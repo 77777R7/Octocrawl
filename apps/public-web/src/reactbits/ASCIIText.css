@@ -7,7 +7,11 @@
   overflow: hidden;
 }
 
-.w2l-ascii-filter {
+/* Fade in the rendered parts, not their wrapper: an opacity animation on the wrapper
+   isolates it, and the veil's backdrop-filter would then see nothing to soften. */
+.w2l-ascii-filter pre,
+.w2l-ascii-filter canvas.w2l-ascii-motif,
+.w2l-ascii-veil {
   animation: w2l-ascii-arrive .8s ease-out both;
 }
 
@@ -18,6 +22,28 @@
 
 .w2l-ascii-filter canvas {
   display: none;
+}
+
+/* Motif mode draws artwork-style glyphs on a visible canvas over a softening veil. */
+.w2l-ascii-filter canvas.w2l-ascii-motif {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.w2l-ascii-veil {
+  position: absolute;
+  pointer-events: none;
+  /* Soften and slightly darken the artwork under the silhouette: the octopus reads as a
+     rim-lit mass in front of the sky and the sunset glow, like its source image. */
+  -webkit-backdrop-filter: blur(3px) brightness(.76);
+  backdrop-filter: blur(3px) brightness(.76);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
 }
 
 .w2l-ascii-filter pre {

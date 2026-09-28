@@ -105,6 +105,54 @@ const cellNoise = (x, y, seed) => {
   return value - Math.floor(value);
 };
 
+// Glyph cell of the Hero artwork, in natural pixels of mountain-hero.webp. The artwork is
+// hand-drawn, so its spacing drifts between ~12 and ~13 px; the octopus matches its scale and
+// glyph family instead of trying to sit on an exact lattice.
+const ARTWORK_CELL_X = 12.5;
+const ARTWORK_CELL_Y = 12.9;
+// The Hero shade darkens the artwork by roughly this much where the octopus sits.
+const ARTWORK_SHADE = 0.8;
+const mix = (from, to, amount) => from + (to - from) * amount;
+
+/** The artwork's own glyph ramp: dot, colon, four-dot cross, cross, starred cross. */
+const drawArtworkGlyph = (ctx, level, cx, cy, size) => {
+  const d = Math.max(1, size * 0.14);
+  const dot = (x, y) => ctx.fillRect(x - d / 2, y - d / 2, d, d);
+  const r = size * 0.2;
+  if (level === 1) { dot(cx, cy); return; }
+  if (level === 2) { dot(cx, cy - r); dot(cx, cy + r); return; }
+  if (level === 3) { dot(cx - r, cy - r); dot(cx + r, cy - r); dot(cx - r, cy + r); dot(cx + r, cy + r); return; }
+  const a = size * 0.25;
+  ctx.lineWidth = d;
+  ctx.beginPath();
+  ctx.moveTo(cx - a, cy - a);
+  ctx.lineTo(cx + a, cy + a);
+  ctx.moveTo(cx + a, cy - a);
+  ctx.lineTo(cx - a, cy + a);
+  if (level >= 5) {
+    ctx.moveTo(cx, cy - a * 1.1);
+    ctx.lineTo(cx, cy + a * 1.1);
+  }
+  ctx.stroke();
+};
+
+/** The octopus keeps its own palette (blue dots, warm rim light); brighter cells lift toward
+ * the rim highlight and the scene behind tints every glyph slightly so it sits in the same light. */
+const motifGlyphColor = (source, scene, tone) => {
+  // Warm rim cells lift toward a warm white, blue body cells toward a cool one.
+  const warm = clamp((source[0] - source[2]) / 90, 0, 1);
+  const lift = 0.06 + 0.24 * tone;
+  let r = mix(source[0], mix(232, 255, warm), lift);
+  let g = mix(source[1], mix(240, 222, warm), lift);
+  let b = mix(source[2], mix(255, 188, warm), lift);
+  if (scene) {
+    r = mix(r, scene[0] * ARTWORK_SHADE, 0.14);
+    g = mix(g, scene[1] * ARTWORK_SHADE, 0.14);
+    b = mix(b, scene[2] * ARTWORK_SHADE, 0.14);
+  }
+  return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${(0.5 + 0.5 * tone).toFixed(2)})`;
+};
+
 class AsciiFilter {
   constructor(renderer, { fontSize, fontFamily, charset, invert, container, variant, fieldMode, motifMode } = {}) {
     this.renderer = renderer;
@@ -112,7 +160,21 @@ class AsciiFilter {
     this.domElement.className = 'w2l-ascii-filter';
 
     this.pre = document.createElement('pre');
-    this.domElement.appendChild(this.pre);
+    if (motifMode) {
+      // The octopus is drawn as artwork glyphs on a canvas. A veil softens the artwork's own
+      // glyphs under its silhouette so the two textures never clash.
+      this.veil = document.createElement('div');
+      this.veil.className = 'w2l-ascii-veil';
+      this.domElement.appendChild(this.veil);
+      this.output = document.createElement('canvas');
+      this.output.className = 'w2l-ascii-motif';
+      this.output.setAttribute('aria-hidden', 'true');
+      this.outputContext = this.output.getContext('2d');
+      this.domElement.appendChild(this.output);
+    } else {
+      this.domElement.appendChild(this.pre);
+    }
+    this.maskTarget = this.output ?? this.pre;
 
     this.canvas = document.createElement('canvas');
     this.canvas.setAttribute('aria-hidden', 'true');
@@ -135,9 +197,13 @@ class AsciiFilter {
     this.lastTrailAt = 0;
     this.mountainTones = null;
     this.motifTones = null;
-    this.onMountainLoad = () => this.updateMountainSample();
+    // In motif mode the artwork sets the glyph scale and colours, so its arrival resets the grid.
+    this.onMountainLoad = () => {
+      if (!this.motifMode) this.updateMountainSample();
+      else if (this.width) this.reset();
+    };
     this.onOctopusLoad = () => this.updateMotifSample();
-    if (this.fieldMode && !this.motifMode) mountainImage.addEventListener('load', this.onMountainLoad);
+    if (this.fieldMode || this.motifMode) mountainImage.addEventListener('load', this.onMountainLoad);
     if (this.motifMode) octopusImage.addEventListener('load', this.onOctopusLoad);
 
     this.context.webkitImageSmoothingEnabled = false;
@@ -156,12 +222,16 @@ class AsciiFilter {
   }
 
   reset() {
-    this.context.font = `${this.fontSize}px ${this.fontFamily}`;
-    const charWidth = this.context.measureText('A').width;
-    this.charWidth = charWidth;
-
-    this.cols = Math.floor(this.width / (this.fontSize * (charWidth / this.fontSize)));
-    this.rows = Math.floor(this.height / this.fontSize);
+    if (this.motifMode) this.resetArtworkGrid();
+    else {
+      this.context.font = `${this.fontSize}px ${this.fontFamily}`;
+      this.cellW = this.context.measureText('A').width;
+      this.cellH = this.fontSize;
+      this.offsetX = 0;
+      this.offsetY = 0;
+      this.cols = Math.floor(this.width / this.cellW);
+      this.rows = Math.floor(this.height / this.cellH);
+    }
 
     this.canvas.width = this.cols;
     this.canvas.height = this.rows;
@@ -169,25 +239,74 @@ class AsciiFilter {
     this.updateMotifSample();
   }
 
-  updateMountainSample() {
-    if (!this.fieldMode || this.motifMode || !mountainImage.naturalWidth || !this.cols || !this.rows || !this.container) return;
-    const hero = this.container.closest('.hero');
-    if (!hero) return;
-    const backdrop = hero.querySelector('.hero-backdrop');
-    if (!backdrop) return;
+  /** Where the Hero artwork is drawn relative to this layer (CSS `cover` + background-position). */
+  artworkPlacement() {
+    const hero = this.container?.closest('.hero');
+    const backdrop = hero?.querySelector('.hero-backdrop');
+    if (!hero || !backdrop || !mountainImage.naturalWidth) return null;
     const heroRect = hero.getBoundingClientRect();
     const layerRect = this.container.getBoundingClientRect();
-    if (!heroRect.width || !heroRect.height || !layerRect.width || !layerRect.height) return;
+    if (!heroRect.width || !heroRect.height || !layerRect.width || !layerRect.height) return null;
 
     const [rawX = '50%', rawY = '50%'] = getComputedStyle(backdrop).backgroundPosition.split(' ');
     const position = raw => raw === 'center' ? 0.5 : clamp(parseFloat(raw) / 100 || 0, 0, 1);
     const scale = Math.max(heroRect.width / mountainImage.naturalWidth, heroRect.height / mountainImage.naturalHeight);
     const imageWidth = mountainImage.naturalWidth * scale;
     const imageHeight = mountainImage.naturalHeight * scale;
-    const imageX = (heroRect.width - imageWidth) * position(rawX);
-    const imageY = (heroRect.height - imageHeight) * position(rawY);
-    const layerX = layerRect.left - heroRect.left;
-    const layerY = layerRect.top - heroRect.top;
+    return {
+      scale,
+      imageWidth,
+      imageHeight,
+      layerRect,
+      imageX: (heroRect.width - imageWidth) * position(rawX),
+      imageY: (heroRect.height - imageHeight) * position(rawY),
+      layerX: layerRect.left - heroRect.left,
+      layerY: layerRect.top - heroRect.top
+    };
+  }
+
+  resetArtworkGrid() {
+    const art = this.artworkPlacement();
+    const scale = art?.scale ?? 0.8;
+    this.cellW = ARTWORK_CELL_X * scale;
+    this.cellH = ARTWORK_CELL_Y * scale;
+    this.cols = Math.max(1, Math.floor(this.width / this.cellW));
+    this.rows = Math.max(1, Math.floor(this.height / this.cellH));
+    this.offsetX = (this.width - this.cols * this.cellW) / 2;
+    this.offsetY = (this.height - this.rows * this.cellH) / 2;
+    this.pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+    this.output.width = Math.max(1, Math.round(this.width * this.pixelRatio));
+    this.output.height = Math.max(1, Math.round(this.height * this.pixelRatio));
+    Object.assign(this.veil.style, {
+      left: `${this.offsetX}px`,
+      top: `${this.offsetY}px`,
+      width: `${this.cols * this.cellW}px`,
+      height: `${this.rows * this.cellH}px`
+    });
+    this.sceneColors = null;
+    if (!art) return;
+    // One averaged artwork colour per glyph cell, used to tint the octopus glyph drawn there.
+    const sample = document.createElement('canvas');
+    sample.width = this.cols;
+    sample.height = this.rows;
+    const context = sample.getContext('2d', { willReadFrequently: true });
+    if (!context) return;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(
+      mountainImage,
+      (art.layerX + this.offsetX - art.imageX) / art.scale,
+      (art.layerY + this.offsetY - art.imageY) / art.scale,
+      this.cols * this.cellW / art.scale,
+      this.rows * this.cellH / art.scale,
+      0, 0, this.cols, this.rows
+    );
+    this.sceneColors = context.getImageData(0, 0, this.cols, this.rows).data;
+  }
+
+  updateMountainSample() {
+    if (!this.fieldMode || this.motifMode || !this.cols || !this.rows) return;
+    const art = this.artworkPlacement();
+    if (!art) return;
 
     const sample = document.createElement('canvas');
     sample.width = this.cols;
@@ -196,10 +315,10 @@ class AsciiFilter {
     if (!context) return;
     context.drawImage(
       mountainImage,
-      (imageX - layerX) * this.cols / layerRect.width,
-      (imageY - layerY) * this.rows / layerRect.height,
-      imageWidth * this.cols / layerRect.width,
-      imageHeight * this.rows / layerRect.height
+      (art.imageX - art.layerX) * this.cols / art.layerRect.width,
+      (art.imageY - art.layerY) * this.rows / art.layerRect.height,
+      art.imageWidth * this.cols / art.layerRect.width,
+      art.imageHeight * this.rows / art.layerRect.height
     );
     const pixels = context.getImageData(0, 0, this.cols, this.rows).data;
     const luminance = new Float32Array(this.cols * this.rows);
@@ -225,15 +344,19 @@ class AsciiFilter {
     sample.height = this.rows;
     const context = sample.getContext('2d', { willReadFrequently: true });
     if (!context) return;
+    // Average each glyph cell over the source (it is itself a dot texture); a plain
+    // resample would pick stray dots and leave only the bright rims.
+    context.imageSmoothingQuality = 'high';
     // Character cells are taller than they are wide. Fit in physical pixels
     // before mapping into cells so the octopus keeps its original proportions.
     const scale = Math.min(rect.width / crop.width, rect.height / crop.height) * 0.98;
-    const width = crop.width * scale / this.charWidth;
-    const height = crop.height * scale / this.fontSize;
+    const width = crop.width * scale / this.cellW;
+    const height = crop.height * scale / this.cellH;
     context.drawImage(octopusImage, crop.x, crop.y, crop.width, crop.height,
       (this.cols - width) / 2, (this.rows - height) / 2, width, height);
     const pixels = context.getImageData(0, 0, this.cols, this.rows).data;
     const tones = new Float32Array(this.cols * this.rows);
+    const colors = new Uint8ClampedArray(this.cols * this.rows * 3);
     for (let i = 0; i < tones.length; i++) {
       const p = i * 4;
       if (pixels[p + 3] < 16) continue;
@@ -241,9 +364,102 @@ class AsciiFilter {
       const dg = pixels[p + 1] - crop.background[1];
       const db = pixels[p + 2] - crop.background[2];
       const distance = Math.hypot(dr, dg, db) / 441.67;
-      tones[i] = Math.pow(clamp((distance - 0.055) / 0.39, 0, 1), 0.7);
+      tones[i] = Math.pow(clamp((distance - 0.03) / 0.3, 0, 1), 0.8);
+      // Undo the averaging with the navy ground to recover the colour of the dots themselves.
+      const recover = 1 / clamp(distance * 2.4, 0.35, 1);
+      colors[i * 3] = crop.background[0] + dr * recover;
+      colors[i * 3 + 1] = crop.background[1] + dg * recover;
+      colors[i * 3 + 2] = crop.background[2] + db * recover;
     }
+    this.fillMotifBody(tones, colors);
     this.motifTones = tones;
+    this.motifColors = colors;
+    this.updateVeil();
+  }
+
+  /** The source octopus is rim-lit, so its body is nearly as dark as its ground. Every cell inside
+   * the silhouette that is dimmer than the body level becomes a body glyph in the body's own blue;
+   * the lit rim and the eyes keep their own tone and colour. */
+  fillMotifBody(tones, colors) {
+    const { cols, rows } = this;
+    const count = cols * rows;
+    const wall = new Uint8Array(count);
+    for (let i = 0; i < count; i++) if (tones[i] >= 0.12) wall[i] = 1;
+    // Grow the rim by one cell so small gaps in it do not let the outside flood in.
+    const grown = wall.slice();
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (!wall[x + y * cols]) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < cols && ny < rows) grown[nx + ny * cols] = 1;
+          }
+        }
+      }
+    }
+    const outside = new Uint8Array(count);
+    const queue = [];
+    const visit = (x, y) => {
+      const i = x + y * cols;
+      if (grown[i] || outside[i]) return;
+      outside[i] = 1;
+      queue.push(i);
+    };
+    for (let x = 0; x < cols; x++) { visit(x, 0); visit(x, rows - 1); }
+    for (let y = 0; y < rows; y++) { visit(0, y); visit(cols - 1, y); }
+    while (queue.length) {
+      const i = queue.pop();
+      const x = i % cols;
+      const y = (i - x) / cols;
+      if (x > 0) visit(x - 1, y);
+      if (x < cols - 1) visit(x + 1, y);
+      if (y > 0) visit(x, y - 1);
+      if (y < rows - 1) visit(x, y + 1);
+    }
+    // The body's own blue: the average colour of its mid-tone (dotted) cells.
+    const body = [0, 0, 0];
+    let samples = 0;
+    for (let i = 0; i < count; i++) {
+      if (tones[i] < 0.2 || tones[i] > 0.6) continue;
+      body[0] += colors[i * 3];
+      body[1] += colors[i * 3 + 1];
+      body[2] += colors[i * 3 + 2];
+      samples++;
+    }
+    if (!samples) return;
+    const isOutsideEdge = (x, y) => (x > 0 && outside[x - 1 + y * cols]) || (x < cols - 1 && outside[x + 1 + y * cols])
+      || (y > 0 && outside[x + (y - 1) * cols]) || (y < rows - 1 && outside[x + (y + 1) * cols]);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = x + y * cols;
+        if (outside[i] || isOutsideEdge(x, y) || tones[i] >= 0.62) continue;
+        // Lift the averaged body blue so it reads over the hero sky, which is the same navy.
+        tones[i] = 0.62;
+        colors[i * 3] = mix(body[0] / samples, 108, 0.62);
+        colors[i * 3 + 1] = mix(body[1] / samples, 156, 0.62);
+        colors[i * 3 + 2] = mix(body[2] / samples, 250, 0.62);
+      }
+    }
+  }
+
+  /** Soften the artwork's glyphs under the octopus silhouette only (feathered, never a box). */
+  updateVeil() {
+    if (!this.veil || !this.motifTones) return;
+    const mask = document.createElement('canvas');
+    mask.width = this.cols;
+    mask.height = this.rows;
+    const context = mask.getContext('2d');
+    if (!context) return;
+    const image = context.createImageData(this.cols, this.rows);
+    for (let i = 0; i < this.motifTones.length; i++) {
+      image.data[i * 4 + 3] = Math.round(smoothstep(clamp((this.motifTones[i] - 0.04) / 0.3, 0, 1)) * 235);
+    }
+    context.putImageData(image, 0, 0);
+    const url = `url(${mask.toDataURL()})`;
+    this.veil.style.maskImage = url;
+    this.veil.style.webkitMaskImage = url;
   }
 
   render(scene, camera) {
@@ -271,17 +487,24 @@ class AsciiFilter {
         const center = (1 - 0.45 * maskStrength).toFixed(3);
         const middle = (1 - 0.2 * maskStrength).toFixed(3);
         const mask = `radial-gradient(circle 155px at ${this.lastPointer.x}px ${this.lastPointer.y}px, rgba(0,0,0,${center}) 0%, rgba(0,0,0,${middle}) 45%, #000 100%)`;
-        this.pre.style.maskImage = mask;
-        this.pre.style.webkitMaskImage = mask;
-      } else if (this.pre.style.maskImage) {
-        this.pre.style.maskImage = '';
-        this.pre.style.webkitMaskImage = '';
+        this.maskTarget.style.maskImage = mask;
+        this.maskTarget.style.webkitMaskImage = mask;
+      } else if (this.maskTarget.style.maskImage) {
+        this.maskTarget.style.maskImage = '';
+        this.maskTarget.style.webkitMaskImage = '';
       }
+      const out = this.outputContext;
+      if (out) {
+        out.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
+        out.clearRect(0, 0, this.width, this.height);
+        out.lineCap = 'round';
+      }
+      const glyphSize = Math.min(this.cellW, this.cellH);
       let str = '';
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-          const cellX = (x + .5) * this.charWidth;
-          const cellY = (y + .5) * this.fontSize;
+          const cellX = this.offsetX + (x + .5) * this.cellW;
+          const cellY = this.offsetY + (y + .5) * this.cellH;
           let influence = 0;
           let sourceX = this.pointer.x;
           let sourceY = this.pointer.y;
@@ -314,8 +537,8 @@ class AsciiFilter {
             const distance = Math.hypot(dx, dy);
             if (distance > 0) {
               // Soft inverse sampling moves glyphs aside without cutting a hole.
-              sampleX -= (dx / distance) * 18 * influence / this.charWidth;
-              sampleY -= (dy / distance) * 18 * influence / this.fontSize;
+              sampleX -= (dx / distance) * 18 * influence / this.cellW;
+              sampleY -= (dy / distance) * 18 * influence / this.cellH;
             }
           }
           const sx = clamp(Math.round(sampleX), 0, w - 1);
@@ -325,16 +548,21 @@ class AsciiFilter {
 
           if (this.motifMode) {
             const shape = this.motifTones?.[sx + sy * w] ?? 0;
-            if (shape < 0.08) {
-              str += cellNoise(x, y, this.variant) > 0.985 ? '.' : ' ';
-              continue;
-            }
+            if (shape < 0.08 || !out) continue;
             const gray = (0.3 * r + 0.6 * g + 0.1 * b) / 255;
             const shimmer = Math.sin(now * 0.0008 + x * 0.12 - y * 0.08) * 0.08;
             const dither = (cellNoise(x, y, this.variant) - 0.5) * 0.24;
-            const tone = clamp(shape * (0.67 + gray * 0.25) + shimmer + dither - influence * 0.29, 0, 1);
-            const idx = clamp(Math.round(tone * (this.charset.length - 1)), 1, this.charset.length - 1);
-            str += this.charset[idx];
+            // Shape sets the glyph (body four-dots, rim crosses); waves and dither only shimmer it.
+            const tone = clamp(shape * (0.86 + gray * 0.14) + shimmer + dither * 0.6 - influence * 0.29, 0, 1);
+            if (tone < 0.1) continue;
+            const m = (sx + sy * w) * 3;
+            const c = (x + y * w) * 4;
+            const source = this.motifColors ? [this.motifColors[m], this.motifColors[m + 1], this.motifColors[m + 2]] : [150, 190, 255];
+            const scene = this.sceneColors ? [this.sceneColors[c], this.sceneColors[c + 1], this.sceneColors[c + 2]] : null;
+            const color = motifGlyphColor(source, scene, tone);
+            out.fillStyle = color;
+            out.strokeStyle = color;
+            drawArtworkGlyph(out, clamp(Math.ceil(tone * 5), 1, 5), cellX, cellY, glyphSize);
             continue;
           }
 
@@ -358,7 +586,7 @@ class AsciiFilter {
         }
         str += '\n';
       }
-      this.pre.textContent = str;
+      if (!this.motifMode) this.pre.textContent = str;
     }
   }
 
@@ -374,7 +602,7 @@ class AsciiFilter {
   }
 
   dispose() {
-    if (this.fieldMode && !this.motifMode) mountainImage.removeEventListener('load', this.onMountainLoad);
+    if (this.fieldMode || this.motifMode) mountainImage.removeEventListener('load', this.onMountainLoad);
     if (this.motifMode) octopusImage.removeEventListener('load', this.onOctopusLoad);
   }
 
