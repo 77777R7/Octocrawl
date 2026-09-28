@@ -8,7 +8,7 @@ Open [Try W2L](/), paste `https://docs.firecrawl.dev/introduction`, and press **
 
 ## Expected output
 
-The result card shows the final URL, status, a title when found, readable Markdown, and total client-visible time. Switch **View** to **JSON** in the result panel to inspect the full result envelope, including the requested URL. Copy or download Markdown (`.md`) or JSON (`.json`) from the same capture; switching output format does not spend another preview.
+Each extraction appears as a card under **Recent runs** with its status and total client-visible time; select a card to see its title, final URL, and readable Markdown. Runs are kept only for the current visit and are never saved. Switch **View** to **JSON** in the result panel to inspect the full result envelope, including the requested URL. Copy or download Markdown (`.md`) or JSON (`.json`) from the same capture; switching output format does not spend another preview.
 
 For the exact recorded success sample and its observation time, see [Introduction](/docs/). The result may differ when the source page changes.
 

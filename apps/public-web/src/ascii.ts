@@ -2,7 +2,7 @@
 export function mountHeroAscii(container: HTMLElement, hero: HTMLElement): void {
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   const pointer = window.matchMedia('(pointer: fine)')
-  // Matches the CSS breakpoint below which the centered hero shows the static artwork instead.
+  // Matches the CSS breakpoint below which the hero is one column and the octopus cell is hidden.
   const compact = window.matchMedia('(max-width: 1049px)')
   let dispose: (() => void) | null = null
   let generation = 0
@@ -15,6 +15,7 @@ export function mountHeroAscii(container: HTMLElement, hero: HTMLElement): void 
       generation++
       dispose?.()
       dispose = null
+      container.classList.remove('is-animated')
       return
     }
     if (dispose || loading) return
@@ -22,7 +23,11 @@ export function mountHeroAscii(container: HTMLElement, hero: HTMLElement): void 
     const version = ++generation
     void import('./asciiReact').then(({ mountReactBitsAscii }) => {
       loading = false
-      if (version === generation && eligible()) dispose = mountReactBitsAscii(container)
+      if (version === generation && eligible()) {
+        dispose = mountReactBitsAscii(container)
+        // The hero cell shows the static octopus until the animation replaces it.
+        container.classList.add('is-animated')
+      }
       else if (eligible()) reconcile()
     }).catch(() => { loading = false }) // The page remains usable without decoration.
   }

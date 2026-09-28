@@ -28,70 +28,116 @@ type OutputFormat = 'markdown' | 'json'
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <div class="page-shell">
-    <section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="hero" id="top">
       <div class="hero-backdrop" aria-hidden="true"></div>
       <div class="hero-octopus-static" aria-hidden="true"></div>
-      <div class="hero-ascii-accent" id="hero-ascii" aria-hidden="true"></div>
       <div class="hero-shade" aria-hidden="true"></div>
       <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>
 
-      <header class="site-header layout-width">
-        <a class="brand" href="#top" aria-label="W2L home">
-          <img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="50" height="50" />
-          <span class="brand-name">W2L<span class="brand-dot">.</span></span>
-        </a>
-        <nav class="site-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works</a>
-          <a href="/docs/">Docs <span aria-hidden="true">↗</span></a>
-        </nav>
-      </header>
-
-      <main class="hero-main layout-width">
-        <div class="hero-copy">
-          <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
-          <p class="hero-description">Paste a public URL. Get readable content and verifiable fields where supported.</p>
-        </div>
-
-        <form class="url-form" id="preview-form" novalidate>
-          <label class="visually-hidden" for="url-input">Public web page URL</label>
-          <div class="url-entry">
-            <span class="url-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4.5 4.5 0 0 0 6.36 0l3.18-3.18a4.5 4.5 0 0 0-6.36-6.36L11.5 5.64"/><path d="M14 10.5a4.5 4.5 0 0 0-6.36 0l-3.18 3.18a4.5 4.5 0 0 0 6.36 6.36l1.68-1.68"/></svg>
-            </span>
-            <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="Paste a public page URL…" aria-describedby="url-help capability-message form-message" required />
-            <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
-          </div>
-          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
-          <div class="form-meta">
-            <p id="url-help">3 free previews per browser, daily · Public pages only</p>
-            <button class="example-button" id="example-button" type="button">Try an example</button>
-          </div>
-          <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>
-        </form>
-      </main>
-    </section>
-
-    <section class="result-section layout-width" id="result-section" aria-labelledby="result-heading" hidden>
-      <div class="section-kicker"><span class="kicker-square"></span> YOUR RESULT</div>
-      <div class="result-head">
-        <div class="result-title"><h2 id="result-heading">Reading the page…</h2></div>
-        <span class="result-badge" id="result-badge">Extracting</span>
+      <div class="band band-dark">
+        <header class="frame site-header">
+          <a class="brand" href="#top" aria-label="W2L home">
+            <img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="50" height="50" />
+            <span class="brand-name">W2L<span class="brand-dot">.</span></span>
+          </a>
+          <nav class="site-nav" aria-label="Main navigation">
+            <a href="#how-it-works">How it works</a>
+            <a href="/docs/">Docs <span aria-hidden="true">↗</span></a>
+          </nav>
+          <a class="github-link" href="https://github.com/77777R7/w2l" aria-label="W2L on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span class="github-label">GitHub</span><span class="card-arrow" aria-hidden="true">↗</span></a>
+        </header>
       </div>
-      <div id="result-content" aria-live="polite" aria-atomic="false"></div>
+
+      <main aria-labelledby="hero-title">
+        <div class="band band-dark">
+          <div class="frame hero-cells">
+            <div class="hero-cell hero-cell-side" aria-hidden="true"></div>
+            <div class="hero-cell hero-copy">
+              <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
+              <p class="hero-description">Paste a public URL. Get readable content and verifiable fields where supported.</p>
+            </div>
+            <div class="hero-cell hero-cell-side hero-octopus-cell" id="hero-ascii" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="band band-dark">
+          <div class="frame hero-form-row">
+            <form class="url-form" id="preview-form" novalidate>
+              <label class="visually-hidden" for="url-input">Public web page URL</label>
+              <div class="url-card">
+                <div class="url-entry">
+                  <span class="url-chip" aria-hidden="true">URL</span>
+                  <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="Paste a public page URL…" aria-describedby="url-help capability-message form-message" required />
+                </div>
+                <div class="url-toolbar">
+                  <p id="url-help">3 free previews a day · Public pages only</p>
+                  <button class="example-button" id="example-button" type="button">Try an example</button>
+                  <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
+                </div>
+              </div>
+              <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
+              <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <section class="runs-section" id="result-section" aria-labelledby="runs-title" hidden>
+      <div class="band">
+        <div class="frame runs-head">
+          <div><p class="section-kicker"><span class="kicker-square"></span> YOUR RESULTS</p><h2 id="runs-title">Recent runs</h2></div>
+          <p class="runs-note">This visit only · cleared when you leave the page</p>
+        </div>
+      </div>
+      <div class="band"><div class="frame runs-grid" id="runs-grid"></div></div>
+      <div class="band">
+        <div class="frame run-detail" id="run-detail">
+          <div class="detail-head">
+            <p class="section-kicker"><span class="kicker-square"></span> SELECTED RUN</p>
+            <h2 id="result-heading" tabindex="-1">Reading the page…</h2>
+            <p class="detail-url" id="detail-url"></p>
+          </div>
+          <div id="result-content" aria-live="polite" aria-atomic="false"></div>
+        </div>
+      </div>
     </section>
 
     <section class="how-section" id="how-it-works" aria-labelledby="how-title">
-      <div class="layout-width how-grid">
-        <div><p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p><h2 id="how-title">From web page<br />to usable content.</h2></div>
-        <div class="how-steps">
-          <div class="how-step"><span class="step-number">01</span><div><h3>Paste a public URL</h3><p>No install or command line. One web address is enough to try it.</p></div></div>
-          <div class="how-step"><span class="step-number">02</span><div><h3>Read the result</h3><p>See the content, final URL, status, and total time. Failures come with a reason.</p></div></div>
-          <div class="how-step"><span class="step-number">03</span><div><h3>Check product fields</h3><p>For supported Amazon.sg pages, we also verify the product, region, and currency.</p></div></div>
+      <div class="band">
+        <div class="frame how-head"><p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p><h2 id="how-title">From web page<br />to usable content.</h2></div>
+      </div>
+      <div class="band">
+        <div class="frame how-steps">
+          <div class="how-step"><span class="step-number">01</span><h3>Paste a public URL</h3><p>No install or command line. One web address is enough to try it.</p></div>
+          <div class="how-step"><span class="step-number">02</span><h3>Read the result</h3><p>See the content, final URL, status, and total time. Failures come with a reason.</p></div>
+          <div class="how-step"><span class="step-number">03</span><h3>Check product fields</h3><p>For supported Amazon.sg pages, we also verify the product, region, and currency.</p></div>
         </div>
       </div>
     </section>
 
-    <footer class="site-footer"><div class="layout-width footer-inner"><div class="footer-brand"><img src="/assets/octopus-original.webp" alt="" width="34" height="34" /><strong>W2L.</strong></div><span class="footer-tagline">Single-page public web preview</span><nav class="footer-links" aria-label="Footer"><a href="/docs/">Documentation ↗</a><a href="#top">Back to top ↑</a></nav></div></footer>
+    <footer class="site-footer">
+      <div class="band band-dark">
+        <div class="frame footer-top">
+          <div class="footer-brand-cell">
+            <a class="brand footer-brand" href="#top" aria-label="W2L home"><img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="40" height="40" /><span class="brand-name">W2L<span class="brand-dot">.</span></span></a>
+            <p class="footer-tagline">One link. Web data, ready.</p>
+            <p class="footer-note">Single-page public web preview</p>
+          </div>
+          <div class="footer-cards">
+            <a class="footer-card" href="https://github.com/77777R7/w2l"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub<span class="card-arrow" aria-hidden="true">↗</span></a>
+            <a class="footer-card" href="/docs/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>Documentation<span class="card-arrow" aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </div>
+      <div class="band band-dark">
+        <nav class="frame footer-columns" aria-label="Footer">
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try W2L</a></li><li><a href="#how-it-works">How it works</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Guides</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Reference</p><ul><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Project</p><ul><li><a href="https://github.com/77777R7/w2l">GitHub ↗</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
+        </nav>
+      </div>
+    </footer>
   </div>
 `
 
@@ -106,9 +152,11 @@ const submit = document.querySelector<HTMLButtonElement>('#submit-button')!
 const submitLabel = document.querySelector<HTMLElement>('#submit-label')!
 const section = document.querySelector<HTMLElement>('#result-section')!
 const resultHeading = document.querySelector<HTMLElement>('#result-heading')!
-const badge = document.querySelector<HTMLElement>('#result-badge')!
+const runsGrid = document.querySelector<HTMLElement>('#runs-grid')!
+const runDetail = document.querySelector<HTMLElement>('#run-detail')!
+const detailUrl = document.querySelector<HTMLElement>('#detail-url')!
 const content = document.querySelector<HTMLElement>('#result-content')!
-const urlEntry = document.querySelector<HTMLElement>('.url-entry')!
+const urlCard = document.querySelector<HTMLElement>('.url-card')!
 const capabilityMessage = document.querySelector<HTMLElement>('#capability-message')!
 // Chosen in the result panel; kept for the next extraction in this visit.
 let outputFormat: OutputFormat = 'markdown'
@@ -172,7 +220,7 @@ function capabilityHint(capability: CapabilityResponse['capability']): string {
 }
 
 function setInvalid(invalid: boolean): void {
-  urlEntry.classList.toggle('is-invalid', invalid)
+  urlCard.classList.toggle('is-invalid', invalid)
   if (invalid) input.setAttribute('aria-invalid', 'true')
   else input.removeAttribute('aria-invalid')
 }
@@ -545,63 +593,116 @@ function renderOutputPanel(result: PreviewResponse): void {
   content.append(output)
 }
 
-function renderResult(result: PreviewResponse, clientMs: number, started: number): void {
-  section.hidden = false
-  content.replaceChildren()
-  const title = result.title?.trim()
-  setHeading(title || urlLabel(result.finalUrl ?? result.requestedUrl), !title)
-  badge.textContent = statusText(result.status, result.product, result.diagnostic)
-  badge.className = `result-badge status-${result.status}`
-  if (result.product?.status !== 'complete' && result.product) badge.classList.add('status-partial')
+/** One extraction in this visit. Runs live only in memory and are never sent anywhere. */
+type Run = { id: number; url: string; startedAt: Date; clientMs: number; result: PreviewResponse | null }
+const MAX_RUNS = 6
+let runs: Run[] = []
+let selectedRunId = 0
+let nextRunId = 1
 
-  const facts = document.createElement('div')
-  facts.className = 'result-facts'
-  const timeFact = document.createElement('div')
-  timeFact.className = 'result-fact'
-  timeFact.append(textElement('span', 'Total time · including network', 'fact-label'), textElement('strong', formatDuration(clientMs), 'elapsed-value'))
-  facts.append(timeFact)
-  const urlFact = document.createElement('div')
-  urlFact.className = 'result-fact'
-  urlFact.append(textElement('span', 'Final URL', 'fact-label'))
-  const href = safeWebUrl(result.finalUrl)
+/** Display label only; the server decides the actual capture route. */
+function runType(run: Run): string {
+  if (run.result?.product) return 'Amazon.sg product'
+  try {
+    const url = new URL(run.result?.finalUrl ?? run.url)
+    const host = url.hostname.replace(/^www\./, '')
+    if (host === 'amazon.sg' && /\/dp\/[a-z0-9]{10}/i.test(url.pathname)) return 'Amazon.sg product'
+    if ((host === 'x.com' || host === 'twitter.com') && /\/status\/\d+/.test(url.pathname)) return 'X post'
+    if ((host === 'reddit.com' || host === 'old.reddit.com') && /\/comments\//.test(url.pathname)) return 'Reddit post'
+  } catch { /* Fall through to the generic label. */ }
+  return 'Web page'
+}
+
+function runStatus(run: Run): { text: string; tone: 'loading' | 'success' | 'partial' | 'error' } {
+  const result = run.result
+  if (!result) return { text: 'Extracting…', tone: 'loading' }
+  const tone = !isPageRead(result) ? 'error' : result.status === 'incomplete' || result.product && result.product.status !== 'complete' ? 'partial' : 'success'
+  return { text: statusText(result.status, result.product, result.diagnostic), tone }
+}
+
+function outputLabel(run: Run): string {
+  if (!run.result) return '—'
+  return isPageRead(run.result) && run.result.markdown?.trim() ? 'Markdown · JSON' : 'JSON'
+}
+
+function renderRuns(): void {
+  const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('.run-card')?.dataset.run : undefined
+  runsGrid.replaceChildren(...runs.map((run) => {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = 'run-card'
+    card.dataset.run = String(run.id)
+    card.setAttribute('aria-pressed', String(run.id === selectedRunId))
+    const label = urlLabel(run.result?.finalUrl ?? run.url)
+    const head = textElement('span', '', 'run-card-head')
+    const glyph = textElement('span', label.charAt(0).toUpperCase(), 'run-glyph')
+    glyph.setAttribute('aria-hidden', 'true')
+    head.append(glyph, textElement('span', label, 'run-url'))
+    card.append(head)
+    const status = runStatus(run)
+    const rows: Array<[string, string, string?]> = [
+      ['Type', runType(run)],
+      ['Status', status.text, `run-status tone-${status.tone}`],
+      ['Total time', run.result ? formatDuration(run.clientMs) : '—', 'run-time'],
+      ['Started', run.startedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })],
+      ['Output', outputLabel(run)],
+    ]
+    for (const [key, value, extra] of rows) {
+      const row = textElement('span', '', 'run-row')
+      row.append(textElement('span', key, 'run-key'), textElement('span', value, extra ? `run-val ${extra}` : 'run-val'))
+      card.append(row)
+    }
+    card.addEventListener('click', () => selectRun(run.id))
+    return card
+  }))
+  if (focusedId) runsGrid.querySelector<HTMLElement>(`[data-run="${focusedId}"]`)?.focus()
+}
+
+function selectRun(id: number): void {
+  const run = runs.find((candidate) => candidate.id === id)
+  if (!run) return
+  selectedRunId = id
+  renderRuns()
+  renderDetail(run)
+  resultHeading.focus({ preventScroll: true })
+  runDetail.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+}
+
+function renderDetailUrl(result: PreviewResponse | null): void {
+  detailUrl.replaceChildren(textElement('span', 'Final URL'))
+  const href = safeWebUrl(result?.finalUrl ?? null)
   if (href) {
     const link = textElement('a', href)
     link.href = href
     link.target = '_blank'
     link.rel = 'noopener noreferrer'
-    urlFact.append(link)
-  } else urlFact.append(textElement('strong', 'Not available'))
-  facts.append(urlFact)
-  content.append(facts)
+    detailUrl.append(link)
+  } else detailUrl.append(textElement('strong', result ? 'Not available' : 'Waiting for the page…'))
+}
 
-  // The badge carries the status; explain it once, where the reader needs it.
+/** Status and time live on the run card; the detail explains and shows the content. */
+function renderDetail(run: Run): void {
+  content.replaceChildren()
+  const result = run.result
+  renderDetailUrl(result)
+  if (!result) {
+    setHeading(urlLabel(run.url), true)
+    const box = document.createElement('div')
+    box.className = 'loading-panel'
+    box.setAttribute('role', 'status')
+    box.append(textElement('span', '', 'loading-spinner'))
+    box.append(textElement('p', 'Reading the page and preparing its content. This usually takes a few seconds.'))
+    content.append(box)
+    return
+  }
+  const title = result.title?.trim()
+  setHeading(title || urlLabel(result.finalUrl ?? result.requestedUrl), !title)
   if (!isPageRead(result)) content.append(renderGuidance(result))
   else if (result.reason || result.status === 'incomplete' && !result.product) {
     content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
   if (result.product) content.append(renderProduct(result.product))
   renderOutputPanel(result)
-
-  // The browser measurement includes network and synchronous result rendering.
-  requestAnimationFrame(() => {
-    const elapsed = content.querySelector<HTMLElement>('.elapsed-value')
-    if (elapsed) elapsed.textContent = formatDuration(Math.max(clientMs, performance.now() - started))
-  })
-  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
-}
-
-function renderLoading(url: string): void {
-  section.hidden = false
-  setHeading(urlLabel(url), true)
-  badge.textContent = 'Extracting'
-  badge.className = 'result-badge status-loading'
-  content.replaceChildren()
-  const box = document.createElement('div')
-  box.className = 'loading-panel'
-  box.setAttribute('role', 'status')
-  box.append(textElement('span', '', 'loading-spinner'))
-  box.append(textElement('p', 'Reading the page and preparing its content. This usually takes a few seconds.'))
-  content.append(box)
 }
 
 /** Point to the result below; its guidance panel carries the reason. */
@@ -609,6 +710,21 @@ function setResultMessage(result: PreviewResponse): void {
   const read = isPageRead(result)
   message.textContent = read ? 'Your result is below.' : 'No readable content was returned. See why below.'
   message.className = `form-message${read ? '' : ' is-error'}`
+}
+
+function finishRun(run: Run, result: PreviewResponse, started: number): void {
+  run.result = result
+  run.clientMs = performance.now() - started
+  renderRuns()
+  if (run.id !== selectedRunId) return
+  renderDetail(run)
+  // The browser measurement includes network and synchronous result rendering.
+  requestAnimationFrame(() => {
+    run.clientMs = Math.max(run.clientMs, performance.now() - started)
+    const time = runsGrid.querySelector<HTMLElement>(`[data-run="${run.id}"] .run-time`)
+    if (time) time.textContent = formatDuration(run.clientMs)
+  })
+  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
 }
 
 form.addEventListener('submit', async (event) => {
@@ -628,7 +744,12 @@ form.addEventListener('submit', async (event) => {
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
   setBusy(true)
-  renderLoading(url)
+  const run: Run = { id: nextRunId++, url, startedAt: new Date(), clientMs: 0, result: null }
+  runs = [run, ...runs].slice(0, MAX_RUNS)
+  selectedRunId = run.id
+  section.hidden = false
+  renderRuns()
+  renderDetail(run)
   const started = performance.now()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
@@ -644,7 +765,7 @@ form.addEventListener('submit', async (event) => {
     if (!value || typeof value !== 'object' || !('status' in value)) throw new Error('The service returned an unrecognized result.')
     const result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
-    renderResult(result, performance.now() - started, started)
+    finishRun(run, result, started)
     setResultMessage(result)
   } catch (error) {
     const aborted = controller.signal.aborted
@@ -657,7 +778,7 @@ form.addEventListener('submit', async (event) => {
       totalMs: performance.now() - started,
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
-    renderResult(result, performance.now() - started, started)
+    finishRun(run, result, started)
     setResultMessage(result)
   } finally {
     clearTimeout(timeout)
