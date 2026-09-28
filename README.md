@@ -228,7 +228,7 @@ packages/
 examples/monitor-workflow.ts       Runnable Monitor + Delivery SDK workflow
 examples/webhook-receiver.ts       Durable idempotent sample receiver
 
-ROADMAP.md                         Current Section A/B/C roadmap
+ROADMAP.md                         Current phase plan
 
 docs/
   onboarding.md                  Install, Crawl, Monitor, HTTPS events and recovery
@@ -282,7 +282,7 @@ docs/
 - [x] Phase 3 Benchmark Gate harness: fixed W2L run, comparator evidence, and blocked-until-real-comparators decision
 - [ ] Hosted Egress Gate: browser subresource policy enforcement and DNS-to-connection binding
 
-See [ROADMAP.md](ROADMAP.md) for the current Section/Phase plan. [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
+See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
 
 ## Contributing
 
