@@ -1,0 +1,5 @@
+year,twh,estimate_type,scenario,source_url,raw_body_sha256,retrieved_at_utc
+2014,58,historical_model_estimate,,https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers,ced183c8e1e7d635957a78ee690c4edc90ad9b9a80cbe9f8c679918223d87a91,2026-09-28T15:07:31.511Z
+2023,176,historical_model_estimate,,https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers,ced183c8e1e7d635957a78ee690c4edc90ad9b9a80cbe9f8c679918223d87a91,2026-09-28T15:07:31.511Z
+2028,325,projection,low,https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers,ced183c8e1e7d635957a78ee690c4edc90ad9b9a80cbe9f8c679918223d87a91,2026-09-28T15:07:31.511Z
+2028,580,projection,high,https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers,ced183c8e1e7d635957a78ee690c4edc90ad9b9a80cbe9f8c679918223d87a91,2026-09-28T15:07:31.511Z
