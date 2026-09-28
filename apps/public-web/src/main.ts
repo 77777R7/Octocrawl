@@ -41,7 +41,7 @@ app.innerHTML = `
           <span class="brand-name">W2L<span class="brand-dot">.</span></span>
         </a>
         <nav class="site-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works <span aria-hidden="true">↗</span></a>
+          <a href="#how-it-works">How it works</a>
           <a href="/docs/">Docs <span aria-hidden="true">↗</span></a>
         </nav>
       </header>
@@ -58,23 +58,15 @@ app.innerHTML = `
             <span class="url-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4.5 4.5 0 0 0 6.36 0l3.18-3.18a4.5 4.5 0 0 0-6.36-6.36L11.5 5.64"/><path d="M14 10.5a4.5 4.5 0 0 0-6.36 0l-3.18 3.18a4.5 4.5 0 0 0 6.36 6.36l1.68-1.68"/></svg>
             </span>
-            <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://docs.firecrawl.dev/introduction" aria-describedby="url-help capability-message form-message" required />
+            <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="Paste a public page URL…" aria-describedby="url-help capability-message form-message" required />
             <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
           </div>
+          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
           <div class="form-meta">
             <p id="url-help">3 free previews per browser, daily · Public pages only</p>
-            <button class="example-button" id="example-button" type="button">Try an example <span aria-hidden="true">↗</span></button>
+            <button class="example-button" id="example-button" type="button">Try an example</button>
           </div>
           <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>
-          <div class="format-choice">
-            <label for="output-format">Format</label>
-            <select id="output-format" aria-describedby="format-help">
-              <option value="markdown">Readable Markdown</option>
-              <option value="json">Result JSON</option>
-            </select>
-            <span class="visually-hidden" id="format-help">Switch formats after extraction without another request.</span>
-          </div>
-          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
         </form>
       </main>
     </section>
@@ -99,7 +91,7 @@ app.innerHTML = `
       </div>
     </section>
 
-    <footer class="site-footer"><div class="layout-width footer-inner"><div class="footer-brand"><img src="/assets/octopus-original.webp" alt="" width="34" height="34" /><strong>W2L.</strong></div><span>Single-page public web preview</span><a href="/docs/">Documentation ↗</a><a href="#top">Back to top ↑</a></div></footer>
+    <footer class="site-footer"><div class="layout-width footer-inner"><div class="footer-brand"><img src="/assets/octopus-original.webp" alt="" width="34" height="34" /><strong>W2L.</strong></div><span class="footer-tagline">Single-page public web preview</span><nav class="footer-links" aria-label="Footer"><a href="/docs/">Documentation ↗</a><a href="#top">Back to top ↑</a></nav></div></footer>
   </div>
 `
 
@@ -116,9 +108,10 @@ const section = document.querySelector<HTMLElement>('#result-section')!
 const resultHeading = document.querySelector<HTMLElement>('#result-heading')!
 const badge = document.querySelector<HTMLElement>('#result-badge')!
 const content = document.querySelector<HTMLElement>('#result-content')!
-const formatSelect = document.querySelector<HTMLSelectElement>('#output-format')!
+const urlEntry = document.querySelector<HTMLElement>('.url-entry')!
 const capabilityMessage = document.querySelector<HTMLElement>('#capability-message')!
-let latestResult: PreviewResponse | null = null
+// Chosen in the result panel; kept for the next extraction in this visit.
+let outputFormat: OutputFormat = 'markdown'
 let capabilityTimer: number | undefined
 let capabilityRequest: AbortController | undefined
 
@@ -144,10 +137,6 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'json'): stri
   return `w2l-${safe}.${extension}`
 }
 
-formatSelect.addEventListener('change', () => {
-  if (latestResult) renderOutputPanel(latestResult)
-})
-
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   input.value = 'https://docs.firecrawl.dev/introduction'
   input.focus()
@@ -170,6 +159,24 @@ function normalizeUrl(value: string): string {
   return url.toString()
 }
 
+/** Plain-language note for special addresses; ordinary public pages need none.
+ * The route and technical limitation stay in the /api/capability response. */
+function capabilityHint(capability: CapabilityResponse['capability']): string {
+  if (capability.support === 'unsupported') return 'Can’t preview this address. Use a public page that anyone can open.'
+  if (capability.task === 'amazon_sg_product') return 'Amazon.sg product (beta) · We’ll also check the product, delivery region and price, and mark anything we can’t verify.'
+  if (capability.task === 'x_public_post' || capability.task === 'reddit_public_post') {
+    const site = capability.task === 'x_public_post' ? 'X post' : 'Reddit post'
+    return `${site} · This site often requires sign-in or blocks automated access, so the post may not come through.`
+  }
+  return ''
+}
+
+function setInvalid(invalid: boolean): void {
+  urlEntry.classList.toggle('is-invalid', invalid)
+  if (invalid) input.setAttribute('aria-invalid', 'true')
+  else input.removeAttribute('aria-invalid')
+}
+
 function scheduleCapability(): void {
   window.clearTimeout(capabilityTimer)
   capabilityRequest?.abort()
@@ -187,23 +194,20 @@ function scheduleCapability(): void {
       if (!response.ok) return
       const result = await response.json() as CapabilityResponse
       if (request.signal.aborted || normalizeUrl(input.value) !== url) return
-      if (result.capability.support === 'unsupported') {
-        capabilityMessage.textContent = `Cannot preview this address. ${result.capability.limitation}`
-        return
-      }
-      const route = result.capability.captureMode === 'browser_local' ? 'a limited browser route' : 'restricted HTTP'
-      const task = result.capability.task === 'amazon_sg_product' ? 'Amazon.sg product beta' : result.capability.task === 'x_public_post' ? 'X post' : result.capability.task === 'reddit_public_post' ? 'Reddit post' : 'Public page'
-      const limit = result.capability.task === 'amazon_sg_product'
-        ? 'Subject or quote may be unverified; the product gate remains open.'
-        : result.capability.task === 'x_public_post' || result.capability.task === 'reddit_public_post'
-          ? 'Site policy, login, or rendering may block capture.'
-          : 'Site policy or rendering may limit content.'
-      capabilityMessage.textContent = `${task} · Planned route: ${route}. ${limit}`
+      capabilityMessage.textContent = capabilityHint(result.capability)
     } catch { /* A hint failure must not prevent extraction. */ }
   }, 300)
 }
 
-input.addEventListener('input', scheduleCapability)
+input.addEventListener('input', () => {
+  // Editing the address resolves a validation error; don't leave it on screen.
+  if (input.hasAttribute('aria-invalid')) {
+    setInvalid(false)
+    message.textContent = ''
+    message.className = 'form-message'
+  }
+  scheduleCapability()
+})
 
 function setBusy(busy: boolean): void {
   submit.disabled = busy
@@ -317,7 +321,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
   json.type = 'button'
   json.id = 'guidance-json-button'
   json.addEventListener('click', () => {
-    formatSelect.value = 'json'
+    outputFormat = 'json'
     renderOutputPanel(result)
     content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
   })
@@ -482,7 +486,7 @@ function renderProduct(product: ProductPreview): HTMLElement {
 
 function renderOutputPanel(result: PreviewResponse): void {
   content.querySelector('.output-panel')?.remove()
-  const format = formatSelect.value as OutputFormat
+  const format = outputFormat
   const isJson = format === 'json'
   // A failed capture has no Markdown to show; its guidance panel offers the JSON view.
   if (!isJson && !isPageRead(result)) return
@@ -507,7 +511,7 @@ function renderOutputPanel(result: PreviewResponse): void {
   viewSelect.append(new Option('Markdown', 'markdown'), new Option('JSON', 'json'))
   viewSelect.value = format
   viewSelect.addEventListener('change', () => {
-    formatSelect.value = viewSelect.value
+    outputFormat = viewSelect.value as OutputFormat
     renderOutputPanel(result)
     const nextFocus = content.querySelector<HTMLElement>('.output-view-select') ?? content.querySelector<HTMLElement>('#guidance-json-button')
     nextFocus?.focus()
@@ -542,7 +546,6 @@ function renderOutputPanel(result: PreviewResponse): void {
 }
 
 function renderResult(result: PreviewResponse, clientMs: number, started: number): void {
-  latestResult = result
   section.hidden = false
   content.replaceChildren()
   const title = result.title?.trim()
@@ -588,7 +591,6 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
 }
 
 function renderLoading(url: string): void {
-  latestResult = null
   section.hidden = false
   setHeading(urlLabel(url), true)
   badge.textContent = 'Extracting'
@@ -617,10 +619,12 @@ form.addEventListener('submit', async (event) => {
   catch (error) {
     message.textContent = error instanceof Error ? error.message : 'Enter a valid URL.'
     message.className = 'form-message is-error'
+    setInvalid(true)
     input.focus()
     return
   }
   input.value = url
+  setInvalid(false)
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
   setBusy(true)
