@@ -1,0 +1,131 @@
+{
+  "manifestId": "datacenter-partner-pilot-v1",
+  "manifestSha256": "b28ca2e114787e96444ca56ec563e2acf2f3e5fbf922704f25b205fac14149c4",
+  "batchTaskId": "8e51445b-50a2-45ae-8e00-42802586beac",
+  "privateBatchArtifactSha256": "0f28c312307cf66385c295344e6b0c07d3eeb9bd9009c2698eb316d466ab5ad3",
+  "operatorCheckoutCommit": "c8b897aee9a8f50e73d87f05cbed3ed3e1071de9",
+  "denominator": 7,
+  "counts": {
+    "success": 4,
+    "blocked": 1,
+    "failed": 2,
+    "incomplete": 0
+  },
+  "results": [
+    {
+      "id": "doe-2024-release",
+      "requestedUrl": "https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers",
+      "finalUrl": "https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers",
+      "kind": "public_html_evidence",
+      "status": "success",
+      "failureReason": null,
+      "blockReason": null,
+      "httpStatus": 200,
+      "contentType": "text/html; charset=utf-8",
+      "rawBodySha256": "ced183c8e1e7d635957a78ee690c4edc90ad9b9a80cbe9f8c679918223d87a91",
+      "markdownCharacters": 5144,
+      "capturedAt": "2026-09-28T15:07:31.511Z"
+    },
+    {
+      "id": "doe-data-center-hub",
+      "requestedUrl": "https://www.energy.gov/powering-americas-ai-future-data-center-resource-hub",
+      "finalUrl": "https://www.energy.gov/powering-americas-ai-future-data-center-resource-hub",
+      "kind": "public_html_evidence",
+      "status": "success",
+      "failureReason": null,
+      "blockReason": null,
+      "httpStatus": 200,
+      "contentType": "text/html; charset=utf-8",
+      "rawBodySha256": "55052d65a203510054f645c774fd79e076f5d3eac482fc79d88e158e4d36a6dc",
+      "markdownCharacters": 15453,
+      "capturedAt": "2026-09-28T15:07:32.307Z"
+    },
+    {
+      "id": "eia-state-2024",
+      "requestedUrl": "https://www.eia.gov/electricity/state/",
+      "finalUrl": "https://www.eia.gov/electricity/state/",
+      "kind": "public_html_table",
+      "status": "success",
+      "failureReason": null,
+      "blockReason": null,
+      "httpStatus": 200,
+      "contentType": "text/html; charset=UTF-8",
+      "rawBodySha256": "af621bf927ff151bd520f2ab3f4313586a5918d975a46294f0c957016f2851ba",
+      "markdownCharacters": 13788,
+      "capturedAt": "2026-09-28T15:07:42.636Z"
+    },
+    {
+      "id": "eia-state-2023",
+      "requestedUrl": "https://www.eia.gov/electricity/state/archive/2023/",
+      "finalUrl": "https://www.eia.gov/electricity/state/archive/2023/",
+      "kind": "public_html_table",
+      "status": "failed",
+      "failureReason": "policy_denied",
+      "blockReason": null,
+      "httpStatus": null,
+      "contentType": null,
+      "rawBodySha256": null,
+      "markdownCharacters": 0,
+      "capturedAt": "2026-09-28T15:07:32.308Z"
+    },
+    {
+      "id": "census-cbp-index",
+      "requestedUrl": "https://www.census.gov/programs-surveys/cbp/data/datasets.html",
+      "finalUrl": "https://www.census.gov/programs-surveys/cbp/data/datasets.html",
+      "kind": "public_html_catalog",
+      "status": "success",
+      "failureReason": null,
+      "blockReason": null,
+      "httpStatus": 200,
+      "contentType": "text/html; rendered",
+      "rawBodySha256": "a4cffdafcce49bc76b354e0cfaf8535014a697b79f8df7d3a90ba45786b13c62",
+      "markdownCharacters": 1299,
+      "capturedAt": "2026-09-28T15:07:37.617Z"
+    },
+    {
+      "id": "lbnl-2024-report",
+      "requestedUrl": "https://eta-publications.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
+      "finalUrl": "https://eta-publications.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
+      "kind": "public_html_report_landing",
+      "status": "blocked",
+      "failureReason": null,
+      "blockReason": "cloudflare_challenge",
+      "httpStatus": 200,
+      "contentType": "text/html; rendered",
+      "rawBodySha256": "2fc46a4099e7bd55eef73f987fd1f731729bb94de041c24935707fdc27e15720",
+      "markdownCharacters": 0,
+      "capturedAt": "2026-09-28T15:07:36.173Z"
+    },
+    {
+      "id": "census-cbp-2023-state-zip",
+      "requestedUrl": "https://www2.census.gov/programs-surveys/cbp/datasets/2023/cbp23st.zip",
+      "finalUrl": "https://www2.census.gov/programs-surveys/cbp/datasets/2023/cbp23st.zip",
+      "kind": "public_zip_dataset",
+      "status": "failed",
+      "failureReason": "connection_error",
+      "blockReason": null,
+      "httpStatus": null,
+      "contentType": null,
+      "rawBodySha256": null,
+      "markdownCharacters": 0,
+      "capturedAt": "2026-09-28T15:07:34.343Z"
+    }
+  ],
+  "exports": {
+    "doe": {
+      "rows": 4,
+      "sourceSentence": "total data center electricity usage climbed from 58 TWh in 2014 to 176 TWh in 2023 and estimates an increase between 325 to 580 TWh by 2028",
+      "caveat": "Historical modeled estimates and future projections are separate; this is not a regression time series."
+    },
+    "eia": {
+      "rows": 51,
+      "grain": "state or District of Columbia in 2024",
+      "role": "electricity context, not data-center use",
+      "stateMinusNational": {
+        "capacityMw": 4,
+        "generationMwh": 0,
+        "retailSalesMwh": 0
+      }
+    }
+  }
+}
