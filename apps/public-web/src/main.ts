@@ -80,9 +80,9 @@ app.innerHTML = `
     </section>
 
     <section class="result-section layout-width" id="result-section" aria-labelledby="result-heading" hidden>
-      <div class="section-kicker"><span class="kicker-square"></span> YOUR RESULT / 01</div>
+      <div class="section-kicker"><span class="kicker-square"></span> YOUR RESULT</div>
       <div class="result-head">
-        <div><h2 id="result-heading">Your result</h2><p id="result-subtitle">Reading the page…</p></div>
+        <div class="result-title"><h2 id="result-heading">Reading the page…</h2></div>
         <span class="result-badge" id="result-badge">Extracting</span>
       </div>
       <div id="result-content" aria-live="polite" aria-atomic="false"></div>
@@ -113,7 +113,7 @@ const message = document.querySelector<HTMLElement>('#form-message')!
 const submit = document.querySelector<HTMLButtonElement>('#submit-button')!
 const submitLabel = document.querySelector<HTMLElement>('#submit-label')!
 const section = document.querySelector<HTMLElement>('#result-section')!
-const subtitle = document.querySelector<HTMLElement>('#result-subtitle')!
+const resultHeading = document.querySelector<HTMLElement>('#result-heading')!
 const badge = document.querySelector<HTMLElement>('#result-badge')!
 const content = document.querySelector<HTMLElement>('#result-content')!
 const formatSelect = document.querySelector<HTMLSelectElement>('#output-format')!
@@ -249,7 +249,85 @@ function statusText(status: PreviewStatus, product?: ProductPreview, diagnostic?
 
 function statusDetail(status: PreviewStatus, reason: string | null): string {
   if (reason) return reason
-  return ({ success: 'The page content is ready.', incomplete: 'We read the page, but could not verify every field.', blocked: 'The site blocked this request.', failed: 'We could not read this page. Please try again later.', timeout: 'The page took too long to respond.', invalid_url: 'Check the URL and try again.', quota_exceeded: 'The public preview limit resets tomorrow.' })[status]
+  return ({ success: 'The page content is ready.', incomplete: 'We read the page, but could not verify every field.', blocked: 'The site blocked this request.', failed: 'We could not read this page. Please try again later.', timeout: 'The page took too long to respond.', invalid_url: 'Check the URL and try again.', quota_exceeded: 'The daily preview limit has been reached.' })[status]
+}
+
+function isPageRead(result: PreviewResponse): boolean {
+  return result.status === 'success' || result.status === 'incomplete'
+}
+
+/** A short heading for results without a page title, e.g. "reddit.com/r/test". */
+function urlLabel(value: string): string {
+  try {
+    const url = new URL(value)
+    return `${url.hostname.replace(/^www\./, '')}${url.pathname.replace(/\/+$/, '')}`
+  } catch { return value }
+}
+
+function setHeading(text: string, isUrl: boolean): void {
+  resultHeading.textContent = text
+  resultHeading.classList.toggle('is-url', isUrl)
+  resultHeading.removeAttribute('title')
+  // Long titles are clamped to three lines; keep the full text available on hover.
+  requestAnimationFrame(() => {
+    if (resultHeading.textContent === text && resultHeading.scrollHeight > resultHeading.clientHeight + 1) resultHeading.title = text
+  })
+}
+
+/** Next steps only; the server reason above already says what happened. */
+function failureAdvice(result: PreviewResponse): string[] {
+  const retry = 'Check that the page opens in your browser, then try again in a few minutes.'
+  const code = result.diagnostic?.code
+  if (code === 'robots_disallowed') return ['Try a page from a different site.']
+  if (code === 'login_required') return ['Try a page that anyone can open without signing in. W2L does not bypass login walls.']
+  if (code === 'challenge') return ['Try a different public page. W2L does not solve verification challenges.']
+  if (code === 'policy_denied') return ['Use a public http:// or https:// address that anyone can open.']
+  // A service-side failure carries no capture diagnostic; its reason already says to retry later.
+  if (result.status === 'failed' && code !== 'capture_failed') return []
+  return ({
+    success: [],
+    incomplete: [],
+    blocked: ['Try a different public page. W2L respects site policy and does not bypass blocks.'],
+    failed: [retry],
+    timeout: [retry],
+    invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, set up W2L through MCP on your own computer.'],
+  })[result.status]
+}
+
+/** Failed captures get one explanation and next steps instead of an empty content panel. */
+function renderGuidance(result: PreviewResponse): HTMLElement {
+  const panel = document.createElement('section')
+  panel.className = 'guidance-panel'
+  panel.setAttribute('aria-labelledby', 'guidance-title')
+  panel.append(textElement('p', 'NO READABLE CONTENT', 'panel-kicker'))
+  const h3 = textElement('h3', 'What happened')
+  h3.id = 'guidance-title'
+  panel.append(h3, textElement('p', statusDetail(result.status, result.reason), 'guidance-reason'))
+  const advice = failureAdvice(result)
+  if (advice.length) {
+    panel.append(textElement('h4', 'What you can try'))
+    const list = document.createElement('ul')
+    for (const item of advice) list.append(textElement('li', item))
+    panel.append(list)
+  }
+  const actions = document.createElement('div')
+  actions.className = 'guidance-actions'
+  const json = textElement('button', 'View result JSON', 'copy-button')
+  json.type = 'button'
+  json.id = 'guidance-json-button'
+  json.addEventListener('click', () => {
+    formatSelect.value = 'json'
+    renderOutputPanel(result)
+    content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
+  })
+  const docs = result.status === 'quota_exceeded'
+    ? textElement('a', 'Connect MCP ↗', 'guidance-link')
+    : textElement('a', 'Limits and result states ↗', 'guidance-link')
+  docs.href = result.status === 'quota_exceeded' ? '/docs/connect-mcp/' : '/docs/limits/'
+  actions.append(json, docs)
+  panel.append(actions)
+  return panel
 }
 
 function appendInline(target: HTMLElement, source: string): void {
@@ -406,6 +484,8 @@ function renderOutputPanel(result: PreviewResponse): void {
   content.querySelector('.output-panel')?.remove()
   const format = formatSelect.value as OutputFormat
   const isJson = format === 'json'
+  // A failed capture has no Markdown to show; its guidance panel offers the JSON view.
+  if (!isJson && !isPageRead(result)) return
   const output = document.createElement('section')
   output.className = 'output-panel'
   output.setAttribute('aria-labelledby', 'content-title')
@@ -429,7 +509,8 @@ function renderOutputPanel(result: PreviewResponse): void {
   viewSelect.addEventListener('change', () => {
     formatSelect.value = viewSelect.value
     renderOutputPanel(result)
-    content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
+    const nextFocus = content.querySelector<HTMLElement>('.output-view-select') ?? content.querySelector<HTMLElement>('#guidance-json-button')
+    nextFocus?.focus()
   })
   viewLabel.append(viewSelect)
   actions.append(viewLabel)
@@ -464,24 +545,20 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
   latestResult = result
   section.hidden = false
   content.replaceChildren()
-  const isPageRead = result.status === 'success' || result.status === 'incomplete'
-  subtitle.textContent = result.title || (isPageRead ? 'Page content' : 'No readable content returned')
+  const title = result.title?.trim()
+  setHeading(title || urlLabel(result.finalUrl ?? result.requestedUrl), !title)
   badge.textContent = statusText(result.status, result.product, result.diagnostic)
   badge.className = `result-badge status-${result.status}`
   if (result.product?.status !== 'complete' && result.product) badge.classList.add('status-partial')
 
   const facts = document.createElement('div')
   facts.className = 'result-facts'
-  const statusFact = document.createElement('div')
-  statusFact.className = 'result-fact'
-  statusFact.append(textElement('span', 'Status', 'fact-label'), textElement('strong', statusText(result.status, result.product, result.diagnostic)))
-  facts.append(statusFact)
   const timeFact = document.createElement('div')
   timeFact.className = 'result-fact'
   timeFact.append(textElement('span', 'Total time · including network', 'fact-label'), textElement('strong', formatDuration(clientMs), 'elapsed-value'))
   facts.append(timeFact)
   const urlFact = document.createElement('div')
-  urlFact.className = 'result-fact result-url-fact'
+  urlFact.className = 'result-fact'
   urlFact.append(textElement('span', 'Final URL', 'fact-label'))
   const href = safeWebUrl(result.finalUrl)
   if (href) {
@@ -494,13 +571,10 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
   facts.append(urlFact)
   content.append(facts)
 
-  if (result.reason || !isPageRead || result.product?.status !== 'complete' && result.product) {
-    const detail = result.reason ?? (result.product && result.product.status !== 'complete'
-      ? 'We read the page, but some product fields still need verification. See the notes below.'
-      : statusDetail(result.status, null))
-    const note = textElement('p', detail, 'result-note')
-    if (!isPageRead) note.classList.add('is-error')
-    content.append(note)
+  // The badge carries the status; explain it once, where the reader needs it.
+  if (!isPageRead(result)) content.append(renderGuidance(result))
+  else if (result.reason || result.status === 'incomplete' && !result.product) {
+    content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
   if (result.product) content.append(renderProduct(result.product))
   renderOutputPanel(result)
@@ -513,10 +587,10 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
   section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
 }
 
-function renderLoading(): void {
+function renderLoading(url: string): void {
   latestResult = null
   section.hidden = false
-  subtitle.textContent = 'Reading the page…'
+  setHeading(urlLabel(url), true)
   badge.textContent = 'Extracting'
   badge.className = 'result-badge status-loading'
   content.replaceChildren()
@@ -526,6 +600,13 @@ function renderLoading(): void {
   box.append(textElement('span', '', 'loading-spinner'))
   box.append(textElement('p', 'Reading the page and preparing its content. This usually takes a few seconds.'))
   content.append(box)
+}
+
+/** Point to the result below; its guidance panel carries the reason. */
+function setResultMessage(result: PreviewResponse): void {
+  const read = isPageRead(result)
+  message.textContent = read ? 'Your result is below.' : 'No readable content was returned. See why below.'
+  message.className = `form-message${read ? '' : ' is-error'}`
 }
 
 form.addEventListener('submit', async (event) => {
@@ -543,7 +624,7 @@ form.addEventListener('submit', async (event) => {
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
   setBusy(true)
-  renderLoading()
+  renderLoading(url)
   const started = performance.now()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
@@ -560,8 +641,7 @@ form.addEventListener('submit', async (event) => {
     const result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
     renderResult(result, performance.now() - started, started)
-    message.textContent = result.status === 'success' || result.status === 'incomplete' ? 'Your result is below.' : statusDetail(result.status, result.reason)
-    message.className = `form-message${result.status === 'success' || result.status === 'incomplete' ? '' : ' is-error'}`
+    setResultMessage(result)
   } catch (error) {
     const aborted = controller.signal.aborted
     const result: PreviewResponse = {
@@ -574,8 +654,7 @@ form.addEventListener('submit', async (event) => {
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
     renderResult(result, performance.now() - started, started)
-    message.textContent = result.reason
-    message.className = 'form-message is-error'
+    setResultMessage(result)
   } finally {
     clearTimeout(timeout)
     setBusy(false)
