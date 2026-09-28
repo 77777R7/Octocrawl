@@ -1,8 +1,9 @@
-/** Load the decorative React Bits renderer only on desktop pointer devices. */
+/** Load the decorative React Bits renderer only in the wide desktop layout with a fine pointer. */
 export function mountHeroAscii(container: HTMLElement, hero: HTMLElement): void {
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   const pointer = window.matchMedia('(pointer: fine)')
-  const compact = window.matchMedia('(max-width: 600px)')
+  // Matches the CSS breakpoint below which the centered hero shows the static artwork instead.
+  const compact = window.matchMedia('(max-width: 1049px)')
   let dispose: (() => void) | null = null
   let generation = 0
   let loading = false

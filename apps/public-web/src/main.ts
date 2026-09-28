@@ -41,7 +41,7 @@ app.innerHTML = `
           <span class="brand-name">W2L<span class="brand-dot">.</span></span>
         </a>
         <nav class="site-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works <span aria-hidden="true">↗</span></a>
+          <a href="#how-it-works">How it works</a>
           <a href="/docs/">Docs <span aria-hidden="true">↗</span></a>
         </nav>
       </header>
@@ -58,31 +58,23 @@ app.innerHTML = `
             <span class="url-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4.5 4.5 0 0 0 6.36 0l3.18-3.18a4.5 4.5 0 0 0-6.36-6.36L11.5 5.64"/><path d="M14 10.5a4.5 4.5 0 0 0-6.36 0l-3.18 3.18a4.5 4.5 0 0 0 6.36 6.36l1.68-1.68"/></svg>
             </span>
-            <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://docs.firecrawl.dev/introduction" aria-describedby="url-help capability-message form-message" required />
+            <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="Paste a public page URL…" aria-describedby="url-help capability-message form-message" required />
             <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
           </div>
+          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
           <div class="form-meta">
             <p id="url-help">3 free previews per browser, daily · Public pages only</p>
-            <button class="example-button" id="example-button" type="button">Try an example <span aria-hidden="true">↗</span></button>
+            <button class="example-button" id="example-button" type="button">Try an example</button>
           </div>
           <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>
-          <div class="format-choice">
-            <label for="output-format">Format</label>
-            <select id="output-format" aria-describedby="format-help">
-              <option value="markdown">Readable Markdown</option>
-              <option value="json">Result JSON</option>
-            </select>
-            <span class="visually-hidden" id="format-help">Switch formats after extraction without another request.</span>
-          </div>
-          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
         </form>
       </main>
     </section>
 
     <section class="result-section layout-width" id="result-section" aria-labelledby="result-heading" hidden>
-      <div class="section-kicker"><span class="kicker-square"></span> YOUR RESULT / 01</div>
+      <div class="section-kicker"><span class="kicker-square"></span> YOUR RESULT</div>
       <div class="result-head">
-        <div><h2 id="result-heading">Your result</h2><p id="result-subtitle">Reading the page…</p></div>
+        <div class="result-title"><h2 id="result-heading">Reading the page…</h2></div>
         <span class="result-badge" id="result-badge">Extracting</span>
       </div>
       <div id="result-content" aria-live="polite" aria-atomic="false"></div>
@@ -99,7 +91,7 @@ app.innerHTML = `
       </div>
     </section>
 
-    <footer class="site-footer"><div class="layout-width footer-inner"><div class="footer-brand"><img src="/assets/octopus-original.webp" alt="" width="34" height="34" /><strong>W2L.</strong></div><span>Single-page public web preview</span><a href="/docs/">Documentation ↗</a><a href="#top">Back to top ↑</a></div></footer>
+    <footer class="site-footer"><div class="layout-width footer-inner"><div class="footer-brand"><img src="/assets/octopus-original.webp" alt="" width="34" height="34" /><strong>W2L.</strong></div><span class="footer-tagline">Single-page public web preview</span><nav class="footer-links" aria-label="Footer"><a href="/docs/">Documentation ↗</a><a href="#top">Back to top ↑</a></nav></div></footer>
   </div>
 `
 
@@ -113,12 +105,13 @@ const message = document.querySelector<HTMLElement>('#form-message')!
 const submit = document.querySelector<HTMLButtonElement>('#submit-button')!
 const submitLabel = document.querySelector<HTMLElement>('#submit-label')!
 const section = document.querySelector<HTMLElement>('#result-section')!
-const subtitle = document.querySelector<HTMLElement>('#result-subtitle')!
+const resultHeading = document.querySelector<HTMLElement>('#result-heading')!
 const badge = document.querySelector<HTMLElement>('#result-badge')!
 const content = document.querySelector<HTMLElement>('#result-content')!
-const formatSelect = document.querySelector<HTMLSelectElement>('#output-format')!
+const urlEntry = document.querySelector<HTMLElement>('.url-entry')!
 const capabilityMessage = document.querySelector<HTMLElement>('#capability-message')!
-let latestResult: PreviewResponse | null = null
+// Chosen in the result panel; kept for the next extraction in this visit.
+let outputFormat: OutputFormat = 'markdown'
 let capabilityTimer: number | undefined
 let capabilityRequest: AbortController | undefined
 
@@ -144,10 +137,6 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'json'): stri
   return `w2l-${safe}.${extension}`
 }
 
-formatSelect.addEventListener('change', () => {
-  if (latestResult) renderOutputPanel(latestResult)
-})
-
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   input.value = 'https://docs.firecrawl.dev/introduction'
   input.focus()
@@ -170,6 +159,24 @@ function normalizeUrl(value: string): string {
   return url.toString()
 }
 
+/** Plain-language note for special addresses; ordinary public pages need none.
+ * The route and technical limitation stay in the /api/capability response. */
+function capabilityHint(capability: CapabilityResponse['capability']): string {
+  if (capability.support === 'unsupported') return 'Can’t preview this address. Use a public page that anyone can open.'
+  if (capability.task === 'amazon_sg_product') return 'Amazon.sg product (beta) · We’ll also check the product, delivery region and price, and mark anything we can’t verify.'
+  if (capability.task === 'x_public_post' || capability.task === 'reddit_public_post') {
+    const site = capability.task === 'x_public_post' ? 'X post' : 'Reddit post'
+    return `${site} · This site often requires sign-in or blocks automated access, so the post may not come through.`
+  }
+  return ''
+}
+
+function setInvalid(invalid: boolean): void {
+  urlEntry.classList.toggle('is-invalid', invalid)
+  if (invalid) input.setAttribute('aria-invalid', 'true')
+  else input.removeAttribute('aria-invalid')
+}
+
 function scheduleCapability(): void {
   window.clearTimeout(capabilityTimer)
   capabilityRequest?.abort()
@@ -187,23 +194,20 @@ function scheduleCapability(): void {
       if (!response.ok) return
       const result = await response.json() as CapabilityResponse
       if (request.signal.aborted || normalizeUrl(input.value) !== url) return
-      if (result.capability.support === 'unsupported') {
-        capabilityMessage.textContent = `Cannot preview this address. ${result.capability.limitation}`
-        return
-      }
-      const route = result.capability.captureMode === 'browser_local' ? 'a limited browser route' : 'restricted HTTP'
-      const task = result.capability.task === 'amazon_sg_product' ? 'Amazon.sg product beta' : result.capability.task === 'x_public_post' ? 'X post' : result.capability.task === 'reddit_public_post' ? 'Reddit post' : 'Public page'
-      const limit = result.capability.task === 'amazon_sg_product'
-        ? 'Subject or quote may be unverified; the product gate remains open.'
-        : result.capability.task === 'x_public_post' || result.capability.task === 'reddit_public_post'
-          ? 'Site policy, login, or rendering may block capture.'
-          : 'Site policy or rendering may limit content.'
-      capabilityMessage.textContent = `${task} · Planned route: ${route}. ${limit}`
+      capabilityMessage.textContent = capabilityHint(result.capability)
     } catch { /* A hint failure must not prevent extraction. */ }
   }, 300)
 }
 
-input.addEventListener('input', scheduleCapability)
+input.addEventListener('input', () => {
+  // Editing the address resolves a validation error; don't leave it on screen.
+  if (input.hasAttribute('aria-invalid')) {
+    setInvalid(false)
+    message.textContent = ''
+    message.className = 'form-message'
+  }
+  scheduleCapability()
+})
 
 function setBusy(busy: boolean): void {
   submit.disabled = busy
@@ -249,7 +253,85 @@ function statusText(status: PreviewStatus, product?: ProductPreview, diagnostic?
 
 function statusDetail(status: PreviewStatus, reason: string | null): string {
   if (reason) return reason
-  return ({ success: 'The page content is ready.', incomplete: 'We read the page, but could not verify every field.', blocked: 'The site blocked this request.', failed: 'We could not read this page. Please try again later.', timeout: 'The page took too long to respond.', invalid_url: 'Check the URL and try again.', quota_exceeded: 'The public preview limit resets tomorrow.' })[status]
+  return ({ success: 'The page content is ready.', incomplete: 'We read the page, but could not verify every field.', blocked: 'The site blocked this request.', failed: 'We could not read this page. Please try again later.', timeout: 'The page took too long to respond.', invalid_url: 'Check the URL and try again.', quota_exceeded: 'The daily preview limit has been reached.' })[status]
+}
+
+function isPageRead(result: PreviewResponse): boolean {
+  return result.status === 'success' || result.status === 'incomplete'
+}
+
+/** A short heading for results without a page title, e.g. "reddit.com/r/test". */
+function urlLabel(value: string): string {
+  try {
+    const url = new URL(value)
+    return `${url.hostname.replace(/^www\./, '')}${url.pathname.replace(/\/+$/, '')}`
+  } catch { return value }
+}
+
+function setHeading(text: string, isUrl: boolean): void {
+  resultHeading.textContent = text
+  resultHeading.classList.toggle('is-url', isUrl)
+  resultHeading.removeAttribute('title')
+  // Long titles are clamped to three lines; keep the full text available on hover.
+  requestAnimationFrame(() => {
+    if (resultHeading.textContent === text && resultHeading.scrollHeight > resultHeading.clientHeight + 1) resultHeading.title = text
+  })
+}
+
+/** Next steps only; the server reason above already says what happened. */
+function failureAdvice(result: PreviewResponse): string[] {
+  const retry = 'Check that the page opens in your browser, then try again in a few minutes.'
+  const code = result.diagnostic?.code
+  if (code === 'robots_disallowed') return ['Try a page from a different site.']
+  if (code === 'login_required') return ['Try a page that anyone can open without signing in. W2L does not bypass login walls.']
+  if (code === 'challenge') return ['Try a different public page. W2L does not solve verification challenges.']
+  if (code === 'policy_denied') return ['Use a public http:// or https:// address that anyone can open.']
+  // A service-side failure carries no capture diagnostic; its reason already says to retry later.
+  if (result.status === 'failed' && code !== 'capture_failed') return []
+  return ({
+    success: [],
+    incomplete: [],
+    blocked: ['Try a different public page. W2L respects site policy and does not bypass blocks.'],
+    failed: [retry],
+    timeout: [retry],
+    invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, set up W2L through MCP on your own computer.'],
+  })[result.status]
+}
+
+/** Failed captures get one explanation and next steps instead of an empty content panel. */
+function renderGuidance(result: PreviewResponse): HTMLElement {
+  const panel = document.createElement('section')
+  panel.className = 'guidance-panel'
+  panel.setAttribute('aria-labelledby', 'guidance-title')
+  panel.append(textElement('p', 'NO READABLE CONTENT', 'panel-kicker'))
+  const h3 = textElement('h3', 'What happened')
+  h3.id = 'guidance-title'
+  panel.append(h3, textElement('p', statusDetail(result.status, result.reason), 'guidance-reason'))
+  const advice = failureAdvice(result)
+  if (advice.length) {
+    panel.append(textElement('h4', 'What you can try'))
+    const list = document.createElement('ul')
+    for (const item of advice) list.append(textElement('li', item))
+    panel.append(list)
+  }
+  const actions = document.createElement('div')
+  actions.className = 'guidance-actions'
+  const json = textElement('button', 'View result JSON', 'copy-button')
+  json.type = 'button'
+  json.id = 'guidance-json-button'
+  json.addEventListener('click', () => {
+    outputFormat = 'json'
+    renderOutputPanel(result)
+    content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
+  })
+  const docs = result.status === 'quota_exceeded'
+    ? textElement('a', 'Connect MCP ↗', 'guidance-link')
+    : textElement('a', 'Limits and result states ↗', 'guidance-link')
+  docs.href = result.status === 'quota_exceeded' ? '/docs/connect-mcp/' : '/docs/limits/'
+  actions.append(json, docs)
+  panel.append(actions)
+  return panel
 }
 
 function appendInline(target: HTMLElement, source: string): void {
@@ -404,8 +486,10 @@ function renderProduct(product: ProductPreview): HTMLElement {
 
 function renderOutputPanel(result: PreviewResponse): void {
   content.querySelector('.output-panel')?.remove()
-  const format = formatSelect.value as OutputFormat
+  const format = outputFormat
   const isJson = format === 'json'
+  // A failed capture has no Markdown to show; its guidance panel offers the JSON view.
+  if (!isJson && !isPageRead(result)) return
   const output = document.createElement('section')
   output.className = 'output-panel'
   output.setAttribute('aria-labelledby', 'content-title')
@@ -427,9 +511,10 @@ function renderOutputPanel(result: PreviewResponse): void {
   viewSelect.append(new Option('Markdown', 'markdown'), new Option('JSON', 'json'))
   viewSelect.value = format
   viewSelect.addEventListener('change', () => {
-    formatSelect.value = viewSelect.value
+    outputFormat = viewSelect.value as OutputFormat
     renderOutputPanel(result)
-    content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
+    const nextFocus = content.querySelector<HTMLElement>('.output-view-select') ?? content.querySelector<HTMLElement>('#guidance-json-button')
+    nextFocus?.focus()
   })
   viewLabel.append(viewSelect)
   actions.append(viewLabel)
@@ -461,27 +546,22 @@ function renderOutputPanel(result: PreviewResponse): void {
 }
 
 function renderResult(result: PreviewResponse, clientMs: number, started: number): void {
-  latestResult = result
   section.hidden = false
   content.replaceChildren()
-  const isPageRead = result.status === 'success' || result.status === 'incomplete'
-  subtitle.textContent = result.title || (isPageRead ? 'Page content' : 'No readable content returned')
+  const title = result.title?.trim()
+  setHeading(title || urlLabel(result.finalUrl ?? result.requestedUrl), !title)
   badge.textContent = statusText(result.status, result.product, result.diagnostic)
   badge.className = `result-badge status-${result.status}`
   if (result.product?.status !== 'complete' && result.product) badge.classList.add('status-partial')
 
   const facts = document.createElement('div')
   facts.className = 'result-facts'
-  const statusFact = document.createElement('div')
-  statusFact.className = 'result-fact'
-  statusFact.append(textElement('span', 'Status', 'fact-label'), textElement('strong', statusText(result.status, result.product, result.diagnostic)))
-  facts.append(statusFact)
   const timeFact = document.createElement('div')
   timeFact.className = 'result-fact'
   timeFact.append(textElement('span', 'Total time · including network', 'fact-label'), textElement('strong', formatDuration(clientMs), 'elapsed-value'))
   facts.append(timeFact)
   const urlFact = document.createElement('div')
-  urlFact.className = 'result-fact result-url-fact'
+  urlFact.className = 'result-fact'
   urlFact.append(textElement('span', 'Final URL', 'fact-label'))
   const href = safeWebUrl(result.finalUrl)
   if (href) {
@@ -494,13 +574,10 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
   facts.append(urlFact)
   content.append(facts)
 
-  if (result.reason || !isPageRead || result.product?.status !== 'complete' && result.product) {
-    const detail = result.reason ?? (result.product && result.product.status !== 'complete'
-      ? 'We read the page, but some product fields still need verification. See the notes below.'
-      : statusDetail(result.status, null))
-    const note = textElement('p', detail, 'result-note')
-    if (!isPageRead) note.classList.add('is-error')
-    content.append(note)
+  // The badge carries the status; explain it once, where the reader needs it.
+  if (!isPageRead(result)) content.append(renderGuidance(result))
+  else if (result.reason || result.status === 'incomplete' && !result.product) {
+    content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
   if (result.product) content.append(renderProduct(result.product))
   renderOutputPanel(result)
@@ -513,10 +590,9 @@ function renderResult(result: PreviewResponse, clientMs: number, started: number
   section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
 }
 
-function renderLoading(): void {
-  latestResult = null
+function renderLoading(url: string): void {
   section.hidden = false
-  subtitle.textContent = 'Reading the page…'
+  setHeading(urlLabel(url), true)
   badge.textContent = 'Extracting'
   badge.className = 'result-badge status-loading'
   content.replaceChildren()
@@ -528,6 +604,13 @@ function renderLoading(): void {
   content.append(box)
 }
 
+/** Point to the result below; its guidance panel carries the reason. */
+function setResultMessage(result: PreviewResponse): void {
+  const read = isPageRead(result)
+  message.textContent = read ? 'Your result is below.' : 'No readable content was returned. See why below.'
+  message.className = `form-message${read ? '' : ' is-error'}`
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
   if (submit.disabled) return
@@ -536,14 +619,16 @@ form.addEventListener('submit', async (event) => {
   catch (error) {
     message.textContent = error instanceof Error ? error.message : 'Enter a valid URL.'
     message.className = 'form-message is-error'
+    setInvalid(true)
     input.focus()
     return
   }
   input.value = url
+  setInvalid(false)
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
   setBusy(true)
-  renderLoading()
+  renderLoading(url)
   const started = performance.now()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
@@ -560,8 +645,7 @@ form.addEventListener('submit', async (event) => {
     const result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
     renderResult(result, performance.now() - started, started)
-    message.textContent = result.status === 'success' || result.status === 'incomplete' ? 'Your result is below.' : statusDetail(result.status, result.reason)
-    message.className = `form-message${result.status === 'success' || result.status === 'incomplete' ? '' : ' is-error'}`
+    setResultMessage(result)
   } catch (error) {
     const aborted = controller.signal.aborted
     const result: PreviewResponse = {
@@ -574,8 +658,7 @@ form.addEventListener('submit', async (event) => {
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
     renderResult(result, performance.now() - started, started)
-    message.textContent = result.reason
-    message.className = 'form-message is-error'
+    setResultMessage(result)
   } finally {
     clearTimeout(timeout)
     setBusy(false)
