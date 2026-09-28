@@ -1,0 +1,61 @@
+{
+  "id": "datacenter-partner-pilot-v1",
+  "cohort": "previously-seen-regression-sample",
+  "frozenOn": "2026-09-28",
+  "purpose": "Bounded Codex plus W2L MCP check for research evidence and state-level CSV export; not an unseen-source or regression-model acceptance sample.",
+  "rules": {
+    "denominator": 7,
+    "captureMode": "standard anonymous public-source MCP batch",
+    "formats": ["markdown"],
+    "reportEveryUrl": true,
+    "replaceFailedUrls": false,
+    "requireSourceUrlStatusAndHash": true,
+    "csvGrain": "one EIA state or District of Columbia by source year",
+    "separateModeledHistoryFromProjection": true,
+    "noInferredMissingValues": true
+  },
+  "sources": [
+    {
+      "id": "doe-2024-release",
+      "url": "https://www.energy.gov/articles/doe-releases-new-report-evaluating-increase-electricity-demand-data-centers",
+      "kind": "public_html_evidence",
+      "role": "data-center electricity estimate and forecast citation"
+    },
+    {
+      "id": "doe-data-center-hub",
+      "url": "https://www.energy.gov/powering-americas-ai-future-data-center-resource-hub",
+      "kind": "public_html_evidence",
+      "role": "updated data-center report context; do not substitute for the report's underlying table"
+    },
+    {
+      "id": "eia-state-2024",
+      "url": "https://www.eia.gov/electricity/state/",
+      "kind": "public_html_table",
+      "role": "2024 state-level electricity covariate; not data-center use"
+    },
+    {
+      "id": "eia-state-2023",
+      "url": "https://www.eia.gov/electricity/state/archive/2023/",
+      "kind": "public_html_table",
+      "role": "2023 state-level electricity covariate; same grain as 2024"
+    },
+    {
+      "id": "census-cbp-index",
+      "url": "https://www.census.gov/programs-surveys/cbp/data/datasets.html",
+      "kind": "public_html_catalog",
+      "role": "official data download discovery; NAICS 518210 is broader than data centers"
+    },
+    {
+      "id": "lbnl-2024-report",
+      "url": "https://eta-publications.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
+      "kind": "public_html_report_landing",
+      "role": "primary study metadata and report link"
+    },
+    {
+      "id": "census-cbp-2023-state-zip",
+      "url": "https://www2.census.gov/programs-surveys/cbp/datasets/2023/cbp23st.zip",
+      "kind": "public_zip_dataset",
+      "role": "binary dataset acquisition boundary; do not treat an index-page scrape as data acquisition"
+    }
+  ]
+}
