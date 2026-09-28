@@ -1,0 +1,451 @@
+{
+  "id": "coos-datacentre-finance-v1",
+  "cohort": "seed-user-source-list",
+  "frozenOn": null,
+  "purpose": "Phase 0 baseline: capture every source cited in the seed user's Global AI Data Centre Environmental & Finance Dataset (release 2026-09-28) with the current W2L build, report every URL, classify each failure by the capability needed to fix it.",
+  "rules": {
+    "denominator": 72,
+    "captureMode": "standard anonymous public-source batch",
+    "formats": [
+      "markdown"
+    ],
+    "reportEveryUrl": true,
+    "replaceFailedUrls": false,
+    "requireSourceUrlStatusAndHash": true,
+    "noInferredMissingValues": true
+  },
+  "sources": [
+    {
+      "id": "S001",
+      "url": "https://docs.equinix.com/colocation/availability/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "S002",
+      "url": "https://vantage-dc.com/company/contact-us/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "S003",
+      "url": "https://vantage-dc.com/data-center-locations/apac/",
+      "kind": "html",
+      "numericObservations": 7
+    },
+    {
+      "id": "S004",
+      "url": "https://www.digitalrealty.com/data-centers/emea/frankfurt",
+      "kind": "html",
+      "numericObservations": 24
+    },
+    {
+      "id": "S005",
+      "url": "https://www.digitalrealty.com/data-centers/emea/paris",
+      "kind": "html",
+      "numericObservations": 13
+    },
+    {
+      "id": "DLR-SINGAPORE",
+      "url": "https://www.digitalrealty.com/data-centers/asia-pacific/singapore",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "DLR-AMSTERDAM",
+      "url": "https://www.digitalrealty.com/data-centers/emea/amsterdam",
+      "kind": "html",
+      "numericObservations": 12
+    },
+    {
+      "id": "DLR-LONDON",
+      "url": "https://www.digitalrealty.com/data-centers/emea/london",
+      "kind": "html",
+      "numericObservations": 13
+    },
+    {
+      "id": "DLR-DUBLIN",
+      "url": "https://www.digitalrealty.com/data-centers/emea/dublin",
+      "kind": "html",
+      "numericObservations": 9
+    },
+    {
+      "id": "DLR-MARSEILLE",
+      "url": "https://www.digitalrealty.com/data-centers/emea/marseille",
+      "kind": "html",
+      "numericObservations": 5
+    },
+    {
+      "id": "DLR-ZURICH",
+      "url": "https://www.digitalrealty.com/data-centers/emea/zurich",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "G-PUE",
+      "url": "https://datacenters.google/efficiency/",
+      "kind": "html",
+      "numericObservations": 249
+    },
+    {
+      "id": "META-2025",
+      "url": "https://sustainability.atmeta.com/asset/2025-environmental-data-index/",
+      "kind": "report_asset_page (PDF?)",
+      "numericObservations": 396
+    },
+    {
+      "id": "META-EY2025",
+      "url": "https://sustainability.atmeta.com/asset/2025-independent-accountants-review-report/",
+      "kind": "report_asset_page (PDF?)",
+      "numericObservations": 0
+    },
+    {
+      "id": "META-LOC",
+      "url": "https://datacenters.atmeta.com/all-locations/",
+      "kind": "html",
+      "numericObservations": 15
+    },
+    {
+      "id": "AIR-LOC",
+      "url": "https://airtrunk.com/locations/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "AIR-SYD1",
+      "url": "https://airtrunk.com/location/syd1-sydney-west/",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "AIR-JHB1",
+      "url": "https://airtrunk.com/location/jhb1-johor/",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "GS-LOC",
+      "url": "https://www.globalswitch.com/data-centres/",
+      "kind": "html",
+      "numericObservations": 16
+    },
+    {
+      "id": "STT-SG",
+      "url": "https://www.sttgdc.com/sg-en/locations/singapore",
+      "kind": "html",
+      "numericObservations": 6
+    },
+    {
+      "id": "EQ-2025",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:39ee2b33-ca04-460f-a97b-1e92ef62ec05/Equinix-Inc_2025_Data-Summary.pdf",
+      "kind": "pdf",
+      "numericObservations": 61
+    },
+    {
+      "id": "DLR-2025",
+      "url": "https://go2.digitalrealty.com/rs/087-YZJ-646/images/Report_Digital_Realty_2605_Impact_Report.pdf",
+      "kind": "pdf",
+      "numericObservations": 32
+    },
+    {
+      "id": "MS-2025",
+      "url": "https://aka.ms/SustainabilityFactsheet2025",
+      "kind": "shortlink (likely PDF)",
+      "numericObservations": 60
+    },
+    {
+      "id": "NTT-EMEA",
+      "url": "https://services.global.ntt/en-us/services-and-products/global-data-centers/global-locations/emea",
+      "kind": "html",
+      "numericObservations": 6
+    },
+    {
+      "id": "NTT-BERLIN",
+      "url": "https://services.global.ntt/en-us/services-and-products/global-data-centers/global-locations/emea/berlin-data-centers",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "NTT-FRANKFURT",
+      "url": "https://services.global.ntt/en-us/services-and-products/global-data-centers/global-locations/emea/frankfurt-data-centers",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "NTT-MUNICH",
+      "url": "https://services.global.ntt/en-us/services-and-products/global-data-centers/global-locations/emea/munich-data-centers",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "NTT-APAC",
+      "url": "https://services.global.ntt/en-us/services-and-products/global-data-centers/global-locations/asia-pacific",
+      "kind": "html",
+      "numericObservations": 1
+    },
+    {
+      "id": "NTT-2016",
+      "url": "https://www.ntt.com/en/about-us/press-releases/news/article/2016/20160615_2/20160615_2a.html",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "ATN-LOC",
+      "url": "https://www.atnorth.com/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "TER-LOC",
+      "url": "https://www.teraco.co.za/data-centre-locations/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "TER-CT2025",
+      "url": "https://www.teraco.co.za/news/teraco-announces-ct1-data-centre-expansion-in-rondebosch-cape-town/",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "TER-DB2023",
+      "url": "https://www.teraco.co.za/news/teraco-completes-durban-data-centre-expansion-to-double-existing-facility-capacity/",
+      "kind": "html",
+      "numericObservations": 2
+    },
+    {
+      "id": "TER-DBLOC",
+      "url": "https://www.teraco.co.za/data-centre-locations/durban/",
+      "kind": "html",
+      "numericObservations": 1
+    },
+    {
+      "id": "DLR-TOKYO",
+      "url": "https://www.digitalrealty.com/data-centers/asia-pacific/tokyo",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "DLR-OSAKA",
+      "url": "https://www.digitalrealty.com/data-centers/asia-pacific/osaka",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "AIR-FIN25",
+      "url": "https://airtrunk.com/airtrunk-closes-a16-billion-ex-japan-sustainable-financing-to-accelerate-apj-growth-and-impact/",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "AIR-GFF",
+      "url": "https://airtrunk.com/wp-content/uploads/2023/03/AirTrunk-Green-Financing-Framework-Final-1.pdf",
+      "kind": "pdf",
+      "numericObservations": 12
+    },
+    {
+      "id": "AIR-SGP2FIN",
+      "url": "https://airtrunk.com/zh-hans/airtrunk-secures-landmark-s2-25-billion-green-loan-advancing-singapores-role-as-asias-green-finance-hub/",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "AIR-TOK1FIN",
+      "url": "https://airtrunk.com/zh-hans/airtrunk-secures-largest-financing-for-a-data-centre-in-japan-with-us1-2-billion-green-loan-for-its-flagship-tokyo-campus/",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "AIR-JHB2FIN",
+      "url": "https://airtrunk.com/airtrunk-secures-us2-325b-green-financing-to-support-sustainable-digital-infrastructure-growth-in-malaysia/",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "EQ-GFF",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:b04d8496-c8ac-4015-b1bd-02c526ce7f22/Eq_GU_Equinix",
+      "kind": "html",
+      "numericObservations": 6
+    },
+    {
+      "id": "EQ-ALLOC25",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:500c1bb1-fec2-4101-b518-162282bd3fc9/green-bond-allocation-report-2025.pdf",
+      "kind": "pdf",
+      "numericObservations": 22
+    },
+    {
+      "id": "STT-SLFF24",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "kind": "pdf",
+      "numericObservations": 15
+    },
+    {
+      "id": "CYR-FIN24",
+      "url": "https://www.cyrusone.com/media-coverage-press-releases/cyrusone-secures-9-7-billion-in-new-debt-capital-to-fund-datacenter-growth",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "GOOG-2025-MIRROR",
+      "url": "https://fliphtml5.com/gsjoh/google-2025-environmental-report/",
+      "kind": "third_party_mirror",
+      "numericObservations": 185
+    },
+    {
+      "id": "IREN-Q226",
+      "url": "https://www.sec.gov/Archives/edgar/data/1878848/000187884826000015/iren-20251231.htm",
+      "kind": "sec_filing_html",
+      "numericObservations": 18
+    },
+    {
+      "id": "NEB-MAN24",
+      "url": "https://nebius.com/newsroom/nebius-to-triple-capacity-at-finland-data-center-to-75-mw",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "IM-LOC",
+      "url": "https://www.ironmountain.com/data-centers/colocation",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "TELE-LOC",
+      "url": "https://www.telehouse-rechenzentrum.de/en/locations/",
+      "kind": "html",
+      "numericObservations": 5
+    },
+    {
+      "id": "NEB-2025",
+      "url": "https://nebius.com/newsroom/nebius-publishes-2025-sustainability-report-outlining-blueprint-for-scaling-responsibly",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "OVH-FY25-KPI",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "kind": "pdf",
+      "numericObservations": 50
+    },
+    {
+      "id": "AWS-ENV26",
+      "url": "https://sustainability.aboutamazon.com/products-services/aws-cloud",
+      "kind": "html",
+      "numericObservations": 155
+    },
+    {
+      "id": "NEB-2025-FULL",
+      "url": "https://assets.nebius.com/assets/79cf11ba-bb23-4cb8-802e-21dc155be31c/Nebius%202025%20Sustainability%20Report.pdf",
+      "kind": "pdf",
+      "numericObservations": 14
+    },
+    {
+      "id": "GDS-ESG24",
+      "url": "https://investors.gds-services.com/news-releases/news-release-details/gds-releases-2024-esg-report",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "ALIBABA-ESG24",
+      "url": "https://www.alibabagroup.com/en-US/document-1752127870676762624",
+      "kind": "html",
+      "numericObservations": 3
+    },
+    {
+      "id": "TENCENT-CLIMATE26",
+      "url": "https://www.tencent.com/zh-cn/tencent-backs-next-gen-decarbonization-innovators-with-catalytic-funding-through-carbonx-2-0-and-advances-progress-towards-climate-goals/",
+      "kind": "html",
+      "numericObservations": 6
+    },
+    {
+      "id": "CHINDATA-ENV26",
+      "url": "https://www.chindatagroup.com/sustainability/4/oid/4.html",
+      "kind": "html",
+      "numericObservations": 10
+    },
+    {
+      "id": "NEXTDC-LOC",
+      "url": "https://www.nextdc.com/solutions/mission-critical-spaces",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "CORESITE-DGX24",
+      "url": "https://www.coresite.com/news/coresite-helps-accelerate-artificial-intelligence-adoption-nvidia-dgx-ready-data-center-partner",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "STT-DGX25",
+      "url": "https://www.sttgdc.com/sg-en/newsroom/stt-gdc-achieves-certification-nvidia-dgx-ready-data-center-program",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "APLD-FY26",
+      "url": "https://ir.applieddigital.com/sec-filings/all-sec-filings/content/0001144879-26-000044/apldq426earningsreleaseasf.htm",
+      "kind": "sec_filing_html",
+      "numericObservations": 11
+    },
+    {
+      "id": "CRUSOE-ABILENE25",
+      "url": "https://www.crusoe.ai/resources/newsroom/crusoe-expands-ai-data-center-campus-in-abilene-to-1-2-gigawatts",
+      "kind": "html",
+      "numericObservations": 2
+    },
+    {
+      "id": "CRUSOE-ABILENE-OP25",
+      "url": "https://www.crusoe.ai/resources/newsroom/crusoe-wins-north-american-data-center-project-of-the-year-at-2025-data-center-dynamics-global-awards",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "KHAZNA-AI25",
+      "url": "https://khaznadatacenters.com/ar/press-release/khazna-expands-infrastructure-to-accelerate-uaes-leadership-in-artificial-intelligence/",
+      "kind": "html",
+      "numericObservations": 2
+    },
+    {
+      "id": "RAXIO-CONTACT26",
+      "url": "https://www.raxiogroup.com/contact/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "RAXIO-ABOUT26",
+      "url": "https://www.raxiogroup.com/about-raxio/",
+      "kind": "html",
+      "numericObservations": 0
+    },
+    {
+      "id": "RAXIO-AO1",
+      "url": "https://www.raxiogroup.com/data-centres/angola/",
+      "kind": "html",
+      "numericObservations": 4
+    },
+    {
+      "id": "ADC-NBO1",
+      "url": "https://www.africadatacentres.com/nairobi/",
+      "kind": "html",
+      "numericObservations": 1
+    },
+    {
+      "id": "ADC-LOS1",
+      "url": "https://www.africadatacentres.com/lagos/",
+      "kind": "html",
+      "numericObservations": 2
+    },
+    {
+      "id": "GOOG-2025-CANONICAL",
+      "url": "https://www.gstatic.com/gumdrop/sustainability/google-2025-environmental-report.pdf",
+      "kind": "pdf",
+      "numericObservations": 0
+    },
+    {
+      "id": "GOOG-2025-STUDYLIB",
+      "url": "https://studylib.net/doc/28545749/google-2025-environmental-report",
+      "kind": "third_party_mirror",
+      "numericObservations": 0
+    }
+  ]
+}
