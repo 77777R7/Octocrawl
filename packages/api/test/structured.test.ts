@@ -536,6 +536,12 @@ describe('structured JSON extraction', () => {
     expect(await extractStructured(named(`S${'a'.repeat(5000)}`), json({ name: { type: 'string', pattern: '^S[a-z]+$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
     // It keeps the u flag's meaning: one astral character is one character.
     expect(await extractStructured(named('\u{1F3A7}'), json({ name: { type: 'string', pattern: '^.$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
+    // The same limit holds for what the linear engine cannot run either: a counted repetition above 16,
+    // a \p{…} escape (it needs the u flag), and any text with a character outside the BMP (2 UTF-16 units).
+    const limited = async (pattern: string, text: string) => (await extractStructured(named(text), json({ name: { type: 'string', pattern } }, ['name']), {}, null)).status
+    expect([await limited('^S[0-9a-f]{32}', `S${'a'.repeat(2047)}`), await limited('^S[0-9a-f]{32}', `S${'a'.repeat(2048)}`)]).toEqual(['complete', 'incomplete'])
+    expect([await limited('^S\\p{Ll}+$', `S${'a'.repeat(2047)}`), await limited('^S\\p{Ll}+$', `S${'a'.repeat(2048)}`)]).toEqual(['complete', 'incomplete'])
+    expect([await limited('^S', `S${'a'.repeat(2045)}\u{1F3A7}`), await limited('^S', `S${'a'.repeat(2046)}\u{1F3A7}`)]).toEqual(['complete', 'incomplete'])
   })
 
   it('maps a recursive schema without descending forever', async () => {
