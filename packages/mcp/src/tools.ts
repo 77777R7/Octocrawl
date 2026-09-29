@@ -286,7 +286,7 @@ function required(value: unknown, name: string): string {
 }
 function compactMonitor(view: Awaited<ReturnType<W2L['getMonitor']>>) {
   const latest = view.runs[0]
-  return {monitorId:view.revision.monitorId,url:view.revision.url,enabled:view.enabled,freshness:view.freshness,nextRunAt:view.nextRunAt,baseline:view.baseline ? {id:view.baseline.id,version:view.baseline.version,fields:view.baseline.fields} : null,latestRun:latest ? {id:latest.id,state:latest.state,quality:latest.quality,change:latest.change,error:latest.error} : null,latestEvent:view.events[0] ?? null,pendingEventCount:view.outbox.filter(item=>item.state==='pending').length}
+  return {monitorId:view.revision.monitorId,url:view.revision.url,enabled:view.enabled,freshness:view.freshness,nextRunAt:view.nextRunAt,baseline:view.baseline ? {id:view.baseline.id,version:view.baseline.version,fields:view.baseline.fields} : null,latestRun:latest ? {id:latest.id,state:latest.state,quality:latest.quality,change:latest.change,changeReason:latest.changeReason ?? null,error:latest.error} : null,latestEvent:view.events[0] ?? null,pendingEventCount:view.outbox.filter(item=>item.state==='pending').length}
 }
 function compactDelivery(delivery: Awaited<ReturnType<W2L['retryDelivery']>>) {
   const {payload:_payload,...rest}=delivery
