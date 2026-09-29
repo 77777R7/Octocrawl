@@ -116,6 +116,12 @@ export function researchUserAgent(contact: string | null = null): string {
   return `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: ${contact})`
 }
 
+/** The contact a research-mode User-Agent declares (see researchUserAgent); null for any other User-Agent. */
+export function declaredContact(userAgent: string): string | null {
+  const prefix = `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: `
+  return userAgent.startsWith(prefix) && userAgent.endsWith(')') ? userAgent.slice(prefix.length, -1) : null
+}
+
 /** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
 export function operatorContact(env: Readonly<Record<string, string | undefined>>): string | null {
   const contact = (env['W2L_CONTACT'] ?? '').trim()
