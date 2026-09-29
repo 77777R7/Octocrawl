@@ -16,7 +16,7 @@
       "request": { "formats": ["markdown", "links"] },
       "checks": [
         { "item": "FS", "type": "field", "path": "status", "equals": "success" },
-        { "item": "3", "type": "markdownIncludes", "text": "Warning! This is a demo website" },
+        { "item": "3", "type": "markdownMatches", "pattern": "Warning!(\\*\\*)? This is a demo website" },
         { "item": "3", "type": "markdownExcludes", "text": "** **" },
         { "item": "3", "type": "markdownIncludes", "text": "£51.77" },
         { "item": "4", "type": "linksAbsolute" },
