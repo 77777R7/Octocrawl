@@ -14,11 +14,13 @@ Use the returned ID with `GET /v1/batches/:id` for `requested`, `completed`, `re
 const { taskId } = await w2l.batchScrape(urls, {
   formats: [{ type: 'json', schema: productSchema }],
 })
-const done = await w2l.waitBatch(taskId)
+const done = await w2l.waitBatch(taskId, { timeoutMs: 600_000 })
 for await (const item of w2l.listBatchItems(taskId, { limit: 50 })) {
   console.log(item.url, item.status, item.json?.data)
 }
 ```
+
+`waitBatch` and `waitCrawl` poll every 500 ms (`pollIntervalMs` changes it). Without `timeoutMs` they wait until the task completes, fails or is cancelled; with it they throw `WaitTimeoutError`, which carries the last status read, and the task keeps running.
 
 MCP exposes `batch_scrape`, `get_batch`, `get_batch_items`, `wait_batch`, and `cancel_batch`. `wait_batch` waits at most 30 seconds by default (configurable with `timeoutMs` up to 300 seconds) and returns the current state if the batch is still running; for incremental work, page through items while the task runs. The task and item checkpoints are SQLite-backed; after a process restart, pending/running/paused batches resume missing URLs and keep prior results.
 
