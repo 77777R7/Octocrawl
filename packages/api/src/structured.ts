@@ -18,6 +18,7 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
+import { CONTENTFUL_STATUS } from '@w2l/contracts'
 
 export interface StructuredModelConfig {
   baseUrl: string
@@ -481,7 +482,7 @@ export async function prepareScrapeResponse(
   const formats = requestedFormats(req, result)
   const modelStart = performance.now()
   const json = hasFormat(formats, 'json')
-    ? await extractStructured(result, customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
+    ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   const serializeStart = performance.now()
@@ -497,6 +498,7 @@ export async function prepareScrapeResponse(
   const totalMs = Math.max(0, performance.now() - overallStart)
   const withTiming: ScrapeResponse = {
     ...next,
+    snapshot: scrapeSnapshot(next),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -506,6 +508,27 @@ export async function prepareScrapeResponse(
   }
   if (req.debug !== false) return withTiming
   return compactScrapeResponse(withTiming, req, formats, totalMs)
+}
+
+/**
+ * What JSON extraction may read. A failed or blocked result's Markdown is the
+ * page an error status carried, evidence rather than content, so extraction
+ * sees such a result as it did before that page was kept.
+ */
+export function extractionInput<T extends FetchResult>(result: T): T {
+  return CONTENTFUL_STATUS.has(result.status) ? result : { ...result, markdown: null }
+}
+
+/**
+ * The capture identity of whatever response was received, success or not,
+ * in both the full and the compact response shape.
+ */
+function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snapshot'] {
+  return {
+    rawBodySha256: result.evidence.rawBodySha256,
+    artifacts: result.evidence.artifacts,
+    httpStatus: result.evidence.httpStatus,
+  }
 }
 
 export function compactScrapeResponse(
@@ -518,11 +541,7 @@ export function compactScrapeResponse(
   return {
     requestedUrl: next.requestedUrl,
     finalUrl: next.evidence.finalUrl,
-    snapshot: {
-      rawBodySha256: next.evidence.rawBodySha256,
-      artifacts: next.evidence.artifacts,
-      httpStatus: next.evidence.httpStatus,
-    },
+    snapshot: scrapeSnapshot(next),
     status: next.status,
     failureReason: next.failureReason,
     blockReason: next.blockReason,

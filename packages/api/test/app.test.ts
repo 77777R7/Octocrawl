@@ -83,6 +83,24 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
   })
 
+  it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {
+    const app = createApp(engine)
+    const post = async (path: string, body: Record<string, unknown>) => (await app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/error/404`, ...body }),
+    })).json()
+    const snapshot = { httpStatus: 404, rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) }
+    const full = await post('/v1/scrape', { formats: ['markdown'] })
+    expect(full).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { httpStatus: 404 }, snapshot })
+    expect(full.markdown).toContain('Not Found')
+    const compact = await post('/v1/scrape', { formats: ['markdown'], debug: false })
+    expect(compact).toMatchObject({ status: 'failed', failureReason: 'http_error', snapshot })
+    expect(compact.markdown).toContain('Not Found')
+    const shim = await post('/fc/v1/scrape', {})
+    expect(shim).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { statusCode: 404, error: 'http_error' } } })
+    expect(shim.data.markdown).toContain('Not Found')
+  })
+
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
     const app = createApp(engine)
     const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }

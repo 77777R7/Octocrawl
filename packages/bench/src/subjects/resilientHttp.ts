@@ -16,6 +16,7 @@ import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 
 /**
@@ -337,6 +338,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
       header: (name) => out.headers?.get(name) ?? null,
       body,
     })
+    // An error status is never content, but its page is what the server
+    // said: the failed or blocked result keeps it as evidence.
+    const errorPage = errorPageEvidence(out.status, base.evidence.contentType, body, out.finalUrl)
+    const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
       const next = escalationForBlock(verdict.reason, 'http')
       trace.push({
@@ -353,7 +358,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'http',
         escalations: next === null ? [] : [{ ...next, improved: null }],
-        markdown: null,
+        ...errorPageFields,
       })
     }
 
@@ -363,11 +368,25 @@ export class ResilientHttpSubject implements SubjectAdapter {
       return blocked(gate)
     }
 
-    if (out.status !== 200) {
+    if (!isSuccessStatus(out.status)) {
       return finish({
         ...base,
         status: 'failed',
         failureReason: 'http_error',
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'http',
+        escalations: [],
+        ...errorPageFields,
+      })
+    }
+
+    // A 204 or 205 says there is no content: proven emptiness, not a failure.
+    if (isNoContentStatus(out.status)) {
+      return finish({
+        ...base,
+        status: 'empty_verified',
+        failureReason: null,
         blockReason: null,
         budgetExceeded: null,
         lane: 'http',

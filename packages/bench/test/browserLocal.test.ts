@@ -53,6 +53,9 @@ beforeAll(async () => {
     } else if (req.url === '/plain-403') {
       res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><body><h1>403 Forbidden</h1></body></html>')
+    } else if (req.url === '/created') {
+      res.writeHead(201, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Created</h1><p>A 201 page with a full document is judged from its content in the browser lane too.</p></article></body></html>')
     } else if (req.url === '/echo-cookie') {
       // Echoes the Cookie header back as page content, so a test can prove the
       // inherited session really went on the wire rather than just being
@@ -264,7 +267,8 @@ describe('BrowserLocalSubject transport', () => {
       const out = await subject.fetch(`${url}/gate`)
       expect(out.status).toBe('blocked')
       expect(out.blockReason).toBe('cloudflare_challenge')
-      expect(out.markdown).toBeNull()
+      // The 403 block page is evidence of what the server said, not content.
+      expect(out.markdown).toContain('Just a moment...')
       expect(out.escalations).toEqual([
         {
           from: 'browser_local',
@@ -285,6 +289,20 @@ describe('BrowserLocalSubject transport', () => {
       expect(out.status).toBe('failed')
       expect(out.failureReason).toBe('http_error')
       expect(out.blockReason).toBeNull()
+      expect(out.evidence.httpStatus).toBe(403)
+      expect(out.markdown).toContain('403 Forbidden')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('judges a 201 page from its content like a 200', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`${url}/created`)
+      expect(out.status).toBe('success')
+      expect(out.evidence.httpStatus).toBe(201)
+      expect(out.markdown).toContain('judged from its content in the browser lane too')
     } finally {
       await subject.teardown()
     }

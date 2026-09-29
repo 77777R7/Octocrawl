@@ -55,7 +55,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from './structured.js'
+import { extractionInput, extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -238,7 +238,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const formats = task.batch!.formats
         const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
         const custom = formats.find(format => typeof format === 'object')
-        const json = wants('json') ? await extractStructured(outcome.result, custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
+        const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {

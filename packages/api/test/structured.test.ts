@@ -178,4 +178,22 @@ describe('structured JSON extraction', () => {
     expect(out.issues.map(issue => issue.code)).toContain('model_timeout')
     expect(out.data).toMatchObject({ asin: 'B012345678', title: 'Subject headphones' })
   })
+
+  it('never hands the evidence Markdown of a failed page to model fallback', async () => {
+    const failed = {
+      ...result, status: 'failed', failureReason: 'http_error', markdown: '# 404 Not Found', document: undefined,
+      evidence: { ...result.evidence, httpStatus: 404 }, channelsTried: ['http'], ladderTrace: [], summary: { attempts: [], totalMs: 1 },
+    } as unknown as ScrapeResponse
+    const subjects: unknown[] = []
+    const out = await prepareScrapeResponse(failed, { url: failed.requestedUrl, formats: ['markdown', format({ modelFallback: true })], debug: false }, {}, {
+      baseUrl: 'https://model.example', model: 'extractor',
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        subjects.push(JSON.parse(JSON.parse(String(init?.body)).messages[1].content).subject)
+        return new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 })
+      }) as typeof fetch,
+    }, performance.now())
+    expect(out.markdown).toBe('# 404 Not Found')
+    expect(subjects.length).toBeGreaterThan(0)
+    expect(subjects.every(subject => subject === '')).toBe(true)
+  })
 })

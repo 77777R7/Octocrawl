@@ -21,6 +21,7 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 ## Known diffs
 
 - Challenge / block pages are `success: false`. Firecrawl often returns the interstitial as success markdown.
+- A page answered with an HTTP error status (4xx/5xx) is `success: false`, with its Markdown in `data.markdown` and the status in `data.metadata.statusCode`: the error page is evidence of what the server said, not content.
 - No fire-engine, proxy pools, `actions`, JSON extract, or screenshots.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
 - Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.

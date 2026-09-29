@@ -1618,7 +1618,7 @@ const http500: Fixture = {
     expectedMainTokens: null,
     budget: budget(500, 10_000, 2),
     expectedStatus: 'failed',
-    notes: 'Retryable server error; body must not be returned as content.',
+    notes: 'Retryable server error. Its body may come back as evidence on the failed result, never as content (a contentful status).',
   },
   respond: () => ({
     status: 500,
