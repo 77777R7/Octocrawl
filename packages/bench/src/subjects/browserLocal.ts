@@ -245,6 +245,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         detail: {
           decision: robotsDecision.decision,
           robotsUrl: robotsDecision.robotsUrl,
+          robotsSha256: robotsDecision.robotsSha256,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
@@ -512,6 +513,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
       const body = await page.content()
+      const fetchedAt = new Date().toISOString()
       if (Buffer.byteLength(body) > this.networkPolicy.maxDecompressedBytes) {
         return this.denied(url, start, trace, new BodyTooLargeError(this.networkPolicy.maxDecompressedBytes))
       }
@@ -578,6 +580,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           contentType: 'text/html; rendered',
           rawBodySha256,
           artifacts: rawArtifacts,
+          fetchedAt,
           ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },
         usage: {

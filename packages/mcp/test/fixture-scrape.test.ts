@@ -49,10 +49,21 @@ describe('MCP scrape against the fixture catalog', () => {
       status: string
       markdown: string | null
       metadata?: unknown
+      evidenceRecord?: unknown
     }
     expect(result.status).toBe('success')
     expect(result.markdown).toContain('Harbour lantern catalog')
     expect(result.metadata).toMatchObject({ title: 'Harbour lantern catalog', language: 'en', favicon: null })
+    // The compact MCP result carries the same Evidence Record as REST.
+    expect(result.evidenceRecord).toMatchObject({
+      schemaVersion: 'w2l.evidence/1',
+      requestedUrl: `${fixtures.url}/crawl/listing`,
+      finalUrl: `${fixtures.url}/crawl/listing`,
+      status: 'success',
+      lane: 'http',
+      httpStatus: 200,
+      outputSha256: { markdown: expect.stringMatching(/^[0-9a-f]{64}$/), json: null },
+    })
     await engine.close()
   })
 })

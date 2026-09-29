@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/77777R7/w2l/blob/main/packages/contracts/schemas/evidence-record.v1.json",
+  "title": "W2L Evidence Record v1",
+  "description": "The evidence W2L attaches to every scrape result (evidenceRecord), batch item and crawl page, stated the same way whichever lane produced it. Every field is always present; a value W2L did not observe is null, never 0 or a guess. The record sits beside the result's own fields and changes none of them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "requestedUrl", "finalUrl", "redirectChain", "fetchedAt", "httpStatus", "status", "reason", "lane", "robotsDecision", "rawSha256", "outputSha256", "extractor", "fieldEvidence", "artifacts", "proxy", "identity"],
+  "properties": {
+    "schemaVersion": {
+      "description": "The version of this schema. A record with another value follows another schema.",
+      "const": "w2l.evidence/1"
+    },
+    "requestedUrl": {
+      "description": "The URL the caller asked for, as given.",
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "finalUrl": {
+      "description": "The last URL W2L requested for the page, after following redirects: the URL of the response it reports, or of the request that got none (a timeout, a refused connection). Null when W2L sent no request for the page: a robots.txt disallow, a DNS failure or a policy refusal came first.",
+      "type": ["string", "null"],
+      "pattern": "^https?://"
+    },
+    "redirectChain": {
+      "description": "Every URL W2L requested for the page, in order, and whether the lane lists every hop.",
+      "$ref": "#/$defs/redirectChain"
+    },
+    "fetchedAt": {
+      "description": "When W2L received the response it reports, in UTC, ISO 8601 with milliseconds as JavaScript's Date#toISOString writes it: the final response's headers on the HTTP lane, the vendor's answer on the provider lane, the capture of the rendered page on browser lanes. Null when the result reports no response or the lane captured none (a browser-lane 503 left for a later retry), and on results stored before W2L recorded it.",
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "httpStatus": {
+      "description": "The HTTP status of the response W2L reports. Null when there was none; a browser navigation that reports no status is null too, never 0.",
+      "type": ["integer", "null"],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "status": {
+      "description": "W2L's verdict on the page: the result's status. success and partial carry content; a failed or blocked result may carry the error page as evidence, never as content.",
+      "enum": ["success", "partial", "empty_verified", "blocked", "failed", "cancelled", "budget_exceeded", "duplicate"]
+    },
+    "reason": {
+      "description": "Why the status is what it is: the failure reason when status is failed, the block reason when blocked, the exhausted budget when budget_exceeded. Null for every other status.",
+      "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
+    },
+    "lane": {
+      "description": "The lane that produced the result: http (W2L's own HTTP client), browser_local (a local headless Chromium), browser_local_authed (the same with the user's session), browser_proxy (a browser through the operator's egress) or provider (a third-party browser service).",
+      "enum": ["http", "browser_local", "browser_local_authed", "browser_proxy", "provider"]
+    },
+    "robotsDecision": {
+      "description": "The robots.txt verdict the page was fetched, or refused, under. Null when no robots.txt decision was made for this result: it ended before the check (a DNS failure, an identity refusal, a deadline), or robots.txt was not consulted.",
+      "anyOf": [{ "$ref": "#/$defs/robotsDecision" }, { "type": "null" }]
+    },
+    "rawSha256": {
+      "description": "SHA-256 (hex) of the body W2L read, the same value as evidence.rawBodySha256. HTTP lane: the response body decoded as text and encoded as UTF-8, which equals the SHA-256 of the bytes received for a UTF-8 body without a byte-order mark. Browser lanes: the rendered page's HTML serialization, as UTF-8. Provider lane: the HTML the vendor returned, as UTF-8. Null when no body was read.",
+      "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+    },
+    "outputSha256": {
+      "description": "SHA-256 of what W2L delivered in this response, so that a cited value can be checked against it.",
+      "$ref": "#/$defs/outputSha256"
+    },
+    "extractor": {
+      "description": "The extraction that turned the page into the delivered output.",
+      "$ref": "#/$defs/extractor"
+    },
+    "fieldEvidence": {
+      "description": "For a JSON request: a JSON Pointer into json.data mapped to where that value was read. A value read from the page, or given by the model fallback, has an entry; a value W2L took from the fetch itself (the URL) or from the content title has none, and neither has a field that is absent or null. An empty object when no value has one; null when JSON was not requested.",
+      "anyOf": [
+        {
+          "type": "object",
+          "propertyNames": { "pattern": "^(/.*)?$" },
+          "additionalProperties": { "$ref": "#/$defs/fieldEvidence" }
+        },
+        { "type": "null" }
+      ]
+    },
+    "artifacts": {
+      "description": "Files W2L saved while producing this result, each with its SHA-256. Today that is the page snapshot, when the operator sets W2L_CAPTURE_RAW_DIR. An empty list when nothing was saved.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "proxy": {
+      "description": "host:port of the operator's environment proxy (HTTPS_PROXY / HTTP_PROXY, local mode only) that the request for the final URL went through; never its credentials. Null when that request went direct, and whenever the lane reports no route for the result: when no request was sent, after a failed browser navigation, and on the provider lane.",
+      "type": ["string", "null"],
+      "pattern": "^\\S+:[0-9]{1,5}$"
+    },
+    "identity": {
+      "description": "Who W2L said it was on the wire.",
+      "$ref": "#/$defs/identity"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": { "properties": { "reason": { "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "blocked" } } },
+      "then": { "properties": { "reason": { "enum": ["cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "budget_exceeded" } } },
+      "then": { "properties": { "reason": { "enum": ["tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["success", "partial", "empty_verified", "cancelled", "duplicate"] } } },
+      "then": { "properties": { "reason": { "const": null } } }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "redirectChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["urls", "complete"],
+      "properties": {
+        "urls": {
+          "description": "Every URL W2L requested for the page, in order: requestedUrl first, finalUrl last. [requestedUrl] when there was no redirect; empty when W2L sent no request for the page (finalUrl is null).",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^https?://" }
+        },
+        "complete": {
+          "description": "Whether the lane lists every hop. True on the HTTP lane, which follows redirects itself and requests each hop. False on browser and provider lanes, which observe only where navigation started and where it ended: their list is [requestedUrl, finalUrl] after a redirect, and hops between the two were not observed.",
+          "type": "boolean"
+        }
+      }
+    },
+    "robotsDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "robotsUrl", "robotsSha256", "unreachable", "crawlDelayMs", "userOverride"],
+      "properties": {
+        "decision": {
+          "description": "allowed or disallowed by the robots.txt rules for the User-Agent of the request (on the provider lane, the vendor's); a robots.txt that could not be fetched counts as disallowed, see unreachable. no_robots when robots.txt was requested and the site has none (a 4xx, or a body that is not text/plain).",
+          "enum": ["allowed", "disallowed", "no_robots"]
+        },
+        "robotsUrl": {
+          "description": "The robots.txt URL consulted; null when it could not be located.",
+          "type": ["string", "null"],
+          "pattern": "^https?://"
+        },
+        "robotsSha256": {
+          "description": "SHA-256 (hex) of the robots.txt bytes parsed. Null when none were parsed (no robots.txt, or unreachable), and on results stored before W2L recorded it.",
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "unreachable": {
+          "description": "Why robots.txt could not be fetched: server_error (a 5xx), network_error or timeout. RFC 9309 §2.3.1.4 then requires a complete disallow, so decision is disallowed. Null when robots.txt was fetched.",
+          "enum": ["server_error", "network_error", "timeout", null]
+        },
+        "crawlDelayMs": {
+          "description": "The Crawl-delay robots.txt sets for W2L's User-Agent, in milliseconds; null when it sets none.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "userOverride": {
+          "description": "Whether a user override replaced the robots.txt decision. W2L has no override yet, so this is false; a later version records the override here.",
+          "type": "boolean"
+        }
+      }
+    },
+    "outputSha256": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["markdown", "json"],
+      "properties": {
+        "markdown": {
+          "description": "SHA-256 (hex) of the UTF-8 bytes of the markdown string exactly as delivered in this response (for a failed or blocked result, the error page kept as evidence). Null when no Markdown was delivered.",
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "json": {
+          "description": "SHA-256 (hex) of the UTF-8 bytes of json.data as delivered, serialized as canonical JSON (RFC 8785: object keys sorted by UTF-16 code units at every level, no whitespace, strings and numbers as JSON.stringify writes them). Null when JSON was not requested or json.data is null.",
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        }
+      }
+    },
+    "extractor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "commit"],
+      "properties": {
+        "name": {
+          "description": "The extractor: extract-tf, W2L's main-content extraction and Markdown conversion, which every lane uses.",
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "description": "The extractor's version (EXTRACTOR_VERSION, for example extract-tf/1). It changes whenever the Markdown produced from the same HTML can change.",
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "description": "The W2L source commit that ran, as the operator declares it in W2L_SOURCE_COMMIT (7 to 40 hex digits). Null when not declared.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{7,40}$"
+        }
+      }
+    },
+    "fieldEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "locator"],
+      "properties": {
+        "source": {
+          "description": "What the value was read from: jsonld, microdata, meta (a meta tag), hydration (the page's embedded application state), dom (the page's markup, including its own label/value rows), text (visible prose), inferred (derived from context, such as a currency from the domain) or model (the configured model fallback). pdf is reserved for text read from a PDF, whose locator will name the page; no lane emits it yet.",
+          "enum": ["jsonld", "microdata", "meta", "hydration", "dom", "text", "inferred", "model", "pdf"]
+        },
+        "locator": {
+          "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector, or table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content, zero-based in document order; for pdf, the page. Null when the source gives no location: model, and for now JSON-LD, microdata and meta values outside the Amazon adapter, whose extraction does not record where it read them.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {
+          "description": "snapshot: the page's HTML as W2L read it (the rendered page on browser lanes). screenshot and file (a downloaded file saved as received) are reserved for the lanes that will produce them. Null when W2L cannot tell what the file is.",
+          "enum": ["snapshot", "screenshot", "file", null]
+        },
+        "path": {
+          "description": "Where the file was saved, on the machine that ran W2L.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "description": "SHA-256 (hex) of the file's bytes; null when unknown.",
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["userAgent", "mode", "contact"],
+      "properties": {
+        "userAgent": {
+          "description": "The User-Agent sent for the page, as observed: the header W2L sent on the HTTP lane, the header the browser sent on browser lanes, the User-Agent the vendor reports on the provider lane. Null when the lane did not observe it: the result ended before a request was made, the navigation failed, or the vendor did not report it.",
+          "type": ["string", "null"]
+        },
+        "mode": {
+          "description": "The crawl mode: research declares a bot (with the operator's contact when one is set), standard and authed present a consistent browser identity (authed with the user's session), proxy uses the operator's egress.",
+          "enum": ["research", "standard", "authed", "proxy"]
+        },
+        "contact": {
+          "description": "The contact the research-mode User-Agent declares (W2L_CONTACT). Null when none is declared.",
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

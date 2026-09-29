@@ -211,6 +211,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
         detail: {
           decision: robotsDecision.decision,
           robotsUrl: robotsDecision.robotsUrl,
+          // This lane mints no compliance record; the Evidence Record reads the decision here.
+          robotsSha256: robotsDecision.robotsSha256,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           // The crawl frontier spaces this host's pages by it (LadderScrapeAtom reads it here).
@@ -262,6 +264,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       return null
     })
     if (out === null) return timedDenied('timeout', this.scheduler.retryAt(host))
+    // resilientFetch returns once the final response's headers arrived.
+    const fetchedAt = out.status === null ? null : new Date().toISOString()
     const transportTotalMs = performance.now() - transportStart
     retryWaitMs = out.trace
       .filter(event => event.event === 'retry')
@@ -315,6 +319,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         contentType: out.headers?.get('content-type') ?? null,
         rawBodySha256,
         artifacts: rawArtifacts,
+        ...(fetchedAt === null ? {} : { fetchedAt }),
         etag: out.headers?.get('etag') ?? null,
         lastModified: out.headers?.get('last-modified') ?? null,
         cacheControl: out.headers?.get('cache-control') ?? null,

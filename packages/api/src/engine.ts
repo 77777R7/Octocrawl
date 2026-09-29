@@ -52,7 +52,7 @@ import {
   type MonitorRunDetail,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, reportFromTaskAttempt, SqliteTaskStore, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
@@ -235,7 +235,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task.mode)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -660,7 +660,7 @@ function linksRequested(task: Task): boolean {
   return options?.includeLinks === true || (options?.formats ?? []).includes('links')
 }
 
-function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
+function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']): CrawlPage {
   const result = step.result
   return {
     id: step.id,
@@ -677,6 +677,8 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,
     evidence: result?.evidence ?? null,
+    // The stored result is the full one, trace included, with only the formats the task asked for.
+    evidenceRecord: result === null ? null : toEvidenceRecord(result, { mode }, { markdown: result.markdown, ...(result.json === undefined ? {} : { json: result.json }) }),
     usage: result?.usage ?? null,
     trace: result?.trace ?? [],
     audit: step.audit,

@@ -313,6 +313,7 @@ describe('@w2l/runtime public surface', () => {
       'runConfiguredMonitor',
       'runFirecrawlMonitor',
       'systemClock',
+      'toEvidenceRecord',
       'verifyWebhookSignature',
       'webhookSignature',
     ])

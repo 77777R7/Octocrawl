@@ -10,6 +10,7 @@ import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { DocumentExtraction } from './extractor.js'
+import type { EvidenceRecord } from './evidenceRecord.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -44,13 +45,16 @@ export interface ScrapeRequest extends PageOptions {
   debug?: boolean
 }
 
-export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot'] }
+/** `evidenceRecord` is set on every response the API sends (see evidenceRecord.ts). */
+export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord }
 
 export interface CompactScrapeResponse {
   requestedUrl: string
   finalUrl: string
   /** Small capture identity for field audits; the HTML body remains local. */
   snapshot: { rawBodySha256: string | null; artifacts: readonly string[]; httpStatus: number | null }
+  /** The result's Evidence Record v1, the same as on the full response. */
+  evidenceRecord: EvidenceRecord
   status: FetchResult['status']
   failureReason: FetchResult['failureReason']
   blockReason: FetchResult['blockReason']

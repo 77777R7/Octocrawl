@@ -76,6 +76,13 @@ export interface Evidence {
   rawBodySha256: string | null
   /** Relative artifact paths (raw body, screenshot, DOM snapshot). */
   artifacts: readonly string[]
+  /**
+   * UTC ISO time the lane received what it reports: the final response's
+   * headers (HTTP), the vendor's answer (provider), the rendered page's
+   * capture (browser). Absent when no response was read, and on results
+   * stored before lanes recorded it.
+   */
+  fetchedAt?: string
   /** HTTP validators observed for the representation, when exposed. */
   etag?: string | null
   lastModified?: string | null

@@ -19,3 +19,5 @@ export { assessConfiguredDocument } from './configuredAssessment.js'
 export { RecipeStore } from './recipeStore.js'
 
 export * from './webhookInbox.js'
+export { toEvidenceRecord } from './evidenceRecord.js'
+export type { EvidenceOutput, EvidenceRecordOptions } from './evidenceRecord.js'

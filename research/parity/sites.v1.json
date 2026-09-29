@@ -2,7 +2,7 @@
   "id": "parity-sites.v1",
   "frozenOn": "2026-09-29",
   "firecrawlSnapshot": "firecrawl-js 4.42.0",
-  "purpose": "Real-site checks for the P1 items in ROADMAP.md. Batch L is the audit's first live batch (real-site-test-set.md, in its order), the 'first 12 real-site URLs' of the P1 exit. Batch 1 holds P1 defect checks written before that list was committed: practice sites first, where any failure is a W2L bug, and the blocking site last. Batch api covers the P1 items that are API behaviour rather than page content. Each check names the P1 item it accepts ('FS' = no false success in general), or the audit's feature id (feature-matrix.csv) where no P1 item fits; each batch L case names its main feature.",
+  "purpose": "Real-site checks for the P1 items in ROADMAP.md. Batch L is the audit's first live batch (real-site-test-set.md, in its order), the 'first 12 real-site URLs' of the P1 exit. Batch 1 holds P1 defect checks written before that list was committed: practice sites first, where any failure is a W2L bug, and the blocking site last. Batch api covers the P1 items that are API behaviour rather than page content. Batch E checks the Evidence Record ('ER', ROADMAP 'Throughout P1') against its published schema on each lane's output. Each check names the P1 item it accepts ('FS' = no false success in general), or the audit's feature id (feature-matrix.csv) where no P1 item fits; each batch L case names its main feature.",
   "rules": [
     "Cases and URLs are not replaced or dropped after freezing; a site that changes or disappears stays in the record with its result.",
     "A check encodes the correct result, not the current one. A case passes when every check passes.",
@@ -603,6 +603,111 @@
         { "item": "crawl-batch.crawl-delay", "type": "field", "path": "report.pagesFetched", "equals": 3 },
         { "item": "crawl-batch.crawl-delay", "type": "fetchSpacing", "robotsCrawlDelay": true, "record": true },
         { "item": "crawl-batch.crawl-delay", "type": "crawlDelay", "record": true }
+      ]
+    },
+    {
+      "id": "E01",
+      "batch": "E",
+      "url": "https://books.toscrape.com/",
+      "request": { "formats": ["markdown"] },
+      "note": "An HTTP-lane success. On 2026-09-29 books.toscrape.com answers 200 without a redirect and its robots.txt answers 404 (no_robots).",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "http" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.finalUrl", "equals": "https://books.toscrape.com/" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fetchedAt", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.robotsDecision.robotsUrl", "equals": "https://books.toscrape.com/robots.txt" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equalsPath": "snapshot.rawBodySha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E02",
+      "batch": "E",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": { "formats": ["markdown"] },
+      "note": "A browser-lane success: the quotes are written by script (S05). A browser lane sees only where navigation started and ended, so its redirect chain is not complete.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "browser_local" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": false },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "includes": "Chrome/" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fetchedAt", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E03",
+      "batch": "E",
+      "url": "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html",
+      "request": { "formats": ["markdown"] },
+      "note": "The S03 page: a 404 whose page is kept as evidence, never content. The record gives its status and reason and hashes the page as delivered.",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.reason", "equals": "http_error" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 404 },
+        { "item": "2", "type": "markdownIncludes", "text": "404 Not Found" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E04",
+      "batch": "E",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": {
+        "formats": [{
+          "type": "json",
+          "schema": {
+            "type": "object",
+            "properties": { "title": { "type": "string" }, "price": { "type": "number" }, "upc": { "type": "string" }, "availability": { "type": "string" }, "numberOfReviews": { "type": "integer" } },
+            "required": ["title", "price", "upc"]
+          }
+        }]
+      },
+      "note": "JSON with field evidence. On 2026-09-29 the product table's first row is UPC a897fe39b1053632 and the visible price is £51.77 in p.price_color. Only JSON was requested, so no Markdown hash.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "1", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.source", "equals": "dom" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.locator", "equals": "table[0] tr[0] \"UPC\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price.locator", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.json", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": false }
+      ]
+    },
+    {
+      "id": "E05",
+      "batch": "E",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/", "https://quotes.toscrape.com/", "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html"],
+      "request": { "formats": ["markdown"] },
+      "note": "Every batch item carries its own record, the failed 404 item included.",
+      "checks": [
+        { "item": "5", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "5", "type": "itemCount", "equals": 3 },
+        { "item": "ER", "type": "eachItem", "minItems": 3, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "evidenceRecord.requestedUrl", "equalsPath": "url" } }
+      ]
+    },
+    {
+      "id": "E06",
+      "batch": "E",
+      "endpoint": "crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 3, "formats": ["markdown"] },
+      "note": "Every crawl page carries its own record, and so does every item listed under /errors, if any.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 3 },
+        { "item": "ER", "type": "eachItem", "minItems": 1, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "path": "errors", "minItems": 0, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "minItems": 1, "check": { "type": "field", "path": "evidenceRecord.requestedUrl", "equalsPath": "url" } }
       ]
     }
   ]

@@ -19,7 +19,8 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { CONTENTFUL_STATUS } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
+import { toEvidenceRecord } from '@w2l/runtime'
 
 export interface StructuredModelConfig {
   baseUrl: string
@@ -616,6 +617,7 @@ export async function prepareScrapeResponse(
   const withTiming: ScrapeResponse = {
     ...next,
     snapshot: scrapeSnapshot(next),
+    evidenceRecord: scrapeEvidenceRecord(result, req, next),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -634,6 +636,15 @@ export async function prepareScrapeResponse(
  */
 export function extractionInput<T extends FetchResult>(result: T): T {
   return CONTENTFUL_STATUS.has(result.status) ? result : { ...result, markdown: null }
+}
+
+/**
+ * The Evidence Record of a scrape: read from the full result (its trace and
+ * compliance record, which the compact shape drops), with the Markdown and
+ * JSON this response delivers.
+ */
+function scrapeEvidenceRecord(result: FetchResult, req: ScrapeRequest, delivered: Pick<ScrapeResponse, 'markdown' | 'json'>): NonNullable<ScrapeResponse['evidenceRecord']> {
+  return toEvidenceRecord(result, { mode: defaultApiMode(req.mode) }, { markdown: delivered.markdown, ...(delivered.json === undefined ? {} : { json: delivered.json }) })
 }
 
 /**
@@ -659,6 +670,10 @@ export function compactScrapeResponse(
     requestedUrl: next.requestedUrl,
     finalUrl: next.evidence.finalUrl,
     snapshot: scrapeSnapshot(next),
+    evidenceRecord: next.evidenceRecord ?? scrapeEvidenceRecord(next, req, {
+      markdown: hasFormat(formats, 'markdown') ? next.markdown : null,
+      ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
+    }),
     status: next.status,
     failureReason: next.failureReason,
     blockReason: next.blockReason,

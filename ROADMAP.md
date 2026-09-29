@@ -135,15 +135,15 @@ Every result from every lane carries the same record. It is the product's identi
 
 | Field | Meaning | Today |
 | --- | --- | --- |
-| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | The first two exist; the redirect chain needs one output form |
-| `fetchedAt` | UTC ISO timestamp | Exists as `observedAt`; rename |
-| `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists |
-| `lane` | `http` / `browser_local` / `my_browser` / `vendor` | Debug output only; move to the default output |
-| `robotsDecision` | The robots.txt verdict, including a recorded user override | Obeyed but not recorded |
-| `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | Partial; unify |
-| `extractor` | Name, version, commit | Exists as `sourceCommit` |
-| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | Amazon path only; generalise |
-| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | Failure evidence only; make an optional output |
+| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | In `evidenceRecord` in one form for every lane; browser and provider lanes observe only the endpoints and say so (`complete: false`) |
+| `fetchedAt` | UTC ISO timestamp | In `evidenceRecord`, from each lane's `evidence.fetchedAt`; Monitor observations keep `observedAt` |
+| `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists; `evidenceRecord.reason` is the failure, block or budget reason in one field |
+| `lane` | `http` / `browser_local` / `my_browser` / `vendor` | In `evidenceRecord` on every default response (lane names as today: `http`, `browser_local`, `provider`, …) |
+| `robotsDecision` | The robots.txt verdict, including a recorded user override | Recorded in `evidenceRecord` (decision, robots.txt URL and hash, unreachable reason, crawl delay); `userOverride` is always false, as no override exists yet |
+| `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | In `evidenceRecord`: the body each lane read, the delivered Markdown and `json.data` as canonical JSON |
+| `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf`, `EXTRACTOR_VERSION`, and the commit when `W2L_SOURCE_COMMIT` is set |
+| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; `pdf` reserved |
+| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256: the raw snapshot when `W2L_CAPTURE_RAW_DIR` is set; no screenshot; not yet a request option |
 
 ### Free core and Pro
 
