@@ -72,6 +72,8 @@ export interface StructuredFieldEvidence {
    */
   source: ProductFactSource | 'hydration' | 'fetch' | 'pdf'
   evidencePath?: string
+  /** For a number read from the page's text: that text, whitespace collapsed (`1.299,00 €`), so the reading can be checked. */
+  text?: string
 }
 
 export type StructuredIssueCode =

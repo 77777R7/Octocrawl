@@ -35,6 +35,9 @@ const MANUALLY_CLEANED = [
   'canvas',
   'svg',
   'template',
+  // An inline XBRL filing's hidden facts and contexts (SEC EDGAR), which the
+  // filing keeps off the page.
+  'ix\\:header',
 ] as const
 
 const CLEANED_SELECTOR = MANUALLY_CLEANED.join(',')

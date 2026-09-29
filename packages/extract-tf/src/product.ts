@@ -36,7 +36,14 @@ import type { TextBlock } from './classify.js'
  */
 const CURRENCY_SYMBOLS = '[$£€¥₹₽₩฿]'
 const CURRENCY_CODES = '(?:USD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|CHF|HKD|SGD|INR|KRW|BRL|MXN|SEK|NOK|DKK|PLN|TRY|ZAR)'
-const AMOUNT = '\\d{1,12}(?:[.,]\\d{1,3}){0,4}'
+/**
+ * Thousands grouped by a space of any width or an apostrophe (`1 299,00`,
+ * `1'299.00`) are one amount, starting where a number starts; otherwise
+ * digits with `.` / `,` separators. A text this matches contains a match of
+ * the second form alone, so what counts as price-shaped is unchanged: only the
+ * run read as the price grows from its last group to the whole amount.
+ */
+const AMOUNT = "(?:(?<![\\d.,'’])\\d{1,3}(?:[\\s'’]\\d{3}){1,4}(?:[.,]\\d{1,3})?|\\d{1,12}(?:[.,]\\d{1,3}){0,4})"
 const PRICE_RE = new RegExp(
   `(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})\\s{0,3}${AMOUNT}|${AMOUNT}\\s{0,3}(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})`,
   'u',

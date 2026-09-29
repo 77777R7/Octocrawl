@@ -6,6 +6,7 @@
 
 import { qsa, tagOf } from './dom.js'
 import type { TextBlock } from './classify.js'
+import { LAYOUT_MARKERS } from './markdown.js'
 
 interface Candidate {
   el: Element
@@ -20,6 +21,21 @@ const SEMANTIC_BONUS = 200
 
 function headingCount(container: Element): number {
   return qsa(container, 'h1,h2,h3,h4,h5,h6').length
+}
+
+const BLOCK_TAGS = new Set(LAYOUT_MARKERS.blockTags)
+
+/**
+ * The nearest ancestor laid out as a block, as the Markdown converter lays it
+ * out: inline elements around a block (a <span>, an inline XBRL
+ * <ix:nonNumeric>) are looked through.
+ */
+function layoutParent(el: Element): Element | null {
+  let parent = el.parentElement
+  while (parent && !BLOCK_TAGS.has(parent.localName) && parent.getAttribute(LAYOUT_MARKERS.display) !== 'block') {
+    parent = parent.parentElement
+  }
+  return parent
 }
 
 /**
@@ -37,6 +53,13 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
     const inside = blocks.filter((b) => el.contains(b.el))
     if (inside.length >= blocks.length * 0.5) return el
   }
+
+  // Blocks the body lays out itself sit in no container below it: an SEC
+  // filing is written as sibling <div>s of the body, some wrapped in inline
+  // XBRL elements. When they hold most of the text, the body is the region.
+  const totalLength = blocks.reduce((sum, b) => sum + b.length, 0)
+  const bodyText = blocks.filter((b) => layoutParent(b.el) === doc.body).reduce((sum, b) => sum + b.length, 0)
+  if (doc.body && bodyText >= totalLength * 0.5) return doc.body
 
   // Score every container that holds at least one block.
   const candidates = new Map<Element, Candidate>()
@@ -70,7 +93,6 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
   // it dominates the best competing region. Its own ancestors and descendants
   // hold the same blocks, so they are not competitors: counting them would tie
   // one long block (a news release in a single <pre>) with its wrappers.
-  const totalLength = blocks.reduce((sum, b) => sum + b.length, 0)
   const rival = list.find((c) => c !== best && !c.el.contains(best.el) && !best.el.contains(c.el))
   const second = rival?.score ?? 0
   if (

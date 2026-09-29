@@ -68,6 +68,10 @@ const bookInformation = `<html><head><title>A Light in the Attic | Books to Scra
 <tr><th>Price (excl. tax)</th><td>£51.77</td></tr><tr><th>Price (incl. tax)</th><td>£51.77</td></tr><tr><th>Tax</th><td>£0.00</td></tr>
 <tr><th>Availability</th><td>In stock (22 available)</td></tr><tr><th>Number of reviews</th><td>0</td></tr></table></article></body></html>`
 
+/** A product page that declares nothing and shows its price in `p.price`, as the page writes it. */
+const shop = (price: string) => `<html lang="de"><head><title>Messinglampe | Shop</title></head><body><main><h1>Messinglampe</h1><p class="price">${price}</p>
+<p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p></main></body></html>`
+
 /** A FetchResult for inline HTML, with the document the HTTP lane attaches. */
 function page(html: string, url = 'https://books.example/catalogue/a-light-in-the-attic_1000/index.html'): FetchResult {
   const out = extractTf.extract(html, { url })
@@ -162,7 +166,7 @@ describe('structured JSON extraction', () => {
     const out = await extractStructured(result, format(), {}, null)
     expect(out.status).toBe('complete')
     expect(out.data).toMatchObject({ asin: 'B012345678', title: 'Subject headphones', price: 1299, currency: 'INR', seller: 'SoundCo Direct' })
-    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div' })
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00' })
     expect(out.modelUsage).toBeNull()
   })
 
@@ -268,6 +272,19 @@ describe('structured JSON extraction', () => {
     expect(observed).toMatchObject({ status: 'complete', data: { images: ['https://images.example/subject.jpg'], variants: [] }, issues: [] })
   })
 
+  it('gives a list or map the adapter observed empty an evidence entry too', async () => {
+    const empty: FetchResult = { ...result, document: { ...result.document!, product: { ...product, images: [], variants: [], specifications: {}, prices: [] } } }
+    const out = await extractStructured(empty, json({ images: { type: 'array' }, variants: { type: 'array' }, specifications: { type: 'object' }, prices: { type: 'array' } }, ['images', 'variants', 'specifications', 'prices']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { images: [], variants: [], specifications: {}, prices: [] }, issues: [] })
+    // Nothing was read from the page: the adapter reported none on the verified subject.
+    expect(out.evidence).toEqual([
+      { path: '/images', source: 'inferred', evidencePath: 'document.product.images' },
+      { path: '/variants', source: 'inferred', evidencePath: 'document.product.variants' },
+      { path: '/specifications', source: 'inferred', evidencePath: 'document.product.specifications' },
+      { path: '/prices', source: 'inferred', evidencePath: 'document.product.prices' },
+    ])
+  })
+
   it('maps page labels and the visible price to top-level keys and says where each came from', async () => {
     const schema = json({ title: { type: 'string' }, price: { type: 'number' }, availability: { type: 'string' }, upc: { type: 'string' }, isbn: { type: 'string' }, numberOfReviews: { type: 'integer' } }, ['title', 'price', 'availability', 'upc', 'isbn'])
     const out = await extractStructured(page(bookInformation), schema, {}, null)
@@ -276,10 +293,10 @@ describe('structured JSON extraction', () => {
     expect(out.issues).toEqual([{ code: 'missing_required', path: '/isbn', message: 'required field unavailable: /isbn' }])
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
       { path: '/availability', source: 'dom', evidencePath: 'table[0] tr[5] "Availability"' },
       { path: '/upc', source: 'dom', evidencePath: 'table[0] tr[0] "UPC"' },
-      { path: '/numberOfReviews', source: 'dom', evidencePath: 'table[0] tr[6] "Number of reviews"' },
+      { path: '/numberOfReviews', source: 'dom', evidencePath: 'table[0] tr[6] "Number of reviews"', text: '0' },
     ])
   })
 
@@ -387,7 +404,7 @@ describe('structured JSON extraction', () => {
     expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/isbn', message: 'no verified source for this nullable field on the selected page' }])
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
       { path: '/availability', source: 'dom', evidencePath: 'table[0] tr[5] "Availability"' },
       { path: '/upc', source: 'dom', evidencePath: 'table[0] tr[0] "UPC"' },
       { path: '/url', source: 'fetch', evidencePath: 'finalUrl' },
@@ -417,6 +434,88 @@ describe('structured JSON extraction', () => {
     expect(out.issues).toEqual([{ code: 'missing_required', path: '/sku', message: 'required field unavailable: /sku' }])
   })
 
+  it('reads a visible price as the page writes it: decimal comma, thousands groups, currency before or after', async () => {
+    const schema = json({ title: { type: 'string' }, price: { type: 'number' } }, ['title', 'price'])
+    const cases: Array<[string, number, string]> = [
+      ['12,99 €', 12.99, '12,99 €'], ['€12,99', 12.99, '€12,99'], ['1.299,00 €', 1299, '1.299,00 €'],
+      ['1 299,00 €', 1299, '1 299,00 €'], ["CHF 1'299.00", 1299, "CHF 1'299.00"], ['$1,299.00', 1299, '$1,299.00'], ['£51.77', 51.77, '£51.77'],
+    ]
+    for (const [shown, value, text] of cases) {
+      const out = await extractStructured(page(shop(shown), 'https://shop.example/lampe'), schema, {}, null)
+      expect(out.data, shown).toEqual({ title: 'Messinglampe', price: value })
+      expect(out.status, shown).toBe('complete')
+      // The text the number was read from stays in its evidence.
+      expect(out.evidence, shown).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text })
+    }
+  })
+
+  it('leaves a number unfilled with an issue quoting the page when its notation is not settled, never a guess', async () => {
+    // "1.299 €" is 1299 in German and 1.299 in English; nothing on this page says which.
+    const out = await extractStructured(page(shop('1.299 €'), 'https://shop.example/lampe'), json({ title: { type: 'string' }, price: { type: 'number' } }, ['title', 'price']), {}, null)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ title: 'Messinglampe' })
+    const unsettled = { code: 'field_unavailable', path: '/price', message: 'the page states "1.299 €" (text, p.price): "." before three digits can separate thousands or decimals, and nothing on the page says which; no number was read' }
+    expect(out.issues).toEqual([unsettled, { code: 'missing_required', path: '/price', message: 'required field unavailable: /price' }])
+    // A nullable price is null with that issue, not with "no verified source".
+    const nullable = await extractStructured(page(shop('$1,299'), 'https://shop.example/lampe'), json({ title: { type: 'string' }, price: { type: ['number', 'null'] } }, ['title', 'price']), {}, null)
+    expect(nullable).toMatchObject({ status: 'complete', data: { title: 'Messinglampe', price: null } })
+    expect(nullable.issues).toEqual([{ ...unsettled, message: 'the page states "$1,299" (text, p.price): "," before three digits can separate thousands or decimals, and nothing on the page says which; no number was read' }])
+    // Asked for as a string, the price is the page's text.
+    expect((await extractStructured(page(shop('1.299 €'), 'https://shop.example/lampe'), json({ price: { type: 'string' } }, ['price']), {}, null)).data).toEqual({ price: '1.299 €' })
+  })
+
+  it('settles a lone separator only from what the value is: a count, a currency without minor units, or JSON-LD and meta decimals', async () => {
+    const facts = (over: Partial<ProductFacts>): FetchResult => ({ ...result, document: { ...result.document!, product: { ...product, ...over } } })
+    const schema = json({ price: { type: 'number' }, rating: { type: 'number' }, reviewCount: { type: 'integer' } }, ['price'])
+    const read = async (over: Partial<ProductFacts>) => extractStructured(facts(over), schema, {}, null)
+    // A review count is whole, so "1.234" groups thousands; "4,5" has one decimal digit.
+    const counted = await read({ reviewCount: { value: '1.234', source: 'dom', path: '#acrCustomerReviewText' }, rating: { value: '4,5', source: 'dom', path: '#acrPopover' } })
+    expect(counted).toMatchObject({ status: 'complete', data: { price: 1299, rating: 4.5, reviewCount: 1234 } })
+    expect(counted.evidence).toContainEqual({ path: '/reviewCount', source: 'dom', evidencePath: '#acrCustomerReviewText', text: '1.234' })
+    // A yen amount has no minor unit, whether the text or the page's currency says JPY.
+    expect((await read({ price: { value: '1.299', source: 'dom', path: '.price' }, priceCurrency: { value: 'JPY', source: 'jsonld' } })).data).toMatchObject({ price: 1299 })
+    expect((await read({ price: { value: '1,299円', source: 'text', path: '.price' } })).data).toMatchObject({ price: 1299 })
+    // JSON-LD and product:price:amount write "." as the decimal point; a comma there settles nothing.
+    expect((await read({ price: { value: '1.299', source: 'jsonld' } })).data).toMatchObject({ price: 1.299 })
+    expect((await read({ price: { value: '1.299', source: 'meta', path: 'meta[property="product:price:amount"]' } })).data).toMatchObject({ price: 1.299 })
+    const comma = await read({ price: { value: '1,299', source: 'jsonld' } })
+    expect(comma.status).toBe('incomplete')
+    expect(comma.issues[0]).toMatchObject({ code: 'field_unavailable', path: '/price', message: expect.stringContaining('"1,299" (jsonld)') })
+    // A price that is not a number is not 0, and a count that is not whole is not truncated.
+    const words = await read({ price: { value: 'Call for price', source: 'jsonld' }, reviewCount: { value: '4.7', source: 'dom', path: '#acrCustomerReviewText' } })
+    expect(words.data).toEqual({ rating: 4.7 })
+    expect(words.issues).toEqual([
+      { code: 'field_unavailable', path: '/price', message: 'the page states "Call for price" (jsonld): not one number; no number was read' },
+      { code: 'field_unavailable', path: '/reviewCount', message: 'the page states "4.7" (dom, #acrCustomerReviewText): not a whole number; no number was read' },
+      { code: 'missing_required', path: '/price', message: 'required field unavailable: /price' },
+    ])
+  })
+
+  it('reads the amounts of a product price list by the same rule, keeping the text of one it cannot settle', async () => {
+    const eur = { value: 'EUR', source: 'dom' as const, path: '#corePrice_feature_div' }
+    const listed = { ...result, document: { ...result.document!, product: { ...product, prices: [
+      { amount: { value: '1.299,00', source: 'dom' as const, path: '#corePrice_feature_div .a-offscreen' }, currency: eur, priceType: 'current' as const, seller: null },
+      { amount: { value: '1.199', source: 'dom' as const, path: '#aod-offer-list .a-price' }, currency: eur, priceType: 'other' as const, seller: null },
+    ] } } }
+    const out = await extractStructured(listed, json({ prices: { type: 'array' } }, ['prices']), {}, null)
+    expect(out.data).toEqual({ prices: [
+      { amount: 1299, currency: 'EUR', priceType: 'current', seller: null },
+      { amount: '1.199', currency: 'EUR', priceType: 'other', seller: null },
+    ] })
+    expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/prices/1/amount', message: 'the page states "1.199" (dom, #aod-offer-list .a-price): "." before three digits can separate thousands or decimals, and nothing on the page says which; no number was read' }])
+  })
+
+  it('reads page labels by the same rule and names a label whose number it cannot settle', async () => {
+    const html = `<html><head><title>Messinglampe</title></head><body><main><h1>Messinglampe</h1>
+<p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p>
+<table><tr><th>Preis</th><td>1.299,– €</td></tr><tr><th>Gewicht</th><td>1.250</td></tr><tr><th>Bestand</th><td>12 Stück</td></tr></table></main></body></html>`
+    const out = await extractStructured(page(html, 'https://shop.example/lampe'), json({ preis: { type: 'number' }, gewicht: { type: 'number' }, bestand: { type: 'integer' } }, ['preis']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { preis: 1299 } })
+    expect(out.evidence).toContainEqual({ path: '/preis', source: 'dom', evidencePath: 'table[0] tr[0] "Preis"', text: '1.299,– €' })
+    // "12 Stück" is not one amount and is skipped as before; "1.250" is a number whose notation the page does not settle.
+    expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/gewicht', message: 'the page states "1.250" (dom, table[0] tr[1] "Gewicht"): "." before three digits can separate thousands or decimals, and nothing on the page says which; no number was read' }])
+  })
+
   it('names a page value that breaks a schema check, also when a required field is missing', async () => {
     const schema = json({ upc: { type: 'string', pattern: '^[0-9]+$' }, isbn: { type: 'string' } }, ['upc', 'isbn'])
     const out = await extractStructured(page(bookInformation), schema, {}, null)
@@ -437,6 +536,12 @@ describe('structured JSON extraction', () => {
     expect(await extractStructured(named(`S${'a'.repeat(5000)}`), json({ name: { type: 'string', pattern: '^S[a-z]+$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
     // It keeps the u flag's meaning: one astral character is one character.
     expect(await extractStructured(named('\u{1F3A7}'), json({ name: { type: 'string', pattern: '^.$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
+    // The same limit holds for what the linear engine cannot run either: a counted repetition above 16,
+    // a \p{…} escape (it needs the u flag), and any text with a character outside the BMP (2 UTF-16 units).
+    const limited = async (pattern: string, text: string) => (await extractStructured(named(text), json({ name: { type: 'string', pattern } }, ['name']), {}, null)).status
+    expect([await limited('^S[0-9a-f]{32}', `S${'a'.repeat(2047)}`), await limited('^S[0-9a-f]{32}', `S${'a'.repeat(2048)}`)]).toEqual(['complete', 'incomplete'])
+    expect([await limited('^S\\p{Ll}+$', `S${'a'.repeat(2047)}`), await limited('^S\\p{Ll}+$', `S${'a'.repeat(2048)}`)]).toEqual(['complete', 'incomplete'])
+    expect([await limited('^S', `S${'a'.repeat(2045)}\u{1F3A7}`), await limited('^S', `S${'a'.repeat(2046)}\u{1F3A7}`)]).toEqual(['complete', 'incomplete'])
   })
 
   it('maps a recursive schema without descending forever', async () => {
@@ -474,7 +579,7 @@ describe('structured JSON extraction', () => {
     expect(out.evidence).toEqual([
       { path: '/asin', source: 'dom', evidencePath: 'url:/dp/{asin}' },
       { path: '/title', source: 'dom', evidencePath: '#productTitle' },
-      { path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div' },
+      { path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00' },
       { path: '/specifications', source: 'dom', evidencePath: '#productDetails' },
       { path: '/availability', source: 'model' },
       { path: '/warranty', source: 'model' },
@@ -513,7 +618,7 @@ describe('structured JSON extraction', () => {
     expect(sent.schema.$defs.Publisher).toEqual({ type: 'object', properties: { name: { type: 'string' }, city: { type: ['string', 'null'] } }, required: ['name', 'city'], additionalProperties: false })
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
       { path: '/publisher', source: 'model' },
       { path: '/edition', source: 'model' },
     ])

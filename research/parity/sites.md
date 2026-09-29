@@ -125,6 +125,13 @@ J01–J03 were added on 2026-09-29 for the JSON extraction gaps of [core-status-
 | J02 | Scrape of a catalog.data.gov dataset page with a zod-to-json-schema schema (draft-07 `$schema`, root `$ref` into `definitions`, nullable type lists, `enum`, `pattern`) | Accepted; the DCAT fields from the page's metadata table with their rows as evidence; the missing `spatial` is `null` with an issue | scrape-formats.json |
 | J03 | Scrape of the L01 book page with a `json` format that has a prompt and no schema | HTTP 400 `invalid_request`, as documented: W2L does not extract JSON without a schema | scrape-formats.json |
 
+J04–J05 were added on 2026-09-29 for numbers read as the page writes them ([core-status-2026-09-29-p1-wave5.md](core-status-2026-09-29-p1-wave5.md): `12,99 €` was read as 1299). Both are German product pages with comma-decimal prices. J04's `jsonIssue` check on `json.evidence` looks for the evidence entry that quotes the price's text.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| J04 | Scrape of a jpc.de book page (`EUR 399,99*`, JSON-LD and microdata `399.99`) with a name, price and currency schema | `complete`; price 399.99 from the JSON-LD value, whose format writes `.` as the decimal point, with its text in `json.evidence` | scrape-formats.json |
+| J05 | Scrape of a product page of OXID's demo shop, whose only price is the visible `499,00 €`, with a title and price schema | Price 499, or reported missing with an issue; never another number | scrape-formats.json |
+
 M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
 
 | Case | Request | What it tests | Feature |

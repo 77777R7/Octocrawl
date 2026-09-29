@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf } from '../src/index.js'
+import { extractTf, htmlToMarkdown } from '../src/index.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -178,6 +178,48 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     const out = extractTf.extract(html)
     expect(out.mainHtml).toContain('Line 12: Total nonfarm payroll employment')
     expect(out.mainHtml).not.toContain('survey respondent')
+  })
+
+  it('keeps the text of a filing laid out as divs around its tables, without its hidden XBRL header', () => {
+    // An SEC EDGAR inline XBRL filing's shape (IREN's 10-Q, parity case A36):
+    // XBRL facts in a hidden <div>, then the document as sibling <div>s of the
+    // body, with no <p>, heading or list, tables with spacer cells, and notes
+    // wrapped in inline ix: elements.
+    const div = (text: string) => `<div style="margin-bottom:12pt;text-align:justify"><span style="font-size:10pt">${text}</span></div>`
+    const table = (rows: string[][]) => `<div><table style="border-collapse:collapse;width:100%"><tr>${rows[0]!.map(() => '<td style="width:1%"></td>').join('')}</tr>` +
+      rows.map((row) => `<tr>${row.map((cell) => `<td>${cell && `<span>${cell}</span>`}</td>`).join('')}</tr>`).join('') + '</table></div>'
+    const html = `<?xml version='1.0' encoding='ASCII'?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:ix="http://www.xbrl.org/2013/inlineXBRL" xmlns:xbrli="http://www.xbrl.org/2003/instance"><head><title>hkl-20251231</title></head><body>
+<div style="display:none"><ix:header><ix:hidden><ix:nonNumeric name="dei:EntityCentralIndexKey" contextRef="c-1">0009990001</ix:nonNumeric></ix:hidden>
+<ix:resources><xbrli:context id="c-1"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0009990001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2025-07-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate></xbrli:period></xbrli:context></ix:resources></ix:header></div>
+<div style="text-align:center"><span style="font-weight:700">FORM <ix:nonNumeric name="dei:DocumentType" contextRef="c-1">10-Q</ix:nonNumeric></span></div>
+<div style="text-align:center"><span style="font-weight:700"><ix:nonNumeric name="dei:EntityRegistrantName" contextRef="c-1">Harbour Kiln Limited</ix:nonNumeric></span></div>
+${table([['x', 'QUARTERLY REPORT PURSUANT TO SECTION 13 OR 15(d)']])}
+${div('Item 2. Management’s discussion and analysis of financial condition and results of operations.')}
+${div('Revenue rose in the quarter because the second kiln line reached full output in October. The harbour office recorded every firing in its ledger.')}
+${div('Operating costs rose less than revenue, as clay and fuel were bought under the contracts signed in the previous year.')}
+${div('The Group expects to fund the third kiln line from cash on hand and from the credit facility described in Note 5.')}
+${table([['', 'Three months ended', '', 'Six months ended'], ['', '2025', '2024', '2025', '2024'], ['Revenue', '1,204', '987', '2,318', '1,902'], ['Cost of revenue', '(611)', '(540)', '(1,190)', '(1,061)'], ['Net income', '402', '301', '768', '577']])}
+<hr style="page-break-after:always"/>
+<ix:nonNumeric name="us-gaap:SignificantAccountingPoliciesTextBlock" contextRef="c-1" escape="true">${div('Note 2. Summary of significant accounting policies')}
+${div('The condensed financial statements were prepared on the same basis as the annual statements, and all normal recurring adjustments were made.')}
+${div('Kiln equipment is depreciated on a straight-line basis over its useful life of twelve years.')}</ix:nonNumeric>
+<div style="text-align:center"><span>7</span></div>
+</body></html>`
+    const out = extractTf.extract(html, { url: 'https://www.sec.gov/Archives/edgar/data/9990001/000999000126000001/hkl-20251231.htm' })
+    const md = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
+    for (const text of [
+      'Harbour Kiln Limited',
+      'Revenue rose in the quarter because the second kiln line reached full output in October.',
+      'the credit facility described in Note 5.',
+      'Note 2. Summary of significant accounting policies',
+      'useful life of twelve years.',
+      '| Net income | 402 | 301 | 768 | 577 |',
+    ]) expect(md).toContain(text)
+    expect(md).not.toContain('0009990001')
+    expect(md).not.toContain('2025-07-01')
+    expect(out.mainHtml).not.toContain('0009990001')
+    expect(out.strategy).toBe('article')
   })
 
   it('keeps a data table that a table viewer wraps in its form', () => {
