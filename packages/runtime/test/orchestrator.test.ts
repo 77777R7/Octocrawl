@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CRAWL_BUDGET, type FetchResult, type ScrapeAtom, type ScrapeOutcome } from '@w2l/contracts'
+import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type FetchResult, type ScrapeAtom, type ScrapeOutcome } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
+import { crawlReportFromStore } from '../src/crawlReport.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
 import type { TaskStore } from '../src/taskStore.js'
 
@@ -93,6 +94,21 @@ function runWith(atom: FakeAtom, spec: Parameters<CrawlOrchestrator['run']>[0], 
   const clock = new FakeClock()
   const orchestrator = new CrawlOrchestrator({ store, atom, clock })
   return { store, atom, clock, orchestrator, go: () => orchestrator.run(spec) }
+}
+
+/** A first attempt that service shutdown interrupts once its first page is stored. */
+async function interruptedAfterFirstPage(atom: ScrapeAtom, spec: Parameters<CrawlOrchestrator['run']>[0], store: TaskStore): Promise<CrawlReport> {
+  const shutdown = new AbortController()
+  const put = store.putStep.bind(store)
+  store.putStep = async (step) => {
+    await put(step)
+    shutdown.abort(new DOMException('service shutdown', 'ShutdownError'))
+  }
+  try {
+    return await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), shutdownSignal: shutdown.signal }).run(spec)
+  } finally {
+    store.putStep = put
+  }
 }
 
 const SEED = 'https://fixture.test/listing'
@@ -215,12 +231,8 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     ])
     const store = new MemoryTaskStore()
     const firstAtom = new FakeAtom(pages)
-    const first = runWith(firstAtom, {
-      seedUrl: SEED,
-      taskDir: '/tmp/w2l-crawl',
-      budget: { maxPages: 1, maxWallMs: null, maxCostUsd: null, maxTokens: null },
-    }, store)
-    const firstReport = await first.go()
+    const firstReport = await interruptedAfterFirstPage(firstAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl' }, store)
+    expect(firstReport.status).toBe('paused')
     expect(firstAtom.fetches).toEqual([SEED])
 
     const resumeAtom = new FakeAtom(pages)
@@ -247,12 +259,9 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B, ITEM_C])], [ITEM_A, outcome(ITEM_A, [])]])
     try {
       const firstStore = SqliteTaskStore.open(dir)
-      const first = runWith(new FakeAtom(pages), {
-        seedUrl: SEED, taskDir: dir, includePaths: ['^/[ab]$'], excludePaths: ['^/b$'],
-        budget: { maxPages: 1, maxWallMs: null, maxCostUsd: null, maxTokens: null },
-      }, firstStore)
-      const firstReport = await first.go()
-      expect(first.atom.fetches).toEqual([SEED])
+      const firstAtom = new FakeAtom(pages)
+      const firstReport = await interruptedAfterFirstPage(firstAtom, { seedUrl: SEED, taskDir: dir, includePaths: ['^/[ab]$'], excludePaths: ['^/b$'] }, firstStore)
+      expect(firstAtom.fetches).toEqual([SEED])
       await firstStore.close()
 
       const resumeStore = SqliteTaskStore.open(dir)
@@ -260,7 +269,7 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
       const resumed = await runWith(resumeAtom, { seedUrl: SEED, taskDir: dir, resumeFrom: firstReport.taskId }, resumeStore).go()
       expect(resumed.status).toBe('completed')
       expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
-      expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({ includePaths: ['^/[ab]$'], excludePaths: ['^/b$'] })
+      expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({ maxDepth: null, allowlistedDomains: [], includePaths: ['^/[ab]$'], excludePaths: ['^/b$'] })
       await resumeStore.close()
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -273,13 +282,7 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
       [ITEM_A, outcome(ITEM_A, [])],
     ])
     const store = new MemoryTaskStore()
-    const firstAtom = new FakeAtom(pages)
-    const first = runWith(firstAtom, {
-      seedUrl: SEED,
-      taskDir: '/tmp/w2l-crawl',
-      budget: { maxPages: 1, maxWallMs: null, maxCostUsd: null, maxTokens: null },
-    }, store)
-    const firstReport = await first.go()
+    const firstReport = await interruptedAfterFirstPage(new FakeAtom(pages), { seedUrl: SEED, taskDir: '/tmp/w2l-crawl' }, store)
 
     const resumeAtom = new FakeAtom(pages)
     const resumed = runWith(resumeAtom, {
@@ -455,6 +458,83 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(report.attemptId).not.toBe('attempt-kill')
     const resumedAttempt = attempts.find((row) => row.id === report.attemptId)
     expect(resumedAttempt?.recoveredFromAttemptId).toBe('attempt-kill')
+  })
+})
+
+describe('CrawlOrchestrator task options, budget and politeness', () => {
+  it('keeps the page budget per task: a resumed crawl never exceeds maxPages', async () => {
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]])
+    const store = new MemoryTaskStore()
+    const first = await interruptedAfterFirstPage(new FakeAtom(pages), { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', budget: { ...DEFAULT_CRAWL_BUDGET, maxPages: 2 } }, store)
+    expect(first.status).toBe('paused')
+    // The resume names no budget; the task keeps its own. Refetching the seed costs no new page.
+    const resumeAtom = new FakeAtom(pages)
+    const resumed = await runWith(resumeAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: first.taskId }, store).go()
+    expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
+    expect(resumed).toMatchObject({ status: 'completed', budgetExceeded: 'pages', pagesFetched: 2 })
+    expect(new Set((await store.listSteps(first.taskId)).map((step) => step.canonicalUrl)).size).toBe(2)
+  })
+
+  it('resumes with the depth and host limits the task was started with', async () => {
+    const OTHER = 'https://other.test/page'
+    const DEEP = 'https://fixture.test/deep'
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, OTHER])], [ITEM_A, outcome(ITEM_A, [DEEP])], [OTHER, outcome(OTHER, [])], [DEEP, outcome(DEEP, [])]])
+    const store = new MemoryTaskStore()
+    const first = await interruptedAfterFirstPage(new FakeAtom(pages), { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', maxDepth: 1, allowlistedDomains: ['fixture.test', 'other.test'] }, store)
+    expect((await store.getTask(first.taskId))?.crawl).toMatchObject({ maxDepth: 1, allowlistedDomains: ['fixture.test', 'other.test'] })
+    const resumeAtom = new FakeAtom(pages)
+    await runWith(resumeAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: first.taskId }, store).go()
+    expect([...resumeAtom.fetches].sort()).toEqual([SEED, ITEM_A, OTHER].sort())
+  })
+
+  it('persists the page count while the crawl runs', async () => {
+    const store = new MemoryTaskStore()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let blocked!: () => void
+    const waiting = new Promise<void>((resolve) => { blocked = resolve })
+    const atom: ScrapeAtom = {
+      async scrape(url) {
+        if (url === ITEM_A) { blocked(); await gate }
+        return outcome(url, url === SEED ? [ITEM_A] : [])
+      },
+      async close() {},
+    }
+    const run = new CrawlOrchestrator({ store, atom, clock: new FakeClock() }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+    await waiting
+    const task = (await store.listTasks())[0]!
+    expect(await crawlReportFromStore(store, task.id)).toMatchObject({ status: 'running', pagesFetched: 1 })
+    release()
+    expect(await run).toMatchObject({ status: 'completed', pagesFetched: 2 })
+  })
+
+  it('follows links on the host the seed redirected to, also after a resume', async () => {
+    const MOVED = 'https://moved.test/listing'
+    const MOVED_A = 'https://moved.test/a'
+    const redirected: ScrapeOutcome = { result: { ...page(SEED, { links: [MOVED_A] }), evidence: { ...page(SEED).evidence, finalUrl: MOVED } }, links: [MOVED_A] }
+    const pages = new Map<string, ScrapeOutcome>([[SEED, redirected], [MOVED_A, outcome(MOVED_A, [])]])
+    const fresh = new FakeAtom(pages)
+    await runWith(fresh, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl' }).go()
+    expect(fresh.fetches).toEqual([SEED, MOVED_A])
+
+    // A resume that reuses the stored seed page still knows where the seed went.
+    const store = new MemoryTaskStore()
+    const first = await interruptedAfterFirstPage(new FakeAtom(pages), { seedUrl: SEED, taskDir: '/tmp/w2l-crawl' }, store)
+    const resumeAtom = new FakeAtom(pages)
+    await runWith(resumeAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: first.taskId, useCached: true }, store).go()
+    expect(resumeAtom.fetches).toEqual([MOVED_A])
+  })
+
+  it('records the politeness delay applied before each fetched page, robots.txt Crawl-delay included', async () => {
+    const pages = new Map<string, ScrapeOutcome>([
+      [SEED, { ...outcome(SEED, [ITEM_A]), crawlDelayMs: 2_000 }],
+      [ITEM_A, { ...outcome(ITEM_A, []), crawlDelayMs: 2_000 }],
+    ])
+    const store = new MemoryTaskStore()
+    const report = await new CrawlOrchestrator({ store, atom: new FakeAtom(pages), clock: new FakeClock(), perHostMinDelayMs: 250, workerCount: 1 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+    const delays = new Map((await store.listSteps(report.taskId)).map((step) => [step.canonicalUrl, step.result?.trace.find((event) => event.event === 'crawl_delay')?.detail]))
+    expect(delays.get(SEED)).toEqual({ host: 'fixture.test', startedAt: new Date(1_000).toISOString(), previousStartedAt: null, observedDelayMs: null, requiredDelayMs: 250, robotsCrawlDelayMs: null })
+    expect(delays.get(ITEM_A)).toEqual({ host: 'fixture.test', startedAt: new Date(3_000).toISOString(), previousStartedAt: new Date(1_000).toISOString(), observedDelayMs: 2_000, requiredDelayMs: 2_000, robotsCrawlDelayMs: 2_000 })
   })
 })
 

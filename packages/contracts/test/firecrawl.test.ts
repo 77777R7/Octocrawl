@@ -269,7 +269,9 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(status.status).toBe('completed')
     expect(status.total).toBe(1)
     expect(status.completed).toBe(1)
-    expect(status.creditsUsed).toBe(0)
+    // No credits and no expiry exist in W2L: unknown is null, never an invented value.
+    expect(status.creditsUsed).toBeNull()
+    expect(status.expiresAt).toBeNull()
     expect(status.next).toBeNull()
     expect(status.data[0]?.markdown).toBe('MAIN')
   })

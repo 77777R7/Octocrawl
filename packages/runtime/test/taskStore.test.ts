@@ -137,9 +137,12 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getStepByCanonicalUrl('task-1', 'https://example.com/')).toEqual(step())
     })
 
-    it('round-trips crawl formats and path filters on the task', async () => {
+    it('round-trips every crawl option a resume needs on the task', async () => {
       ;({ store, cleanup } = await open())
-      const crawl = task({ crawl: { formats: ['markdown', 'links'], includeLinks: false, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'] } })
+      const crawl = task({
+        budget: { ...DEFAULT_CRAWL_BUDGET, maxPages: 20 },
+        crawl: { formats: ['markdown', 'links'], includeLinks: false, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'], maxDepth: null, allowlistedDomains: ['example.com'], useCached: true, onlyMainContent: false, waitFor: 500, timeout: 20_000 },
+      })
       await store.putTask(crawl)
       expect(await store.getTask('task-1')).toEqual(crawl)
     })

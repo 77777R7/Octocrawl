@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import type { ApiEngine } from './engine.js'
+import { CrawlStateError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
 import {
   API_ERROR_STATUS,
@@ -135,6 +135,17 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const report = await engine.cancelCrawl(c.req.param('id'))
     if (report === null) return fail(c, 'not_found', 'not found')
     return c.json(report, 200)
+  })
+
+  /** Restart a paused or failed crawl with its stored options; 202 { taskId } like a crawl start. */
+  app.post('/v1/crawl/:id/resume', async (c) => {
+    try {
+      const accepted = await engine.resumeCrawl(c.req.param('id'))
+      return accepted === null ? fail(c, 'not_found', 'not found') : c.json(accepted, 202)
+    } catch (error) {
+      if (error instanceof CrawlStateError) return fail(c, 'conflict', error.message)
+      throw error
+    }
   })
 
   app.post('/v1/monitors/firecrawl-introduction/run', async (c) => {

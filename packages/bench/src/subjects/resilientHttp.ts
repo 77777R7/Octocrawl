@@ -201,6 +201,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
           robotsUrl: robotsDecision.robotsUrl,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
+          // The crawl frontier spaces this host's pages by it (LadderScrapeAtom reads it here).
+          crawlDelayMs: robotsDecision.crawlDelayMs,
           ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
         },
       })

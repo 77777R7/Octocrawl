@@ -194,6 +194,11 @@ export class W2L {
     return this.post<CrawlReport>(`/v1/crawl/${encodeURIComponent(id)}/cancel`, undefined, 200, request)
   }
 
+  /** Restarts a paused or failed crawl with the options it was started with; follow it with waitCrawl. */
+  async resumeCrawl(id: string, request: RequestOptions = {}): Promise<CrawlAccepted> {
+    return this.post<CrawlAccepted>(`/v1/crawl/${encodeURIComponent(id)}/resume`, undefined, 202, request)
+  }
+
   async createMonitor(input: CreateMonitorRequest, request: RequestOptions = {}): Promise<MonitorRevision> {
     return this.post<MonitorRevision>('/v1/monitors', input, 201, request)
   }
