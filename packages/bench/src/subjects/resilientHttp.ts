@@ -412,6 +412,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (out.kind === 'failure') {
       return finish({
         ...base,
+        ...(out.deadlineExceeded ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         status: 'failed',
         failureReason: out.failureReason,
         blockReason: null,
