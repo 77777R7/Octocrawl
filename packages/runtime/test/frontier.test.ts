@@ -92,6 +92,10 @@ describe('Frontier seed / enqueue / visited', () => {
     // A filter that ran out of time decides nothing more, and does not run again.
     expect(frontier.enqueue('https://fixture.test/catalogue/b-book_2/index.html', 1).reason).toBe('path_undecided')
     expect(performance.now() - started).toBeLessThan(1_000)
+    // A path longer than REGEX_SUBJECT_MAX_LENGTH is not run on the backtracking engine at all.
+    const long = seeded({ seedUrl: SEED, includePaths: ['^/catalogue/(?!category/)[^/]+/index\\.html$'] })
+    expect(long.enqueue(`https://fixture.test/catalogue/${'b'.repeat(3_000)}/index.html`, 1).reason).toBe('path_undecided')
+    expect(long.enqueue('https://fixture.test/catalogue/c-book_3/index.html', 1).accepted).toBe(true)
   })
 
   it('does not enqueue sitemap XML as a discovery path of its own', () => {

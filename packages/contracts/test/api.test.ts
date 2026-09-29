@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -89,6 +89,15 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('refuses a path filter that can backtrack catastrophically, with invalid_request, and keeps lookaround', () => {
+    const url = 'https://example.com/'
+    expect(parseCrawlStartRequest({ url, includePaths: ['^/catalogue/(?!category/)[^/]+/index\\.html$'] }).includePaths).toEqual(['^/catalogue/(?!category/)[^/]+/index\\.html$'])
+    let error: unknown
+    try { parseCrawlStartRequest({ url, excludePaths: ['^/(a+)+$'] }) } catch (caught) { error = caught }
+    expect(error).toBeInstanceOf(RequestError)
+    expect(error).toMatchObject({ code: 'invalid_request', message: 'excludePaths contains a regular expression that can take too long to match (a repeated group has a repeated or optional part inside and no separator that part cannot match): ^/(a+)+$' })
   })
 
   it('has one request-error code set, each code with its HTTP status', () => {
