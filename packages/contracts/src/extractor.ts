@@ -164,6 +164,13 @@ export interface ExtractorOutput {
   title: string | null
   /** Extracted main content as HTML. Markdown conversion happens later in the pipeline. */
   mainHtml: string
+  /**
+   * Base URL for the page's relative URLs: the first `<base href>` resolved
+   * against `options.url`, else `options.url`. mainHtml is a fragment without
+   * the page's `<base>` element, so Markdown conversion takes this instead.
+   * Null when no absolute URL is known.
+   */
+  baseUrl: string | null
   /** 0..1 self-assessed extraction confidence. */
   confidence: number
   /**

@@ -80,7 +80,7 @@ export class ExtractTfSubject implements SubjectAdapter {
         if (out.escalate) {
           escalated = true
         } else {
-          markdown = htmlToMarkdown(out.mainHtml)
+          markdown = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
         }
       }
 
