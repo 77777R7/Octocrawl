@@ -7,6 +7,7 @@ import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOper
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
+import { InFlightCalls, trackPost } from './inFlight.js'
 
 export interface LocalConfig {
   taskRoot: string
@@ -44,6 +45,7 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
       browserAllowedHosts:['www.amazon.sg','m.media-amazon.com','images-na.ssl-images-amazon.com','images-eu.ssl-images-amazon.com'],
       channelPolicy:(url:string)=>new URL(url).hostname === 'www.amazon.sg' ? 'browser_only' as const : ['docs.firecrawl.dev','modelcontextprotocol.io'].includes(new URL(url).hostname) ? 'http_only' as const : 'ladder' as const})})
   let closing:Promise<void>|null=null
+  const calls=new InFlightCalls()
   const sendJson=(res:import('node:http').ServerResponse,status:number,body:unknown)=>{
     res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}).end(JSON.stringify(body))
   }
@@ -78,7 +80,8 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
       let body:unknown
       try {body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}
       catch {sendJson(res,400,{error:'invalid JSON'});return}
-      const mcp=createMcpServer(runtime.client)
+      // One user, no token: a cancellation reaches only a call of the same MCP session.
+      const mcp=createMcpServer(runtime.client,{calls:trackPost(calls,req,res,body,[])})
       const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true})
       try {await mcp.connect(transport);await transport.handleRequest(req,res,body)}
       finally {await mcp.close()}
