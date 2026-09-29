@@ -31,6 +31,12 @@ export class DnsLookupError extends Error {
   }
 }
 
+/**
+ * Largest response header block the HTTP clients accept. Undici's default is
+ * 16 KiB; some sites send about 20 KiB, which failed as a connection error.
+ */
+export const MAX_RESPONSE_HEADER_BYTES = 64 * 1024
+
 export class BodyTooLargeError extends Error {
   override readonly name = 'BodyTooLargeError'
   constructor(maxBytes: number) {
@@ -160,6 +166,7 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
     connect: { lookup: safeLookup },
     keepAliveTimeout: 1_000,
     keepAliveMaxTimeout: 1_000,
+    maxHeaderSize: MAX_RESPONSE_HEADER_BYTES,
   })
 }
 

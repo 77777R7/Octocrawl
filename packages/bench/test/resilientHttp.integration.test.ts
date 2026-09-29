@@ -202,6 +202,27 @@ describe('hosted network policy on the HTTP arm', () => {
 })
 
 describe('HTTP lane egress failures', () => {
+  it('accepts about 20 KiB of response headers, above undici\'s 16 KiB default', async () => {
+    const { createServer } = await import('node:http')
+    const server = createServer((_req, res) => {
+      for (let i = 0; i < 20; i++) res.setHeader(`x-padding-${i}`, 'x'.repeat(1024))
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Global locations</h1><p>A page whose server sends more header bytes than the HTTP client accepted by default, which failed as a connection error before the limit was raised.</p></article></body></html>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/emea`)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Global locations')
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('reports a host that does not resolve as dns_error, not policy_denied', async () => {
     const http = new ResilientHttpSubject()
     try {
