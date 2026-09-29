@@ -1034,6 +1034,101 @@
         { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
         { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
       ]
+    },
+    {
+      "id": "T01",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 45000 },
+      "note": "Added 2026-09-29 for the lane waits a timeout sets. httpbin.org/delay/10 answers after 10 s, about 11.5 s through the scoring machine's proxy: past the HTTP lane's default 10 s wait for headers. With a 45 s timeout the HTTP rung must receive that 200 (summary.attempts.0 is the http rung, its wall time over 10 s). Its body is JSON, not HTML: on 2026-09-29 the HTTP rung reports it empty_unverified and the browser rung fetches the URL again, so the answer takes two 10 s waits (about 28 s in a trial run). That is why A23's 20 s is too short and this case gives 45 s. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.channel", "equals": "http" },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.result.evidence.httpStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 10000, "record": true },
+        { "item": "6", "type": "field", "path": "status", "equals": "success" },
+        { "item": "6", "type": "markdownIncludes", "text": "https://httpbin.org/delay/10" },
+        { "item": "6", "type": "field", "path": "elapsedMs", "max": 45000, "record": true }
+      ]
+    },
+    {
+      "id": "T02",
+      "batch": "api",
+      "feature": "platform.sdk.waiters",
+      "endpoint": "sdk",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 20 },
+      "sdk": { "op": "crawlAndWait", "pollIntervalMs": 1000, "timeoutMs": 300000, "pollFaults": [503, "network", 429] },
+      "note": "Added 2026-09-29 for the waiters' retry and the wait-and-collect helper. crawlAndWait crawls books.toscrape.com (20 pages), polling every second, while the runner answers its first three status requests itself with a 503, a network error and a 429 (Retry-After: 1) instead of passing them to the API. The wait must retry through all three and return the completed crawl with all 20 steps, the start page with Markdown. (On 2026-09-29 /index.html repeats / and is a duplicate page, which has no Markdown of its own.) The faults are injected in the runner's fetch, not on the network.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "field", "path": "report.pagesFetched", "equals": 20 },
+        { "item": "8", "type": "field", "path": "stepCount", "equals": 20 },
+        { "item": "8", "type": "field", "path": "items.0.markdown", "present": true },
+        { "item": "8", "type": "field", "path": "faults.injected", "equals": 3 },
+        { "item": "8", "type": "field", "path": "faults.remaining", "equals": 0 },
+        { "item": "8", "type": "field", "path": "waitMs", "max": 300000, "record": true }
+      ]
+    },
+    {
+      "id": "T03",
+      "batch": "api",
+      "feature": "crawl-batch.batch-wait",
+      "endpoint": "sdk",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping", "https://en.wikipedia.org/wiki/Search_engine", "https://en.wikipedia.org/wiki/Web_archiving"],
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "batchAndWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "pollFaults": [502, "network"] },
+      "note": "Added 2026-09-29 for the waiters' retry and the wait-and-collect helper. batchAndWait scrapes 5 Wikipedia articles while the runner answers its first two status requests with a 502 and a network error. The wait must retry through both and return the completed batch with 5 successful items with Markdown. The faults are injected in the runner's fetch, not on the network. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 5 },
+        { "item": "FS", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "8", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "faults.injected", "equals": 2 },
+        { "item": "8", "type": "field", "path": "faults.remaining", "equals": 0 }
+      ]
+    },
+    {
+      "id": "T04",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-status",
+      "endpoint": "fc-crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "limit": 30 },
+      "pageLimit": 10,
+      "note": "Added 2026-09-29 for the /fc crawl status. A 30-page Firecrawl crawl of docs.python.org, its status polled every 2 s. While it scrapes, total is known (this API runs the crawl) and never below completed, is above it at some poll, and next is present. At the end the status is completed, the data read 10 at a time through next has total entries with unique URLs, the entries without metadata.error number completed, and the last page has no next. On 2026-09-29 docs.python.org/robots.txt disallows some linked paths; those pages are failed data entries (policy_denied) and count in total, not completed.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.status", "equals": "completed" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.polls", "min": 1, "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.nullTotals", "equals": 0 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.totalAboveCompleted", "min": 1 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.totalBelowCompleted", "equals": 0 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.nextWhileScraping", "equals": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "equalsPath": "final.dataLength", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.completed", "equalsPath": "final.pagesWithoutError", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.nextOnLastPage", "equals": false },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "pageRequests", "min": 3, "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "uniqueUrls" }
+      ]
+    },
+    {
+      "id": "T05",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-status",
+      "endpoint": "fc-crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "limit": 40 },
+      "cancelAfterCompleted": 3,
+      "note": "Added 2026-09-29 for the /fc crawl status of a cancelled crawl. A 40-page Firecrawl crawl of books.toscrape.com, cancelled (native POST /v1/crawl/:id/cancel; the shim has no cancel) once its status counts 3 completed pages. The status must then say cancelled, not failed; total is the pages the crawl recorded, all of them in data, and there is no next after the last page.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "cancel", "equals": "cancelled" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.status", "equals": "cancelled" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "equalsPath": "final.dataLength", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.completed", "equalsPath": "final.pagesWithoutError" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "max": 39 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.nextOnLastPage", "equals": false }
+      ]
     }
   ]
 }

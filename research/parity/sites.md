@@ -103,6 +103,11 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | A33 | Crawl of books.toscrape.com with `maxPages` 5, product-page `includePaths`, `markdown`, `links` and a `json` schema | Every page has Markdown and absolute links; every product page JSON with its title and a numeric price | crawl-batch.crawl-scrape-options |
 | A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
 | A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
+| T01 | Scrape of httpbin.org/delay/10 with `timeout: 45000` | The HTTP rung waits past its default 10 s and receives the 200; `success` with the endpoint's JSON (through the browser rung, which fetches JSON again) | scrape-execution.timeout |
+| T02 | SDK: `crawlAndWait` on books.toscrape.com (20 pages), its first three status requests answered by the runner with a 503, a network error and a 429 | The wait retries through all three; completed with all 20 steps | platform.sdk.waiters |
+| T03 | SDK: `batchAndWait` on 5 Wikipedia articles, its first two status requests answered with a 502 and a network error | The wait retries through both; 5 successful items with Markdown | crawl-batch.batch-wait |
+| T04 | `/fc` crawl of docs.python.org/3/ (`limit` 30), status polled every 2 s, data read 10 at a time | While scraping, `total` known, never below `completed`, above it at some poll, `next` present; at the end `completed`, `total` data entries with unique URLs, `completed` of them without an error, no `next` on the last page | crawl-batch.crawl-status |
+| T05 | `/fc` crawl of books.toscrape.com (`limit` 40), cancelled after 3 completed pages | Status `cancelled`; `total` equals the data entries; no `next` on the last page | crawl-batch.crawl-status |
 
 ## Later batches
 
