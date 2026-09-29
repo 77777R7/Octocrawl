@@ -508,6 +508,55 @@
           [{ "type": "field", "path": "status", "equals": "success" }, { "type": "markdownMatches", "pattern": "^\\|\\s*Civilian\\s+labor\\s+force\\s*(\\|\\s*[0-9]{2,3},[0-9]{3}\\s*){9}\\|\\s*$" }, { "type": "markdownMatches", "pattern": "^\\|\\s*Unemployment\\s+rate\\s*(\\|\\s*[0-9]+\\.[0-9]\\s*){9}\\|\\s*$" }]
         ] }
       ]
+    },
+    {
+      "id": "A10",
+      "batch": "api",
+      "url": "https://quotes.toscrape.com/",
+      "request": { "formats": ["markdown"] },
+      "note": "On 2026-09-29 the head declares a charset, the <title> and two stylesheets, and <html> has lang=\"en\": no description, keywords or icon. /favicon.ico answers 404 there, so an assumed default icon would be wrong. The <meta itemprop=\"keywords\"> inside each quote is microdata, not the page's keywords.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.title", "equals": "Quotes to Scrape" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.language", "equals": "en" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.description", "present": false },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.keywords", "present": false },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.favicon", "present": false }
+      ]
+    },
+    {
+      "id": "A11",
+      "batch": "api",
+      "url": "https://www.gov.uk/government/statistics/subnational-electricity-and-gas-consumption-summary-report-2024/subnational-electricity-and-gas-consumption-summary-report-2024--2",
+      "request": { "formats": ["markdown"] },
+      "note": "The L08 page. On 2026-09-29 its head has no <meta name=\"description\"> and an empty og:description, so the description is null. The head <title> ends in ' - GOV.UK'; the GOV.UK logo in the body is an SVG with its own <title>GOV.UK</title>, which is not the page's title. document.title stays the content title, the <h1>. The icon is a hashed asset path that changes with GOV.UK releases, so it is checked by prefix; it answered 200 that day.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.title", "equals": "Subnational electricity and gas consumption summary report 2024 - GOV.UK" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "document.title", "equals": "Subnational electricity and gas consumption summary report 2024" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.language", "equals": "en" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.description", "present": false },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.favicon", "includes": "https://www.gov.uk/assets/frontend/favicon-" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "metadata.canonicalUrl", "equals": "https://www.gov.uk/government/statistics/subnational-electricity-and-gas-consumption-summary-report-2024/subnational-electricity-and-gas-consumption-summary-report-2024--2" }
+      ]
+    },
+    {
+      "id": "A12",
+      "batch": "api",
+      "endpoint": "fc-scrape",
+      "url": "https://www.python.org/",
+      "request": { "formats": ["markdown"] },
+      "note": "The feature matrix check for scrape-formats.metadata-page (title, the <meta name=\"description\"> text, language en, an absolute icon URL that answers 200), through /fc. On 2026-09-29 python.org declares these and keywords in its head, with no robots meta; /static/favicon.ico answered 200 (image/x-icon). W2L answered from the browser lane that day.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "success", "equals": true },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.title", "equals": "Welcome to Python.org" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.description", "equals": "The official home of the Python Programming Language" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.language", "equals": "en" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.keywords", "equals": "Python programming language object oriented web free open source software license documentation download community" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.favicon", "equals": "https://www.python.org/static/favicon.ico" },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.robots", "present": false },
+        { "item": "scrape-formats.metadata-page", "type": "field", "path": "data.metadata.sourceURL", "equals": "https://www.python.org/" }
+      ]
     }
   ]
 }
