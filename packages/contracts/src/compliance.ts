@@ -161,6 +161,9 @@ export const MODE_IDENTITIES: Readonly<Record<CrawlMode, ModeIdentity>> = {
 // Compliance facts
 // ---------------------------------------------------------------------------
 
+/** Why robots.txt could not be fetched: a 5xx, a network failure, or the lookup's own deadline. */
+export type RobotsUnreachable = 'server_error' | 'network_error' | 'timeout'
+
 /**
  * The outcome of consulting robots.txt for a single target URL. One record per
  * fetch. `consulted` distinguishes "we checked and it said X" from "there was
@@ -183,6 +186,14 @@ export interface RobotsDecision {
   /** When disallowed, whether the fetch was skipped because of it. */
   skippedFetch: boolean
   crawlDelayMs?: number | null
+  /**
+   * Set only when robots.txt could not be fetched. RFC 9309 §2.3.1.4 then
+   * requires assuming a complete disallow: `decision` is `disallowed` with no
+   * rules and no robots.txt hash, and this reason tells it apart from a
+   * disallow the publisher wrote. A 4xx is not unreachable: it means no
+   * robots.txt, and `decision` is `no_robots`.
+   */
+  unreachable?: RobotsUnreachable
 }
 
 /**

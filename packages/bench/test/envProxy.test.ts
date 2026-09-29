@@ -32,6 +32,10 @@ beforeAll(async () => {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
       return
     }
+    if (path === '/to-https') {
+      res.writeHead(301, { location: 'https://w2l-proxy-only.invalid/page' }).end()
+      return
+    }
     // ~20 KiB of response headers, above undici's 16 KiB default.
     const padding = path === '/big-headers' ? Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`x-padding-${i}`, 'x'.repeat(1024)])) : {}
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...padding }).end(PAGE)
@@ -73,10 +77,22 @@ describe('HTTP lane behind the environment proxy', () => {
   it('tunnels https with CONNECT and reports a refused tunnel as connection_error', async () => {
     const http = new ResilientHttpSubject('standard', policy)
     try {
-      const out = await http.fetch('https://w2l-proxy-only.invalid/page')
+      // robots.txt for the http origin allows the page, which redirects to https.
+      const out = await http.fetch('http://w2l-proxy-only.invalid/to-https')
       expect(out).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
       expect(seen).toContain('CONNECT w2l-proxy-only.invalid:443')
       expect(out.evidence.envProxy).toBe(proxyEndpoint)
+    } finally { await http.teardown() }
+  })
+
+  it('does not fetch an https page whose robots.txt tunnel is refused, and says robots.txt was unreachable', async () => {
+    const http = new ResilientHttpSubject('standard', policy)
+    try {
+      const out = await http.fetch('https://w2l-proxy-only.invalid/page')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'network_error' }) }))
+      // One tunnel, for robots.txt: the page request never left.
+      expect(seen).toEqual(['CONNECT w2l-proxy-only.invalid:443'])
     } finally { await http.teardown() }
   })
 

@@ -68,10 +68,12 @@ describe('persistent URL-array batch', () => {
     expect(await events.text()).toContain('event: complete')
   })
 
-  it('finishes every URL when one origin never answers its robots.txt', async () => {
+  it('finishes every URL when one origin never answers its robots.txt, and does not fetch that origin', async () => {
     const f = await fixture()
+    let silentPageHits = 0
     const silent = createServer((req, res) => {
       if (req.url === '/robots.txt') return // never answers
+      silentPageHits++
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end('<html><body><main><article><h1>Silent robots</h1><p>This origin never answers its robots.txt, so the lookup deadline must count as an unreachable robots.txt instead of failing the batch that contains it.</p></article></main></body></html>')
     })
@@ -89,10 +91,12 @@ describe('persistent URL-array batch', () => {
     }
     expect(report).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
     const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items
-    expect(items.map(item => item.status)).toEqual(['success', 'success', 'success'])
     const silentItem = items.find(item => item.url === silentUrl)!
-    expect(silentItem.markdown).toContain('Silent robots')
-    expect(silentItem.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ unreachable: 'timeout' }) }))
+    expect(items.filter(item => item !== silentItem).map(item => item.status)).toEqual(['success', 'success'])
+    // RFC 9309 §2.3.1.4: an unreachable robots.txt is a complete disallow, and the item says why.
+    expect(silentItem).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
+    expect(silentItem.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'timeout' }) }))
+    expect(silentPageHits).toBe(0)
   })
 
   it('recovers an interrupted URL without refetching completed items', async () => {

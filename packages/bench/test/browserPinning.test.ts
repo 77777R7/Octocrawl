@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { chromium } from 'playwright'
 import { hostedNetworkPolicy, localNetworkPolicy } from '@w2l/contracts'
 import { pinnedBrowserHostRules, SsrfDeniedError } from '../src/egress.js'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 
 describe('host-pinned Chromium resolver', () => {
@@ -112,6 +113,11 @@ describe('host-pinned Chromium resolver', () => {
       // Only this ephemeral self-signed fixture relaxes certificate checks.
       args: [...(options?.args ?? []), '--ignore-certificate-errors'],
     }))
+    // The robots.txt lookup runs in Node, which cannot verify this fixture's
+    // certificate, and an unreachable robots.txt is a complete disallow. The
+    // lookup answers "no robots.txt" instead, the decision it made before
+    // unreachable meant disallow; this test is about the browser's egress.
+    const robots = vi.spyOn(RobotsOriginCache.prototype, 'lookup').mockImplementation(async url => ({ robotsUrl: new URL('/robots.txt', url).href, robots: null, sha256: null, absent: true }))
     let renderedHtml = ''
     const subject = new BrowserLocalSubject('standard', null, false, localNetworkPolicy(), null, undefined, null, ['localhost'], html => { renderedHtml = html })
     try {
@@ -124,6 +130,7 @@ describe('host-pinned Chromium resolver', () => {
     } finally {
       await subject.teardown()
       launch.mockRestore()
+      robots.mockRestore()
       await new Promise<void>(resolve => server.close(() => resolve()))
       await rm(directory, { recursive: true, force: true })
     }

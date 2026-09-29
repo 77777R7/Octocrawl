@@ -187,6 +187,12 @@ describe('robots gate on the provider UA', () => {
     expect(verdict.reason).toContain('No robots.txt published')
   })
 
+  it('treats a robots.txt it could not fetch as a complete disallow, not as an absent one', () => {
+    const verdict = evaluateProviderGate(provider(), null, '/dp/B0TEST', 'timeout')
+    expect(verdict).toMatchObject({ allowed: false, refusal: 'robots_unreachable', appliedRules: [] })
+    expect(verdict.reason).toContain('could not be fetched (timeout)')
+  })
+
   it('records the UA the decision was actually made about', () => {
     // The record has to be self-describing: "allowed" is meaningless without
     // "allowed for whom", since the provider's UA is not ours.

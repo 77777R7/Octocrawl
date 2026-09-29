@@ -145,8 +145,6 @@ export function buildChannels(
     browserAllowedHosts?: readonly string[]
     /** In-memory raw witness for an explicitly authorized caller. */
     onRenderedHtml?: (html: string, sha256: string) => void
-    /** Public HTTP/browser previews fail closed when robots is unreachable. */
-    robotsFailClosed?: boolean
     /** Loopback-only review egress for fixed Reddit/X hosts; never set by a public visitor. */
     localPreviewProxyUrl?: string
     /** Explicit local-review exception for fixed public platform pages only. */
@@ -157,8 +155,8 @@ export function buildChannels(
   // fetch would be both slow and leaky; the channel's close() is what tears
   // the browser down at the end.
   const originScheduler = opts.originScheduler ?? new OriginScheduler(opts.networkPolicy ?? defaultNetworkPolicy())
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.robotsFailClosed === true, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, opts.robotsFailClosed === true)
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml)
   const declared: IdentityBundle = identityForRoute(mode)
 
   // ----------------------------------------------------------------------

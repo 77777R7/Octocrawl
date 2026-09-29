@@ -47,13 +47,13 @@ afterAll(async () => {
 
 describe('ResilientHttpSubject robots', () => {
   it('never applies a local platform exception to another host', async () => {
-    const subject = new ResilientHttpSubject('standard', undefined, undefined, true, 'http://127.0.0.1:7890', true)
+    const subject = new ResilientHttpSubject('standard', undefined, undefined, 'http://127.0.0.1:7890', true)
     try {
       await expect(subject.fetch('https://example.com/')).rejects.toThrow('limited to fixed platform hosts')
     } finally { await subject.teardown() }
   })
 
-  it('never fetches the page when public-preview robots responds 503', async () => {
+  it('never fetches the page when robots.txt responds 503, and says robots.txt was unreachable', async () => {
     let pageHits = 0
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') res.writeHead(503).end('temporarily unavailable')
@@ -62,12 +62,13 @@ describe('ResilientHttpSubject robots', () => {
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('no fixture address')
-    const subject = new ResilientHttpSubject('standard', undefined, undefined, true)
+    const subject = new ResilientHttpSubject()
     try {
       const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
       expect(out.status).toBe('failed')
       expect(out.failureReason).toBe('policy_denied')
-      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed' }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'server_error', ruleCount: 0 }) }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error', appliedRules: [] }) }))
       expect(pageHits).toBe(0)
     } finally {
       await subject.teardown()
@@ -75,29 +76,27 @@ describe('ResilientHttpSubject robots', () => {
     }
   })
 
-  it('fetches the page when robots.txt never answers, and records robots as unreachable', async () => {
+  it('never fetches the page when robots.txt never answers, and records the timeout', async () => {
+    // RFC 9309 §2.3.1.4: an unreachable robots.txt is a complete disallow.
+    let pageHits = 0
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') return // never answers
+      pageHits++
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end('<!doctype html><html><body><article><h1>Slow robots</h1><p>The origin serves this page normally, but its robots.txt never answers within the lookup deadline, so the robots decision is unreachable rather than a reason to fail the fetch.</p></article></body></html>')
+      res.end('<!doctype html><html><body><article><h1>Slow robots</h1><p>The origin serves this page normally, but its robots.txt never answers within the lookup deadline.</p></article></body></html>')
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('no fixture address')
-    const policy = { ...localNetworkPolicy(), robotsTimeoutMs: 100 }
-    const open = new ResilientHttpSubject('standard', policy)
-    const closed = new ResilientHttpSubject('standard', policy, undefined, true)
+    const subject = new ResilientHttpSubject('standard', { ...localNetworkPolicy(), robotsTimeoutMs: 100 })
     try {
-      const out = await open.fetch(`http://127.0.0.1:${address.port}/page`)
-      expect(out.status).toBe('success')
-      expect(out.markdown).toContain('Slow robots')
-      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'no_robots', unreachable: 'timeout' }) }))
-      // Failing closed on an unreachable robots.txt stays the caller's policy.
-      const denied = await closed.fetch(`http://127.0.0.1:${address.port}/page`)
-      expect(denied.failureReason).toBe('policy_denied')
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'timeout' }) }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'timeout' }) }))
+      expect(pageHits).toBe(0)
     } finally {
-      await open.teardown()
-      await closed.teardown()
+      await subject.teardown()
       server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
@@ -111,7 +110,10 @@ describe('ResilientHttpSubject robots', () => {
     expect(out.status).toBe('failed')
     expect(out.failureReason).toBe('policy_denied')
     expect(out.markdown).toBeNull()
-    expect(out.trace.some((t) => t.event === 'robots_disallowed')).toBe(true)
+    const disallowed = out.trace.find((t) => t.event === 'robots_disallowed')
+    expect(disallowed?.detail).toMatchObject({ appliedRules: [{ pattern: '/private', allow: false }] })
+    // A rule the publisher wrote, not an unreachable robots.txt.
+    expect(disallowed?.detail).not.toHaveProperty('unreachable')
   })
 
   it('honours a more-specific Allow beneath a Disallow', async () => {

@@ -176,8 +176,34 @@ describe('BrowserLocalSubject transport', () => {
       // The rule that did it is cited, so the publisher can check the verdict
       // against their own robots.txt rather than take our word for it.
       expect(record.robots.appliedRules.map((r) => r.pattern)).toContain('/private')
+      expect(record.robots).not.toHaveProperty('unreachable')
     } finally {
       await subject.teardown()
+    }
+  })
+
+  it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
+    let pageHits = 0
+    const failing = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(503).end('temporarily unavailable'); return }
+      pageHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><article><h1>Must not fetch</h1></article></body></html>')
+    })
+    await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve))
+    const address = failing.address()
+    if (address === null || typeof address === 'string') throw new Error('no address')
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(pageHits).toBe(0)
+      // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
+      expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      expect(verifyLedger(subject.ledger()).valid).toBe(true)
+    } finally {
+      await subject.teardown()
+      await new Promise<void>((resolve) => failing.close(() => resolve()))
     }
   })
 

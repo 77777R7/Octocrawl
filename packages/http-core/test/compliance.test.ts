@@ -141,4 +141,16 @@ describe('buildComplianceRecord', () => {
     }).contentHash
     expect(withNull).not.toBe(withEmpty)
   })
+
+  it('hashes why robots.txt was unreachable, and leaves records without a reason unchanged', () => {
+    // Pinned before the reason existed: ledgers already written still verify.
+    expect(buildComplianceRecord(baseInput()).contentHash).toBe('64548aeef5844e7d680583f8117e09e98f9ab2d3c508133654f62d18dec8ca75')
+    const assumed = { robotsUrl: 'https://example.com/robots.txt', robotsSha256: null, matchedUserAgentGroup: null, appliedRules: [], decision: 'disallowed' as const, skippedFetch: true }
+    const hashes = [
+      buildComplianceRecord({ ...baseInput(), robots: assumed }).contentHash,
+      ...(['timeout', 'network_error', 'server_error'] as const).map(unreachable =>
+        buildComplianceRecord({ ...baseInput(), robots: { ...assumed, unreachable } }).contentHash),
+    ]
+    expect(new Set(hashes).size).toBe(4)
+  })
 })

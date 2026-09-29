@@ -127,7 +127,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserAllowedHosts?: readonly string[],
     /** In-memory witness for an explicitly authorized evaluation. Never a persistence path. */
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
-    robotsFailClosed = false,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -145,7 +144,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
     this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, undefined, robotsFailClosed)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy)
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -248,7 +247,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
-          ...(cachedRobots?.unreachable === undefined ? {} : { unreachable: cachedRobots.unreachable }),
+          ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
         },
       })
 
@@ -277,7 +276,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           at: wallMs,
           lane: 'browser_local',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
         return {
           requestedUrl: url,
