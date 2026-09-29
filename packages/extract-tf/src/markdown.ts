@@ -408,11 +408,16 @@ function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
   return true
 }
 
+/**
+ * An image with its alt text and absolute target. A `data:` URI is dropped and
+ * only the alt text kept, as Firecrawl's removeBase64Images does by default:
+ * the encoded bytes are noise in Markdown and point at no source.
+ */
 function image(el: Element, out: Inline, ctx: Context): void {
   const alt = (el.getAttribute('alt') ?? '').replace(WHITESPACE, ' ').trim()
   const src = el.getAttribute('src')
   const target = src === null ? null : linkTarget(src, ctx.base)
-  if (target !== null) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
+  if (target !== null && !/^data:/i.test(target)) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
   else if (alt) out.content(alt)
 }
 

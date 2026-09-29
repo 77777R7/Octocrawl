@@ -102,18 +102,29 @@ describe('htmlToMarkdown lists and code', () => {
 })
 
 describe('htmlToMarkdown link and image targets', () => {
-  it('resolves relative targets against the base URL and keeps fragments, mailto and data', () => {
+  it('resolves relative targets against the base URL and keeps fragments and mailto', () => {
     const md = htmlToMarkdown(
       '<p><a href="../guide/">Guide</a> <img src="//cdn.fixture.test/a.png" alt="A"> <a href="#top">Top</a> ' +
-        '<a href="mailto:x@fixture.test">Mail</a> <img src="data:image/gif;base64,R0lGOD" alt="Dot"> <a href="javascript:void(0)">Menu</a></p>',
+        '<a href="mailto:x@fixture.test">Mail</a> <a href="javascript:void(0)">Menu</a></p>',
       { baseUrl: BASE },
     )
     expect(md).toBe(
       '[Guide](https://fixture.test/guide/) ![A](https://cdn.fixture.test/a.png) [Top](#top) ' +
-        '[Mail](mailto:x@fixture.test) ![Dot](data:image/gif;base64,R0lGOD) Menu',
+        '[Mail](mailto:x@fixture.test) Menu',
     )
     // A heading's empty permalink anchor says nothing and is dropped.
     expect(htmlToMarkdown('<h2><a class="anchor" href="#install"></a>Install</h2>')).toBe('## Install')
+  })
+
+  it('drops data: image URIs and keeps their alt text, as Firecrawl removeBase64Images does', () => {
+    const md = htmlToMarkdown(
+      '<p>Chart <img src="data:image/png;base64,iVBORw0KGgo=" alt="Monthly [output]"> and ' +
+        '<a href="/logo"><img src=" DATA:image/svg+xml;utf8,<svg></svg>" alt="Logo"></a> and ' +
+        '<img src="data:image/gif;base64,R0lGOD">.</p>',
+      { baseUrl: BASE },
+    )
+    expect(md).toBe('Chart Monthly [output] and [Logo](https://fixture.test/logo) and .')
+    expect(htmlToMarkdown('<img src="data:image/gif;base64,R0lGOD" alt="Dot">')).toBe('Dot')
   })
 
   it('prefers the document <base href>, and keeps targets as written without a base', () => {
