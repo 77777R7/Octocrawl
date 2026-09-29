@@ -17,7 +17,7 @@
       "pattern": "^https?://"
     },
     "finalUrl": {
-      "description": "The last URL W2L requested for the page, after following redirects: the URL of the response it reports, or of the request that got none (a timeout, a refused connection). Null when W2L sent no request for the page: a robots.txt disallow, a DNS failure or a policy refusal came first.",
+      "description": "The last URL W2L requested for the page, after following redirects: the URL of the response it reports, or of the request that got none (a timeout, a refused connection). On browser lanes a script or a meta refresh that loaded another document is a redirect; a URL the page set with the history API (pushState, replaceState), which nothing requested, is not. Null when W2L sent no request for the page: a robots.txt disallow, a DNS failure or a policy refusal came first.",
       "type": ["string", "null"],
       "pattern": "^https?://"
     },
@@ -31,7 +31,7 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
     },
     "httpStatus": {
-      "description": "The HTTP status of the response W2L reports. Null when there was none; a browser navigation that reports no status is null too, never 0.",
+      "description": "The HTTP status of the response W2L reports, the one that answered finalUrl: on browser lanes, of the document the page shows when it is captured. Null when there was none; a browser navigation that reports no status is null too, never 0.",
       "type": ["integer", "null"],
       "minimum": 100,
       "maximum": 599
@@ -119,12 +119,12 @@
       "required": ["urls", "complete"],
       "properties": {
         "urls": {
-          "description": "Every URL W2L requested for the page, in order: requestedUrl first, finalUrl last. [requestedUrl] when there was no redirect; empty when W2L sent no request for the page (finalUrl is null).",
+          "description": "Every URL W2L requested for the page, in order: requestedUrl first, finalUrl last, with each redirect between (on browser lanes, a document a script or a meta refresh loaded is one). [requestedUrl] when there was no redirect; empty when W2L sent no request for the page (finalUrl is null).",
           "type": "array",
           "items": { "type": "string", "pattern": "^https?://" }
         },
         "complete": {
-          "description": "Whether the lane lists every hop. True on the HTTP lane, which follows redirects itself and requests each hop, and on the browser lane when it lists each redirect Chromium followed for the page's navigation; false there when a follow-up navigation or the page itself (a script, a meta refresh) moved on, so hops were not observed. False on the provider lane, which observes only where navigation started and where it ended: its list is [requestedUrl, finalUrl] after a redirect.",
+          "description": "Whether the lane lists every hop. True on the HTTP lane, which follows redirects itself and requests each hop, and on the browser lane when it lists each redirect Chromium followed and each document a script or a meta refresh loaded; false there when a follow-up navigation did not start at requestedUrl, a document came without a request, or the chain of a page that kept moving on was cut to its first URL and last 20. False on the provider lane, which observes only where navigation started and where it ended: its list is [requestedUrl, finalUrl] after a redirect.",
           "type": "boolean"
         }
       }

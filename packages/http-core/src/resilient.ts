@@ -113,7 +113,11 @@ export interface ResilientOutcome {
    * reaches the deadline.
    */
   deadlineExceeded?: true
-  /** Last URL the engine acted on. */
+  /**
+   * The URL `redirectChain` ends with: the one whose response `status` is,
+   * or whose request failed or was refused. The target of a redirect the
+   * engine did not follow (a loop, the limit, a denied target) is not it.
+   */
   finalUrl: string
   /** Every URL visited, in order, starting with the requested one. */
   redirectChain: string[]
@@ -339,12 +343,14 @@ export async function resilientFetch(
           }
         }
         if (seen.has(next)) {
-          trace.push({ at, event: 'redirect_loop', detail: { to: next } })
+          // The loop's target was requested already and is not requested
+          // again: the final URL is the one whose redirect closes the loop.
+          trace.push({ at, event: 'redirect_loop', detail: { from: current, to: next } })
           return {
             kind: 'failure',
             status: response.status,
             failureReason: 'redirect_loop',
-            finalUrl: next,
+            finalUrl: current,
             ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
             headers: response.headers,
           }

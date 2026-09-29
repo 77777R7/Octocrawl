@@ -1749,6 +1749,67 @@
         { "item": "6", "type": "field", "path": "probe.status", "equals": "success" },
         { "item": "6", "type": "field", "path": "probe.elapsedMs", "max": 6000, "record": true }
       ]
+    },
+    {
+      "id": "M09",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "https://httpbin.org/base64/PCFkb2N0eXBlIGh0bWw-PGh0bWw-PGhlYWQ-PHRpdGxlPk1vdmVkPC90aXRsZT48L2hlYWQ-PGJvZHk-PHA-VGhpcyBwYWdlIG1vdmVkLjwvcD48c2NyaXB0PmxvY2F0aW9uLnJlcGxhY2UoImh0dHBzOi8vYm9va3MudG9zY3JhcGUuY29tL2NhdGFsb2d1ZS9kb2VzLW5vdC1leGlzdC13MmwvaW5kZXguaHRtbCIpPC9zY3JpcHQ-PC9ib2R5PjwvaHRtbD4=",
+      "request": {"formats": ["markdown"], "waitFor": 500},
+      "note": "Added 2026-09-29 for the client-side navigation gap of core-status-2026-09-29-p1-wave5.md: a page that answers 200 and then goes to a 404 page by script. The first page is W2L's own HTML, served by httpbin.org's /base64 endpoint, which answers the HTML the URL encodes (URL-safe base64) as text/html; charset=utf-8: a 'Moved' page whose script runs location.replace() to the S03 page, books.toscrape.com's 404 (text/html). waitFor starts at the browser rung, where the script runs. Before the fix (f2774c6), on 2026-09-29, the browser lane reported the 404 page's URL and content with the first page's 200 and content type and redirectChain.complete false, as failed/empty_unverified only because the 404 page has no main block. httpbin.org has occasional 5xx outages (A19).",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "failed"},
+        {"item": "2", "type": "field", "path": "failureReason", "equals": "http_error"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "lane", "equals": "browser_local"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.httpStatus", "equals": 404},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "equals": "text/html"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["https://httpbin.org/base64/PCFkb2N0eXBlIGh0bWw-PGh0bWw-PGhlYWQ-PHRpdGxlPk1vdmVkPC90aXRsZT48L2hlYWQ-PGJvZHk-PHA-VGhpcyBwYWdlIG1vdmVkLjwvcD48c2NyaXB0PmxvY2F0aW9uLnJlcGxhY2UoImh0dHBzOi8vYm9va3MudG9zY3JhcGUuY29tL2NhdGFsb2d1ZS9kb2VzLW5vdC1leGlzdC13MmwvaW5kZXguaHRtbCIpPC9zY3JpcHQ-PC9ib2R5PjwvaHRtbD4=", "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html"]},
+        {"item": "2", "type": "markdownIncludes", "text": "404 Not Found"},
+        {"item": "ER", "type": "evidenceSchema"},
+        {"item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 404},
+        {"item": "ER", "type": "field", "path": "evidenceRecord.reason", "equals": "http_error"},
+        {"item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true}
+      ]
+    },
+    {
+      "id": "M10",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "endpoint": "fc-scrape",
+      "url": "https://httpbin.org/base64/PCFkb2N0eXBlIGh0bWw-PGh0bWw-PGhlYWQ-PHRpdGxlPk1vdmVkPC90aXRsZT48bWV0YSBodHRwLWVxdWl2PSJyZWZyZXNoIiBjb250ZW50PSIwO3VybD1odHRwczovL2Jvb2tzLnRvc2NyYXBlLmNvbS9jYXRhbG9ndWUvZG9lcy1ub3QtZXhpc3QtdzJsL2luZGV4Lmh0bWwiPjwvaGVhZD48Ym9keT48cD5UaGlzIHBhZ2UgbW92ZWQuPC9wPjwvYm9keT48L2h0bWw-",
+      "request": {"formats": ["markdown"], "waitFor": 500},
+      "note": "Added 2026-09-29: M09 on /fc, with a zero-second meta refresh instead of a script. The first page is W2L's own HTML from httpbin.org's /base64 endpoint (see M09), whose meta refresh goes to the S03 404 page at once, while the browser waits for the page to settle. Before the fix (f2774c6), on 2026-09-29, the navigation cut the settle wait off and the scrape failed as connection_error with statusCode null and the first page as url.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "success", "equals": false},
+        {"item": "2", "type": "field", "path": "error", "equals": "failed: http_error"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.url", "equals": "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.statusCode", "equals": 404},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.contentType", "equals": "text/html"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.error", "equals": "http_error"},
+        {"item": "2", "type": "field", "path": "data.markdown", "includes": "404 Not Found"}
+      ]
+    },
+    {
+      "id": "M11",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "https://spa-github-pages.rafgraph.dev/example",
+      "request": {"formats": ["markdown"], "waitFor": 1000},
+      "note": "Added 2026-09-29: a real site that moves on by itself from an error page. The spa-github-pages demo (GitHub Pages; its robots.txt names only a sitemap) answers /example with 404 and a page whose script runs location.replace() to /?/example, which answers 200 with the app; the app then sets its URL back to /example with history.replaceState, which requests nothing. The document shown is /?/example's: the final URL is the last URL requested, reported with its own 200, and the trace names the URL the page set. Before the fix (f2774c6), on 2026-09-29, the browser lane reported the app's content as failed/http_error with the first page's 404 and /example as final URL.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "lane", "equals": "browser_local"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://spa-github-pages.rafgraph.dev/?/example"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.httpStatus", "equals": 200},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html"},
+        {"item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["https://spa-github-pages.rafgraph.dev/example", "https://spa-github-pages.rafgraph.dev/?/example"]},
+        {"item": "scrape-formats.metadata-response-status", "type": "traceEvent", "match": {"event": "same_document_navigation", "detail.to": "https://spa-github-pages.rafgraph.dev/example"}},
+        {"item": "FS", "type": "markdownIncludes", "text": "This is an example page."},
+        {"item": "ER", "type": "evidenceSchema"},
+        {"item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200},
+        {"item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true}
+      ]
     }
   ]
 }

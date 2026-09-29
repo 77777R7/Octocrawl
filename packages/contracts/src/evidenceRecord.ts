@@ -39,17 +39,19 @@ export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]
 export interface EvidenceRedirectChain {
   /**
    * Every URL W2L requested for the page, in order: the requested URL first,
-   * the final URL last. `[requestedUrl]` when there was no redirect; empty
-   * when W2L sent no request for the page.
+   * the final URL last, with each redirect between (in the browser lane, a
+   * document a script or a meta refresh loaded is one). `[requestedUrl]` when
+   * there was no redirect; empty when W2L sent no request for the page.
    */
   urls: readonly string[]
   /**
    * True when every hop is listed. The HTTP lane follows redirects itself and
-   * lists each; the browser lane lists each redirect Chromium followed for the
-   * page's navigation, and is false only when a follow-up navigation or the
-   * page itself (a script, a meta refresh) moved on. The provider lane sees
-   * only where its vendor started and ended, so its chain is
-   * `[requested, final]` and this is false.
+   * lists each; the browser lane lists each redirect Chromium followed and
+   * each document a script or a meta refresh loaded, and is false only when a
+   * follow-up navigation did not start at the requested URL, a document came
+   * without a request, or the chain of a page that kept moving on was cut to
+   * its first URL and last 20. The provider lane sees only where its vendor
+   * started and ended, so its chain is `[requested, final]` and this is false.
    */
   complete: boolean
 }

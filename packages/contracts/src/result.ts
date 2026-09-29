@@ -68,8 +68,20 @@ export interface Meter {
 }
 
 export interface Evidence {
-  /** Final URL after redirects. */
+  /**
+   * Final URL after redirects: the last URL requested for the page, whose
+   * response `httpStatus` and `contentType` are from. In the browser lane a
+   * script or a meta refresh that loaded another document is a redirect; a
+   * URL the page set with the history API (pushState, replaceState), which
+   * nothing requested, is not: the page keeps it as the base of its links.
+   */
   finalUrl: string
+  /**
+   * The status of the response that answered `finalUrl`: in the browser lane,
+   * of the document the page shows when it is read, not of the navigation W2L
+   * started. Null when there was none (no request, a transport failure, a
+   * document that came without a response).
+   */
   httpStatus: number | null
   /**
    * The URLs of a redirect, the requested URL first and `finalUrl` last;
@@ -79,15 +91,19 @@ export interface Evidence {
   /**
    * True when `redirectChain` lists every hop the lane requested: the HTTP
    * lane follows each redirect itself, and the browser lane lists each
-   * redirect Chromium followed for the page's navigation. Absent when the
+   * redirect Chromium followed and each document a script or a meta refresh
+   * loaded, for a page it shows or a file it displays or downloads. The
+   * browser lane says false when a follow-up navigation did not start at the
+   * requested URL, a document came without a request, or it cut the chain of
+   * a page that kept moving on to its first URL and last 20. Absent when the
    * lane does not say (the provider lane, which sees where its vendor started
    * and ended, and results stored before lanes recorded it).
    */
   redirectChainComplete?: boolean
   /**
-   * The final response's `content-type` header as the server sent it, in
-   * every lane (the browser lane reads the rendered page, whatever it says);
-   * null when there was no response or no such header.
+   * The `content-type` header of the response `httpStatus` is from, as the
+   * server sent it, in every lane (the browser lane reads the rendered page,
+   * whatever it says); null when there was no response or no such header.
    */
   contentType: string | null
   /** sha256 of the raw response body. Null only when no body was read. */
