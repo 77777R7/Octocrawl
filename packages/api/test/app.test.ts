@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { identityForRoute } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
@@ -150,6 +152,40 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const both = await scrape(['markdown', { type: 'json', schema }])
     expect(both.markdown).toContain('Harbour lantern catalog')
     expect(both.json.data.title).toBe('Harbour lantern catalog')
+  })
+
+  it('reads JSON numbers as the page writes them, and leaves one it cannot settle unfilled with the text quoted', async () => {
+    const shop = (price: string) => `<!doctype html><html lang="de"><head><title>Messinglampe | Shop</title></head><body><main><h1>Messinglampe</h1><p class="price">${price}</p>` +
+      '<p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p></main></body></html>'
+    const pages: Record<string, string> = { '/a': shop('12,99 €'), '/b': shop('1.299,00 €'), '/c': shop('1 299,00 €'), '/d': shop('1.299 €') }
+    const local = createServer((req, res) => {
+      const body = pages[req.url ?? '']
+      if (body === undefined) res.writeHead(404).end()
+      else res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body)
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(local.address() as AddressInfo).port}`
+    try {
+      const app = createApp(engine)
+      const schema = { type: 'object', properties: { title: { type: 'string' }, price: { type: 'number' } }, required: ['title', 'price'] }
+      const scrape = async (path: string) => (await app.request('/v1/scrape', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: origin + path, formats: [{ type: 'json', schema }], debug: false }),
+      })).json()
+      for (const [path, price, text] of [['/a', 12.99, '12,99 €'], ['/b', 1299, '1.299,00 €'], ['/c', 1299, '1 299,00 €']] as const) {
+        const out = await scrape(path)
+        expect(out.json, path).toMatchObject({ status: 'complete', data: { title: 'Messinglampe', price } })
+        expect(out.json.evidence, path).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text })
+        expect(out.evidenceRecord.fieldEvidence['/price'], path).toEqual({ source: 'text', locator: 'p.price' })
+      }
+      const unsettled = await scrape('/d')
+      expect(unsettled.json).toMatchObject({ status: 'incomplete', data: { title: 'Messinglampe' } })
+      expect(unsettled.json.data).not.toHaveProperty('price')
+      expect(unsettled.json.issues[0]).toMatchObject({ code: 'field_unavailable', path: '/price', message: expect.stringContaining('the page states "1.299 €"') })
+      expect(unsettled.evidenceRecord.fieldEvidence).not.toHaveProperty('/price')
+    } finally {
+      await new Promise<void>(resolve => local.close(() => resolve()))
+    }
   })
 
   it('POST /v1/crawl is 202 and GET /v1/crawl/:id returns CrawlReport', async () => {
