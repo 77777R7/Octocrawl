@@ -168,6 +168,15 @@ describe('htmlToMarkdown link and image targets', () => {
     expect(htmlToMarkdown('<img src="data:image/gif;base64,R0lGOD" alt="Dot">')).toBe('Dot')
   })
 
+  it('drops data: link targets and keeps the link text, as for images', () => {
+    const md = htmlToMarkdown(
+      '<p><a href="data:text/html;base64,PGgxPg==">Open</a> and <a href=" DATA:text/plain,x"><img src="/i.png" alt="Icon"></a></p>' +
+        '<table><tr><th>File</th><th>Size</th></tr><tr><td><a href="data:text/csv,a,b">Download</a></td><td>1 kB</td></tr></table>',
+      { baseUrl: BASE },
+    )
+    expect(md).toBe('Open and ![Icon](https://fixture.test/i.png)\n\n| File | Size |\n| --- | --- |\n| Download | 1 kB |')
+  })
+
   it('prefers the document <base href>, and keeps targets as written without a base', () => {
     const doc = '<!doctype html><html><head><base href="https://cdn.fixture.test/v2/"></head><body><a href="intro.html">Intro</a></body></html>'
     expect(htmlToMarkdown(doc, { baseUrl: BASE })).toBe('[Intro](https://cdn.fixture.test/v2/intro.html)')

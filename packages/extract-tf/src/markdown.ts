@@ -295,11 +295,14 @@ const CELL_MARKS: Marks = { ...NO_MARKS, plain: true }
  * Markdown stands on its own. Same-document fragments ("#section") stay as
  * written: they point at headings of this same Markdown, and Monitor heading
  * rules read heading anchors in that form. Without a base, targets stay as
- * written. javascript: targets and unparseable ones give no target.
+ * written. javascript: targets and unparseable ones give no target. Nor does a
+ * data: URI, as Firecrawl's removeBase64Images drops image ones by default:
+ * the encoded bytes are noise in Markdown and point at no source, so a link
+ * keeps only its text and an image only its alt text.
  */
 function linkTarget(raw: string, base: URL | null): string | null {
   const href = raw.replace(/[\t\n\r]/g, '').trim()
-  if (href === '' || /^javascript:/i.test(href)) return null
+  if (href === '' || /^(?:javascript|data):/i.test(href)) return null
   if (href.startsWith('#') || base === null) return href
   try {
     return new URL(href, base).href
@@ -410,16 +413,12 @@ function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
   return true
 }
 
-/**
- * An image with its alt text and absolute target. A `data:` URI is dropped and
- * only the alt text kept, as Firecrawl's removeBase64Images does by default:
- * the encoded bytes are noise in Markdown and point at no source.
- */
+/** An image with its alt text and absolute target; only the alt text when it has no target (a `data:` URI). */
 function image(el: Element, out: Inline, ctx: Context): void {
   const alt = (el.getAttribute('alt') ?? '').replace(WHITESPACE, ' ').trim()
   const src = el.getAttribute('src')
   const target = src === null ? null : linkTarget(src, ctx.base)
-  if (target !== null && !/^data:/i.test(target)) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
+  if (target !== null) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
   else if (alt) out.content(alt)
 }
 

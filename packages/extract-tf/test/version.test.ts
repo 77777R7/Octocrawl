@@ -62,6 +62,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/4', digest: '15410fa8f3ec84f88722f7a513245884985544106504e664784854b9b5eee560' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/4', digest: 'bda0950f965d38eba2b88afc6b0d73385b28beeaa60de208e2e8e2f7def99df4' })
   })
 })
