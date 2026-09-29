@@ -115,6 +115,7 @@ describe('HTTP lane on non-200 statuses', () => {
     '/empty': { status: 204, body: '' },
     '/unchanged': { status: 304, body: '' },
     '/api-missing': { status: 404, type: 'application/json', body: '{"error":"not found"}' },
+    '/gone': { status: 410, body: '<!doctype html><html><body><nav><a href="/">Home</a></nav><main><article><h1>This report was withdrawn</h1><p>The quarterly report that used to live at this address was withdrawn by the statistics office and replaced by a revised edition.</p><p>Read the <a href="reports/revised">revised edition</a> or browse <a href="/reports">all reports</a>.</p></article></main></body></html>' },
   }
   let origin: string
   let errorServer: import('node:http').Server
@@ -154,11 +155,21 @@ describe('HTTP lane on non-200 statuses', () => {
     const broken = await http.fetch(`${origin}/broken`)
     expect(broken).toMatchObject({ status: 'failed', failureReason: 'http_error' })
     expect(broken.markdown).toContain('Internal Server Error')
+    // Link targets resolve against the page URL, as on a success.
+    expect(broken.markdown).toContain(`[Status page](${origin}/status)`)
     expect(broken.links).toEqual([`${origin}/status`])
     const forbidden = await http.fetch(`${origin}/forbidden`)
     expect(forbidden).toMatchObject({ status: 'failed', failureReason: 'http_error', blockReason: null })
     expect(forbidden.evidence.httpStatus).toBe(403)
     expect(forbidden.markdown).toContain('403 Forbidden')
+  })
+
+  it('resolves the links of an error page with main content against the page URL', async () => {
+    const gone = await http.fetch(`${origin}/gone`)
+    expect(gone).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+    expect(gone.markdown).toContain('# This report was withdrawn')
+    expect(gone.markdown).toContain(`Read the [revised edition](${origin}/reports/revised) or browse [all reports](${origin}/reports).`)
+    expect(gone.markdown).not.toContain('Home')
   })
 
   it('names a gated 403 blocked with its signals and keeps the block page as evidence', async () => {
