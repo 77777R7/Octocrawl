@@ -469,6 +469,11 @@ function flowNode(node: Node, flow: Flow): void {
       flow.add(codeBlock(el, ctx))
       return
     case 'table':
+      // A table that holds another table lays out the page (Hacker News puts
+      // its header, story list and footer in one), and so does a single row
+      // (a bar of links): their cells are blocks, and only the data tables
+      // inside are grids.
+      if (el.querySelector('table') !== null || el.querySelectorAll('tr').length < 2) break
       flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {

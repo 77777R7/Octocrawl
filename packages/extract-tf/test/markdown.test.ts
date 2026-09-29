@@ -21,6 +21,20 @@ describe('htmlToMarkdown', () => {
     expect(md).toContain('| 1 | 2 |')
   })
 
+  it('lays out a table that holds a table as blocks, and only the inner table as a grid (Hacker News)', () => {
+    const md = htmlToMarkdown(
+      '<table id="hnmain"><tr><td><table><tr><td><b><a href="news">Hacker News</a></b> <a href="newest">new</a></td><td><a href="login">login</a></td></tr></table></td></tr>' +
+        '<tr><td><table><tr><td>1.</td><td>Story one</td></tr><tr><td></td><td>10 points</td></tr></table></td></tr>' +
+        '<tr><td><center><a href="newsguidelines.html">Guidelines</a> | <a href="newsfaq.html">FAQ</a></center></td></tr></table>',
+      { baseUrl: 'https://news.fixture.test/' },
+    )
+    expect(md).toBe(
+      '**[Hacker News](https://news.fixture.test/news)** [new](https://news.fixture.test/newest)\n\n[login](https://news.fixture.test/login)\n\n' +
+        '| 1. | Story one |\n| --- | --- |\n|  | 10 points |\n\n' +
+        '[Guidelines](https://news.fixture.test/newsguidelines.html) | [FAQ](https://news.fixture.test/newsfaq.html)',
+    )
+  })
+
   it('keeps an empty corner header cell empty instead of inventing its text', () => {
     const md = htmlToMarkdown(
       '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',
