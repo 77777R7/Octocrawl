@@ -22,6 +22,7 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 
 - Challenge / block pages are `success: false`. Firecrawl often returns the interstitial as success markdown.
 - A page answered with an HTTP error status (4xx/5xx) is `success: false`, with its Markdown in `data.markdown` and the status in `data.metadata.statusCode`: the error page is evidence of what the server said, not content.
+- `data.metadata` has `title` (the page's `<title>`), `description`, `language`, `keywords`, `robots` and `favicon` only when the page declares them, next to `sourceURL`, `statusCode` and `error`. `keywords` is the declared string, not split. Other `<meta>` tags (`og:*`, `twitter:*` and the rest) are not passed through, and a failed or blocked page, an error-status page included, has none of the six.
 - No fire-engine, proxy pools, `actions`, JSON extract, or screenshots.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
 - Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
