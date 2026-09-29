@@ -96,7 +96,7 @@ To connect a standalone stdio MCP process to that API, run:
 npm run mcp
 ```
 
-`npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and defaults crawl `maxPages` to 100.
+`npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and limits a crawl to 100 pages: an omitted or `null` `maxPages` takes 100, and a larger one is refused with `invalid_request`.
 
 A server started with tokens, hosted or local, accepts any one of them: repeat `--token`, or set `W2L_API_TOKEN` and the comma-separated `W2L_API_TOKENS`. Tokens on the command line replace those in the environment. Give each client its own token; restarting the server without a token revokes it. Tokens are compared as fixed-length SHA-256 digests in constant time, and a missing or unknown token gets HTTP 401 with `{ "error": "unauthorized", "code": "unauthorized" }`. The SDK sends its `token` option, or `W2L_API_TOKEN` from the environment when none is passed; `token: ''` sends none.
 

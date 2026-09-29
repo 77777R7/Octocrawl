@@ -25,7 +25,7 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - `data.metadata` has `title` (the page's `<title>`), `description`, `language`, `keywords`, `robots` and `favicon` only when the page declares them, next to `sourceURL`, `statusCode` and `error`. `keywords` is the declared string, not split. Other `<meta>` tags (`og:*`, `twitter:*` and the rest) are not passed through, and a failed or blocked page, an error-status page included, has none of the six.
 - No fire-engine, proxy pools, `actions`, JSON extract, or screenshots.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
-- Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
+- Omitted `limit` / `maxDepth` stay unbounded on a local server. A hosted server enforces its crawl limit (100 pages): an omitted or `null` `limit` takes it, and a larger one is refused with HTTP 400 `invalid_request`. Firecrawl defaults are 10000 / 10.
 - `maxDepth` counts link hops from the start URL, which Firecrawl calls `maxDiscoveryDepth`; Firecrawl's own `maxDepth` limits URL path depth.
 - Shim crawl start is HTTP 200 `{success,id,url}`. Native crawl start stays 202 `{taskId}`.
 - `creditsUsed` and `expiresAt` are `null`: W2L counts no credits and keeps crawl results until their task directory is deleted.
