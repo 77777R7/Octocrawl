@@ -31,6 +31,7 @@ import {
   formatIdentitySummary,
   identityForRoute,
   withEnvironmentProxy,
+  withOperatorContact,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
@@ -528,8 +529,9 @@ export async function runLadder(args: Args): Promise<number> {
       ...(args.liveView ? ['live_view_handoff'] : []),
     ] as const,
   }
-  // The CLI runs in local mode: outbound requests follow the operator's proxy variables.
-  const networkPolicy = withEnvironmentProxy(defaultNetworkPolicy(), process.env)
+  // The CLI runs in local mode: outbound requests follow the operator's proxy
+  // variables, and research mode declares W2L_CONTACT.
+  const networkPolicy = withOperatorContact(withEnvironmentProxy(defaultNetworkPolicy(), process.env), process.env)
   const channels = buildChannels(args.mode, {
     vendorPolicy,
     networkPolicy,

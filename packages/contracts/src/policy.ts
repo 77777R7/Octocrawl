@@ -46,6 +46,11 @@ export interface NetworkPolicy {
    * is 'operator'.
    */
   egressProxy?: EgressProxy | null
+  /**
+   * The operator's contact from `W2L_CONTACT` (`withOperatorContact`), which
+   * research mode declares in its User-Agent. Absent or null declares none.
+   */
+  contact?: string | null
 }
 
 /**

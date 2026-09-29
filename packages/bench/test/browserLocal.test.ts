@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { localNetworkPolicy } from '@w2l/contracts'
 import { AccessConfigError, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 
@@ -153,6 +154,19 @@ describe('BrowserLocalSubject transport', () => {
       expect(record.robots.robotsSha256).toMatch(/^[0-9a-f]{64}$/)
       expect(record.robots.matchedUserAgentGroup).toBe('*')
       expect(record.robots.skippedFetch).toBe(false)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('declares the operator contact in research mode and signs the User-Agent that carried it', async () => {
+    const subject = new BrowserLocalSubject('research', null, false, { ...localNetworkPolicy(), contact: 'Jane Doe jane@example.org' })
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out.status).toBe('success')
+      const sent = out.compliance!.sentHeaders.headers.find((h) => h.name === 'user-agent')
+      expect(sent?.value).toMatch(/w2l-research.*; contact: Jane Doe jane@example\.org\)$/)
+      expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
     } finally {
       await subject.teardown()
     }

@@ -4,6 +4,7 @@ import {
   checkIdentityHonesty,
   headersFromIdentity,
   identityBundleFrom,
+  localNetworkPolicy,
   modeIdentity,
 } from '@w2l/contracts'
 import { prepareHttpIdentity } from '../src/httpIdentity.js'
@@ -96,5 +97,25 @@ describe('product HTTP arms send the bundle', () => {
     expect(last['sec-ch-ua']).toBeUndefined()
     expect(last['sec-ch-ua-platform']).toBeUndefined()
     expect(out.trace.some((t) => t.event === 'identity_mismatch')).toBe(false)
+  })
+
+  it('ResilientHttpSubject research declares the operator contact, and records the User-Agent it sent', async () => {
+    const contact = 'Jane Doe jane@example.org'
+    const subject = new ResilientHttpSubject('research', { ...localNetworkPolicy(), contact })
+    const standard = new ResilientHttpSubject('standard', { ...localNetworkPolicy(), contact })
+    try {
+      const out = await subject.fetch(url)
+      expect(out.status).toBe('success')
+      expect(last['user-agent']).toBe(modeIdentity('research', undefined, contact).userAgent)
+      expect(last['user-agent']).toMatch(/; contact: Jane Doe jane@example\.org\)$/)
+      const sent = out.trace.find((t) => t.event === 'identity_sent')?.detail?.headers as { name: string; value: string }[]
+      expect(sent).toContainEqual({ name: 'user-agent', value: last['user-agent'] })
+      expect(out.trace.some((t) => t.event === 'identity_mismatch')).toBe(false)
+      await standard.fetch(url)
+      expect(last['user-agent']).not.toContain('contact:')
+    } finally {
+      await subject.teardown()
+      await standard.teardown()
+    }
   })
 })

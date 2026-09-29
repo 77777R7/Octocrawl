@@ -28,6 +28,11 @@ it('routes local capture through the environment proxy the service starts with',
   expect(localConfigFromEnv({HTTPS_PROXY:'http://127.0.0.1:7890',W2L_PROXY:'off'}).networkPolicy).toBeUndefined()
 })
 
+it('declares the operator contact the service starts with',()=>{
+  expect(localConfigFromEnv({W2L_CONTACT:'Jane Doe jane@example.org'}).networkPolicy?.contact).toBe('Jane Doe jane@example.org')
+  expect(()=>localConfigFromEnv({W2L_CONTACT:'Jane (lab)'})).toThrow(/W2L_CONTACT/)
+})
+
 it('serves all tools on loopback and preserves Monitor state across MCP connections',async()=>{
   const probe=createServer()
   probe.listen(0,'127.0.0.1');await once(probe,'listening')

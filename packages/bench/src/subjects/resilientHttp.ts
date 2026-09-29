@@ -48,11 +48,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private teardownPromise: Promise<void> | null = null
 
   constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false) {
-    this.prepared = prepareHttpIdentity(mode)
+    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
+    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
-    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
@@ -282,6 +282,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
         ...(t.detail !== undefined ? { detail: t.detail } : {}),
       })
     }
+    const contactHint = declaredContactHint(out.finalUrl, out.status, this.prepared.mode === 'research' && (this.networkPolicy.contact ?? null) !== null)
+    if (contactHint !== null) trace.push({ at: wallMs, lane: 'http', event: 'declared_contact_hint', detail: contactHint })
 
     // Redirect evidence only when a redirect actually happened; a chain of
     // just the requested URL is "no redirect" and matches the other arms.
@@ -570,6 +572,19 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close()]).then(() => {})
     await this.teardownPromise
   }
+}
+
+/**
+ * SEC.gov answers 403 to automated clients that declare no contact in their
+ * User-Agent. When a request that declared none gets that answer, the result
+ * says how to declare one; the status stays what the server said.
+ */
+function declaredContactHint(finalUrl: string, status: number | null, declaredContact: boolean): { host: string; status: 403; hint: string } | null {
+  if (status !== 403 || declaredContact) return null
+  let host: string
+  try { host = new URL(finalUrl).hostname.toLowerCase() } catch { return null }
+  if (host !== 'sec.gov' && !host.endsWith('.sec.gov')) return null
+  return { host, status, hint: 'SEC.gov asks automated clients to declare a contact in the User-Agent: use mode "research" with W2L_CONTACT set, for example W2L_CONTACT="Jane Doe jane@example.org".' }
 }
 
 /**

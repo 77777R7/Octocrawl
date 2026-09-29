@@ -30,6 +30,7 @@
 
 import type { Lane } from './status.js'
 import type { AccessFact } from './access.js'
+import type { NetworkPolicy } from './policy.js'
 
 // ---------------------------------------------------------------------------
 // Modes
@@ -83,8 +84,52 @@ export interface ModeIdentity {
  * sec-ch-ua — that contradiction is the inconsistency the probe showed gets a
  * request blocked, and it is exactly the lie the signed record exposes.
  */
-export const RESEARCH_USER_AGENT =
-  'Mozilla/5.0 (compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page)'
+const RESEARCH_UA_COMMENT = 'compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page'
+export const RESEARCH_USER_AGENT = `Mozilla/5.0 (${RESEARCH_UA_COMMENT})`
+
+/** Longest operator contact (`W2L_CONTACT`) the research User-Agent declares. */
+export const MAX_CONTACT_LENGTH = 200
+
+/**
+ * Why a contact cannot go into the research User-Agent, or null when it can.
+ * It becomes part of the User-Agent comment, so it is printable ASCII without
+ * parentheses or backslashes, and never names a browser product: the
+ * research identity is a declared bot.
+ */
+function contactIssue(contact: string): string | null {
+  if (contact.length === 0 || contact.length > MAX_CONTACT_LENGTH) return `must be 1 to ${MAX_CONTACT_LENGTH} characters`
+  if (!/^[\x20-\x7e]+$/.test(contact)) return 'must be printable ASCII'
+  if (/[()\\]/.test(contact)) return 'must not contain parentheses or backslashes, which would end the User-Agent comment'
+  if (/(?:Chrome|Chromium)\/|HeadlessChrome/.test(contact)) return 'must not name a browser product: research mode declares a bot'
+  return null
+}
+
+/**
+ * The research-mode User-Agent. With the operator's contact (`W2L_CONTACT`,
+ * such as a name and email address or a URL), it ends `; contact: <contact>)`:
+ * publishers such as the SEC ask automated clients to declare one.
+ */
+export function researchUserAgent(contact: string | null = null): string {
+  if (contact === null) return RESEARCH_USER_AGENT
+  const issue = contactIssue(contact)
+  if (issue !== null) throw new Error(`W2L_CONTACT ${issue}.`)
+  return `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: ${contact})`
+}
+
+/** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
+export function operatorContact(env: Readonly<Record<string, string | undefined>>): string | null {
+  const contact = (env['W2L_CONTACT'] ?? '').trim()
+  if (contact === '') return null
+  const issue = contactIssue(contact)
+  if (issue !== null) throw new Error(`W2L_CONTACT ${issue}.`)
+  return contact
+}
+
+/** An operator policy whose research-mode requests declare `W2L_CONTACT`, when it is set. */
+export function withOperatorContact(policy: NetworkPolicy, env: Readonly<Record<string, string | undefined>>): NetworkPolicy {
+  const contact = operatorContact(env)
+  return contact === null ? policy : { ...policy, contact }
+}
 
 /**
  * Floor used when no real browser version is known. Subjects driving real
@@ -134,12 +179,13 @@ export const BROWSER_FINGERPRINT = {
 /**
  * The identity for a mode. `standard`, `authed`, and `proxy` share one
  * consistent-browser identity (they differ only in execution lane — session,
- * egress); `research` is the declared bot with no client hints.
+ * egress); `research` is the declared bot with no client hints, declaring the
+ * operator's `contact` when there is one.
  */
-export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR): ModeIdentity {
+export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null): ModeIdentity {
   switch (mode) {
     case 'research':
-      return { mode, userAgent: RESEARCH_USER_AGENT, clientHints: {}, respectsRobots: true, lane: 'browser_local' }
+      return { mode, userAgent: researchUserAgent(contact), clientHints: {}, respectsRobots: true, lane: 'browser_local' }
     case 'standard':
       return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_local' }
     case 'authed':

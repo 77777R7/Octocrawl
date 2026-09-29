@@ -26,14 +26,21 @@ const PAGE = '<!doctype html><html><head><title>Proxied page</title></head><body
 let proxy: Server
 let proxyEndpoint: string
 let seen: string[] = []
+let userAgents: string[] = []
 let policy: NetworkPolicy
 
 beforeAll(async () => {
   proxy = createServer((req, res) => {
     seen.push(`${req.method} ${req.url}`)
-    const path = new URL(req.url ?? '/', 'http://absolute-form.invalid').pathname
+    userAgents.push(req.headers['user-agent'] ?? '')
+    const target = new URL(req.url ?? '/', 'http://absolute-form.invalid')
+    const path = target.pathname
     if (path === '/robots.txt') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
+      return
+    }
+    if (target.hostname === 'www.sec.gov' || path === '/forbidden') {
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><h1>Forbidden</h1><p>Automated clients must declare who they are.</p></body></html>')
       return
     }
     if (path === '/to-https') {
@@ -60,7 +67,7 @@ afterAll(async () => {
   await new Promise<void>(resolve => proxy.close(() => resolve()))
 })
 
-beforeEach(() => { seen = [] })
+beforeEach(() => { seen = []; userAgents = [] })
 
 describe('HTTP lane behind the environment proxy', () => {
   it('sends the page and its robots.txt through the proxy without local DNS and records it', async () => {
@@ -117,6 +124,41 @@ describe('HTTP lane behind the environment proxy', () => {
       await http.teardown()
       origin.closeAllConnections()
       await new Promise<void>(resolve => origin.close(() => resolve()))
+    }
+  })
+})
+
+describe('declared contact hint on the HTTP lane', () => {
+  const filing = 'http://www.sec.gov/Archives/edgar/data/1/filing.htm'
+
+  it('says how to declare a contact when SEC.gov answers 403 to a request that declared none', async () => {
+    for (const [mode, contact] of [['standard', 'Jane Doe jane@example.org'], ['research', undefined]] as const) {
+      const http = new ResilientHttpSubject(mode, { ...policy, ...(contact === undefined ? {} : { contact }) })
+      try {
+        const out = await http.fetch(filing)
+        expect(out.evidence.httpStatus).toBe(403)
+        expect(out.trace).toContainEqual(expect.objectContaining({
+          event: 'declared_contact_hint',
+          detail: expect.objectContaining({ host: 'www.sec.gov', hint: expect.stringContaining('mode "research" with W2L_CONTACT set') }),
+        }))
+      } finally { await http.teardown() }
+    }
+  })
+
+  it('gives no hint once the request declared a contact, or for a 403 from another host', async () => {
+    const research = new ResilientHttpSubject('research', { ...policy, contact: 'Jane Doe jane@example.org' })
+    const standard = new ResilientHttpSubject('standard', policy)
+    try {
+      const declared = await research.fetch(filing)
+      expect(declared.evidence.httpStatus).toBe(403)
+      expect(userAgents.at(-1)).toMatch(/; contact: Jane Doe jane@example\.org\)$/)
+      expect(declared.trace.some(event => event.event === 'declared_contact_hint')).toBe(false)
+      const other = await standard.fetch('http://w2l-proxy-only.invalid/forbidden')
+      expect(other.evidence.httpStatus).toBe(403)
+      expect(other.trace.some(event => event.event === 'declared_contact_hint')).toBe(false)
+    } finally {
+      await research.teardown()
+      await standard.teardown()
     }
   })
 })
