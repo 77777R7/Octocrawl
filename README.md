@@ -214,6 +214,26 @@ The [Gate 2–4 acceptance record](docs/roadmap/gate-2-4-acceptance.md) links th
 
 C2 Monitor/Delivery MCP and its local HTTPS first-use workflow are implemented. C3 has a unified process and authenticated Streamable HTTP implementation; Render hosting, WorkOS browser login, real-client connection, and a hosted restart drill remain unverified. B1/B2 and C1 remain in_progress for their broader operational/adoption gates. See the [first-use walkthrough](docs/mcp-first-use.md) and [dated local evidence](docs/evidence/c2-c3-mcp-local-2026-09-23.md).
 
+## PDF text
+
+`pdfToMarkdown(bytes, options?)` in `packages/extract-tf` turns the bytes of a PDF into Markdown with page numbers, so a figure quoted from a report can be traced to its page. **It is a library function only: scrape, batch, crawl, the API and MCP do not reach it yet**, and a PDF URL still fails there until file download lands (next on the [roadmap](ROADMAP.md)).
+
+What it does:
+
+- Reads the PDF's own text layer with Mozilla pdf.js (`pdfjs-dist` 6.3.289, Apache-2.0), in Node, without rendering.
+- Starts each page with a line `<!-- page N -->`, N being the page's position in the file, and returns `pages[]`: each page's `text`, its printed `label` when the PDF declares one, and the `start` / `end` offsets of that text in the Markdown. `pdfPagesForSpan(pages, start, end)` names the pages any span of the Markdown came from.
+- Rebuilds lines, spaces and paragraphs from text positions, reads multi-column pages column by column and keeps table rows as lines. A word hyphenated at a line end is joined; the hyphen is removed only where the document spells the word without it elsewhere.
+- Reports `info` as the PDF declares it (title, author, producer, dates, language), null where it declares nothing.
+
+What it does not do:
+
+- No OCR: a page without a text layer (a scan) comes back empty with a `no_text_layer` warning.
+- No table reconstruction: cells become lines of text, and every result with text carries `tables_unverified`.
+- Running headers and footers stay in the text unless `repeatedLines: 'remove'`, which lists the removed lines per page.
+- `maxPages` (default 1000) and `timeBudgetMs` (default 60 000, checked before each page) stop with a `page_cap` or `time_budget` warning and the pages read so far. Encrypted, malformed and non-PDF input returns `{ ok: false, error: { code, message } }` instead of throwing.
+
+It is checked on 10 public reports, six of them the seed user's PDFs: [manifest](research/pdf-corpus/manifest.v1.json), `node research/pdf-corpus/run.mjs`, runs in [research/pdf-corpus/runs/](research/pdf-corpus/runs/).
+
 ## Benchmark
 
 Run the full fixture suite against the bare HTTP baseline:
