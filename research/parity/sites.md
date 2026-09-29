@@ -67,6 +67,9 @@ Practice sites come first, because any failure there is a W2L bug. The blocking 
 | A07 | Scrape of quotes.toscrape.com with `onlyMainContent: false` | The whole page: the header's Login link and the footer that main content drops, with the quotes | 6 |
 | A08 | Scrape of quotes.toscrape.com/js-delayed with `waitFor` and a `timeout` shorter than the page's delay | HTTP 200 with `partial` or `failed`/`timeout`, never HTTP 500 | 6 |
 | A09 | A08 through `/fc/v1/scrape` | The shim answers the timeout with HTTP 200 too | 6 |
+| A10 | Crawl of scrapethissite.com/pages/, which redirects to www, with `maxPages` 4 | The start answers within 1 s; the crawl follows the sandbox pages on www and completes with 4 pages | 10 |
+| A11 | Crawl of docs.python.org/3/ with `maxPages` 30, status polled every 2 s | While it runs the status counts pages and never goes back and `/pages` lists some; at the end `pagesFetched` equals the pages and errors listed | 10 |
+| A12 | Crawl of a Statistics Canada listing (robots.txt `Crawl-delay: 2`) with `maxPages` 3 | Fetches are the robots.txt Crawl-delay apart, as estimated and as W2L records them | 10 |
 
 ## Later batches
 

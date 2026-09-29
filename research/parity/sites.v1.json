@@ -508,6 +508,53 @@
           [{ "type": "field", "path": "status", "equals": "success" }, { "type": "markdownMatches", "pattern": "^\\|\\s*Civilian\\s+labor\\s+force\\s*(\\|\\s*[0-9]{2,3},[0-9]{3}\\s*){9}\\|\\s*$" }, { "type": "markdownMatches", "pattern": "^\\|\\s*Unemployment\\s+rate\\s*(\\|\\s*[0-9]+\\.[0-9]\\s*){9}\\|\\s*$" }]
         ] }
       ]
+    },
+    {
+      "id": "A10",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-start-async",
+      "endpoint": "crawl",
+      "url": "https://scrapethissite.com/pages/",
+      "request": { "maxPages": 4, "includePaths": ["^/pages/."] },
+      "note": "The audit's check (python.org, limit 20) on the practice site this set already uses. On 2026-09-29 https://scrapethissite.com/pages/ answers 301 with https://www.scrapethissite.com/pages/, whose links resolve on www.scrapethissite.com; the path filter keeps the crawl on the sandbox pages. The start call answers within 1 s, the crawl completes with 4 pages, and the pages it lists are the start URL and sandbox pages on www (at least two, as the audit asks for more than one on www). Restarting the API mid-crawl is covered by packages/api/test/crawlLifecycle.test.ts, not by this runner.",
+      "checks": [
+        { "item": "crawl-batch.crawl-start-async", "type": "field", "path": "startMs", "max": 1000, "record": true },
+        { "item": "crawl-batch.crawl-start-async", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.crawl-start-async", "type": "field", "path": "report.pagesFetched", "equals": 4 },
+        { "item": "crawl-batch.crawl-start-async", "type": "itemUrls", "minItems": 3, "pattern": "^https://scrapethissite\\.com/pages/$|^https://www\\.scrapethissite\\.com/pages/[^/]+/$" }
+      ]
+    },
+    {
+      "id": "A11",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-status",
+      "endpoint": "crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "maxPages": 30 },
+      "note": "The audit's check: a 30-page crawl of docs.python.org, its status polled every 2 s. While it runs the status counts fetched pages and never goes back, /pages already lists pages, and at the end pagesFetched equals the pages plus errors listed. On 2026-09-29 docs.python.org/robots.txt disallows /dev, /release and end-of-life versions such as /2/ and /3.9/; links there are policy_denied items under /errors and count as pages.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.maxPagesFetchedWhileRunning", "min": 1, "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.monotonic", "equals": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.midRunPages", "min": 1 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "report.pagesFetched", "equalsPath": "stepCount" }
+      ]
+    },
+    {
+      "id": "A12",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-delay",
+      "endpoint": "crawl",
+      "url": "https://www150.statcan.gc.ca/n1/en/type/data",
+      "request": { "maxPages": 3 },
+      "robots": true,
+      "note": "On 2026-09-29 www150.statcan.gc.ca/robots.txt gives 'User-agent: *' with 'Crawl-delay: 2', and this listing links to other pages on the same host. The runner reads robots.txt at run time: the 3 fetches must be its Crawl-delay apart, both as estimated from createdAt like L11 (fetchSpacing) and as W2L records them in each page's crawl_delay trace event (crawlDelay).",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.crawl-delay", "type": "field", "path": "report.pagesFetched", "equals": 3 },
+        { "item": "crawl-batch.crawl-delay", "type": "fetchSpacing", "robotsCrawlDelay": true, "record": true },
+        { "item": "crawl-batch.crawl-delay", "type": "crawlDelay", "record": true }
+      ]
     }
   ]
 }
