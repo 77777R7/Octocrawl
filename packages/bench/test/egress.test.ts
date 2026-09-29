@@ -3,7 +3,7 @@ import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy } from '@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { request } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, DnsLookupError, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, createGuardedDispatcher, DnsLookupError, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
 
 async function* chunks(...parts: Uint8Array[]): AsyncIterable<Uint8Array> {
   for (const part of parts) yield part
@@ -34,6 +34,20 @@ describe('assertSafeUrl', () => {
     // A NO_PROXY host connects directly, so it is resolved and validated here.
     await expect(assertSafeUrl('https://direct.test/', proxied, notFound)).rejects.toBeInstanceOf(DnsLookupError)
     await expect(assertSafeUrl('https://direct.test/', proxied, async () => [{ address: '169.254.169.254', family: 4 }])).rejects.toBeInstanceOf(SsrfDeniedError)
+  })
+})
+
+describe('Chromium proxy at launch', () => {
+  it('names the environment proxy when W2L uses one, and turns the system proxy off otherwise', () => {
+    // Without either, Chromium would use the operating system's proxy: a route nothing records.
+    const off = { args: ['--proxy-server=direct://'] }
+    expect(chromiumProxyLaunchOptions(browserProxySettings(localNetworkPolicy()))).toEqual(off)
+    expect(chromiumProxyLaunchOptions(browserProxySettings(hostedNetworkPolicy()))).toEqual(off)
+    const env = { HTTPS_PROXY: 'http://user:secret@127.0.0.1:7890', HTTP_PROXY: 'http://user:secret@127.0.0.1:7890', NO_PROXY: 'example.org' }
+    expect(chromiumProxyLaunchOptions(browserProxySettings(withEnvironmentProxy(localNetworkPolicy(), { ...env, W2L_PROXY: 'off' })))).toEqual(off)
+    expect(chromiumProxyLaunchOptions(browserProxySettings(withEnvironmentProxy(localNetworkPolicy(), env)))).toEqual({
+      proxy: { server: 'http://127.0.0.1:7890', bypass: 'localhost,*.localhost,127.0.0.1,[::1],example.org,.example.org', username: 'user', password: 'secret' },
+    })
   })
 })
 

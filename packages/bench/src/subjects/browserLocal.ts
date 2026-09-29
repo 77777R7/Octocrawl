@@ -19,7 +19,7 @@ import {
   type ComplianceSentHeader,
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, browserProxySettings, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -849,7 +849,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
           `--host-resolver-rules=${await pinnedBrowserHostRules(this.browserAllowedHosts, this.networkPolicy)}`,
         ]
         if (this.activeExecutions === 0) throw new DOMException('Browser startup abandoned', 'AbortError')
-        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? {} : { args }) })
+        // Never the operating system's proxy: the environment proxy when W2L
+        // uses one, otherwise direct (a user's proxy is set per context).
+        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
       }
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {
@@ -872,7 +874,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     throwIfExecutionStopped(execution)
     if (this.managedContext !== null) return this.managedContext
     if (this.managedContextPromise === null) {
-      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...(this.envProxy === null ? {} : { proxy: this.envProxy.proxy }) })
+      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) })
         .then(async context => {
           if (this.activeExecutions === 0) {
             if (this.managedContextPromise === pending) this.managedContextPromise = null
