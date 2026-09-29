@@ -4,12 +4,14 @@ import {
   RESEARCH_USER_AGENT,
   browserClientHints,
   browserUserAgent,
+  formatIdentitySummary,
   identityBundleFrom,
   identityBundleIssues,
   localNetworkPolicy,
   modeIdentity,
   operatorContact,
   researchUserAgent,
+  robotsAgent,
   withOperatorContact,
   type CrawlMode,
 } from '../src/index.js'
@@ -87,6 +89,26 @@ describe('declared research contact (W2L_CONTACT)', () => {
     expect(research.clientHints).toEqual({})
     expect(identityBundleIssues(identityBundleFrom(research))).toEqual([])
     expect(modeIdentity('standard', undefined, contact).userAgent).toBe(modeIdentity('standard').userAgent)
+  })
+
+  it("declares the contact to sec.gov and its subdomains in SEC's own format, and matches robots.txt as w2l-research there", () => {
+    const contact = 'Jane Doe jane@example.org'
+    for (const host of ['sec.gov', 'www.sec.gov', 'EFTS.SEC.GOV', 'www.sec.gov.']) {
+      expect(researchUserAgent(contact, host), host).toBe(`W2L Research ${contact}`)
+      expect(modeIdentity('research', undefined, contact, host).userAgent, host).toBe(`W2L Research ${contact}`)
+    }
+    for (const host of [null, 'example.org', 'notsec.gov', 'sec.gov.example.org']) {
+      expect(researchUserAgent(contact, host), String(host)).toBe(researchUserAgent(contact))
+    }
+    // Without a contact SEC.gov gets the plain research identity; standard mode never declares one.
+    expect(researchUserAgent(null, 'www.sec.gov')).toBe(RESEARCH_USER_AGENT)
+    expect(modeIdentity('standard', undefined, contact, 'www.sec.gov').userAgent).toBe(modeIdentity('standard').userAgent)
+    const sec = identityBundleFrom(modeIdentity('research', undefined, contact, 'www.sec.gov'))
+    expect(identityBundleIssues(sec)).toEqual([])
+    expect(identityBundleIssues({ ...sec, clientHints: browserClientHints(128) })).toContain('research UA must not send Chromium client hints')
+    expect(formatIdentitySummary(sec)).toBe('w2l-research · en-US')
+    expect(robotsAgent(sec.userAgent)).toContain('w2l-research')
+    expect(robotsAgent(researchUserAgent(contact))).toBe(researchUserAgent(contact))
   })
 
   it('reads W2L_CONTACT as printable ASCII of at most 200 characters, and refuses anything else', () => {

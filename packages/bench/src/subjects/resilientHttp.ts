@@ -38,7 +38,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private readonly prepared: ReturnType<typeof prepareHttpIdentity>
-  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -57,9 +57,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
-    const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
+    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
@@ -92,6 +91,17 @@ export class ResilientHttpSubject implements SubjectAdapter {
         },
       }
     }
+  }
+
+  /**
+   * The identity for a page, used for its robots.txt and every request made
+   * for it: research mode with a contact declares SEC's own format to SEC.gov
+   * (see researchUserAgent), the subject's one identity everywhere else.
+   */
+  private preparedFor(url: string): ReturnType<typeof prepareHttpIdentity> {
+    const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname)
+    prepared.identity.respectsRobots = this.prepared.identity.respectsRobots
+    return prepared
   }
 
   private dispatcherFor(url: string): Dispatcher {
@@ -174,7 +184,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       }
     }
     const trace: TraceEvent[] = []
-    const honest = recordHttpIdentity(this.prepared, trace, 0)
+    const prepared = this.preparedFor(url)
+    const honest = recordHttpIdentity(prepared, trace, 0)
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
     }
@@ -194,16 +205,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
       return timedDenied(dns ? 'dns_error' : 'policy_denied')
     }
 
-    if (this.prepared.identity.respectsRobots) {
+    if (prepared.identity.respectsRobots) {
       const robotsStart = performance.now()
       let cached: Awaited<ReturnType<RobotsOriginCache['lookup']>>
-      try { cached = await this.robotsCache.lookup(url, this.prepared.identity.userAgent, execution) }
+      try { cached = await this.robotsCache.lookup(url, prepared.identity.userAgent, execution) }
       catch (error) {
         robotsMs = performance.now() - robotsStart
         if (signal?.aborted) return timedDenied('timeout')
         throw error
       }
-      const robotsDecision = this.robotsCache.decision(cached, url, this.prepared.identity.userAgent)
+      const robotsDecision = this.robotsCache.decision(cached, url, prepared.identity.userAgent)
       trace.push({
         at: Date.now() - start,
         lane: 'http',
@@ -238,7 +249,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const host = new URL(url).origin
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
     const transportStart = performance.now()
-    const out = await resilientFetch(url, this.fetcherFor(url, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
+    const out = await resilientFetch(url, this.fetcherFor(url, prepared.headers, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs

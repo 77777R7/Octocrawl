@@ -35,11 +35,13 @@ beforeAll(async () => {
     userAgents.push(req.headers['user-agent'] ?? '')
     const target = new URL(req.url ?? '/', 'http://absolute-form.invalid')
     const path = target.pathname
-    if (path === '/robots.txt') {
-      res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
+    // Like SEC.gov, the fake SEC host serves only its prescribed `<Company or name> <email>` User-Agent.
+    const secDeclared = target.hostname === 'www.sec.gov' && /^[^()]+ [^\s()]+@[^\s()]+$/.test(req.headers['user-agent'] ?? '')
+    if (path === '/robots.txt' && (target.hostname !== 'www.sec.gov' || secDeclared)) {
+      res.writeHead(200, { 'content-type': 'text/plain' }).end(`${secDeclared ? 'User-agent: w2l-research\nDisallow: /private/\n\n' : ''}User-agent: *\nAllow: /\n`)
       return
     }
-    if (target.hostname === 'www.sec.gov' || path === '/forbidden') {
+    if (target.hostname === 'www.sec.gov' && !secDeclared || path === '/forbidden') {
       res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><h1>Forbidden</h1><p>Automated clients must declare who they are.</p></body></html>')
       return
     }
@@ -145,14 +147,23 @@ describe('declared contact hint on the HTTP lane', () => {
     }
   })
 
-  it('gives no hint once the request declared a contact, or for a 403 from another host', async () => {
+  it("declares SEC's own format to SEC.gov in research mode with a contact, and gives no hint for a 403 from another host", async () => {
     const research = new ResilientHttpSubject('research', { ...policy, contact: 'Jane Doe jane@example.org' })
     const standard = new ResilientHttpSubject('standard', policy)
     try {
       const declared = await research.fetch(filing)
-      expect(declared.evidence.httpStatus).toBe(403)
+      expect(declared).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
+      // robots.txt and the page both went out in SEC's format, and the trace says so.
+      expect(userAgents).toEqual(['W2L Research Jane Doe jane@example.org', 'W2L Research Jane Doe jane@example.org'])
+      expect(declared.trace.find(event => event.event === 'identity_sent')?.detail?.headers).toContainEqual({ name: 'user-agent', value: 'W2L Research Jane Doe jane@example.org' })
+      expect(declared.trace.some(event => event.event === 'identity_mismatch' || event.event === 'declared_contact_hint')).toBe(false)
+      // A robots.txt group for w2l-research governs the SEC format too.
+      const denied = await research.fetch('http://www.sec.gov/private/filing.htm')
+      expect(denied).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(denied.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ matchedGroup: 'w2l-research' }) }))
+      // Every other host gets the research format with the contact.
+      await research.fetch('http://w2l-proxy-only.invalid/page')
       expect(userAgents.at(-1)).toMatch(/; contact: Jane Doe jane@example\.org\)$/)
-      expect(declared.trace.some(event => event.event === 'declared_contact_hint')).toBe(false)
       const other = await standard.fetch('http://w2l-proxy-only.invalid/forbidden')
       expect(other.evidence.httpStatus).toBe(403)
       expect(other.trace.some(event => event.event === 'declared_contact_hint')).toBe(false)
@@ -173,6 +184,18 @@ describe('browser lane behind the environment proxy', () => {
       expect(seen).toEqual(expect.arrayContaining(['GET http://w2l-proxy-only.invalid/robots.txt', 'GET http://w2l-proxy-only.invalid/page']))
       expect(out.evidence.envProxy).toBe(proxyEndpoint)
       expect(out.trace.some(event => event.event === 'egress_proxy')).toBe(true)
+    } finally { await browser.teardown() }
+  })
+
+  it("declares SEC's own format to SEC.gov in research mode with a contact, and records it", async () => {
+    const browser = new BrowserLocalSubject('research', null, false, { ...policy, contact: 'Jane Doe jane@example.org' })
+    try {
+      const out = await browser.fetch('http://www.sec.gov/Archives/edgar/data/1/filing.htm')
+      expect(out.status).toBe('success')
+      expect(userAgents.length).toBeGreaterThan(1)
+      expect(new Set(userAgents)).toEqual(new Set(['W2L Research Jane Doe jane@example.org']))
+      expect(out.compliance?.sentHeaders.headers).toContainEqual({ name: 'user-agent', value: 'W2L Research Jane Doe jane@example.org' })
+      expect(out.trace.some(event => event.event === 'identity_mismatch')).toBe(false)
     } finally { await browser.teardown() }
   })
 
