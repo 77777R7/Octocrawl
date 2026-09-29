@@ -1,15 +1,17 @@
 import {
   estimateTokens,
+  fileByteCap,
   QUALITY_ESCALATION_MAX_CONFIDENCE,
   QUALITY_ESCALATION_MAX_TOKENS,
   type CrawlMode,
   type ExecutionContext,
   type FetchOptions,
   type FetchResult,
+  type FileDescription,
   type NetworkPolicy,
   type TraceEvent,
 } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
+import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
@@ -19,6 +21,8 @@ import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
+import type { FileStore } from '../fileStore.js'
+import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 
 /**
  * Resilient HTTP subject: the resilient transport engine (redirect following
@@ -38,7 +42,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private readonly prepared: ReturnType<typeof prepareHttpIdentity>
-  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -47,7 +51,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
 
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false) {
+  /** `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved. */
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
@@ -59,7 +64,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
+    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy)) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
@@ -73,23 +78,30 @@ export class ResilientHttpSubject implements SubjectAdapter {
         signal: init.signal ?? signal,
       }).catch((error: unknown) => { throw proxyRefusal(error) ?? error })
       const responseHeaders = response.headers
+      const header = (name: string) => {
+        const v = responseHeaders[name.toLowerCase()]
+        return typeof v === 'string' ? v : Array.isArray(v) ? (v[0] ?? null) : null
+      }
+      let bytes: Promise<Uint8Array> | undefined
       let body: string | undefined
+      const bodyBytes = () => bytes ??= (async () => {
+        const kind = classifyContentType(header('content-type'))
+        // A type W2L does not read (an image, a video, ...) is not downloaded.
+        if (kind === 'unsupported') { discard(response.body); return new Uint8Array() }
+        // A file, or a response whose bytes decide, has the file cap; a web page keeps maxBodyBytes.
+        const cap = kind === 'page' ? maxBodyBytes : maxFileBytes
+        const declared = declaredLength(header('content-length'))
+        if (declared !== null && declared > cap) { discard(response.body); throw new BodyTooLargeError(cap, declared) }
+        const bodyStart = performance.now()
+        const buf = await readCappedBody(response.body, cap)
+        onBodyRead?.(Math.max(0, performance.now() - bodyStart))
+        return buf
+      })()
       return {
         status: response.statusCode,
-        headers: {
-          get: (name: string) => {
-            const v = responseHeaders[name.toLowerCase()]
-            return typeof v === 'string' ? v : Array.isArray(v) ? (v[0] ?? null) : null
-          },
-        },
-        bodyText: async () => {
-          if (body !== undefined) return body
-          const bodyStart = performance.now()
-          const buf = await readCappedBody(response.body, maxBodyBytes)
-          body = new TextDecoder().decode(buf)
-          onBodyRead?.(Math.max(0, performance.now() - bodyStart))
-          return body
-        },
+        headers: { get: header },
+        bodyBytes,
+        bodyText: async () => (body ??= new TextDecoder().decode(await bodyBytes())),
       }
     }
   }
@@ -238,13 +250,14 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const host = new URL(url).origin
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
     const transportStart = performance.now()
+    const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     const out = await resilientFetch(url, this.fetcherFor(url, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
     }, (target, proxy) => {
       trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
-    }), {
+    }, maxFileBytes), {
       signal,
       deadlineAt,
       onRetryAfter: (target, retryAt) => {
@@ -294,17 +307,47 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // Redirect evidence only when a redirect actually happened; a chain of
     // just the requested URL is "no redirect" and matches the other arms.
     const redirectChain = out.redirectChain.length > 1 ? out.redirectChain : []
+    const contentType = out.headers?.get('content-type') ?? null
+    // A 2xx answer with content may be a file (PDF, CSV, ...): see fileResult.ts.
+    const contentful = out.kind === 'ok' && isSuccessStatus(out.status) && !isNoContentStatus(out.status)
     const bodyReadBeforeFinal = bodyReadMs
-    let body: string
-    try { body = await out.bodyText() }
+    // A response whose body was not read to the end: failed, nothing saved,
+    // with the response's status and type kept as what the server answered.
+    const unread = (reason: 'body_too_large' | 'timeout' | 'connection_error', file?: FileDescription): FetchResult => {
+      const denied = timedDenied(reason)
+      return {
+        ...denied,
+        evidence: { ...denied.evidence, finalUrl: out.finalUrl, httpStatus: out.status, redirectChain, contentType, ...(fetchedAt === null ? {} : { fetchedAt }), ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}) },
+        usage: { ...denied.usage, requestCount: out.requestCount, attemptCount: out.attemptCount },
+        ...(file === undefined ? {} : { file }),
+      }
+    }
+    let bytes: Uint8Array
+    try { bytes = await out.bodyBytes() }
     catch (error) {
       if (signal?.aborted) return timedDenied('timeout', out.retryAt)
-      if (error instanceof BodyTooLargeError) return timedDenied('body_too_large')
-      throw error
+      if (error instanceof BodyTooLargeError) {
+        const declared = classifyContentType(contentType)
+        if (!contentful || declared === 'page') return timedDenied('body_too_large')
+        // A file over the cap: failed with the size it declared, nothing saved, nothing truncated.
+        const at = () => Date.now() - start
+        const file = typeof declared === 'object' ? fileTooLarge({ contentType, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes, decision: { kind: declared.kind, detectedBy: 'content_type' } }, { lane: 'http', trace, at }) : undefined
+        if (file === undefined) trace.push({ at: at(), lane: 'http', event: 'file_too_large', detail: { kind: null, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes } })
+        return unread('body_too_large', file)
+      }
+      // A body that stalls or breaks off after the headers is a transport
+      // failure like one before them, not an internal error.
+      const reason = bodyReadFailure(error)
+      if (reason === null) throw error
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'body_read_failed', detail: { reason, error: error instanceof Error ? error.name : String(error) } })
+      return unread(reason)
     }
     transportMs += Math.max(0, bodyReadMs - bodyReadBeforeFinal)
-    const rawBodySha256 = sha256Utf8(body)
-    const rawArtifacts = await captureRawHtml(body, rawBodySha256)
+    const file = contentful ? detectFile(contentType, bytes, responseFileName(out.finalUrl, out.headers?.get('content-disposition') ?? null)) : null
+    // A web page is read as text and hashed as such; a file's hash is of its bytes (see below).
+    const body = file === null ? new TextDecoder().decode(bytes) : ''
+    const rawBodySha256 = file === null ? sha256Utf8(body) : null
+    const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
 
     const base = {
       requestedUrl: url,
@@ -329,8 +372,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
       usage: {
         wallMs,
-        bytesWire: Buffer.byteLength(body),
-        bytesDecompressed: Buffer.byteLength(body),
+        bytesWire: file === null ? Buffer.byteLength(body) : bytes.byteLength,
+        bytesDecompressed: file === null ? Buffer.byteLength(body) : bytes.byteLength,
         requestCount: out.requestCount,
         attemptCount: out.attemptCount,
         contentTokens: null as number | null,
@@ -363,6 +406,30 @@ export class ResilientHttpSubject implements SubjectAdapter {
         lane: 'http',
         escalations: [],
         markdown: null,
+      })
+    }
+
+    if (file === 'unsupported') {
+      trace.push({ at: wallMs, lane: 'http', event: 'unsupported_content_type', detail: { contentType } })
+      return finish({ ...base, status: 'failed', failureReason: 'unsupported_content_type', blockReason: null, budgetExceeded: null, lane: 'http', escalations: [], markdown: null })
+    }
+    // A file is answered here, whatever its outcome: no other lane reads it better.
+    if (file !== null) {
+      const content = await readFileResponse({ decision: file, contentType, declaredBytes: declaredLength(out.headers?.get('content-length') ?? null), maxBytes: maxFileBytes }, bytes, { lane: 'http', store: this.fileStore, deadlineAt, trace, at: () => Date.now() - start })
+      formatMs = content.textMs
+      return finish({
+        ...base,
+        status: content.status,
+        failureReason: content.failureReason,
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'http',
+        escalations: [],
+        markdown: content.markdown,
+        links: [],
+        file: content.file,
+        evidence: { ...base.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
+        usage: { ...base.usage, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
       })
     }
 
@@ -598,6 +665,21 @@ function declaredContactHint(finalUrl: string, status: number | null, declaredCo
   try { host = new URL(finalUrl).hostname.toLowerCase() } catch { return null }
   if (host !== 'sec.gov' && !host.endsWith('.sec.gov')) return null
   return { host, status, hint: 'SEC.gov asks automated clients to declare a contact in the User-Agent: use mode "research" with W2L_CONTACT set, for example W2L_CONTACT="Jane Doe jane@example.org".' }
+}
+
+/** How a body read that failed after the response headers is reported; null for anything else. */
+function bodyReadFailure(error: unknown): 'timeout' | 'connection_error' | null {
+  if (!(error instanceof Error)) return null
+  const code = (error as { code?: unknown }).code
+  if (error.name === 'BodyTimeoutError' || code === 'UND_ERR_BODY_TIMEOUT') return 'timeout'
+  if (error.name === 'SocketError' || code === 'UND_ERR_SOCKET' || code === 'ECONNRESET' || code === 'EPIPE' || code === 'UND_ERR_CLOSED') return 'connection_error'
+  return null
+}
+
+/** Closes a body that will not be read; the connection's own abort is not an error of the fetch. */
+function discard(body: { on(event: 'error', listener: () => void): unknown; destroy(): unknown }): void {
+  body.on('error', () => {})
+  body.destroy()
 }
 
 /**

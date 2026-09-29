@@ -83,6 +83,8 @@ export interface CrawlPage {
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
   metadata?: FetchResult['metadata']
   json?: import('./structured.js').StructuredExtractionResult | null
+  /** The file the page was (PDF, CSV, ...), as on a scrape result; absent for a web page. */
+  file?: FetchResult['file']
   failureReason: string | null
   blockReason: string | null
   budgetExceeded: BudgetKind | null

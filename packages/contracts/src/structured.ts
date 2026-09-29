@@ -33,7 +33,8 @@ export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string
-  source: ProductFactSource | 'hydration'
+  /** `pdf`: a `Label: value` line of a PDF's text; its evidencePath is `page N "label"`. */
+  source: ProductFactSource | 'hydration' | 'pdf'
   evidencePath?: string
 }
 

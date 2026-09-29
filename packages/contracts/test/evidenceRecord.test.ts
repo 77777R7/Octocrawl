@@ -4,6 +4,7 @@ import {
   BLOCK_REASON,
   BUDGET_KIND,
   EVIDENCE_ARTIFACT_KINDS,
+  EVIDENCE_RECORD_ADDED_KEYS,
   EVIDENCE_RECORD_KEYS,
   EVIDENCE_SCHEMA_VERSION,
   FAILURE_REASON,
@@ -41,13 +42,15 @@ describe('Evidence Record v1 schema file', () => {
     for (const [name, node] of Object.entries(schema.properties)) expect(node.description, name).toMatch(/\S/)
   })
 
-  it('has exactly the type\'s nested objects', () => {
+  it('has exactly the type\'s nested objects; a key added to v1 later is optional, every other one required', () => {
     const { record: _record, ...nested } = EVIDENCE_RECORD_KEYS
     expect(Object.keys(schema.$defs).filter(name => name !== 'sha256').sort()).toEqual(Object.keys(nested).sort())
+    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ artifact: ['bytes', 'contentType'] })
     for (const [name, keys] of Object.entries(nested)) {
       const def = schema.$defs[name]!
+      const added: readonly string[] = EVIDENCE_RECORD_ADDED_KEYS[name as keyof typeof EVIDENCE_RECORD_KEYS] ?? []
       expect(Object.keys(def.properties), name).toEqual([...keys])
-      expect(def.required, name).toEqual([...keys])
+      expect(def.required, name).toEqual(keys.filter(key => !added.includes(key)))
       for (const [key, node] of Object.entries(def.properties)) expect(node.description, `${name}.${key}`).toMatch(/\S/)
     }
   })

@@ -23,6 +23,7 @@
  * vendor before the first fetch.
  */
 
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
@@ -30,6 +31,7 @@ import {
   describeEgressProxy,
   formatIdentitySummary,
   identityForRoute,
+  maxFileBytesFromEnv,
   withEnvironmentProxy,
   withOperatorContact,
 } from '@w2l/contracts'
@@ -38,6 +40,7 @@ import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
+import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
 import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
@@ -150,14 +153,17 @@ export function buildChannels(
     localPreviewProxyUrl?: string
     /** Explicit local-review exception for fixed public platform pages only. */
     localPreviewRobotsException?: boolean
+    /** Where the HTTP and browser rungs save files (PDF, CSV, ...) as received. */
+    fileStore?: FileStore | null
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
   // fetch would be both slow and leaky; the channel's close() is what tears
   // the browser down at the end.
   const originScheduler = opts.originScheduler ?? new OriginScheduler(opts.networkPolicy ?? defaultNetworkPolicy())
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml)
+  const fileStore = opts.fileStore ?? null
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore)
   const declared: IdentityBundle = identityForRoute(mode)
 
   // ----------------------------------------------------------------------
@@ -184,7 +190,7 @@ export function buildChannels(
       }
       if (session.cookies !== undefined) access.session!.cookies = session.cookies
       if (session.storageState !== undefined) access.session!.storageState = session.storageState
-      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler)
+      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler, null, undefined, undefined, fileStore)
       authedSubjects.set(session.domain, subject)
     }
     return subject
@@ -530,11 +536,14 @@ export async function runLadder(args: Args): Promise<number> {
     ] as const,
   }
   // The CLI runs in local mode: outbound requests follow the operator's proxy
-  // variables, and research mode declares W2L_CONTACT.
-  const networkPolicy = withOperatorContact(withEnvironmentProxy(defaultNetworkPolicy(), process.env), process.env)
+  // variables, and research mode declares W2L_CONTACT. Files are saved where
+  // the API saves them, under W2L_TASK_ROOT, capped by W2L_MAX_FILE_BYTES.
+  const networkPolicy = { ...withOperatorContact(withEnvironmentProxy(defaultNetworkPolicy(), process.env), process.env), maxFileBytes: maxFileBytesFromEnv(process.env) }
+  const fileStore = new FileStore(join(process.env.W2L_TASK_ROOT ?? '.w2l/api', 'files'))
   const channels = buildChannels(args.mode, {
     vendorPolicy,
     networkPolicy,
+    fileStore,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),
   })
   const policy: CrawlPolicy = {
@@ -578,6 +587,7 @@ export async function runLadder(args: Args): Promise<number> {
         markdown: run.result.markdown,
       }),
     )
+    if (run.result.file !== undefined) console.log(`file        : ${run.result.file.kind} ${run.result.file.bytes ?? '?'} bytes sha256=${run.result.file.sha256 ?? '—'} saved=${run.result.file.path ?? '(not saved)'}`)
     for (const step of run.ladderTrace) {
       console.log(`audit       : ${step.event} channel=${step.channel} ${JSON.stringify(step.detail)}`)
     }

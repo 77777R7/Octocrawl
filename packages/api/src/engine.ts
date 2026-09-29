@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {
   buildChannels,
   BrowserLocalSubject,
+  FileStore,
   LadderRunner,
   LadderScrapeAtom,
   MemoryRoutingHistory,
@@ -19,6 +20,7 @@ import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
   localNetworkPolicy,
+  maxFileBytesFromEnv,
   type FetchOptions,
   type PageOptions,
   type CrawlAccepted,
@@ -150,13 +152,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
   const headed = options.headed === true
+  const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
-    ...(options.networkPolicy ?? localNetworkPolicy()),
+    ...basePolicy,
     ...(options.perHostConcurrency === undefined ? {} : { perHostConcurrency: options.perHostConcurrency }),
     ...(options.perHostMinDelayMs === undefined ? {} : { perHostMinDelayMs: options.perHostMinDelayMs }),
+    // The operator's file cap: the policy's own, else W2L_MAX_FILE_BYTES, else the default.
+    maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
+  }
+  // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
+  const fileStore = new FileStore(join(taskRoot, 'files'))
+  /** A request may lower the file cap, never raise it past the operator's. */
+  const checkFileCap = (req: PageOptions): void => {
+    if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
+      throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes}, this server's file cap (W2L_MAX_FILE_BYTES)`)
+    }
   }
   const originScheduler = new OriginScheduler(networkPolicy)
-  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler)
+  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const inflight = new Map<string, Promise<void>>()
   let batchStartInProgress = false
@@ -165,7 +178,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -335,6 +348,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   return {
     async scrape(req, context = {}) {
+      checkFileCap(req)
       const overallStart = performance.now()
       // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
       const deadlineAt = req.timeout === undefined
@@ -365,6 +379,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async startCrawl(req) {
+      checkFileCap(req)
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
@@ -403,6 +418,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
+      checkFileCap(req)
       batchStartInProgress = true
       try {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
@@ -627,6 +643,7 @@ function fetchOptions(options: PageOptions | undefined): FetchOptions {
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
+    ...(options?.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
   }
 }
 
@@ -673,6 +690,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
+    ...(result?.file === undefined ? {} : { file: result.file }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/77777R7/w2l/blob/main/packages/contracts/schemas/evidence-record.v1.json",
   "title": "W2L Evidence Record v1",
-  "description": "The evidence W2L attaches to every scrape result (evidenceRecord), batch item and crawl page, stated the same way whichever lane produced it. Every field is always present; a value W2L did not observe is null, never 0 or a guess. The record sits beside the result's own fields and changes none of them.",
+  "description": "The evidence W2L attaches to every scrape result (evidenceRecord), batch item and crawl page, stated the same way whichever lane produced it. Every field is always present; a value W2L did not observe is null, never 0 or a guess. The record sits beside the result's own fields and changes none of them. Versioning: w2l.evidence/1 changes only additively, so this file accepts every record an earlier revision of it accepted: a field added later is optional here (artifacts' bytes and contentType, added with file download), though W2L writes it on every record from then on; enums only gain values; no field changes its meaning. A change that cannot follow this rule gets a new schemaVersion and a new schema file.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "requestedUrl", "finalUrl", "redirectChain", "fetchedAt", "httpStatus", "status", "reason", "lane", "robotsDecision", "rawSha256", "outputSha256", "extractor", "fieldEvidence", "artifacts", "proxy", "identity"],
@@ -53,7 +53,7 @@
       "anyOf": [{ "$ref": "#/$defs/robotsDecision" }, { "type": "null" }]
     },
     "rawSha256": {
-      "description": "SHA-256 (hex) of the body W2L read, the same value as evidence.rawBodySha256. HTTP lane: the response body decoded as text and encoded as UTF-8, which equals the SHA-256 of the bytes received for a UTF-8 body without a byte-order mark. Browser lanes: the rendered page's HTML serialization, as UTF-8. Provider lane: the HTML the vendor returned, as UTF-8. Null when no body was read.",
+      "description": "SHA-256 (hex) of the body W2L read, the same value as evidence.rawBodySha256. For a file (a PDF, CSV, JSON, text, XLSX, XLS or ZIP response, listed in artifacts with kind file), in every lane: the SHA-256 of the bytes received, equal to that artifact's sha256. For a web page on the HTTP lane: the response body decoded as text and encoded as UTF-8, which equals the SHA-256 of the bytes received for a UTF-8 body without a byte-order mark. Browser lanes: the rendered page's HTML serialization, as UTF-8. Provider lane: the HTML the vendor returned, as UTF-8. Null when no body was read.",
       "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
     },
     "outputSha256": {
@@ -76,7 +76,7 @@
       ]
     },
     "artifacts": {
-      "description": "Files W2L saved while producing this result, each with its SHA-256. Today that is the page snapshot, when the operator sets W2L_CAPTURE_RAW_DIR. An empty list when nothing was saved.",
+      "description": "Files W2L saved while producing this result, each with its SHA-256: a file response (PDF, CSV, ...) saved as received (kind file), and the page snapshot when the operator sets W2L_CAPTURE_RAW_DIR. An empty list when nothing was saved.",
       "type": "array",
       "items": { "$ref": "#/$defs/artifact" }
     },
@@ -183,12 +183,12 @@
       "required": ["name", "version", "commit"],
       "properties": {
         "name": {
-          "description": "The extractor: extract-tf, W2L's main-content extraction and Markdown conversion, which every lane uses.",
+          "description": "The extractor: extract-tf, W2L's main-content extraction and Markdown conversion of web pages, which every lane uses; pdf-text for a PDF (its text layer, with a page marker before each page); file-text for another file (CSV, JSON and plain text as their text, XLSX, XLS and ZIP without text).",
           "type": "string",
           "minLength": 1
         },
         "version": {
-          "description": "The extractor's version (EXTRACTOR_VERSION, for example extract-tf/1). It changes whenever the Markdown produced from the same HTML can change.",
+          "description": "The extractor's version: EXTRACTOR_VERSION (for example extract-tf/1) for a web page, PDF_TEXT_VERSION (pdf-text/1) for a PDF, FILE_TEXT_VERSION (file-text/1) for another file. It changes whenever the Markdown produced from the same bytes can change.",
           "type": "string",
           "minLength": 1
         },
@@ -205,11 +205,11 @@
       "required": ["source", "locator"],
       "properties": {
         "source": {
-          "description": "What the value was read from: jsonld, microdata, meta (a meta tag), hydration (the page's embedded application state), dom (the page's markup, including its own label/value rows), text (visible prose), inferred (derived from context, such as a currency from the domain) or model (the configured model fallback). pdf is reserved for text read from a PDF, whose locator will name the page; no lane emits it yet.",
+          "description": "What the value was read from: jsonld, microdata, meta (a meta tag), hydration (the page's embedded application state), dom (the page's markup, including its own label/value rows), text (visible prose), inferred (derived from context, such as a currency from the domain), model (the configured model fallback) or pdf (a Label: value line of a PDF's text).",
           "enum": ["jsonld", "microdata", "meta", "hydration", "dom", "text", "inferred", "model", "pdf"]
         },
         "locator": {
-          "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector, or table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content, zero-based in document order; for pdf, the page. Null when the source gives no location: model, and for now JSON-LD, microdata and meta values outside the Amazon adapter, whose extraction does not record where it read them.",
+          "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector, or table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content, zero-based in document order; for pdf, page N \"label\", N being the page's 1-based position in the file (the <!-- page N --> marker in the Markdown). Null when the source gives no location: model, and for now JSON-LD, microdata and meta values outside the Amazon adapter, whose extraction does not record where it read them.",
           "type": ["string", "null"]
         }
       }
@@ -220,7 +220,7 @@
       "required": ["kind", "path", "sha256"],
       "properties": {
         "kind": {
-          "description": "snapshot: the page's HTML as W2L read it (the rendered page on browser lanes). screenshot and file (a downloaded file saved as received) are reserved for the lanes that will produce them. Null when W2L cannot tell what the file is.",
+          "description": "snapshot: the page's HTML as W2L read it (the rendered page on browser lanes). file: a file response (PDF, CSV, JSON, text, XLSX, XLS, ZIP) saved byte for byte as received. screenshot is reserved for the lane that will produce it. Null when W2L cannot tell what the file is.",
           "enum": ["snapshot", "screenshot", "file", null]
         },
         "path": {
@@ -231,6 +231,15 @@
         "sha256": {
           "description": "SHA-256 (hex) of the file's bytes; null when unknown.",
           "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "bytes": {
+          "description": "Size of the file in bytes: for kind file, every byte received. Null when unknown (a snapshot). Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "contentType": {
+          "description": "The Content-Type header the file was received with, as sent. Null when the response sent none or W2L did not record it (a snapshot). Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
+          "type": ["string", "null"]
         }
       }
     },

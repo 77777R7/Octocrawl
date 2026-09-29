@@ -21,6 +21,7 @@ import type {
 import { sha256Utf8 } from '@w2l/http-core'
 import { CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
 import { toEvidenceRecord } from '@w2l/runtime'
+import { pdfLabelledValues } from './pdfFields.js'
 
 export interface StructuredModelConfig {
   baseUrl: string
@@ -39,7 +40,7 @@ export function structuredModelConfigFromEnv(): StructuredModelConfig | null {
 
 interface Candidate {
   value: JsonValue
-  fact?: ProductFact
+  fact?: Omit<ProductFact, 'source'> & { source: StructuredFieldEvidence['source'] }
 }
 
 function numeric(value: string, integer = false): number | string {
@@ -89,7 +90,7 @@ function labelValue(text: string, schema: JsonSchema): JsonValue | undefined {
 function addLabelCandidates(
   map: Map<string, Candidate>,
   root: JsonSchema,
-  labels: readonly LabelledValue[],
+  labels: readonly (LabelledValue & { source?: 'pdf' })[],
   issues: StructuredExtractionIssue[],
 ): void {
   for (const [name, child] of Object.entries(resolveRef(root, root).properties ?? {})) {
@@ -109,7 +110,7 @@ function addLabelCandidates(
       continue
     }
     const first = matched[0]!
-    map.set(name.toLowerCase(), { value: values[0]!, fact: { value: first.value, source: 'dom', path: `${first.path} ${JSON.stringify(first.label)}` } })
+    map.set(name.toLowerCase(), { value: values[0]!, fact: { value: first.value, source: first.source ?? 'dom', path: `${first.path} ${JSON.stringify(first.label)}` } })
   }
 }
 
@@ -129,7 +130,8 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType })
   if (product !== null) addProductCandidates(map, product, put)
-  if (schema !== undefined) addLabelCandidates(map, schema, result.document?.labelledValues ?? [], issues)
+  // A PDF's labels are its `Label: value` lines, each with its page (pdfFields.ts).
+  if (schema !== undefined) addLabelCandidates(map, schema, [...(result.document?.labelledValues ?? []), ...pdfLabelledValues(result)], issues)
   return map
 }
 
@@ -494,7 +496,12 @@ export async function extractStructured(
     return { status: partial.length > 0 ? 'incomplete' : 'complete', data, schemaSha256, evidence, issues: [...partial, ...labelIssues, ...unavailable], modelUsage: null }
   }
   const issues: StructuredExtractionIssue[] = [...partial, ...labelIssues]
-  if (format.modelFallback !== true || partial.length > 0) {
+  // PDF text is read only deterministically: each field from a labelled line with its page, never by a model.
+  const pdf = result.file?.kind === 'pdf'
+  if (format.modelFallback === true && pdf && partial.length === 0) {
+    issues.push({ code: 'model_unavailable', message: 'model fallback does not read PDF text: fields come only from its "Label: value" lines, each with its page' })
+  }
+  if (format.modelFallback !== true || partial.length > 0 || pdf) {
     for (const path of missing) issues.push({ code: 'missing_required', path, message: `required field unavailable: ${path}` })
     if (!deterministicValid && missing.length === 0) issues.push({ code: 'field_unavailable', message: validationMessage(validate.errors) })
     return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
@@ -697,6 +704,7 @@ export function compactScrapeResponse(
     } }),
     ...(next.metadata === undefined ? {} : { metadata: next.metadata }),
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
+    ...(next.file === undefined ? {} : { file: next.file }),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,
     usage: { ...next.usage, totalMs },

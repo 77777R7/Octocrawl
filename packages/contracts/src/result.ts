@@ -2,6 +2,7 @@ import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from 
 import type { ComplianceRecord } from './compliance.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { StructuredExtractionResult } from './structured.js'
+import type { FileDescription } from './file.js'
 
 export interface ResourceTimings {
   queueMs?: number
@@ -197,6 +198,13 @@ export interface FetchResult {
   metadata?: PageMetadata
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
+  /**
+   * Present when the response was a file (PDF, CSV, JSON, text, XLSX, XLS,
+   * ZIP) rather than a web page: what it was, its size, SHA-256 and where it
+   * was saved, and for a PDF its pages. Such a result has no `document` or
+   * `metadata`.
+   */
+  file?: FileDescription
   /**
    * Outbound http(s) links from the FULL document, collected after extract
    * and before the raw HTML is dropped. Not from `mainHtml` — prune strips

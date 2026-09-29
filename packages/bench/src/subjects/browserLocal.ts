@@ -1,5 +1,5 @@
-import { estimateTokens, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
+import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -18,8 +18,10 @@ import {
   type ComplianceRecord,
   type ComplianceSentHeader,
 } from '@w2l/http-core'
-import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { chromium, type Browser, type BrowserContext, type Download, type Page, type Response } from 'playwright'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
+import type { FileStore } from '../fileStore.js'
+import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -128,6 +130,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserAllowedHosts?: readonly string[],
     /** In-memory witness for an explicitly authorized evaluation. Never a persistence path. */
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
+    /** Where files (PDF, CSV, ...) the browser downloads or displays are saved as received; without one they are read but not saved. */
+    private readonly fileStore: FileStore | null = null,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -401,6 +405,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
       void pendingPage.then(created => { if (signal?.aborted) void created.close().catch(() => {}) }, () => {})
       page = await raceWithSignal(pendingPage, signal)
       throwIfExecutionStopped(execution)
+      // A file (PDF, CSV, ZIP, ...) starts a download instead of a page: the
+      // navigation fails with "Download is starting". Keep the download and
+      // the navigation responses, whose headers and request say what came.
+      const seen: { download: Download | null; navigations: Response[] } = { download: null, navigations: [] }
+      page.on('download', download => { seen.download ??= download })
+      page.on('response', navigation => { if (navigation.request().isNavigationRequest()) seen.navigations.push(navigation) })
 
       // Rate-limit facts are captured at actual navigation, after setup.
       let previousRequestAtMs: number | null = null
@@ -433,7 +443,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount } })
         const envProxy = proxyFor(navigationUrl, this.networkPolicy)
         if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
-        response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: remainingTimeout(execution, 20_000) })
+        try {
+          response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: remainingTimeout(execution, 20_000) })
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('Download is starting')) throw error
+          seen.download ??= await raceWithSignal(page.waitForEvent('download', { timeout: remainingTimeout(execution, 5_000) }), signal)
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'download', detail: { url: seen.download.url(), suggestedFilename: seen.download.suggestedFilename() } })
+          break
+        }
         const status = response?.status() ?? 0
         if (status === 429 || status === 503) {
           const delay = parseRetryAfterMs(response?.headers()['retry-after'] ?? null)
@@ -488,6 +505,18 @@ export class BrowserLocalSubject implements SubjectAdapter {
         break
       }
       throwIfExecutionStopped(execution)
+      const file = await this.fileAnswer(url, start, trace, execution, options, seen, response, attemptCount, (finalUrl, sentHeaders) => this.chain.append({
+        recordId: crypto.randomUUID(),
+        mode: this.mode,
+        requestedUrl: url,
+        finalUrl,
+        requestedAt: new Date(start).toISOString(),
+        robots: robotsDecision,
+        sentHeaders: { headers: sentHeaders },
+        rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
+        access: this.access,
+      }), identity)
+      if (file !== null) return file
       // waitFor: the caller's extra wait after load and stability. It counts
       // toward the scrape's deadline; when the deadline would end it, the
       // wait stops early enough to capture the page as it is then, and that
@@ -782,6 +811,113 @@ export class BrowserLocalSubject implements SubjectAdapter {
       signal?.removeEventListener('abort', onAbort)
       await page?.close().catch(() => {})
       if (context !== this.managedContext) await context?.close().catch(() => {})
+    }
+  }
+
+  /**
+   * The answer for a file (see fileResult.ts) the navigation downloaded, or
+   * displays in place of a page (JSON, plain text, a PDF in a headed
+   * browser): the bytes the browser received, saved as received. Null when
+   * the navigation is a web page after all.
+   */
+  private async fileAnswer(
+    url: string,
+    start: number,
+    trace: TraceEvent[],
+    execution: ExecutionContext,
+    options: FetchOptions,
+    seen: { download: Download | null; navigations: readonly Response[] },
+    response: Response | null,
+    attemptCount: number,
+    mint: (finalUrl: string, sentHeaders: ComplianceSentHeader[]) => ComplianceRecord,
+    identity: Parameters<typeof checkIdentityHonesty>[0],
+  ): Promise<FetchResult | null> {
+    const { download } = seen
+    const navigation = download === null ? response : [...seen.navigations].reverse().find(item => item.url() === download.url()) ?? null
+    const status = navigation?.status() ?? null
+    const headers = navigation?.headers() ?? {}
+    const contentType = headers['content-type'] ?? null
+    const declared = classifyContentType(contentType)
+    // Displayed rather than downloaded: only a response whose type names a file (or a type W2L does not read) is one.
+    if (download === null && (navigation === null || !isSuccessStatus(status) || isNoContentStatus(status) || typeof declared !== 'object' && declared !== 'unsupported')) return null
+    const finalUrl = download?.url() ?? navigation!.url()
+    if (finalUrl !== url) await raceWithSignal(assertSafeUrl(finalUrl, this.networkPolicy), execution.signal)
+    const at = () => Date.now() - start
+    const maxBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
+    const declaredBytes = declaredLength(headers['content-length'])
+    const base = (): Omit<FetchResult, 'status' | 'failureReason'> => {
+      // What went on the wire, as Playwright saw it, checked and signed as for a page.
+      const sentHeaders: ComplianceSentHeader[] = Object.entries(navigation === null ? {} : navigation.request().headers())
+        .map(([name, value]) => ({ name: name.toLowerCase(), value }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+      const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
+      if (!honesty.honest) trace.push({ at: at(), lane: 'browser_local', event: 'identity_mismatch', detail: { mismatches: honesty.mismatches } })
+      return {
+        requestedUrl: url,
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'browser_local',
+        escalations: [],
+        markdown: null,
+        links: [],
+        truncated: false,
+        truncatedAt: null,
+        compliance: mint(finalUrl, sentHeaders),
+        evidence: {
+          finalUrl,
+          httpStatus: status,
+          redirectChain: finalUrl !== url ? [url, finalUrl] : [],
+          contentType,
+          rawBodySha256: null,
+          artifacts: [],
+          fetchedAt: new Date().toISOString(),
+          ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
+        },
+        // The file's bytes are counted; what crossed the wire (compressed) is not measured.
+        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: null },
+        trace,
+      }
+    }
+    const unsupported = (): FetchResult => {
+      trace.push({ at: at(), lane: 'browser_local', event: 'unsupported_content_type', detail: { contentType, download: download !== null } })
+      return { ...base(), status: 'failed', failureReason: 'unsupported_content_type' }
+    }
+    const tooLarge = (error: BodyTooLargeError): FetchResult => {
+      const file = typeof declared === 'object' ? fileTooLarge({ decision: { kind: declared.kind, detectedBy: 'content_type' }, contentType, declaredBytes: error.declaredBytes, maxBytes }, { lane: 'browser_local', trace, at }) : undefined
+      if (file === undefined) trace.push({ at: at(), lane: 'browser_local', event: 'file_too_large', detail: { kind: null, declaredBytes: error.declaredBytes, maxBytes } })
+      return { ...base(), status: 'failed', failureReason: 'body_too_large', ...(file === undefined ? {} : { file }) }
+    }
+    if (declared === 'unsupported') {
+      await download?.cancel().catch(() => {})
+      return unsupported()
+    }
+    let bytes: Uint8Array
+    try {
+      if (declaredBytes !== null && declaredBytes > maxBytes) throw new BodyTooLargeError(maxBytes, declaredBytes)
+      if (download !== null) {
+        bytes = await raceWithSignal(download.createReadStream().then(stream => readCappedBody(stream, maxBytes)), execution.signal)
+      } else {
+        bytes = new Uint8Array(await raceWithSignal(navigation!.body(), execution.signal))
+        if (bytes.byteLength > maxBytes) throw new BodyTooLargeError(maxBytes)
+      }
+    } catch (error) {
+      if (!(error instanceof BodyTooLargeError)) throw error
+      await download?.cancel().catch(() => {})
+      return tooLarge(error)
+    }
+    const decision = detectFile(contentType, bytes, responseFileName(finalUrl, headers['content-disposition'] ?? null))
+    if (decision === null && download === null) return null
+    if (decision === null || decision === 'unsupported') return unsupported()
+    const content = await readFileResponse({ decision, contentType, declaredBytes, maxBytes }, bytes, { lane: 'browser_local', store: this.fileStore, ...(execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt }), trace, at })
+    const answered = base()
+    return {
+      ...answered,
+      status: content.status,
+      failureReason: content.failureReason,
+      markdown: content.markdown,
+      file: content.file,
+      evidence: { ...answered.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
+      usage: { ...answered.usage, bytesDecompressed: bytes.byteLength, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
     }
   }
 

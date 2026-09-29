@@ -36,6 +36,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them; other meta tags (og:*, twitter:* and the rest) are not passed through, and a failed or blocked page has none.',
+  'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
 ] as const
 
 export interface FirecrawlPage {

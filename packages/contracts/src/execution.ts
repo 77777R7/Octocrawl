@@ -16,4 +16,10 @@ export interface FetchOptions {
   onlyMainContent?: boolean
   /** Milliseconds a browser rung waits after load and stability before capture. Default 0. */
   waitFor?: number
+  /**
+   * Bytes a file (PDF, CSV, XLSX, ZIP, JSON, text) may have, below the
+   * operator's cap (`NetworkPolicy.maxFileBytes`); a larger file is failed
+   * with `body_too_large` and not saved. Web pages keep `maxBodyBytes`.
+   */
+  maxFileBytes?: number
 }

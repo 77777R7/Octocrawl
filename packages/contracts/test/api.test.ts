@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -81,6 +81,21 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, onlyMainContent: 'false' })).toThrow('onlyMainContent must be a boolean')
     for (const waitFor of [-1, 60_001, 1.5, '500']) expect(() => parseBatchStartRequest({ urls: [url], waitFor })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
     for (const timeout of [999, 300_001, null]) expect(() => parseCrawlStartRequest({ url, timeout })).toThrow('timeout must be an integer number of milliseconds from 1000 to 300000')
+  })
+
+  it('takes maxFileBytes on scrape, batch and crawl, and an operator cap from W2L_MAX_FILE_BYTES that a request only lowers', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, maxFileBytes: 1 })).toMatchObject({ maxFileBytes: 1 })
+    expect(parseBatchStartRequest({ urls: [url], maxFileBytes: 500 * 1024 * 1024 })).toMatchObject({ maxFileBytes: 500 * 1024 * 1024 })
+    expect(parseCrawlStartRequest({ url })).not.toHaveProperty('maxFileBytes')
+    for (const maxFileBytes of [0, 1.5, '100', 500 * 1024 * 1024 + 1]) expect(() => parseCrawlStartRequest({ url, maxFileBytes })).toThrow('maxFileBytes must be an integer number of bytes from 1 to 524288000')
+    expect(maxFileBytesFromEnv({})).toBe(DEFAULT_MAX_FILE_BYTES)
+    expect(DEFAULT_MAX_FILE_BYTES).toBe(50 * 1024 * 1024)
+    expect(maxFileBytesFromEnv({ W2L_MAX_FILE_BYTES: ' 104857600 ' })).toBe(104_857_600)
+    for (const value of ['0', '10MB', '1e6', '524288001']) expect(() => maxFileBytesFromEnv({ W2L_MAX_FILE_BYTES: value })).toThrow('W2L_MAX_FILE_BYTES must be a whole number of bytes from 1 to 524288000')
+    expect(fileByteCap({ maxFileBytes: 1000 }, 10)).toBe(10)
+    expect(fileByteCap({ maxFileBytes: 1000 }, 5000)).toBe(1000)
+    expect(fileByteCap({})).toBe(DEFAULT_MAX_FILE_BYTES)
   })
 
   it('accepts crawl formats and pathname filters, and rejects an invalid regex', () => {

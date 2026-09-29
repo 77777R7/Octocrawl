@@ -42,8 +42,9 @@ export const MAX_RESPONSE_HEADER_BYTES = 64 * 1024
 
 export class BodyTooLargeError extends Error {
   override readonly name = 'BodyTooLargeError'
-  constructor(maxBytes: number) {
-    super(`body exceeded ${maxBytes} bytes`)
+  /** `declaredBytes`: the Content-Length that was over the cap before anything was read; null when the body ran past it. */
+  constructor(readonly maxBytes: number, readonly declaredBytes: number | null = null) {
+    super(declaredBytes === null ? `body exceeded ${maxBytes} bytes` : `body of ${declaredBytes} bytes declared, over the cap of ${maxBytes}`)
   }
 }
 

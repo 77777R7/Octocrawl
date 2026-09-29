@@ -16,13 +16,14 @@ import {
   type EvidenceRecord,
   type EvidenceRobotsDecision,
   type FetchResult,
+  type FileDescription,
   type JsonValue,
   type Lane,
   type RobotsUnreachable,
   type StructuredExtractionResult,
   type TraceEvent,
 } from '@w2l/contracts'
-import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
+import { EXTRACTOR_VERSION, FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /** What this response delivered from the result, after format selection. */
@@ -57,6 +58,8 @@ export function toEvidenceRecord(
     : evidence.redirectChain.length > 0 ? [...evidence.redirectChain]
       : finalUrl === result.requestedUrl ? [finalUrl] : [result.requestedUrl, finalUrl]
   const userAgent = finalUrl === null ? null : observedUserAgent(result)
+  // A web page goes through extract-tf; a file through the PDF text or file text rules.
+  const extractor = result.file === undefined ? EXTRACTOR_VERSION : result.file.kind === 'pdf' ? PDF_TEXT_VERSION : FILE_TEXT_VERSION
   return {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     requestedUrl: result.requestedUrl,
@@ -74,14 +77,14 @@ export function toEvidenceRecord(
       json: output.json === undefined || output.json === null || output.json.data === null ? null : sha256Utf8(canonicalJson(output.json.data as JsonValue)),
     },
     extractor: {
-      name: EXTRACTOR_VERSION.split('/')[0]!,
-      version: EXTRACTOR_VERSION,
+      name: extractor.split('/')[0]!,
+      version: extractor,
       commit: options.sourceCommit !== undefined ? options.sourceCommit : sourceCommitFromEnv(),
     },
     fieldEvidence: output.json === undefined || output.json === null ? null : Object.fromEntries(
       output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null }]),
     ),
-    artifacts: evidence.artifacts.map(artifact),
+    artifacts: evidence.artifacts.map(path => artifact(path, result.file)),
     proxy: evidence.envProxy ?? null,
     identity: {
       userAgent,
@@ -162,8 +165,13 @@ function observedUserAgent(result: FetchResult): string | null {
   return signed ?? identityEvent(result.trace)?.userAgent ?? null
 }
 
-/** A raw snapshot is saved as `<sha256 of its bytes>.html` (bench captureRawHtml); any other file is not known here. */
-function artifact(path: string): EvidenceArtifact {
+/**
+ * The file the result describes (`file.path`), saved as received; a raw
+ * snapshot, saved as `<sha256 of its bytes>.html` (bench captureRawHtml),
+ * whose size and type are not recorded; any other file is not known here.
+ */
+function artifact(path: string, file: FileDescription | undefined): EvidenceArtifact {
+  if (file !== undefined && file.path === path) return { kind: 'file', path, sha256: file.sha256, bytes: file.bytes, contentType: file.contentType }
   const hash = /(?:^|[\\/])([0-9a-f]{64})\.html$/.exec(path)?.[1]
-  return hash === undefined ? { kind: null, path, sha256: null } : { kind: 'snapshot', path, sha256: hash }
+  return hash === undefined ? { kind: null, path, sha256: null, bytes: null, contentType: null } : { kind: 'snapshot', path, sha256: hash, bytes: null, contentType: null }
 }
