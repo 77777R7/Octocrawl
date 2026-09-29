@@ -8,7 +8,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -31,6 +31,7 @@ describe('MCP tools', () => {
         if (url.includes('/pages')) return json({ items: [{ id: 'step-1' }], nextCursor: null, hasMore: false })
         if (url.includes('/errors')) return json({ items: [], nextCursor: null, hasMore: false })
         if (url.includes('/cancel')) return json({ taskId: 'task-1', status: 'cancelled' })
+        if (url.endsWith('/resume')) return json({ taskId: 'task-1' }, 202)
         return json({ taskId: 'task-1', status: 'completed', pagesFetched: 1, cachedPages: 0, attemptId: 'a', budgetExceeded: null, loopDetected: false })
       }) as typeof fetch,
     })
@@ -44,6 +45,7 @@ describe('MCP tools', () => {
     expect((await callTool(client, 'get_crawl_pages', { id: 'task-1', limit: 1 }) as { items: unknown[] }).items).toHaveLength(1)
     expect((await callTool(client, 'get_crawl_errors', { id: 'task-1' }) as { items: unknown[] }).items).toEqual([])
     expect((await callTool(client, 'cancel_crawl', { id: 'task-1' }) as { status: string }).status).toBe('cancelled')
+    expect(await callTool(client, 'resume_crawl', { id: 'task-1' })).toEqual({ taskId: 'task-1' })
     expect(calls.map(call => call.line)).toEqual([
       'POST http://127.0.0.1:8787/v1/scrape',
       'POST http://127.0.0.1:8787/v1/crawl',
@@ -51,6 +53,7 @@ describe('MCP tools', () => {
       'GET http://127.0.0.1:8787/v1/crawl/task-1/pages?limit=1',
       'GET http://127.0.0.1:8787/v1/crawl/task-1/errors',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/cancel',
+      'POST http://127.0.0.1:8787/v1/crawl/task-1/resume',
     ])
     expect(calls[0]?.body).toEqual({ url: 'https://example.com/', mode: 'standard', debug: false })
   })

@@ -31,6 +31,9 @@ describe('W2L SDK', () => {
         if (url.includes('/cancel')) {
           return new Response(JSON.stringify({ taskId: 'task-1', status: 'cancelled' }), { status: 200 })
         }
+        if (url.endsWith('/resume')) {
+          return new Response(JSON.stringify({ taskId: 'task-1' }), { status: 202 })
+        }
         return new Response(JSON.stringify({ taskId: 'task-1', status: 'completed', pagesFetched: 1 }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -47,6 +50,7 @@ describe('W2L SDK', () => {
     expect((await client.getCrawlPages('task-1', { limit: 1 })).items).toHaveLength(1)
     expect((await client.getCrawlErrors('task-1')).items).toEqual([])
     expect((await client.cancelCrawl('task-1')).status).toBe('cancelled')
+    expect(await client.resumeCrawl('task-1')).toEqual({ taskId: 'task-1' })
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       'POST http://127.0.0.1:8787/v1/scrape',
       'POST http://127.0.0.1:8787/v1/crawl',
@@ -54,6 +58,7 @@ describe('W2L SDK', () => {
       'GET http://127.0.0.1:8787/v1/crawl/task-1/pages?limit=1',
       'GET http://127.0.0.1:8787/v1/crawl/task-1/errors',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/cancel',
+      'POST http://127.0.0.1:8787/v1/crawl/task-1/resume',
     ])
   })
 
