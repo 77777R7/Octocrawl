@@ -68,6 +68,53 @@ describe('extractTf', () => {
     expect(out.mainHtml).toBe('')
   })
 
+  it('keeps a release held in one long <pre> inside nested wrappers', () => {
+    const release = Array.from({ length: 12 }, (_, i) =>
+      `Line ${i + 1}: Total nonfarm payroll employment increased by 162,000 in August, and the rate held at 4.1 percent.`).join('\n')
+    const html = `<!doctype html><html><head><title>Employment Situation Summary</title></head><body>
+<div class="helpFormSection"><p>Are you a survey respondent and need help submitting your data?</p></div>
+<div class="helpFormSection"><p>Do you have questions about the monthly estimates?</p></div>
+<div id="wrapper"><div id="main-content"><div id="bodytext"><div class="normalnews"><figure><pre>${release}</pre></figure></div></div></div></div>
+</body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('Line 12: Total nonfarm payroll employment')
+    expect(out.mainHtml).not.toContain('survey respondent')
+  })
+
+  it('keeps a data table that a table viewer wraps in its form', () => {
+    const rows = ['Canada', 'Ontario', 'Quebec', 'British Columbia'].map((geo, i) =>
+      `<tr><th>${geo}</th><td>${(41_000_000 - i * 9_000_000).toLocaleString('en-US')}</td></tr>`).join('')
+    const html = `<!doctype html><html><body><main>
+<h1>Population estimates, quarterly</h1>
+<form id="viewForm"><label for="ref">Reference period</label><select id="ref"><option>2026</option></select><button>Apply</button>
+<div id="viewHtml"><table><thead><tr><th>Geography</th><th>July 1, 2026</th></tr></thead><tbody>${rows}</tbody></table></div>
+</form></main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('British Columbia')
+    expect(out.mainHtml).toContain('14,000,000')
+    expect(out.mainHtml).not.toContain('Apply')
+  })
+
+  it('still drops a short comment form', () => {
+    const html = `<!doctype html><html><body><article>
+<h1>Kiln temperatures</h1>
+<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>
+<form class="comment-form"><p>Leave a reply. Your email address will not be published.</p><textarea></textarea><button>Post comment</button></form>
+</article></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('The kiln reached 1240 degrees')
+    expect(out.mainHtml).not.toContain('Leave a reply')
+  })
+
+  it('counts tables whose rows a script has yet to fill', () => {
+    const html = `<!doctype html><html><body><main><h1>Population estimates, quarterly</h1>
+<p>Table 17-10-0009-01. Release date 2026-09-23. Frequency: quarterly. Geography: Canada, province or territory.</p>
+<table id="simpleTable"><thead id="simpleTableHeader"></thead><tbody id="simpleTableBody"></tbody></table>
+</main></body></html>`
+    expect(extractTf.extract(html).emptyTableShells).toBe(1)
+    expect(extractTf.extract(ARTICLE).emptyTableShells).toBe(0)
+  })
+
   it('filters link-farm paragraphs by link density', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Directory</h1>
