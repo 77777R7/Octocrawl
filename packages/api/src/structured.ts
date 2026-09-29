@@ -609,6 +609,7 @@ export function compactScrapeResponse(
       adapter: next.document.adapter,
       ...(next.document.adapterValidation === undefined ? {} : { adapterValidation: next.document.adapterValidation }),
     } }),
+    ...(next.metadata === undefined ? {} : { metadata: next.metadata }),
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,

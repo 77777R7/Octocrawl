@@ -707,6 +707,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         escalations: [],
         markdown,
         links,
+        metadata: extracted.metadata,
         document: {
           title: extracted.title,
           pageType: extracted.pageType,

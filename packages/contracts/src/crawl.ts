@@ -73,6 +73,8 @@ export interface CrawlPage {
   markdown: string | null
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
+  /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
+  metadata?: FetchResult['metadata']
   json?: import('./structured.js').StructuredExtractionResult | null
   failureReason: string | null
   blockReason: string | null

@@ -21,6 +21,7 @@ import { pageSignalsFor, routePage, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
+import { collectPageMetadata } from './metadata.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -95,6 +96,8 @@ export class ExtractTf implements Extractor {
     const signals = pageSignalsFor(doc.document)
     const preliminaryAdapter = adapterFor(doc.document, options.url)
     const baseUrl = documentBaseUrl(doc.document, options.url)
+    // The page's own <title>, <meta> and <link> declarations, read before cleaning.
+    const metadata = collectPageMetadata(doc.document, baseUrl)
 
     // Declared product facts share those carriers, so they are read from the
     // raw tree too. The visible-price fallback runs much later, after
@@ -181,6 +184,7 @@ export class ExtractTf implements Extractor {
       title: pickTitle(doc.document, main),
       mainHtml: main ? outerHtml(main) : '',
       baseUrl,
+      metadata,
       confidence: confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,

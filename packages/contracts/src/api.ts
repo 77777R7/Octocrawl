@@ -61,6 +61,7 @@ export interface CompactScrapeResponse {
   markdown?: string | null
   links?: readonly string[]
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
+  metadata?: FetchResult['metadata']
   json?: StructuredExtractionResult | null
   truncated: boolean
   truncatedAt: number | null
