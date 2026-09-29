@@ -72,6 +72,14 @@ beforeAll(async () => {
           '<span class="platform-linux">Terminal</span><span class="platform-windows">Git Bash</span>.</p></li><li><p>Set a Git username.</p></li></ol>' +
           '</main></body></html>',
       )
+    } else if (req.url === '/nav-only') {
+      // Navigation and a footer, no main block: the extractor finds no content.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+          '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav>' +
+          '<footer><p>Published by the harbour office</p></footer></body></html>',
+      )
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
     } else if (req.url === '/gate') {
@@ -349,6 +357,24 @@ describe('BrowserLocalSubject transport', () => {
       expect(full.markdown).not.toContain('script text never shows')
       expect(full.status).toBe(main.status)
       expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('keeps the whole page as evidence when no main block is found, and returns it for onlyMainContent false', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const whole = `[Harbour office](${url}/)\n\n- [Tide tables](${url}/tides)\n- [Weather](${url}/weather)\n\nPublished by the harbour office`
+      const main = await subject.fetch(`${url}/nav-only`)
+      expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: whole, usage: { contentTokens: null } })
+      expect(main.links).toEqual([`${url}/`, `${url}/tides`, `${url}/weather`])
+      expect(main.document).toBeUndefined()
+      const full = await subject.fetch(`${url}/nav-only`, undefined, undefined, undefined, { onlyMainContent: false })
+      expect(full).toMatchObject({ status: 'success', failureReason: null, markdown: whole, metadata: { title: 'Harbour office' } })
+      expect(full.usage.contentTokens).toBeGreaterThan(0)
+      expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
+      expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
     } finally {
       await subject.teardown()
     }

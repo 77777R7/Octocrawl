@@ -17,6 +17,9 @@ const PAGES: Record<string, string> = {
   // A confident page whose table rows arrive by script: HTTP content that the ladder offers to the browser rung.
   '/table-shell': '<!doctype html><html><body><main><h1>Tide table, hourly</h1><p>Table 7. Release date 2026-09-23. Frequency: hourly. Station: north pier.</p>' +
     '<form><button>Apply</button><table><thead id="head"></thead><tbody id="body"></tbody></table></form></main></body></html>',
+  // Navigation and a footer, no main block: the extractor finds no content.
+  '/nav-only': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+    '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav><footer><p>Published by the harbour office</p></footer></body></html>',
 }
 
 type BrowserStub = { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: unknown, options?: FetchOptions) => Promise<FetchResult> }
@@ -25,6 +28,17 @@ interface Seen { url: string; options?: FetchOptions; remainingMs: number | null
 /** A browser rung that only ends when the scrape's deadline or a cancellation stops it. */
 const hangingBrowser: BrowserStub = {
   fetch: (_url, _deadlineAt, signal) => new Promise<FetchResult>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true })),
+}
+
+/** A browser rung that cannot load the page. */
+const unreachableBrowser: BrowserStub = {
+  fetch: async url => ({
+    requestedUrl: url, status: 'failed', failureReason: 'connection_error', blockReason: null, budgetExceeded: null, lane: 'browser_local', escalations: [],
+    markdown: null, truncated: false, truncatedAt: null, compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 1, contentTokens: null, browserMs: 1, externalCostUsd: null },
+    trace: [],
+  }),
 }
 
 function recordingBrowser(seen: Seen[]): BrowserStub {
@@ -93,6 +107,19 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(full.markdown).not.toContain('never content')
     expect(full).toMatchObject({ status: main.status, lane: 'http', snapshot: main.snapshot })
     expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ onlyMainContent: false }) }))
+  })
+
+  it('on a page with no main block, false returns the whole page and the default keeps it as evidence', async () => {
+    const { origin, post } = await setup(unreachableBrowser)
+    const full = (await post('/v1/scrape', { url: `${origin}/nav-only`, formats: ['markdown'], onlyMainContent: false })).body
+    expect(full).toMatchObject({ status: 'success', lane: 'http', channelsTried: ['http', 'browser_local'] })
+    expect(full.markdown).toBe(`[Harbour office](${origin}/)\n\n- [Tide tables](${origin}/tides)\n- [Weather](${origin}/weather)\n\nPublished by the harbour office`)
+    // The browser rung failed without a page: the HTTP page is the answer, as evidence of a failed result.
+    const main = (await post('/v1/scrape', { url: `${origin}/nav-only`, formats: ['markdown'] })).body
+    expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: full.markdown, channelsTried: ['http', 'browser_local'] })
+    expect(main.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', channel: 'http' }))
+    expect((await post('/fc/v1/scrape', { url: `${origin}/nav-only`, onlyMainContent: false })).body).toMatchObject({ success: true, data: { markdown: full.markdown } })
+    expect((await post('/fc/v1/scrape', { url: `${origin}/nav-only` })).body).toMatchObject({ success: false, error: 'failed: empty_unverified', data: { markdown: full.markdown } })
   })
 
   it('a timeout answers HTTP 200 with the HTTP content as partial while the browser rung still runs', async () => {

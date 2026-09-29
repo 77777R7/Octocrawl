@@ -202,6 +202,57 @@ describe('HTTP lane on non-200 statuses', () => {
   })
 })
 
+describe('HTTP lane on a page with no main content', () => {
+  const pages: Record<string, string> = {
+    '/nav-only': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+      '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="notices">Notices</a></li></ul></nav><footer><p>Published by the harbour office</p></footer></body></html>',
+    '/shell': '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><noscript>Enable JavaScript to run this app.</noscript></body></html>',
+  }
+  let origin: string
+  let server: import('node:http').Server
+  const http = new ResilientHttpSubject()
+
+  beforeAll(async () => {
+    const { createServer } = await import('node:http')
+    server = createServer((req, res) => {
+      const page = pages[req.url ?? '']
+      if (page === undefined) res.writeHead(404, { 'content-type': 'text/plain' }).end('not found')
+      else res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    origin = `http://127.0.0.1:${address.port}`
+  })
+
+  afterAll(async () => {
+    await http.teardown()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  const whole = () => `[Harbour office](${origin}/)\n\n- [Tide tables](${origin}/tides)\n- [Notices](${origin}/notices)\n\nPublished by the harbour office`
+
+  it('keeps the whole page as evidence on a failed result and still asks for the browser lane', async () => {
+    const out = await http.fetch(`${origin}/nav-only`)
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: whole(), usage: { contentTokens: null } })
+    expect(out.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null }])
+    expect(out.links).toEqual([`${origin}/`, `${origin}/tides`, `${origin}/notices`])
+    expect(out.document).toBeUndefined()
+    // A page with no text at all has no evidence page either.
+    expect(await http.fetch(`${origin}/shell`)).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
+  })
+
+  it('returns the whole page for onlyMainContent false and still offers it to the browser lane', async () => {
+    const out = await http.fetch(`${origin}/nav-only`, undefined, undefined, {}, undefined, { onlyMainContent: false })
+    expect(out).toMatchObject({ status: 'success', failureReason: null, escalations: [], markdown: whole(), metadata: { title: 'Harbour office' } })
+    expect(out.usage.contentTokens).toBeGreaterThan(0)
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_low_yield' }))
+    const shell = await http.fetch(`${origin}/shell`, undefined, undefined, {}, undefined, { onlyMainContent: false })
+    expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
+  })
+})
+
 describe('hosted network policy on the HTTP arm', () => {
   it('denies cloud metadata before a wire request', async () => {
     const hosted = new ResilientHttpSubject('standard', hostedNetworkPolicy())

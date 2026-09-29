@@ -25,7 +25,7 @@ import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -677,11 +677,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
         },
       })
 
+      // No main content: the whole rendered page stays on the failed result
+      // as evidence, never content. onlyMainContent: false asks for the whole
+      // page, not the main content, so there it is the answer.
+      let wholePage: string | null = null
       if (extracted.escalate) {
         if (gate !== null) return blocked(gate)
+        wholePage = wholePageMarkdown(converted, finalUrl)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
-        return {
+        if (options.onlyMainContent !== false || wholePage === null) return {
           ...base,
           status: 'failed',
           failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
@@ -689,7 +694,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
-          markdown: null,
+          markdown: wholePage,
+          ...(wholePage === null ? {} : { links }),
           ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
       }
@@ -705,7 +711,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
       const markdown = options.onlyMainContent === false
-        ? htmlToMarkdown(converted, { baseUrl: finalUrl })
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: finalUrl })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,

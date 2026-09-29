@@ -106,6 +106,16 @@ describe('ProviderSubject robots gate', () => {
     expect(full).toMatchObject({ status: 'success', evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
   })
 
+  it('keeps a page with no main block as evidence, and returns it for onlyMainContent false', async () => {
+    const body = '<!doctype html><html><body><nav><a href="/shop">Shop navigation</a></nav><footer>Provider footer</footer></body></html>'
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const main = await subject.fetch('https://shop.example/dp/B0TEST')
+    expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: '[Shop navigation](https://shop.example/shop)\n\nProvider footer', links: ['https://shop.example/shop'] })
+    const full = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { onlyMainContent: false })
+    expect(full).toMatchObject({ status: 'success', markdown: main.markdown, evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
+  })
+
   it('evaluates robots under the PROVIDER UA, not ours', async () => {
     const transport = new CountingTransport()
     const { fetcher, fetches } = robotsServing(AMAZON_SHAPED)

@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -518,9 +518,14 @@ export class ProviderSubject implements SubjectAdapter {
       },
     })
 
+    // No main content: the whole page stays on the failed result as evidence,
+    // never content. onlyMainContent: false asks for the whole page, so there
+    // it is the answer.
+    let wholePage: string | null = null
     if (extracted.escalate) {
       if (gate !== null) return blocked(gate)
-      return {
+      wholePage = wholePageMarkdown(res.body, res.finalUrl)
+      if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
         failureReason: 'empty_unverified',
@@ -528,7 +533,8 @@ export class ProviderSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'provider',
         escalations: [],
-        markdown: null,
+        markdown: wholePage,
+        ...(wholePage === null ? {} : { links }),
       }
     }
 
@@ -542,7 +548,7 @@ export class ProviderSubject implements SubjectAdapter {
 
     // onlyMainContent: false emits the whole page through the same converter and base URL.
     const markdown = options.onlyMainContent === false
-      ? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
       : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
