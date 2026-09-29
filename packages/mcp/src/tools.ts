@@ -14,6 +14,12 @@ export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl'
 export type ToolName = (typeof TOOL_NAMES)[number]
 
 const idSchema = {type:'object',properties:{id:{type:'string'},debug:{type:'boolean'}},required:['id'],additionalProperties:false} as const
+/** Options scrape, crawl and batch_scrape share; crawl and batch apply them to every page. */
+const PAGE_OPTION_PROPERTIES = {
+  onlyMainContent: { type: 'boolean', description: 'false returns the whole page (header, navigation and footer kept) instead of the main content. Default true.' },
+  waitFor: { type: 'integer', minimum: 0, maximum: 60000, description: 'Milliseconds the browser waits after load before capture. Starts at the browser rung and counts toward timeout. Default 0.' },
+  timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in milliseconds for the whole scrape (per page for crawl and batch). When it fires the result is partial with the content so far, or failed/timeout. Default 300000.' },
+} as const
 const monitorConfigSchema = {type:'object',properties:{preset:{type:'string',enum:['firecrawl-introduction']},monitorId:{type:'string'},revision:{type:'integer',minimum:1},url:{type:'string'},ruleVersion:{type:'string'},intervalMs:{type:'integer',minimum:1},staleAfterMs:{type:'integer',minimum:1},config:{type:'object'},enabled:{type:'boolean'}},additionalProperties:false} as const
 const MONITOR_TOOLS = [
   {name:'preview_monitor',description:'Capture a nonpersistent sample and assess identity, fields, evidence, and missing reasons. Start with preset firecrawl-introduction.',inputSchema:monitorConfigSchema},
@@ -75,6 +81,7 @@ export const TOOLS = [
         },
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
+        ...PAGE_OPTION_PROPERTIES,
       },
       required: ['url'],
       additionalProperties: false,
@@ -99,6 +106,7 @@ export const TOOLS = [
         includeLinks: { type: 'boolean' },
         includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a discovered link must match; the start URL is always fetched.' },
         excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that skip a discovered link; they win over includePaths.' },
+        ...PAGE_OPTION_PROPERTIES,
       },
       required: ['url'],
       additionalProperties: false,
@@ -169,6 +177,7 @@ export const TOOLS = [
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
         includeLinks: { type: 'boolean' },
+        ...PAGE_OPTION_PROPERTIES,
       },
       required: ['urls'], additionalProperties: false,
     },
@@ -202,6 +211,9 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       formats: req.formats,
       includeLinks: req.includeLinks,
       debug: req.debug ?? false,
+      onlyMainContent: req.onlyMainContent,
+      waitFor: req.waitFor,
+      timeout: req.timeout,
     })
   }
   if (name === 'crawl') {
@@ -216,6 +228,9 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       includeLinks: req.includeLinks,
       includePaths: req.includePaths,
       excludePaths: req.excludePaths,
+      onlyMainContent: req.onlyMainContent,
+      waitFor: req.waitFor,
+      timeout: req.timeout,
     })
   }
   if (name === 'get_crawl') {
@@ -236,7 +251,7 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks })
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout })
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

@@ -263,7 +263,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.post('/fc/v1/scrape', async (c) => {
     const req = parseFirecrawlScrapeRequest(await c.req.json())
-    return c.json(wrapScrape(await engine.scrape({ ...req, debug: true }) as ScrapeResponse), 200)
+    // A client disconnect cancels the scrape, as on native /v1/scrape.
+    return c.json(wrapScrape(await engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal }) as ScrapeResponse), 200)
   })
 
   app.post('/fc/v1/crawl', async (c) => {

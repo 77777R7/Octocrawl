@@ -1,3 +1,4 @@
+import type { FetchOptions } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 
 /**
@@ -25,14 +26,19 @@ export interface ErrorPage {
  * Markdown and links of the page an error status carried. Null for a success
  * status, a 304 (it points at a cached representation, it is not one), a
  * missing status, an empty body or a body that is not HTML or text.
+ * `onlyMainContent: false` asks for the whole page, as on a success.
  */
-export function errorPageEvidence(status: number | null, contentType: string | null, body: string, url: string): ErrorPage | null {
+export function errorPageEvidence(status: number | null, contentType: string | null, body: string, url: string, options: FetchOptions = {}): ErrorPage | null {
   if (status === null || status < 100 || isSuccessStatus(status) || status === 304) return null
   if (body.trim() === '' || !isTextBody(contentType)) return null
-  const extracted = extractTf.extract(body, { url })
-  // Error pages are often too small for main-content extraction; then the
-  // whole body is what the server said.
-  const markdown = htmlToMarkdown(extracted.escalate ? body : extracted.mainHtml)
+  let markdown: string
+  if (options.onlyMainContent === false) markdown = htmlToMarkdown(body, { baseUrl: url })
+  else {
+    const extracted = extractTf.extract(body, { url })
+    // Error pages are often too small for main-content extraction; then the
+    // whole body is what the server said.
+    markdown = htmlToMarkdown(extracted.escalate ? body : extracted.mainHtml)
+  }
   return markdown === '' ? null : { markdown, links: collectLinks(body, url) }
 }
 

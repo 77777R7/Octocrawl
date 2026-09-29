@@ -39,6 +39,24 @@ beforeAll(async () => {
           '<!doctype html><html><body><article><h1>Recovered</h1><p>Succeeded on the second attempt.</p></article></body></html>',
         )
       }
+    } else if (req.url === '/delayed') {
+      // Part of the article is in the HTML; the rest arrives two seconds after load.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><article><h1>Delayed report</h1><p>The opening paragraph is in the HTML the server sends, ' +
+          'so it is on the page from the first render onwards and any capture contains it.</p><div id="late"></div></article>' +
+          '<script>setTimeout(function () { document.getElementById("late").innerHTML = "<p>The late paragraph arrives two seconds after load.</p>" }, 2000)</script>' +
+          '</body></html>',
+      )
+    } else if (req.url === '/chrome') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Chrome page</title><style>p { color: black }</style></head><body>' +
+          '<header><a href="/">Site header link</a></header><nav><a href="/a">Navigation entry</a></nav>' +
+          '<main><article><h1>Main story</h1><p>The main story is long enough for the extraction cascade to select it as the ' +
+          'content of the page, while the header, the navigation and the footer around it are page chrome.</p></article></main>' +
+          '<footer><p>Footer notice text</p></footer><script>document.title = "script text never shows"</script></body></html>',
+      )
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
     } else if (req.url === '/gate') {
@@ -227,6 +245,56 @@ describe('BrowserLocalSubject transport', () => {
       const verdict = verifyLedger(scrubbed)
       expect(verdict.valid).toBe(false)
       expect(verdict.violations.some((v) => v.kind === 'broken_link')).toBe(true)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('waits waitFor after load and stability before it captures', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const plain = await subject.fetch(`${url}/delayed`)
+      expect(plain.markdown).toContain('The opening paragraph')
+      expect(plain.markdown).not.toContain('The late paragraph')
+      const waited = await subject.fetch(`${url}/delayed`, undefined, undefined, undefined, { waitFor: 2_500 })
+      expect(waited.status).toBe('success')
+      expect(waited.markdown).toContain('The late paragraph arrives two seconds after load.')
+      expect(waited.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 2_500 }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('captures the page so far as partial when the timeout cuts waitFor short', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      await subject.fetch(`${url}/spa`) // warm the browser so the deadline covers only this page
+      const deadline = Date.now() + 2_500
+      const out = await subject.fetch(`${url}/delayed`, deadline, undefined, undefined, { waitFor: 10_000 })
+      expect(Date.now()).toBeLessThan(deadline)
+      expect(out).toMatchObject({ status: 'partial', failureReason: null, budgetExceeded: null, usage: { deadlineExceeded: true } })
+      expect(out.markdown).toContain('The opening paragraph')
+      expect(out.markdown).not.toContain('The late paragraph')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 10_000, cutShortBy: 'timeout' }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('returns the whole page for onlyMainContent false, with the same evidence', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const main = await subject.fetch(`${url}/chrome`)
+      const full = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false })
+      expect(main.markdown).toContain('Main story')
+      expect(main.markdown).not.toContain('Navigation entry')
+      expect(full.markdown).toContain(`[Navigation entry](${url}/a)`)
+      expect(full.markdown).toContain('Site header link')
+      expect(full.markdown).toContain('Footer notice text')
+      expect(full.markdown).toContain('Main story')
+      expect(full.markdown).not.toContain('script text never shows')
+      expect(full.status).toBe(main.status)
+      expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
     } finally {
       await subject.teardown()
     }

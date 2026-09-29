@@ -24,7 +24,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
-import type { ExecutionContext, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
+import type { ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
   CONTENTFUL_STATUS,
   formatIdentitySummary,
@@ -129,8 +129,8 @@ export function buildChannels(
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
     localSubjects?: {
-      http?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext) => Promise<FetchResult>; teardown?: () => Promise<void> }
-      browser_local?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext) => Promise<FetchResult>; teardown?: () => Promise<void> }
+      http?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext, options?: FetchOptions) => Promise<FetchResult>; teardown?: () => Promise<void> }
+      browser_local?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext, options?: FetchOptions) => Promise<FetchResult>; teardown?: () => Promise<void> }
     }
     /** Opt-in headed Chromium on the browser arm only. Default remains headless. */
     headed?: boolean
@@ -192,8 +192,8 @@ export function buildChannels(
     {
       id: 'http',
       identity: declared,
-      fetch: (url, _session, execution) =>
-        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter),
+      fetch: (url, _session, execution, options) =>
+        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options),
       close: async () => {
         await http.teardown()
         await opts.localSubjects?.http?.teardown?.()
@@ -202,11 +202,12 @@ export function buildChannels(
     {
       id: 'browser_local',
       identity: declared,
+      waitsFor: true,
       // No session here, ever: the plain rung is the public browser.
-      fetch: (url, _session, execution) =>
+      fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
-          ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter),
+          ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -218,7 +219,8 @@ export function buildChannels(
     channels.push({
       id: 'authed_session',
       identity: identityForRoute('authed', { session: true }),
-      fetch: async (url, session, execution) => {
+      waitsFor: true,
+      fetch: async (url, session, execution, options) => {
         const host = new URL(url).hostname.toLowerCase()
         // Skip, never terminal, never a throw: without a local session this
         // rung has nothing to offer, and the ladder must move on to the
@@ -274,7 +276,7 @@ export function buildChannels(
           }
           return skip
         }
-        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
+        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
       },
       close: async () => {
         for (const subject of authedSubjects.values()) await subject.teardown()
@@ -329,7 +331,7 @@ export function buildChannels(
       id: 'provider',
       vendorId,
       identity: identityForRoute(mode, { resume: true }),
-      fetch: async (url, session, execution) => {
+      fetch: async (url, session, execution, options) => {
         // Session resume acceptance is strict: only this vendor's own
         // material, only for this domain. A Steel profile never reaches
         // Browserbase.
@@ -412,7 +414,7 @@ export function buildChannels(
           null,
           opts.robotsFetcher ?? undefined,
         )
-        return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
+        return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
       },
       close: async () => {
         if (connected !== null) {

@@ -7,6 +7,7 @@
 
 import type { CrawlMode } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
+import type { FetchOptions } from './execution.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { DocumentExtraction } from './extractor.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
@@ -14,7 +15,25 @@ import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
 export type ApiCrawlMode = (typeof CRAWL_MODES)[number]
 
-export interface ScrapeRequest {
+/** A scrape's deadline when the request sets no `timeout`, and the largest one it may set. */
+export const DEFAULT_SCRAPE_TIMEOUT_MS = 300_000
+export const MIN_SCRAPE_TIMEOUT_MS = 1_000
+export const MAX_WAIT_FOR_MS = 60_000
+
+/**
+ * Per-page capture options shared by scrape, batch and crawl (for batch and
+ * crawl they apply to every page).
+ */
+export interface PageOptions extends FetchOptions {
+  /**
+   * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
+   * 300 000. When it fires the result is `partial` with the best content a
+   * rung produced so far, or `failed` with `timeout`, never an error.
+   */
+  timeout?: number
+}
+
+export interface ScrapeRequest extends PageOptions {
   url: string
   mode?: ApiCrawlMode
   allowlistedDomains?: readonly string[]
@@ -49,7 +68,7 @@ export interface CompactScrapeResponse {
   channelsTried: readonly string[]
 }
 
-export interface CrawlStartRequest {
+export interface CrawlStartRequest extends PageOptions {
   url: string
   mode?: ApiCrawlMode
   maxPages?: number | null
@@ -70,7 +89,7 @@ export interface CrawlAccepted {
   taskId: string
 }
 
-export interface BatchStartRequest {
+export interface BatchStartRequest extends PageOptions {
   urls: readonly string[]
   mode?: ApiCrawlMode
   formats?: readonly ScrapeFormat[]
@@ -116,9 +135,10 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths'] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout'] as const
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', ...PAGE_KEYS] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', ...PAGE_KEYS] as const
 
 /** An option W2L does not know is an error, never silently dropped. */
 function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[]): void {
@@ -261,6 +281,24 @@ function readPathPatterns(value: unknown, name: string): readonly string[] | und
   return patterns
 }
 
+function readMilliseconds(value: unknown, name: string, min: number, max: number): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new RequestError(`${name} must be an integer number of milliseconds from ${min} to ${max}`)
+  }
+  return value
+}
+
+/** onlyMainContent, waitFor and timeout, shared by scrape, batch and crawl. */
+function readPageOptions(rec: Record<string, unknown>): PageOptions {
+  if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
+  return {
+    onlyMainContent: rec.onlyMainContent as boolean | undefined,
+    waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
+    timeout: readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS),
+  }
+}
+
 export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
   rejectUnknownKeys(rec, SCRAPE_KEYS)
@@ -273,6 +311,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     formats: readFormats(rec.formats),
     includeLinks: rec.includeLinks as boolean | undefined,
     debug: rec.debug as boolean | undefined,
+    ...readPageOptions(rec),
   }
 }
 
@@ -295,6 +334,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     includeLinks: rec.includeLinks as boolean | undefined,
     includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
     excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
+    ...readPageOptions(rec),
   }
 }
 
@@ -307,7 +347,7 @@ export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   const urls = rec.urls.map(readUrl)
   if (new Set(urls.map(url => new URL(url).href)).size !== urls.length) throw new RequestError('urls must be unique')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
-  return { urls, mode: readMode(rec.mode), formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined }
+  return { urls, mode: readMode(rec.mode), formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined, ...readPageOptions(rec) }
 }
 
 export function parseCrawlPageQuery(query: Record<string, string | undefined>): CrawlPageQuery {

@@ -4,6 +4,7 @@ import {
   QUALITY_ESCALATION_MAX_TOKENS,
   type CrawlMode,
   type ExecutionContext,
+  type FetchOptions,
   type FetchResult,
   type NetworkPolicy,
   type TraceEvent,
@@ -95,34 +96,36 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.dispatcher
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
     const origin = new URL(url).origin
+    const deadlinePassed = () => scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs
+    // A timeout the deadline caused says so in usage. budgetExceeded stays
+    // null: the contract reserves it for status budget_exceeded.
+    const markDeadline = (result: FetchResult): FetchResult =>
+      result.failureReason === 'timeout' && deadlinePassed() ? { ...result, usage: { ...result.usage, deadlineExceeded: true } } : result
     let permit: OriginPermit | undefined
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs)
-      return scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs
-        ? { ...result, budgetExceeded: 'time' }
-        : result
+      return markDeadline(await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const retryAt = this.scheduler.retryAt(origin)
       const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
-      return scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs ? { ...timed, budgetExceeded: 'time' } : timed
+      return markDeadline(timed)
     } finally {
       scope.dispose()
       permit?.release()
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions): Promise<FetchResult> {
     const { signal, deadlineAt, onRetryAfter } = execution
     const start = Date.now()
     let robotsMs = 0
@@ -340,7 +343,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     })
     // An error status is never content, but its page is what the server
     // said: the failed or blocked result keeps it as evidence.
-    const errorPage = errorPageEvidence(out.status, base.evidence.contentType, body, out.finalUrl)
+    const errorPage = errorPageEvidence(out.status, base.evidence.contentType, body, out.finalUrl, options)
     const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
       const next = escalationForBlock(verdict.reason, 'http')
@@ -414,6 +417,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         confidence: extracted.confidence,
         escalate: extracted.escalate,
         linkCount: links.length,
+        ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
       },
     })
 
@@ -442,9 +446,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     const formatStart = performance.now()
-    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    const mainMarkdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    // onlyMainContent: false emits the whole page (header, navigation and
+    // footer kept) through the same converter and base URL. The quality
+    // signal below still reads the main content, so the mode never changes
+    // which lane answers.
+    const markdown = options.onlyMainContent === false ? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
     formatMs = performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
+    const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
 
     // Quality signal: a success whose content is thin AND low-confidence is
     // a success worth offering to a higher lane. So is a page whose tables
@@ -454,7 +464,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // event as "the HTTP answer is below the quality bar, try the browser".
     const emptyTableShells = extracted.emptyTableShells ?? 0
     if (
-      (contentTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
+      (mainTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
         extracted.confidence <= QUALITY_ESCALATION_MAX_CONFIDENCE) ||
       emptyTableShells > 0
     ) {
@@ -463,7 +473,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         lane: 'http',
         event: 'quality_low_yield',
         detail: {
-          contentTokens,
+          contentTokens: mainTokens,
           confidence: extracted.confidence,
           pageType: extracted.pageType,
           strategy: extracted.strategy,

@@ -260,6 +260,21 @@ describe('structured JSON extraction', () => {
     expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [] }, issues: [{ code: 'page_unsuccessful' }] })
   })
 
+  it('reads fields from a partial page but never reports it complete and never calls the model', async () => {
+    const partial: FetchResult = { ...page(book), status: 'partial', usage: { ...result.usage, deadlineExceeded: true } }
+    let calls = 0
+    const custom = await extractStructured(partial, json({ title: { type: 'string' }, reviews: { type: 'array', items: { type: 'string' } } }, ['title', 'reviews'], true), {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: (async () => { calls++; return new Response('{}') }) as typeof fetch,
+    })
+    expect(calls).toBe(0)
+    expect(custom).toMatchObject({ status: 'incomplete', data: { title: 'A Light in the Attic' } })
+    expect(custom.issues.map(issue => issue.code)).toEqual(['page_partial', 'missing_required'])
+    const whole = await extractStructured(partial, json({ title: { type: 'string' } }, ['title']))
+    expect(whole).toMatchObject({ status: 'incomplete', data: { title: 'A Light in the Attic' }, issues: [{ code: 'page_partial' }] })
+    const canonical = await extractStructured({ ...result, status: 'partial' })
+    expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [{ id: 'B012345678' }] }, issues: [{ code: 'page_partial' }] })
+  })
+
   it('keeps a failed page as evidence Markdown and never hands it to model fallback', async () => {
     const failed = {
       ...result, status: 'failed', failureReason: 'http_error', markdown: '# 404 Not Found', document: undefined,
