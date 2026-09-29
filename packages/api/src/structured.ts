@@ -21,6 +21,7 @@ import type {
 import { sha256Utf8 } from '@w2l/http-core'
 import { CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
 import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
+import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 
 export interface StructuredModelConfig {
@@ -42,11 +43,25 @@ interface Candidate {
   value: JsonValue
   /** Where the value came from; a product fact carries its own. */
   fact?: { source: StructuredFieldEvidence['source']; path?: string }
+  /** The page text a number value was read from. */
+  text?: string
+  /** Why no number was read from the page text the value keeps; an issue when a number field stays unfilled. */
+  unread?: string
+  /** The same for members of the value, such as a price list's amounts, by JSON Pointer below it. */
+  unreadMembers?: ReadonlyArray<{ path: string; message: string }>
 }
 
-function numeric(value: string, integer = false): number | string {
-  const parsed = Number(value.replace(integer ? /[^0-9-]/g : /[^0-9.-]/g, ''))
-  return Number.isFinite(parsed) ? (integer ? Math.trunc(parsed) : parsed) : value
+/** Sources whose format writes `.` as the decimal point: JSON-LD and OpenGraph product meta. Microdata may hold visible text. */
+const DECIMAL_POINT_SOURCES: ReadonlySet<string> = new Set(['jsonld', 'meta'])
+
+function unreadMessage(text: string, where: NonNullable<Candidate['fact']>, why: string): string {
+  return `the page states ${JSON.stringify(text)} (${where.source}${where.path === undefined ? '' : `, ${where.path}`}): ${why}; no number was read`
+}
+
+/** A product fact's number and the text it was read from, or its text and why no number was read (numbers.ts). */
+function factNumber(fact: ProductFact, context: NumberContext = {}): Omit<Candidate, 'fact' | 'unreadMembers'> {
+  const reading = readNumber(fact.value, { ...context, decimalPoint: DECIMAL_POINT_SOURCES.has(fact.source) })
+  return 'value' in reading ? { value: reading.value, text: fact.value } : { value: fact.value, unread: unreadMessage(fact.value, fact, reading.message) }
 }
 
 /** A key or page label reduced to its letters and digits: "Number of reviews" matches numberOfReviews. */
@@ -59,30 +74,22 @@ function baseLabelKey(text: string): string {
   return labelKey(text.replace(/\([^)]*\)|\[[^\]]*\]/g, ' '))
 }
 
-const CURRENCY = '(?:[$£€¥₹₽₩฿]|USD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|CHF|HKD|SGD|INR|KRW|BRL|MXN|SEK|NOK|DKK|PLN|TRY|ZAR)'
-/** Sign, currency, sign, whole part (thousands in groups of three), decimals, currency. */
-const AMOUNT_RE = new RegExp(`^([-−]?)(?:${CURRENCY}\\s?)?([-−]?)(\\d{1,3}(?:,\\d{3})+|\\d+)(\\.\\d+)?(?:\\s?${CURRENCY})?$`, 'u')
-
 /**
- * Text as a number when it is one amount, with a currency or thousands
- * separators at most: "In stock (22 available)", "4.7 out of 5", "18,50",
- * "HL-1" and a URL are not.
+ * Label text as the schema type: its value (`number` when read as a number
+ * from the text), `unsettled` with the reason when it is a number whose
+ * notation the page does not settle (numbers.ts), or undefined when it is not
+ * cleanly that type ("In stock (22 available)", "4.7 out of 5", "HL-1" and a
+ * URL are not numbers).
  */
-function amount(text: string): number | undefined {
-  const m = AMOUNT_RE.exec(text.trim())
-  if (m === null || (m[1] !== '' && m[2] !== '')) return undefined
-  return Number(`${m[1] || m[2] ? '-' : ''}${m[3]!.replace(/,/g, '')}${m[4] ?? ''}`)
-}
-
-/** Label text as the schema type, or undefined when it is not cleanly that type. */
-function labelValue(text: string, schema: JsonSchema): JsonValue | undefined {
+function labelValue(text: string, schema: JsonSchema): { value: JsonValue; number?: true } | { unsettled: string } | undefined {
   const types = schemaTypes(schema)
-  if (types.length === 0 || types.includes('string')) return text
+  if (types.length === 0 || types.includes('string')) return { value: text }
   if (types.includes('number') || types.includes('integer')) {
-    const value = amount(text)
-    return value !== undefined && (types.includes('number') || Number.isInteger(value)) ? value : undefined
+    const reading = readNumber(text)
+    if (!('value' in reading)) return reading.reason === 'unsettled' ? { unsettled: reading.message } : undefined
+    return types.includes('number') || Number.isInteger(reading.value) ? { value: reading.value, number: true } : undefined
   }
-  if (types.includes('boolean')) return /^(true|yes)$/i.test(text) ? true : /^(false|no)$/i.test(text) ? false : undefined
+  if (types.includes('boolean')) return /^(true|yes)$/i.test(text) ? { value: true } : /^(false|no)$/i.test(text) ? { value: false } : undefined
   return undefined
 }
 
@@ -91,7 +98,8 @@ function labelValue(text: string, schema: JsonSchema): JsonValue | undefined {
  * covers. A label equal to the key wins over one that only matches without
  * its bracketed qualifier. When the matching labels state different values,
  * or one of them is not of the key's type, nothing is chosen: the field stays
- * absent and an issue names the labels.
+ * absent and an issue names the labels. Labels that state one number in a
+ * notation the page does not settle leave it absent too, saying why.
  */
 function addLabelCandidates(
   map: Map<string, Candidate>,
@@ -105,8 +113,16 @@ function addLabelCandidates(
     const exact = labels.filter(item => labelKey(item.label) === key)
     const matched = exact.length > 0 ? exact : labels.filter(item => baseLabelKey(item.label) === key)
     if (matched.length === 0) continue
-    const values = matched.map(item => labelValue(item.value, effective(root, child)))
-    if (values.every(value => value === undefined)) continue
+    const readings = matched.map(item => labelValue(item.value, effective(root, child)))
+    if (readings.every(reading => reading === undefined)) continue
+    const first = matched[0]!
+    const fact: NonNullable<Candidate['fact']> = { source: first.source ?? 'dom', path: `${first.path} ${JSON.stringify(first.label)}` }
+    const unsettled = readings[0] !== undefined && 'unsettled' in readings[0] ? readings[0].unsettled : undefined
+    if (unsettled !== undefined && matched.every(item => item.value === first.value)) {
+      map.set(name.toLowerCase(), { value: first.value, fact, unread: unreadMessage(first.value, fact, unsettled) })
+      continue
+    }
+    const values = readings.map(reading => reading !== undefined && 'value' in reading ? reading.value : undefined)
     if (values.some(value => value === undefined || JSON.stringify(value) !== JSON.stringify(values[0]))) {
       issues.push({
         code: 'field_ambiguous',
@@ -115,17 +131,18 @@ function addLabelCandidates(
       })
       continue
     }
-    const first = matched[0]!
-    map.set(name.toLowerCase(), { value: values[0]!, fact: { source: first.source ?? 'dom', path: `${first.path} ${JSON.stringify(first.label)}` } })
+    const number = readings[0] !== undefined && 'number' in readings[0]
+    map.set(name.toLowerCase(), { value: values[0]!, fact, ...(number ? { text: first.value } : {}) })
   }
 }
 
 function candidates(result: FetchResult, schema?: JsonSchema, issues: StructuredExtractionIssue[] = []): Map<string, Candidate> {
   const map = new Map<string, Candidate>()
   const product = result.document?.product ?? null
-  const put = (keys: readonly string[], fact: ProductFact | null | undefined, value?: JsonValue): void => {
+  const put = (keys: readonly string[], fact: ProductFact | null | undefined, read?: (fact: ProductFact) => Omit<Candidate, 'fact'>): void => {
     if (fact === null || fact === undefined) return
-    for (const key of keys) map.set(key.toLowerCase(), { value: value ?? fact.value, fact })
+    const candidate = { value: fact.value, fact, ...read?.(fact) }
+    for (const key of keys) map.set(key.toLowerCase(), candidate)
   }
   // The fetch's own URLs, the content title and the page type W2L inferred:
   // each says where it came from, like a value read from the page.
@@ -159,18 +176,18 @@ function titleFact(title: string, metadata: FetchResult['metadata']): Candidate[
 function addProductCandidates(
   map: Map<string, Candidate>,
   product: ProductFacts,
-  put: (keys: readonly string[], fact: ProductFact | null | undefined, value?: JsonValue) => void,
+  put: (keys: readonly string[], fact: ProductFact | null | undefined, read?: (fact: ProductFact) => Omit<Candidate, 'fact'>) => void,
 ): void {
   put(['asin', 'id', 'productid', 'subjectid', 'sku'], product.subjectId ?? product.sku)
   put(['title', 'name', 'productname'], product.name)
   put(['brand'], product.brand)
-  put(['price', 'amount', 'currentprice'], product.price, product.price ? numeric(product.price.value) : undefined)
+  put(['price', 'amount', 'currentprice'], product.price, fact => factNumber(fact, { currency: product.priceCurrency?.value }))
   put(['currency', 'pricecurrency'], product.priceCurrency)
   put(['seller', 'merchant'], product.seller)
   put(['availability', 'stock'], product.availability)
   put(['deliverylocation', 'deliveryregion', 'region'], product.deliveryLocation)
-  put(['rating'], product.rating, product.rating ? numeric(product.rating.value) : undefined)
-  put(['reviewcount', 'reviews'], product.reviewCount, product.reviewCount ? numeric(product.reviewCount.value, true) : undefined)
+  put(['rating'], product.rating, fact => factNumber(fact))
+  put(['reviewcount', 'reviews'], product.reviewCount, fact => factNumber(fact, { count: true }))
   map.set('kind', { value: product.kind ?? 'unknown', fact: { source: 'inferred', ...(product.kind === undefined ? {} : { path: 'document.product.kind' }) } })
   // A list is a source only when the extractor read it from the page. The
   // Amazon adapter reports what it observed on the verified subject, possibly
@@ -179,14 +196,20 @@ function addProductCandidates(
   const { images, prices, variants, specifications } = product
   if (images !== undefined) map.set('images', { value: images.map(item => item.value), fact: images[0] })
   if (prices !== undefined) {
+    const unreadMembers: Array<{ path: string; message: string }> = []
     map.set('prices', {
-      value: prices.map(item => ({
-        amount: numeric(item.amount.value),
-        currency: item.currency?.value ?? null,
-        priceType: item.priceType,
-        seller: item.seller?.value ?? null,
-      })),
+      value: prices.map((item, index) => {
+        const amount = factNumber(item.amount, { currency: item.currency?.value })
+        if (amount.unread !== undefined) unreadMembers.push({ path: `/${index}/amount`, message: amount.unread })
+        return {
+          amount: amount.value,
+          currency: item.currency?.value ?? null,
+          priceType: item.priceType,
+          seller: item.seller?.value ?? null,
+        }
+      }),
       fact: prices[0]?.amount,
+      ...(unreadMembers.length > 0 ? { unreadMembers } : {}),
     })
   }
   if (variants !== undefined) {
@@ -281,14 +304,15 @@ function matchesType(value: JsonValue, type: string): boolean {
   }
 }
 
-function coerce(value: JsonValue, schema: JsonSchema): JsonValue | undefined {
+/** The value as the schema's type. `readNumbers` false: a string is not read as a number (its number was already found unreadable). */
+function coerce(value: JsonValue, schema: JsonSchema, readNumbers = true): JsonValue | undefined {
   const types = schemaTypes(schema)
   if (types.length === 0 || types.some(type => matchesType(value, type))) return value
   if (value === null) return undefined
   if ((types.includes('number') || types.includes('integer')) && typeof value === 'string') {
-    // Only a string that is one amount becomes a number: "HL-1" is not -1.
-    const parsed = amount(value)
-    return parsed !== undefined && (types.includes('number') || Number.isInteger(parsed)) ? parsed : undefined
+    // Only a string that is one amount becomes a number: "HL-1" is not -1 (numbers.ts).
+    const reading = readNumbers ? readNumber(value) : null
+    return reading !== null && 'value' in reading && (types.includes('number') || Number.isInteger(reading.value)) ? reading.value : undefined
   }
   if (types.includes('string') && typeof value !== 'string') return String(value)
   if (types.includes('boolean') && typeof value === 'string') {
@@ -319,13 +343,16 @@ function mapSchema(
   const schema = effective(root, node)
   const direct = key === null ? undefined : source.get(key.toLowerCase())
   if (direct !== undefined) {
-    const value = coerce(direct.value, schema)
+    const value = coerce(direct.value, schema, direct.unread === undefined)
     if (value !== undefined) {
       if (direct.fact !== undefined) {
+        // A number read from page text quotes that text.
+        const text = typeof value !== 'number' ? undefined : direct.text ?? (typeof direct.value === 'string' ? direct.value : undefined)
         evidence.push({
           path,
           source: direct.fact.source,
           ...(direct.fact.path === undefined ? {} : { evidencePath: direct.fact.path }),
+          ...(text === undefined ? {} : { text }),
         })
       }
       filled.add(path)
@@ -345,6 +372,26 @@ function mapSchema(
     return path === '' || Object.keys(out).length > 0 ? out : undefined
   }
   return undefined
+}
+
+/**
+ * Why a number the page states was not read: for each top-level field that
+ * asked for one and was left unfilled, and for each member of a filled value
+ * (a price list's amount) kept as the page's text.
+ */
+function unreadIssues(root: JsonSchema, source: ReadonlyMap<string, Candidate>, filled: ReadonlySet<string>): StructuredExtractionIssue[] {
+  const issues: StructuredExtractionIssue[] = []
+  for (const name of Object.keys(effective(root, root).properties ?? {})) {
+    const candidate = source.get(name.toLowerCase())
+    const path = `/${name}`
+    if (candidate === undefined) continue
+    if (!filled.has(path)) {
+      if (candidate.unread !== undefined) issues.push({ code: 'field_unavailable', path, message: candidate.unread })
+      continue
+    }
+    for (const member of candidate.unreadMembers ?? []) issues.push({ code: 'field_unavailable', path: `${path}${member.path}`, message: member.message })
+  }
+  return issues
 }
 
 function fillNullableMissing(root: JsonSchema, schemaInput: JsonSchema, value: JsonValue | undefined): JsonValue | undefined {
@@ -727,9 +774,12 @@ export async function extractStructured(
   const evidence: StructuredFieldEvidence[] = []
   // Paths filled from the page or the fetch.
   const filled = new Set<string>()
-  // Fields whose page labels disagree: reported with every result that carries data.
-  const labelIssues: StructuredExtractionIssue[] = []
-  const mapped = mapSchema(format.schema, format.schema, candidates(result, format.schema, labelIssues), '', evidence, filled) ?? null
+  // Fields whose page labels disagree, or whose number the page states but was
+  // not read: reported with every result that carries data.
+  const readIssues: StructuredExtractionIssue[] = []
+  const source = candidates(result, format.schema, readIssues)
+  const mapped = mapSchema(format.schema, format.schema, source, '', evidence, filled) ?? null
+  readIssues.push(...unreadIssues(format.schema, source, filled))
   const data = fillNullableMissing(format.schema, format.schema, mapped) ?? null
   let validate: ValidateFunction
   try {
@@ -747,12 +797,12 @@ export async function extractStructured(
   const missing = requiredMissing(format.schema, format.schema, data)
   const deterministicValid = validate(data)
   const unavailable = (value: JsonValue): StructuredExtractionIssue[] =>
-    nullableMissingIssues(format.schema, format.schema, value).filter(issue => !labelIssues.some(label => label.path === issue.path))
+    nullableMissingIssues(format.schema, format.schema, value).filter(issue => !readIssues.some(read => read.path === issue.path))
   if (missing.length === 0 && deterministicValid) {
-    return { status: partial.length > 0 ? 'incomplete' : 'complete', data, schemaSha256, evidence, issues: [...partial, ...labelIssues, ...unavailable(data)], modelUsage: null }
+    return { status: partial.length > 0 ? 'incomplete' : 'complete', data, schemaSha256, evidence, issues: [...partial, ...readIssues, ...unavailable(data)], modelUsage: null }
   }
   const missingIssues = missing.map(path => ({ code: 'missing_required' as const, path, message: `required field unavailable: ${path}` }))
-  const issues: StructuredExtractionIssue[] = [...partial, ...labelIssues]
+  const issues: StructuredExtractionIssue[] = [...partial, ...readIssues]
   // PDF text is read only deterministically: each field from a labelled line with its page, never by a model.
   const pdf = result.file?.kind === 'pdf'
   if (format.modelFallback === true && pdf && partial.length === 0) {
@@ -810,13 +860,13 @@ export async function extractStructured(
           data: merged,
           schemaSha256,
           evidence: [...baseEvidence, ...written.map(path => ({ path, source: 'model' as const }))],
-          issues: [...labelIssues, ...unavailable(merged)],
+          issues: [...readIssues, ...unavailable(merged)],
           modelUsage: modelUsage(),
         }
       }
       repair = validationMessage(validate.errors)
       if (attempts === 2) {
-        return { status: 'invalid', data, schemaSha256, evidence, issues: [...labelIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
+        return { status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
       }
     } catch (error) {
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
@@ -826,7 +876,7 @@ export async function extractStructured(
         schemaSha256,
         evidence,
         issues: [
-          ...labelIssues,
+          ...readIssues,
           { code: aborted ? 'model_timeout' : 'model_provider_error', message: aborted ? 'model extraction was cancelled or exceeded the deadline' : error instanceof Error ? error.message : 'model provider failed' },
           ...missingIssues,
         ],
@@ -834,7 +884,7 @@ export async function extractStructured(
       }
     }
   }
-  return { status: 'incomplete', data, schemaSha256, evidence, issues: [...labelIssues, ...missingIssues], modelUsage: null }
+  return { status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null }
 }
 
 function requestedFormats(req: ScrapeRequest, result?: ScrapeResponse): readonly ScrapeFormat[] {
