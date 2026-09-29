@@ -265,6 +265,23 @@ describe('resilientFetch: transport errors', () => {
     expect(out.failureReason).toBe('timeout')
   })
 
+  it('says the deadline ended a header or body wait that was set to the time left, not one a lane cap ended', async () => {
+    // Timers run on the event loop's cached clock: a wait set to the time left
+    // can end before Date.now() reaches the deadline, so the outcome says so.
+    const timeout = (name: string) => Object.assign(new Error(name), { name })
+    const bound = await resilientFetch(U, scripted([timeout('HeadersTimeoutError')]), { deadlineAt: Date.now() + 2_000 })
+    expect(bound).toMatchObject({ failureReason: 'timeout', deadlineExceeded: true })
+    const followed = await resilientFetch(U, scripted([timeout('BodyTimeoutError')]), { deadlineAt: Date.now() + 60_000, capsFollowDeadline: true })
+    expect(followed).toMatchObject({ failureReason: 'timeout', deadlineExceeded: true })
+    const capped = await resilientFetch(U, scripted([timeout('HeadersTimeoutError')]), { deadlineAt: Date.now() + 60_000 })
+    expect(capped.failureReason).toBe('timeout')
+    expect(capped.deadlineExceeded).toBeUndefined()
+    const cancelled = new AbortController()
+    const aborted = resilientFetch(U, async (_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason))), { deadlineAt: Date.now() + 2_000, signal: cancelled.signal })
+    cancelled.abort()
+    expect((await aborted).deadlineExceeded).toBeUndefined()
+  })
+
   it('maps other thrown errors to connection_error', async () => {
     const f = scripted([new Error('ECONNREFUSED')])
     const out = await resilientFetch(U, f)
