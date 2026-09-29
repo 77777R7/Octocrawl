@@ -72,6 +72,17 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.pendingCount()).toBe(3)
   })
 
+  it('matches a catastrophic path filter against a crafted path in linear time', () => {
+    // A backtracking engine takes about 2^n steps for ^/(a+)+$ on "/" + n × "a" + "!".
+    const frontier = seeded({ seedUrl: SEED, excludePaths: ['^/(a+)+$'] })
+    for (const length of [32, 100_000]) {
+      const started = performance.now()
+      expect(frontier.enqueue(`https://fixture.test/${'a'.repeat(length)}!`, 1).accepted).toBe(true)
+      expect(performance.now() - started).toBeLessThan(1_000)
+    }
+    expect(frontier.enqueue('https://fixture.test/aaaa', 1).reason).toBe('path_denied')
+  })
+
   it('does not enqueue sitemap XML as a discovery path of its own', () => {
     const frontier = seeded()
     expect(frontier.enqueue('https://fixture.test/sitemap.xml', 1).accepted).toBe(true)

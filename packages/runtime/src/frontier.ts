@@ -10,13 +10,14 @@
  * seed redirected to (followSeedRedirect); a non-empty allowlist replaces it
  * with the same exact / `*.domain` match as governance. includePaths /
  * excludePaths are regexes on an enqueued link's pathname (Firecrawl
- * semantics, exclude wins), and links to assets (images, fonts, styles,
- * scripts, audio, video, programs) are not enqueued. Seeds bypass the path
- * and asset filters, so the seed URL is always fetched.
+ * semantics, exclude wins), matched in linear time (compilePathPattern), and
+ * links to assets (images, fonts, styles, scripts, audio, video, programs)
+ * are not enqueued. Seeds bypass the path and asset filters, so the seed URL
+ * is always fetched.
  */
 
 import { isIP } from 'node:net'
-import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, compilePathPattern } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 
@@ -88,8 +89,8 @@ export class Frontier {
     this.addSeedHost(hostOf(seed))
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
-    this.includePaths = (options.includePaths ?? []).map((pattern) => new RegExp(pattern))
-    this.excludePaths = (options.excludePaths ?? []).map((pattern) => new RegExp(pattern))
+    this.includePaths = (options.includePaths ?? []).map((pattern) => compilePathPattern(pattern))
+    this.excludePaths = (options.excludePaths ?? []).map((pattern) => compilePathPattern(pattern))
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()

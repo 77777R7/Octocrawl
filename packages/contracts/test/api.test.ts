@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -89,6 +89,17 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('accepts a catastrophic-looking path filter, matched in linear time, and refuses one that needs backtracking', () => {
+    const url = 'https://example.com/'
+    expect(parseCrawlStartRequest({ url, excludePaths: ['^/(a+)+$', '^/\\d{4}/[a-z]{2,16}/'] }).excludePaths).toEqual(['^/(a+)+$', '^/\\d{4}/[a-z]{2,16}/'])
+    for (const pattern of ['^/(a+)\\1$', '^/(?!private/)', '^/[a-z]{3,40}$']) {
+      let error: unknown
+      try { parseCrawlStartRequest({ url, includePaths: [pattern] }) } catch (caught) { error = caught }
+      expect(error, pattern).toBeInstanceOf(RequestError)
+      expect(error, pattern).toMatchObject({ code: 'invalid_request', message: `includePaths contains a regular expression that cannot be matched in linear time (such as one with a backreference, a lookaround or a counted repetition above 16): ${pattern}` })
+    }
   })
 
   it('has one request-error code set, each code with its HTTP status', () => {
