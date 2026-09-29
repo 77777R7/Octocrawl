@@ -104,6 +104,12 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
 | A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
 
+A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
+
+| Case | Request | What it tests | P1 items |
+| --- | --- | --- | --- |
+| A36 | Scrape of an SEC EDGAR filing (IREN Limited, quarter to 31 December 2025) with `mode: "research"` | `success` with HTTP 200 and the filing's text; the Evidence Record's User-Agent is `W2L Research <W2L_CONTACT>` and its contact is `W2L_CONTACT` | FS, ER |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.
