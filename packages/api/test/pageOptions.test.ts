@@ -202,7 +202,8 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
       const [page] = (await task.pages(taskId))!.items
       expect(page).toMatchObject({ status: 'success', json: { status: 'incomplete' } })
       expect(page!.json!.issues.map(issue => issue.code)).toContain('model_timeout')
-      expect(modelCalls.at(-1)).toEqual({ aborted: true })
+      // The model server sees the aborted request's socket close a moment after the task completes.
+      await expect.poll(() => modelCalls.at(-1)).toEqual({ aborted: true })
     }
     expect(modelCalls).toHaveLength(2)
   })
