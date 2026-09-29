@@ -61,7 +61,7 @@ const mcpClients = [
     intro: 'The macOS first-use setup normally adds this entry automatically. Use this command if it did not.',
     code: 'codex mcp add w2l-local --url http://127.0.0.1:8791/mcp', language: 'bash',
     verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that preview_monitor is available.',
-    source: 'https://developers.openai.com/learn/docs-mcp',
+    source: 'https://developers.openai.com/codex/extend/mcp',
   },
   {
     id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Client task check pending',
