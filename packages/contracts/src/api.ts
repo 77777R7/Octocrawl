@@ -9,7 +9,6 @@ import type { CrawlMode } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
-import { pathPatternIssue } from './pathPattern.js'
 import type { DocumentExtraction } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
@@ -312,11 +311,7 @@ function readBound(value: unknown, name: string, min: number): number | null | u
   return value
 }
 
-/**
- * Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns
- * of at most 2000 characters. They are matched in linear time, so one that
- * needs backtracking is refused here (see pathPattern.ts).
- */
+/** Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns of at most 2000 characters. */
 function readPathPatterns(value: unknown, name: string): readonly string[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length > 1000 || value.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 2000)) {
@@ -324,10 +319,11 @@ function readPathPatterns(value: unknown, name: string): readonly string[] | und
   }
   const patterns = value as string[]
   for (const pattern of patterns) {
-    const issue = pathPatternIssue(pattern)
-    if (issue === 'invalid') throw new RequestError(`${name} contains an invalid regular expression: ${pattern}`)
-    if (issue === 'not_linear') throw new RequestError(`${name} contains a regular expression that cannot be matched in linear time (such as one with a backreference, a lookaround or a counted repetition above 16): ${pattern}`)
-    if (issue === 'no_linear_engine') throw new RequestError(`${name} needs Node.js 20.16 or later, whose linear-time regular expression engine path filters run on`)
+    try {
+      new RegExp(pattern)
+    } catch {
+      throw new RequestError(`${name} contains an invalid regular expression: ${pattern}`)
+    }
   }
   return patterns
 }

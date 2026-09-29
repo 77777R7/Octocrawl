@@ -10,16 +10,17 @@
  * seed redirected to (followSeedRedirect); a non-empty allowlist replaces it
  * with the same exact / `*.domain` match as governance. includePaths /
  * excludePaths are regexes on an enqueued link's pathname (Firecrawl
- * semantics, exclude wins), matched in linear time (compilePathPattern), and
- * links to assets (images, fonts, styles, scripts, audio, video, programs)
- * are not enqueued. Seeds bypass the path and asset filters, so the seed URL
- * is always fetched.
+ * semantics, exclude wins; a link a filter cannot decide in its time limit is
+ * skipped, see pathFilter.ts), and links to assets (images, fonts, styles,
+ * scripts, audio, video, programs) are not enqueued. Seeds bypass the path
+ * and asset filters, so the seed URL is always fetched.
  */
 
 import { isIP } from 'node:net'
-import { DEFAULT_NETWORK_POLICY, compilePathPattern } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
+import { compilePathFilter, type PathFilter } from './pathFilter.js'
 
 export interface FrontierItem {
   url: string
@@ -39,6 +40,7 @@ export interface FrontierEnqueueResult {
     | 'depth'
     | 'host_denied'
     | 'path_denied'
+    | 'path_undecided'
     | 'asset_denied'
     | 'scheme_denied'
 }
@@ -70,8 +72,8 @@ export class Frontier {
   private readonly seedHosts = new Set<string>()
   private readonly maxDepth: number | null
   private readonly allowlistedDomains: readonly string[]
-  private readonly includePaths: readonly RegExp[]
-  private readonly excludePaths: readonly RegExp[]
+  private readonly includePaths: readonly PathFilter[]
+  private readonly excludePaths: readonly PathFilter[]
   private readonly perHostConcurrency: number
   private readonly perHostMinDelayMs: number
   private crawlDelayMsByHost: ReadonlyMap<string, number>
@@ -89,8 +91,8 @@ export class Frontier {
     this.addSeedHost(hostOf(seed))
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
-    this.includePaths = (options.includePaths ?? []).map((pattern) => compilePathPattern(pattern))
-    this.excludePaths = (options.excludePaths ?? []).map((pattern) => compilePathPattern(pattern))
+    this.includePaths = (options.includePaths ?? []).map((pattern) => compilePathFilter(pattern))
+    this.excludePaths = (options.excludePaths ?? []).map((pattern) => compilePathFilter(pattern))
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
@@ -227,7 +229,8 @@ export class Frontier {
     if (acceptedReason === 'enqueued') {
       const pathname = new URL(canonicalUrl).pathname
       if (isAssetPath(pathname)) return { accepted: false, canonicalUrl, reason: 'asset_denied' }
-      if (!this.pathAllowed(pathname)) return { accepted: false, canonicalUrl, reason: 'path_denied' }
+      const allowed = this.pathAllowed(pathname)
+      if (allowed !== true) return { accepted: false, canonicalUrl, reason: allowed === false ? 'path_denied' : 'path_undecided' }
     }
     if (this.visited.has(canonicalUrl)) {
       return { accepted: false, canonicalUrl, reason: 'duplicate' }
@@ -250,9 +253,22 @@ export class Frontier {
     if (twin !== null) this.seedHosts.add(twin)
   }
 
-  private pathAllowed(pathname: string): boolean {
-    if (this.excludePaths.some((pattern) => pattern.test(pathname))) return false
-    return this.includePaths.length === 0 || this.includePaths.some((pattern) => pattern.test(pathname))
+  /** Exclude wins; null when a filter that could change the answer did not decide in its time limit. */
+  private pathAllowed(pathname: string): boolean | null {
+    let undecided = false
+    for (const pattern of this.excludePaths) {
+      const match = pattern.test(pathname)
+      if (match === true) return false
+      if (match === null) undecided = true
+    }
+    if (undecided) return null
+    if (this.includePaths.length === 0) return true
+    for (const pattern of this.includePaths) {
+      const match = pattern.test(pathname)
+      if (match === true) return true
+      if (match === null) undecided = true
+    }
+    return undecided ? null : false
   }
 }
 

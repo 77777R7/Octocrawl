@@ -29,7 +29,6 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
-  'includePaths / excludePaths are matched in linear time: a pattern that needs backtracking (a backreference, a lookahead, a counted repetition above 16) is rejected with HTTP 400.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
