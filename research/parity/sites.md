@@ -104,6 +104,19 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
 | A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
 
+M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M01 | Scrape of MDN's 404 status page | The H1, absolute targets, no `data:` URIs, no header or footer text | scrape-formats.markdown |
+| M02 | Scrape of the Hacker News front page | The story list, absolute targets, no `data:` URIs, neither the header's nor the footer's links | scrape-formats.markdown |
+| M03 | Scrape of a path MDN answers with 404 | The error page kept as evidence has absolute link targets | scrape-formats.markdown |
+| M04 | Scrape of BBC News technology, then again with `onlyMainContent: false` | True leaves out the navigation and footer; false keeps them and is longer | scrape-formats.only-main-content |
+| M05 | Scrape of the Wikipedia portal with `onlyMainContent: false`, then with the default | On a page with no main block, false returns the whole page as success; the default keeps it as evidence | scrape-formats.only-main-content |
+| M06 | Scrape of http://www.github.com with `waitFor` (browser lane) | The response's content type and both redirect hops, `redirectChain.complete: true` | scrape-formats.metadata-response-status |
+| M07 | Compact scrape (`debug: false`) of http://github.com | `snapshot.httpStatus` and `snapshot.contentType`; the hop in the Evidence Record | scrape-formats.metadata-response-status |
+| M08 | `/fc/v1/scrape` of http://github.com | `data.metadata` with `sourceURL`, the final `url`, `statusCode` and `contentType` | scrape-formats.metadata-response-status |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

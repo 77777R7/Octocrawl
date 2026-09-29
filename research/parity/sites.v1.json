@@ -1034,6 +1034,149 @@
         { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
         { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
       ]
+    },
+    {
+      "id": "M01",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps. The feature matrix check for scrape-formats.markdown, first half: MDN's page on the 404 status. The Markdown has the H1, only absolute link and image targets (same-page #fragments stay as written), no data: image URIs, and none of the page's header or footer. On 2026-09-29 the URL redirected to /en-US/docs/Web/HTTP/Reference/Status/404; the footer read 'Your blueprint for a better internet.' and 'Website Privacy Notice', the header 'Skip to main content'.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^# 404 Not Found$" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Skip to main content" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Your blueprint for a better internet" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Website Privacy Notice" }
+      ]
+    },
+    {
+      "id": "M02",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://news.ycombinator.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps. The feature matrix check for scrape-formats.markdown, second half: the Hacker News front page, which lays out its header, story list and footer in one table. The Markdown is the story list (rank, title and site, points and comments), with absolute targets, no data: image URIs and neither the header's links (new | past | comments | ask | show | jobs | submit) nor the footer's (Guidelines | FAQ | ... | Apply to YC | Contact, Search:). The page has no H1, so the audit's H1 check does not apply. Story titles change by the minute; the checks read only the page's fixed parts.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^\\| 1\\. \\|" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "\\d+ points by \\S+" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "jobs \\| submit" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "jobs | submit" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Apply to YC" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Search:" }
+      ]
+    },
+    {
+      "id": "M03",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://developer.mozilla.org/en-US/docs/w2l-does-not-exist",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps: an error page kept as evidence has absolute link targets, like a success. On 2026-09-29 MDN answered this path with a 404 page (its header, a 'Page not found' heading and its footer, with site-relative links) that has no main block, so the whole page is the evidence.",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "2", "type": "field", "path": "failureReason", "equals": "http_error" },
+        { "item": "2", "type": "field", "path": "snapshot.httpStatus", "equals": 404 },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^# Page not found$" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" }
+      ]
+    },
+    {
+      "id": "M04",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.bbc.com/news/technology",
+      "request": { "formats": ["markdown"] },
+      "compareRequest": { "formats": ["markdown"], "onlyMainContent": false },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.only-main-content: BBC News technology with onlyMainContent true (the default, doc) and false (doc.compare). True leaves out the site navigation and footer; false keeps them and is longer. On 2026-09-29 the URL redirected to https://www.bbc.com/technology, whose H1 was 'Technology'; the header had 'Skip to content', the footer 'Follow BBC on:' and a 'Terms of Use' link.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "field", "path": "compare.status", "equals": "success" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# Technology$" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Skip to content" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Follow BBC on" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Terms of Use" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "Skip to content" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "Follow BBC on" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "[Terms of Use](https://www.bbc.com/pages/terms-of-use)" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown.length", "abovePath": "markdown.length", "record": true },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" }
+      ]
+    },
+    {
+      "id": "M05",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.wikipedia.org/",
+      "request": { "formats": ["markdown"], "onlyMainContent": false },
+      "compareRequest": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29: onlyMainContent false on a page where the extractor finds no main block returns the whole page (README), not a failure. On 2026-09-29 the Wikipedia portal (a logo, the 'Wikipedia The Free Encyclopedia' heading and links to the language editions) had no main block on the HTTP rung (the traceEvent check) nor, rendered, on the browser rung. With the default (doc.compare) the result is failed/empty_unverified with the whole page kept as evidence; a success would also be honest if the extractor ever finds a main block there.",
+      "checks": [
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.only-main-content", "type": "traceEvent", "path": "summary.attempts.0.result.trace", "match": { "event": "extract", "detail.escalate": true } },
+        { "item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# Wikipedia" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "](https://en.wikipedia.org/)" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "compare.status", "equals": "success" }],
+          [{ "type": "field", "path": "compare.failureReason", "equals": "empty_unverified" }, { "type": "field", "path": "compare.markdown", "includes": "](https://en.wikipedia.org/)" }]
+        ] }
+      ]
+    },
+    {
+      "id": "M06",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://www.github.com",
+      "request": { "formats": ["markdown"], "waitFor": 500 },
+      "note": "Added 2026-09-29: the browser lane (waitFor starts there) reports the response's content type and every redirect hop, like the HTTP lane in A18. On 2026-09-29 http://www.github.com redirected to https://www.github.com/ (for Chromium an HSTS upgrade) and then to https://github.com/, which answered text/html; charset=utf-8.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "lane", "equals": "browser_local" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "notIn": ["text/html; rendered"] },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["http://www.github.com", "https://www.github.com/", "https://github.com/"] },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "M07",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"], "debug": false },
+      "note": "Added 2026-09-29: the compact response (MCP's default shape) carries the status and content type in snapshot, and the redirect hop in its Evidence Record. On 2026-09-29 http://github.com answered 301 with https://github.com/ (A18).",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "snapshot.httpStatus", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "snapshot.contentType", "includes": "text/html" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidenceRecord.redirectChain.urls", "equals": ["http://github.com", "https://github.com/"] },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "M08",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "endpoint": "fc-scrape",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29: /fc metadata has the final URL and the content type next to sourceURL and statusCode, as Firecrawl's does.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "success", "equals": true },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.sourceURL", "equals": "http://github.com" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.url", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.statusCode", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.contentType", "includes": "text/html" }
+      ]
     }
   ]
 }
