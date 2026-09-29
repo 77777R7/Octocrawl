@@ -114,6 +114,35 @@ describe('routePage', () => {
     doc.close()
   })
 
+  it('routes a visible buy box to product: the one h1, then the one price in its section', () => {
+    const doc = parse(wrap('<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li><a href="/poetry">Poetry</a></li><li>A Light in the Attic</li></ul>' +
+      '<article><div class="product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p><p class="availability">In stock (22 available)</p></div>' +
+      '<h2>Product Description</h2><p>A collection of poems and line drawings.</p></article>'))
+    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+    doc.close()
+  })
+
+  it('does not route a price that belongs to a listed item to product', () => {
+    // One card under its own heading, or in a list item, is a listing of one.
+    for (const body of [
+      '<h1>Crime</h1><section><h3><a href="/b/1">The Long Goodbye</a></h3><p class="price_color">£31.12</p></section>',
+      '<h1>Deals</h1><ul><li><a href="/b/1">Cobalt teapot</a> <span class="price">£19.00</span></li></ul>',
+      '<h1>Teapots</h1>' + ['£19.00', '£24.00'].map((p, i) => `<div><a href="/t/${i}">Teapot ${i}</a><span class="price">${p}</span></div>`).join(''),
+    ]) {
+      const doc = parse(wrap(body))
+      expect(routePage(doc.document).type).not.toBe('product')
+      doc.close()
+    }
+  })
+
+  it('does not take a price box on a page declared an article for a buy box', () => {
+    const doc = parse(wrap('<article><h1>Gold hits a record</h1><div class="price-box"><span class="price">$2,410.50</span></div>' +
+      '<p>Gold rose for a fifth day as investors sought safety ahead of the central bank meeting.</p></article>',
+    '<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Gold hits a record"}</script>'))
+    expect(routePage(doc.document).type).not.toBe('product')
+    doc.close()
+  })
+
   it('does not route priceCurrency alone to product', () => {
     const doc = parse(wrap('<main><h1>Teapot</h1><span itemprop="priceCurrency">USD</span></main>'))
     const d = routePage(doc.document)

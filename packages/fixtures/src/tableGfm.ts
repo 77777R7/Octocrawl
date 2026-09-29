@@ -111,11 +111,9 @@ export function toGfmTable(html: string): string {
   if (rows.length === 0) return ''
 
   const grid = expandRows(rows)
+  // An empty first header cell stays empty, as the converter emits it: GFM
+  // allows an empty header cell, and placeholder text is not on the page.
   const header = grid[0]!
-
-  // When the first header cell is empty (a common GFM convention), generate a
-  // consistent placeholder rather than emit an empty leading cell.
-  if (header[0] === '') header[0] = '(header)'
 
   const lines: string[] = []
   if (caption) lines.push(caption)
