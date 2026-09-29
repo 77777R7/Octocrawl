@@ -38,6 +38,31 @@
 //               trace event, and per host its recorded starts are at least the robots.txt
 //               Crawl-delay the runner read (doc.robots) apart, which each page after the
 //               first also names as robotsCrawlDelayMs.
+//
+// Added for the core-29 scoring (2026-09-29), for the audit checks that need a client:
+//   sdk         drives the built @w2l/sdk (packages/sdk; run `npm run typecheck` or `npm run api`
+//               first) against the API. case.sdk.op 'crawlWait' / 'batchWait' starts the crawl
+//               (case.url) or batch (case.urls), waits with case.sdk.pollIntervalMs / timeoutMs,
+//               lists every page or item and, with case.sdk.timeoutProbeMs, starts the same task
+//               again, waits that long, records the error into doc.timeoutProbe and cancels it
+//               (doc.probeCancel). 'scrape' scrapes case.url with the token the SDK takes from
+//               W2L_API_TOKEN, then again with no token and a wrong one (doc.withoutToken,
+//               doc.wrongToken: {name, status, code}).
+//   apiEnv      a case may name the environment variable that holds its API's URL (for example
+//               W2L_HOSTED_API_URL for a hosted-mode API); the case fails when it is unset.
+//   scrape      doc.elapsedMs is the call's round trip. case.egress: true reads the IPv4 address
+//               case.url shows the runner directly and through the runner's environment proxy
+//               (undici EnvHttpProxyAgent) into doc.egress {directIp, proxiedIp, reportedIp,
+//               reportedIsDirect}, where reportedIp is the first IPv4 address in W2L's Markdown.
+//   batch       records doc.startMs and doc.progress from status polls every case.pollMs (default
+//               2000): {polls, maxCompletedWhileRunning, monotonic, midRunItems, midRunSubset},
+//               where midRunItems counts the items read at the first running poll that reports a
+//               completed URL and midRunSubset says each of them is in the final list.
+//               case.debug: true reads items with debug=true (their trace).
+//   checks      eachItem urlPattern (only items whose url matches); itemUrls path (default items);
+//               hostSpacing: every fetched item has a crawl_delay trace event and, per host,
+//               consecutive recorded starts are at least the delay W2L recorded as required
+//               (requiredDelayMs) apart, on at least minHosts hosts.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -124,6 +149,22 @@ async function readRobots(url) {
   }
 }
 
+const ipv4 = (text) => text.match(/\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/)?.[0] ?? null
+
+// The IPv4 address an IP echo URL shows the runner itself, directly and through the environment
+// proxy (HTTPS_PROXY / HTTP_PROXY / NO_PROXY, as W2L's local mode reads them); null when unreachable.
+async function egressIps(url) {
+  const { fetch: undiciFetch, Agent, EnvHttpProxyAgent } = await import('undici')
+  const read = async (dispatcher) => {
+    try {
+      return ipv4(await (await undiciFetch(url, { dispatcher, signal: AbortSignal.timeout(20000) })).text())
+    } catch {
+      return null
+    }
+  }
+  return { directIp: await read(new Agent()), proxiedIp: await read(new EnvHttpProxyAgent()) }
+}
+
 // Data rows of every GFM table: a |-row, a --- separator row, then |-rows.
 function gfmTables(markdown) {
   const lines = markdown.split('\n')
@@ -143,25 +184,100 @@ function gfmTables(markdown) {
 // the checks look at (for batch/crawl cases: the items array under doc.items).
 const runners = {
   async scrape(c) {
+    const began = Date.now()
     const response = await call('POST', '/v1/scrape', { url: c.url, ...c.request })
-    return { response, doc: response.json ?? {} }
+    const doc = { ...(response.json ?? {}), elapsedMs: Date.now() - began }
+    if (c.egress) {
+      const ips = await egressIps(c.url)
+      const reportedIp = ipv4(typeof doc.markdown === 'string' ? doc.markdown : '')
+      doc.egress = { ...ips, reportedIp, reportedIsDirect: reportedIp !== null && reportedIp === ips.directIp }
+      response.egress = doc.egress
+    }
+    return { response, doc }
   },
   async 'fc-scrape'(c) {
     const response = await call('POST', '/fc/v1/scrape', { url: c.url, ...c.request })
     return { response, doc: response.json ?? {} }
   },
   async batch(c) {
+    const startedAt = Date.now()
     const start = await call('POST', '/v1/batches', { urls: c.urls, ...c.request })
+    const startMs = Date.now() - startedAt
     const taskId = start.json?.taskId
     if (!taskId) return { response: start, doc: start.json ?? {} }
     let status
+    const polls = []
+    let midRunUrls = null
     for (let i = 0; i < 120; i++) {
       status = await call('GET', `/v1/batches/${taskId}`)
       if (!['pending', 'running'].includes(status.json?.status)) break
-      await sleep(2000)
+      polls.push({ status: status.json.status, completed: status.json.completed ?? null })
+      if (midRunUrls === null && status.json.status === 'running' && status.json.completed > 0) {
+        midRunUrls = (await readAll(`/v1/batches/${taskId}/items`, 50)).items.map((item) => item.url)
+      }
+      await sleep(c.pollMs ?? 2000)
     }
-    const items = await readAll(`/v1/batches/${taskId}/items`, 50)
-    return { response: { start, status, items }, doc: { status: status.json?.status, items: items.items } }
+    const items = await readAll(`/v1/batches/${taskId}/items`, 50, c.debug ? '&debug=true' : '')
+    const counts = polls.filter((poll) => poll.status === 'running').map((poll) => poll.completed).filter(Number.isFinite)
+    const finalUrls = new Set(items.items.map((item) => item.url))
+    const progress = { polls: polls.length, maxCompletedWhileRunning: counts.length === 0 ? null : Math.max(...counts), monotonic: counts.every((n, i) => i === 0 || n >= counts[i - 1]), midRunItems: midRunUrls?.length ?? null, midRunSubset: midRunUrls === null ? null : midRunUrls.every((url) => finalUrls.has(url)) }
+    return { response: { start, startMs, progress, status, items }, doc: { status: status.json?.status, report: status.json, items: items.items, startMs, progress } }
+  },
+  // A client's view: the built @w2l/sdk against the case's API (see the header).
+  async sdk(c) {
+    const { W2L, WaitTimeoutError } = await import('@w2l/sdk')
+    const baseUrl = c.apiEnv === undefined ? api : process.env[c.apiEnv]
+    if (!baseUrl) throw new Error(`${c.apiEnv} is not set`)
+    // No token option: the SDK sends W2L_API_TOKEN from the environment when it is set.
+    const w2l = new W2L({ baseUrl })
+    const failure = async (promise) => {
+      try { await promise; return null } catch (error) { return { name: error?.name ?? null, status: error?.status ?? null, code: error?.code ?? null } }
+    }
+    const op = c.sdk?.op
+    if (op === 'scrape') {
+      const began = Date.now()
+      const scrape = await w2l.scrape(c.url, c.request ?? {})
+      const elapsedMs = Date.now() - began
+      const withoutToken = await failure(new W2L({ baseUrl, token: '' }).scrape(c.url, c.request ?? {}))
+      const wrongToken = await failure(new W2L({ baseUrl, token: 'w2l-parity-wrong-token' }).scrape(c.url, c.request ?? {}))
+      const tokenInEnvironment = Boolean(process.env.W2L_API_TOKEN)
+      return { response: { baseUrl, tokenInEnvironment, scrape, withoutToken, wrongToken }, doc: { ...scrape, elapsedMs, tokenInEnvironment, withoutToken, wrongToken } }
+    }
+    if (op !== 'crawlWait' && op !== 'batchWait') throw new Error(`unknown sdk op ${op}`)
+    const crawl = op === 'crawlWait'
+    const start = () => (crawl ? w2l.crawl(c.url, c.request ?? {}) : w2l.batchScrape(c.urls, c.request ?? {}))
+    const wait = (id, options) => (crawl ? w2l.waitCrawl(id, options) : w2l.waitBatch(id, options))
+    const began = Date.now()
+    const { taskId } = await start()
+    const report = await wait(taskId, { pollIntervalMs: c.sdk.pollIntervalMs, timeoutMs: c.sdk.timeoutMs })
+    const waitMs = Date.now() - began
+    const items = []
+    for await (const item of crawl ? w2l.listCrawlPages(taskId, { limit: 100 }) : w2l.listBatchItems(taskId, { limit: 50 })) items.push(item)
+    const errors = []
+    if (crawl) {
+      let cursor
+      do {
+        const page = await w2l.getCrawlErrors(taskId, { limit: 100, cursor })
+        errors.push(...page.items)
+        cursor = page.hasMore ? page.nextCursor ?? undefined : undefined
+      } while (cursor !== undefined)
+    }
+    let timeoutProbe = null
+    let probeCancel = null
+    if (c.sdk.timeoutProbeMs !== undefined) {
+      const probe = await start()
+      const probeBegan = Date.now()
+      try {
+        const last = await wait(probe.taskId, { pollIntervalMs: c.sdk.pollIntervalMs, timeoutMs: c.sdk.timeoutProbeMs })
+        timeoutProbe = { thrown: false, lastStatus: last.status, elapsedMs: Date.now() - probeBegan }
+      } catch (error) {
+        timeoutProbe = { thrown: true, name: error?.name ?? null, isWaitTimeoutError: error instanceof WaitTimeoutError, taskId: error?.taskId ?? null, jobIdMatches: error?.taskId === probe.taskId, lastStatus: error?.last?.status ?? null, timeoutMs: error?.timeoutMs ?? null, elapsedMs: Date.now() - probeBegan }
+      }
+      const cancelled = crawl ? await w2l.cancelCrawl(probe.taskId) : await w2l.cancelBatch(probe.taskId)
+      probeCancel = { taskId: probe.taskId, status: cancelled.status }
+    }
+    const doc = { status: report.status, report, items, errors, stepCount: items.length + errors.length, waitMs, timeoutProbe, probeCancel }
+    return { response: { taskId, ...doc }, doc }
   },
   async crawl(c) {
     const robots = c.robots ? await readRobots(c.url) : undefined
@@ -343,14 +459,34 @@ function check(doc, spec, response) {
       return { pass: found, actual: JSON.stringify(issues).slice(0, 200) }
     }
     case 'eachItem': {
-      const items = get(doc, spec.path ?? 'items') ?? []
+      const items = (get(doc, spec.path ?? 'items') ?? []).filter((item) => spec.urlPattern === undefined || new RegExp(spec.urlPattern).test(item.url ?? ''))
       const failures = items.map((item) => check(item, spec.check, response)).filter((result) => !result.pass)
       return { pass: items.length >= (spec.minItems ?? 1) && failures.length === 0, actual: `${items.length} items, ${failures.length} failing${failures[0]?.actual ? `: ${failures[0].actual}` : ''}` }
     }
     case 'itemUrls': {
-      const urls = (doc.items ?? []).map((item) => item.url ?? item.canonicalUrl ?? '')
+      const urls = (get(doc, spec.path ?? 'items') ?? []).map((item) => item.url ?? item.canonicalUrl ?? '')
       const bad = urls.filter((url) => !new RegExp(spec.pattern).test(url))
       return { pass: urls.length >= (spec.minItems ?? 1) && bad.length === 0, actual: `${urls.length} pages, ${bad.length} outside the pattern${bad[0] ? `: ${bad[0]}` : ''}` }
+    }
+    case 'hostSpacing': {
+      // Per host, consecutive fetch starts W2L recorded (crawl_delay trace events) are at least the
+      // delay it recorded as required apart. Needs items read with debug=true.
+      const events = [...(doc.items ?? []), ...(doc.errors ?? [])].map((step) => (step.trace ?? []).find((event) => event.event === 'crawl_delay')?.detail)
+      const missing = events.filter((event) => event === undefined).length
+      const byHost = new Map()
+      for (const event of events.filter(Boolean)) byHost.set(event.host, [...(byHost.get(event.host) ?? []), event])
+      let smallest = null
+      let short = 0
+      for (const hostEvents of byHost.values()) {
+        hostEvents.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+        for (let i = 1; i < hostEvents.length; i++) {
+          const gap = Date.parse(hostEvents[i].startedAt) - Date.parse(hostEvents[i - 1].startedAt)
+          smallest = smallest === null ? gap : Math.min(smallest, gap)
+          if (gap < hostEvents[i].requiredDelayMs) short++
+        }
+      }
+      const required = [...new Set(events.filter(Boolean).map((event) => event.requiredDelayMs))].join('/')
+      return { pass: events.length > 0 && missing === 0 && short === 0 && byHost.size >= (spec.minHosts ?? 1), actual: `${events.length} fetches on ${byHost.size} hosts, ${missing} without a crawl_delay event, smallest same-host gap ${smallest ?? 'n/a'} ms, required ${required || 'n/a'} ms, ${short} gaps shorter` }
     }
     case 'anyOf': {
       const results = spec.checks.map((group) => group.map((inner) => check(doc, inner, response)))
@@ -387,6 +523,8 @@ const summary = {
   manifest: manifest.id,
   command,
   api,
+  otherApis: Object.fromEntries([...new Set(cases.map((c) => c.apiEnv).filter(Boolean))].map((name) => [name, process.env[name] ?? null])),
+  tokenInEnvironment: Boolean(process.env.W2L_API_TOKEN),
   sourceCommit: commit,
   workingTreeDirty: dirty,
   startedAt,
@@ -407,7 +545,8 @@ const lines = [
   '',
   `Command: \`${command}\``,
   `Source commit: \`${commit ?? 'unknown'}\`${dirty ? ' (working tree had uncommitted changes)' : ''}`,
-  `Run: ${startedAt} → ${summary.finishedAt} against ${api}`,
+  `Run: ${startedAt} → ${summary.finishedAt} against ${api}${Object.keys(summary.otherApis).length === 0 ? '' : `; cases naming an apiEnv against ${Object.entries(summary.otherApis).map(([name, url]) => `${name}=${url ?? '(unset)'}`).join(', ')}`}`,
+  ...(cases.some((c) => c.endpoint === 'sdk') ? [`SDK: the built @w2l/sdk; W2L_API_TOKEN ${summary.tokenInEnvironment ? 'set' : 'not set'} in the runner's environment (its value is not recorded).`] : []),
   `Network: ${proxyVars.length === 0 ? 'no proxy variables set in the runner' : `${proxyVars.join(', ')} set in the runner's environment`}; ${proxiedCases} of ${results.length} cases' responses record an environment proxy in evidence.envProxy${proxyEndpoints.length === 0 ? '' : ` (${proxyEndpoints.join(', ')})`}.`,
   '',
   `Cases fully passing: ${summary.casesPassed}/${summary.cases}; checks passing: ${summary.checksPassed}/${summary.checks}.`,

@@ -74,6 +74,36 @@ Practice sites come first, because any failure there is a W2L bug. The blocking 
 | A14 | Crawl of docs.python.org/3/ with `maxPages` 30, status polled every 2 s | While it runs the status counts pages and never goes back and `/pages` lists some; at the end `pagesFetched` equals the pages and errors listed | 10 |
 | A15 | Crawl of a Statistics Canada listing (robots.txt `Crawl-delay: 2`) with `maxPages` 3 | Fetches are the robots.txt Crawl-delay apart, as estimated and as W2L records them | 10 |
 
+A16–A35 were added on 2026-09-29 for the scoring of the 29 core features ([core-status-2026-09-29.md](core-status-2026-09-29.md)): each runs the audit's real-site check from [feature-matrix.csv](feature-matrix.csv) for a core feature that had none in this set, or had only a check adapted to another site. A25 needs the environment proxy in the API's and the runner's environment. The SDK cases (`endpoint: sdk`) drive the built `@w2l/sdk`. A29 also needs a hosted-mode API started with a token, its URL in `W2L_HOSTED_API_URL` and the same token in `W2L_API_TOKEN` for the runner:
+
+```bash
+W2L_API_TOKEN=<token> W2L_TASK_ROOT=.w2l/api-hosted npm run api -- --hosted --host 127.0.0.1 --port 8817   # terminal 3
+W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/parity/run-sites.mjs
+```
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| A16 | Scrape of Wikipedia's Web scraping article with `markdown`, `links` and a `json` schema | All three in one response; the H1, absolute targets and no `data:` URIs in the Markdown | scrape-formats.formats-array |
+| A17 | Batch of 3 Wikipedia articles with `formats: ['links']` | Every item has non-empty absolute links and no Markdown | scrape-formats.formats-array |
+| A18 | Scrape of http://github.com | Requested URL, final URL, the redirect hop, status 200 and the content type | scrape-formats.metadata-response-status |
+| A19 | Scrape of httpbin.org/status/404 | Not success; `http_error`, 404 and the content type | scrape-formats.metadata-response-status |
+| A20 | Scrape of quotes.toscrape.com/js-delayed with `waitFor: 0` | The late text is absent (S06 has it with `waitFor`) | scrape-execution.wait-for |
+| A21 | The same with `waitFor: -1` | HTTP 400 `invalid_request` before any fetch | scrape-execution.wait-for |
+| A22 | Scrape of httpbin.org/delay/10 with `timeout: 3000` | `failed`/`timeout`, HTTP 200, within 3–5 s | scrape-execution.timeout |
+| A23 | The same with `timeout: 20000` | `success` with the endpoint's JSON | scrape-execution.timeout |
+| A24 | The same with `timeout: 0` | HTTP 400 `invalid_request` | scrape-execution.timeout |
+| A25 | Scrape of httpbin.org/ip through the environment proxy | The address W2L reports is the proxy's egress address, not the direct one; `evidence.envProxy` names the proxy | scrape-execution.proxy-basic |
+| A26 | SDK: crawl docs.python.org/3/tutorial/ (10 pages), `waitCrawl` 120 s, list pages; the same crawl waited on for 1 s | 10 pages with Markdown; `WaitTimeoutError` with the crawl's id; the probe crawl cancelled | crawl-batch.crawl-wait |
+| A27 | SDK: crawl books.toscrape.com (20 pages), `waitCrawl` polling every 1 s; the same crawl waited on for 1 s | All 20 steps; `WaitTimeoutError` with the crawl's id | platform.sdk.waiters |
+| A28 | SDK: batch of 10 Wikipedia articles, `waitBatch` 120 s, list items; the same batch waited on for 1 s | 10 successful items with Markdown; `WaitTimeoutError` with the batch's id; the probe batch cancelled | crawl-batch.batch-wait |
+| A29 | SDK against a hosted-mode API, token from `W2L_API_TOKEN`; again with no token and a wrong one | The scrape succeeds; the other two get HTTP 401 `unauthorized` | platform.client.api-key |
+| A30 | Crawl of docs.python.org/3/ with `includePaths: ['^/3/library/.*']`, `maxPages` 15 | Every page after the seed is under /3/library/ | crawl-batch.include-paths |
+| A31 | Crawl of docs.python.org/3/ with `excludePaths: ['^/3/whatsnew/.*']`, `maxPages` 30 | Nothing under /3/whatsnew/ is fetched | crawl-batch.exclude-paths |
+| A32 | Crawl of Wikipedia's Web crawler article with `maxPages` 7 | Exactly 7 steps and `budgetExceeded: pages` | crawl-batch.page-limit |
+| A33 | Crawl of books.toscrape.com with `maxPages` 5, product-page `includePaths`, `markdown`, `links` and a `json` schema | Every page has Markdown and absolute links; every product page JSON with its title and a numeric price | crawl-batch.crawl-scrape-options |
+| A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
+| A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.
