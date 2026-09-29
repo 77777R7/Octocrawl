@@ -80,7 +80,7 @@ The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2
 
 | Item | Accepted when |
 | --- | --- |
-| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified |
+| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified<br>**Status 2026-09-29:** implemented on branch `claude/p2-file-download`, not yet merged. PDF text was checked on all 10 corpus reports ([corpus run](research/pdf-corpus/runs/2026-09-29.md)); through the API, 9 of them (F01–F08, and F11 reached by a crawl), a CSV, ZIP, JSON and XLSX (F09, F10, F15, F16), `/fc`, the browser download and JSON from a PDF are real-site cases: 15 of 16 passed in the [recorded run](research/parity/runs/2026-09-29-file-download.md); F03 failed on a connection timeout before any file was read and passed when run again |
 | `html` / `rawHtml` / `screenshot` formats | Identical in scrape, batch and crawl |
 | Sitemap mode, subdomains, `map` endpoint | URL list from `sitemap.xml` and home-page links, with include / exclude patterns |
 | Tables → CSV | One CSV per `<table>` with `tableIndex`, caption and source URL; 10 real table pages checked with no misaligned cells |
