@@ -26,6 +26,7 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
 
 export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
+  'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
@@ -50,7 +51,11 @@ export interface FirecrawlPage {
     robots?: string
     favicon?: string
     sourceURL: string
+    /** The final URL, after redirects. */
+    url: string
     statusCode: number | null
+    /** The final response's `content-type` header; left out when there was none. */
+    contentType?: string
     error?: string
   }
 }
@@ -90,6 +95,7 @@ const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout'] as const
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
   ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
+  removeBase64Images: { value: true, reason: 'W2L always drops data: image URIs from Markdown and keeps their alt text' },
 }
 
 interface ShimProblems {
@@ -127,9 +133,10 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   return parseCrawlStartRequest(native)
 }
 
-/** The scrape options the shim maps: formats (markdown, links), onlyMainContent, waitFor and timeout. */
+/** The scrape options the shim maps: formats (markdown, links), onlyMainContent, waitFor and timeout; removeBase64Images only as true, which W2L always does. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
-  checkShimKeys(rec, prefix, [...keys, 'formats', ...SHIM_PAGE_OPTIONS], problems)
+  checkShimKeys(rec, prefix, [...keys, 'formats', 'removeBase64Images', ...SHIM_PAGE_OPTIONS], problems)
+  checkShimFixedValue(rec, prefix, 'removeBase64Images', problems)
   const mapped: Record<string, unknown> = {}
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
   if (rec.formats === undefined) return mapped
@@ -228,7 +235,9 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
     metadata: {
       ...declared,
       sourceURL: result.requestedUrl,
+      url: result.evidence.finalUrl,
       statusCode: result.evidence.httpStatus,
+      ...(result.evidence.contentType === null ? {} : { contentType: result.evidence.contentType }),
       ...(error !== undefined ? { error } : {}),
     },
   }
