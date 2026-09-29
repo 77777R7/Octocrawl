@@ -20,7 +20,7 @@ Success at week 16 (2027-01-17): three paying users or ten weekly active users. 
 
 ## How progress is measured
 
-- **Core features solid.** The parity audit marks 29 core features. A feature is solid when it works, has tests, passes its real-site test and behaves as documented. The target is 29 of 29; P1 exits at 25.
+- **Core features solid.** The parity audit marks 29 core features ([core-features.csv](research/parity/core-features.csv)). A feature is solid when it works, has tests, passes its real-site test and behaves as documented. Three were solid at the audit. P1 makes the 17 in milestone M1 solid, plus basic proxy through local-mode proxy support: 21 of 29. P2 adds `map`, `maxAge`, the published JS SDK and the Python client: 25 of 29. The other four are search, which is paused.
 - **Real-site tests passed.** The set in [research/parity/](research/parity/), including sites where the correct result is an honest `blocked`.
 - **Not Firecrawl coverage.** The comparison is frozen at firecrawl-js v4.42.0 (snapshot 2026-09-29). Newer Firecrawl releases are not tracked, and the rest of the 312 audited features is not a target.
 - Every real-site result is recorded with its command and source commit. A reported gap is first reproduced by a failing test: the audit's first pass was corrected in 90 places on review.
@@ -30,8 +30,8 @@ Success at week 16 (2027-01-17): three paying users or ten weekly active users. 
 | Phase | Weeks | Goal | Exit |
 | --- | --- | --- | --- |
 | P0 · Validation (user track) | 1–2 | Real URLs and real conversations replace assumptions | Status distribution of the seed user's URLs; 8 interviews; repository and docs corrected |
-| P1 · Core correctness (engine track) | 1–6 | Core features give correct output on real sites and never report false success | First 12 real-site URLs pass; ≥25 of the core 29 solid; seed-user URLs ≥70% success, the rest with honest reasons |
-| P2 · Breadth for researchers | 7–10 | Install, formats, Python client, guides | The seed user runs a regression on W2L data; a non-author installs W2L unaided |
+| P1 · Core correctness (engine track) | 1–6 | Core features give correct output on real sites and never report false success | First 12 real-site URLs pass; 21 of the core 29 solid (M1's 17, the 3 already solid, basic proxy); seed-user URLs ≥70% success, the rest with honest reasons |
+| P2 · Breadth for researchers | 7–10 | Install, formats, Python client, guides | 25 of the core 29 solid; the seed user runs a regression on W2L data; a non-author installs W2L unaided |
 | P3 · Browser lane and Pro | 11–14 | A lane for blocked sites and something to sell | Published success rates of the user-browser lane against HTTP; 3 early users used queue mode |
 | P4 · Paid launch | 15–16 | First payment | 3 paying or 10 weekly active users by week 16 |
 
@@ -62,15 +62,17 @@ Order: first what silently returns wrong data, then what loses data, then missin
 | 6 | `formats`, `onlyMainContent`, `timeout` / `waitFor` | Behaviour matches the docs; a timeout returns `partial` with the content fetched so far |
 | 7 | Crawl: output format selection, `includePaths` / `excludePaths` | Path filters are tested; format options match scrape |
 | 8 | SDK wait helpers; one error-code set | Error-code table in the docs reference |
+| 9 | Local-mode proxy: `HTTPS_PROXY` / `NO_PROXY` for every lane; hosted mode stays direct | A site reachable only through the operator's proxy passes its real-site test; proxy use is recorded in the result |
+| 10 | The rest of M1 in [plan-to-70.md](research/parity/plan-to-70.md): page metadata and the page `<title>`, crawl start and resume, live crawl status, API key comparison, crawl-delay | Each feature's real-site check in [feature-matrix.csv](research/parity/feature-matrix.csv) passes |
 
 Throughout P1:
 
-- **Real-site test set.** About 40 sites in [research/parity/sites.md](research/parity/sites.md). All of the first 12 URLs pass, and blocked sites report `blocked` honestly. The seed user's URLs are the second batch.
+- **Real-site test set.** About 40 sites in [research/parity/sites.md](research/parity/sites.md). The first 12 URLs are the audit's first live batch in [real-site-test-set.md](research/parity/real-site-test-set.md); all of them pass, and blocked sites report `blocked` honestly. The seed user's URLs are the second batch.
 - **Evidence Record correctness.** `status` / `reason`, `httpStatus`, `finalUrl`, `lane` and the hashes come out the same way in every lane ([Evidence Record](#evidence-record)). This is part of P1, not a new feature.
 - **One-line install.** `npx @w2l/cli@latest scrape <url>` gives a result within 5 minutes on clean macOS and Windows.
 - **Week 6 calibration.** Record the actual P1 time against the audit's 34-working-day estimate for its M1 and rescale P2–P4 by that ratio.
 
-**Exit:** the first 12 URLs all pass; at least 25 of the core 29 are solid; at least 70% of the seed user's URLs succeed and the rest report their reason honestly.
+**Exit:** the first 12 URLs all pass; 21 of the core 29 are solid (the 17 in M1, the 3 solid at the audit, and basic proxy); at least 70% of the seed user's URLs succeed and the rest report their reason honestly.
 
 ### P2 · Breadth for researchers (weeks 7–10)
 
@@ -90,7 +92,7 @@ The subset of the audit's M2 and M3 that researchers use; the rest is paused.
 | Throughput benchmark | HTTP lane, 32 concurrent across origins: ≥500 pages/min, p50 <800 ms; browser lane, 8 contexts: ≥60 pages/min, p95 <8 s; results in `docs/benchmarks/` |
 | Two guides | "URL list → CSV with evidence" (data-centre sources as the example) and "Citing web data in a paper" |
 
-**Exit:** the seed user runs a regression on data W2L produced; a non-author installs W2L on a clean machine and completes a first batch unaided.
+**Exit:** 25 of the core 29 are solid; the seed user runs a regression on data W2L produced; a non-author installs W2L on a clean machine and completes a first batch unaided.
 
 ### P3 · Browser lane and Pro (weeks 11–14)
 
