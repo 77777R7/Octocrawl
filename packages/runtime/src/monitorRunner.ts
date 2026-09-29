@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { DOCUMENT_RULE_VERSION, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, monitorIdentity, type ExecutionContext, type MonitorRevision, type ScrapeOutcome, type TransportRepresentation } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, DOCUMENT_RULE_VERSION, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, monitorIdentity, type ExecutionContext, type MonitorRevision, type ScrapeOutcome, type TransportRepresentation } from '@w2l/contracts'
 import { createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { MonitorStore } from './monitorStore.js'
@@ -24,9 +24,10 @@ export interface MonitorCaptureOptions {
   onRetryAfter: (url: string, retryAt: number) => void
 }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+// A failed result keeps the page it received as evidence; that page is never a representation to revalidate.
 function cacheable(outcome: ScrapeOutcome): boolean {
   const e = outcome.result.evidence
-  return e.cacheControl !== undefined && !/\b(no-store|private)\b/i.test(e.cacheControl ?? '') && !e.vary?.trim() && e.setsCookie === false
+  return CONTENTFUL_STATUS.has(outcome.result.status) && e.cacheControl !== undefined && !/\b(no-store|private)\b/i.test(e.cacheControl ?? '') && !e.vary?.trim() && e.setsCookie === false
 }
 
 export async function runConfiguredMonitor(store: MonitorStore, revision: MonitorRevision, capture: (options: MonitorCaptureOptions) => Promise<ScrapeOutcome>, triggerKey?: string, context: ExecutionContext = {}) {
