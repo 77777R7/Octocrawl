@@ -27,6 +27,8 @@ interface RouterCounts {
   main: number
   p: number
   textChars: number
+  /** Visible text inside tables (outermost tables only). */
+  tableChars: number
   headings: number
   /** Links per 100 chars of visible text — div-based listings have high density. */
   linkDensity: number
@@ -54,7 +56,8 @@ function hasVisibleBuyBox(doc: Document): boolean {
 }
 
 function countAll(doc: Document): RouterCounts {
-  const textChars = (doc.body?.textContent ?? '').replace(/\s+/g, ' ').trim().length
+  const textLength = (el: Element | null): number => (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length
+  const textChars = textLength(doc.body)
   const a = qsa(doc, 'a').length
   return {
     buyBox: hasVisibleBuyBox(doc),
@@ -67,6 +70,9 @@ function countAll(doc: Document): RouterCounts {
     p: qsa(doc, 'p').length,
     headings: qsa(doc, 'h1,h2,h3').length,
     textChars,
+    tableChars: qsa(doc, 'table')
+      .filter((table) => table.parentElement?.closest('table') == null)
+      .reduce((sum, table) => sum + textLength(table), 0),
     linkDensity: textChars > 0 ? (a / textChars) * 100 : 0,
   }
 }
@@ -253,14 +259,19 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
     return { type: 'article', strategy: 'article' }
   }
 
+  // The table strategy keeps one table, so it is for pages whose text is in
+  // their tables. A page whose text lies mostly outside them (an SEC filing's
+  // paragraphs and notes around its statements) goes on to the rules below.
+  const textInTables = c.tableChars >= c.textChars * 0.5
+
   // A page whose only structure is one standalone table (readings, schedules,
   // dashboards). Tables inside <article> stay on the article cascade.
-  if (c.tableInArticle === 0 && c.table === 1 && c.li < 10 && c.a < 20 && c.headings <= 2) {
+  if (c.tableInArticle === 0 && c.table === 1 && c.li < 10 && c.a < 20 && c.headings <= 2 && textInTables) {
     return { type: 'collection', strategy: 'table' }
   }
 
   // Several tables with little prose: a comparison/dashboard page.
-  if (c.tableInArticle === 0 && c.table >= 2 && c.li < 15) {
+  if (c.tableInArticle === 0 && c.table >= 2 && c.li < 15 && textInTables) {
     return { type: 'collection', strategy: 'table' }
   }
 

@@ -45,6 +45,16 @@ describe('routePage', () => {
     doc.close()
   })
 
+  it('does not route a page whose text lies outside its tables to the table strategy', () => {
+    const prose = Array.from({ length: 4 }, (_, i) =>
+      `<div>Paragraph ${i + 1} explains how the kiln readings were taken and why the quarterly figures in the table were revised.</div>`).join('')
+    for (const tables of [1, 3]) {
+      const doc = parse(wrap(prose + TABLE_SNIPPET.repeat(tables)))
+      expect(routePage(doc.document)).toEqual({ type: 'article', strategy: 'article' })
+      doc.close()
+    }
+  })
+
   it('does not route a single product-spec-shaped table to product', () => {
     // Product-spec headings alone are not proof of a product page.
     const doc = parse(

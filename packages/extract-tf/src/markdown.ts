@@ -36,6 +36,8 @@ const SKIP = new Set([
   'script', 'style', 'noscript', 'template', 'head', 'title', 'meta', 'link', 'base',
   'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea',
   'svg', 'canvas', 'iframe', 'object', 'embed', 'audio', 'video', 'source', 'track', 'map', 'area',
+  // An inline XBRL filing's hidden facts and contexts.
+  'ix:header',
 ])
 
 /** Elements a browser lays out as blocks by default. Everything else is inline. */
