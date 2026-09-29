@@ -1687,6 +1687,45 @@
         { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "equalsEnv": "W2L Research ${W2L_CONTACT}" },
         { "item": "ER", "type": "field", "path": "evidenceRecord.identity.contact", "equalsEnv": "${W2L_CONTACT}" }
       ]
+    },
+    {
+      "id": "J04",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://www.jpc.de/jpcng/books/detail/-/art/die-augenheilkunde/hnum/11617379",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "name": { "type": "string" }, "price": { "type": "number" }, "currency": { "type": "string" } }, "required": ["name", "price", "currency"] } }] },
+      "note": "Added 2026-09-29 for numbers read as the page writes them. A German book shop's product page (jpc.de; robots.txt allows /jpcng/books/detail/-/art/). On 2026-09-29 it showed the price as 'EUR 399,99*' and declared it as JSON-LD and microdata 399.99 with priceCurrency EUR; German fixed book prices keep it stable. W2L reads the JSON-LD value, whose format writes '.' as the decimal point: price must be 399.99, and json.evidence must quote the text it was read from.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "equals": "Die Augenheilkunde" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.price", "equals": 399.99 },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.currency", "equals": "EUR" },
+        { "item": "scrape-formats.json", "type": "jsonIssue", "path": "json.evidence", "includes": "\"path\":\"/price\",\"source\":\"jsonld\",\"text\":\"399.99\"" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price", "equals": { "source": "jsonld", "locator": null } }
+      ]
+    },
+    {
+      "id": "J05",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://demoshop.oxid-esales.com/Merchandise/Uhren/Gold-Spirit.html",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "title": { "type": "string" }, "price": { "type": "number" } }, "required": ["title", "price"] } }] },
+      "note": "Added 2026-09-29 for numbers read as the page writes them. OXID's public German demo shop (reset every hour; robots.txt allows product pages). The page declares no JSON-LD, microdata or product meta: its price is only the visible '499,00 €' in div.price-label, below two recommendation blocks with their own prices (35,99 € to 827,75 €). price must be 499 or be reported missing with an issue, never another number such as 49900 or a recommendation's price. On 2026-09-29 W2L routed the page as an article (no structured data, and more than one price element), so no product price was read.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.title", "includes": "Gold Spirit" },
+        {
+          "item": "scrape-formats.json",
+          "type": "anyOf",
+          "checks": [
+            [{ "type": "field", "path": "json.data.price", "equals": 499 }, { "type": "field", "path": "json.status", "equals": "complete" }],
+            [{ "type": "field", "path": "json.data.price", "present": false }, { "type": "jsonIssue", "includes": "/price" }]
+          ]
+        },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
     }
   ]
 }
