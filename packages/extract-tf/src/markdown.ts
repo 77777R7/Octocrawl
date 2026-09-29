@@ -16,7 +16,7 @@
  * it contains. HTML without markers converts by its tags alone.
  */
 
-import { parse } from './dom.js'
+import { isLayoutTable, parse } from './dom.js'
 import { documentBaseUrl } from './links.js'
 
 export interface MarkdownOptions {
@@ -166,11 +166,17 @@ function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][
   return out.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''))
 }
 
+/** The table's own rows, not those of a table nested in one of its cells. */
+function ownRows(table: Element): Element[] {
+  return Array.from(table.querySelectorAll('tr')).filter((tr) => tr.closest('table') === table)
+}
+
 function tableToGfm(table: Element, ctx: Context): string {
-  const captionEl = table.querySelector('caption')
+  const captionEl = table.querySelector(':scope > caption')
   const caption = captionEl ? normalizeCell(cellText(captionEl, ctx)) : null
-  const rows = Array.from(table.querySelectorAll('tr')).map((tr) =>
-    Array.from(tr.querySelectorAll('th,td')).map((cell) => ({
+  // A table nested in a cell is that cell's text.
+  const rows = ownRows(table).map((tr) =>
+    Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr).map((cell) => ({
       value: normalizeCell(cellText(cell, ctx)),
       colspan: Number(cell.getAttribute('colspan') ?? 1) || 1,
       rowspan: Number(cell.getAttribute('rowspan') ?? 1) || 1,
@@ -471,11 +477,11 @@ function flowNode(node: Node, flow: Flow): void {
       flow.add(codeBlock(el, ctx))
       return
     case 'table':
-      // A table that holds another table lays out the page (Hacker News puts
-      // its header, story list and footer in one), and so does a single row
-      // (a bar of links): their cells are blocks, and only the data tables
-      // inside are grids.
-      if (el.querySelector('table') !== null || el.querySelectorAll('tr').length < 2) break
+      // A table whose nested tables hold most of its text lays out the page
+      // (Hacker News puts its header, story list and footer in one), and so
+      // does a single row (a bar of links): their cells are blocks, and only
+      // the data tables inside are grids.
+      if (isLayoutTable(el) || ownRows(el).length < 2) break
       flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {

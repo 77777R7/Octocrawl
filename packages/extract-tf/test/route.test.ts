@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf, routePage, selectList, selectTable } from '../src/index.js'
+import { extractTf, htmlToMarkdown, routePage, selectList, selectTable } from '../src/index.js'
 import { parse } from '../src/dom.js'
 
 const wrap = (bodyHtml: string, headExtra = '') =>
@@ -383,6 +383,22 @@ describe('strategies', () => {
     expect(out.strategy).toBe('table')
     expect(out.mainHtml).toContain('Story 4')
     expect(out.mainHtml).not.toContain('Guidelines')
+  })
+
+  it('selectTable keeps a data table that holds a small table in one cell, not the small table', () => {
+    const html = wrap('<div><h2>Kiln survey</h2><table>' +
+      '<tr><th>Kiln</th><th>Site</th><th>Firings</th><th>Glazes</th></tr>' +
+      '<tr><td>North</td><td>Harbour</td><td>41</td><td><table><tr><td>Cobalt</td><td>12</td></tr><tr><td>Ash</td><td>29</td></tr></table></td></tr>' +
+      '<tr><td>South</td><td>Estuary</td><td>37</td><td>Celadon</td></tr>' +
+      '<tr><td>West</td><td>Quarry</td><td>22</td><td>Tenmoku</td></tr></table></div>')
+    const doc = parse(html)
+    expect(selectTable(doc.document)!.textContent).toContain('Quarry')
+    doc.close()
+    const out = extractTf.extract(html)
+    expect(out.strategy).toBe('table')
+    const md = htmlToMarkdown(out.mainHtml)
+    expect(md).toContain('| North | Harbour | 41 | Cobalt 12 Ash 29 |')
+    expect(md).toContain('| West | Quarry | 22 | Tenmoku |')
   })
 })
 
