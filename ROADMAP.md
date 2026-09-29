@@ -4,7 +4,7 @@ Version 2, updated 2026-09-29. Weeks 1–16 run from 2026-09-28 to 2027-01-17. T
 
 ## Current phase: P0 validation and P1 core correctness, in parallel
 
-**This week (week 1):** P1 items 1–4 reproduced by failing tests, fixed in order, and checked on the first 12 real-site URLs.
+**This week (week 1):** P1 items 1–5 and 7 fixed and checked on real sites, items 6, 8 and 9 in review; next, item 10 and the rest of the audit's first 12 URLs (L01–L12).
 
 P0 is the user track (weeks 1–2) and P1 the engine track (weeks 1–6). P1 does not wait for P0: when the seed user's URLs point to a different P1 item than the order below, their URLs decide.
 
@@ -76,13 +76,13 @@ Throughout P1:
 
 ### P2 · Breadth for researchers (weeks 7–10)
 
-The subset of the audit's M2 and M3 that researchers use; the rest is paused.
+The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2 opens with file download and PDF text: PDFs are the largest source type among the seed user's failures ([preliminary baseline](research/coos-pilot/runs/2026-09-29-preliminary-baseline.md)).
 
 | Item | Accepted when |
 | --- | --- |
+| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified |
 | `html` / `rawHtml` / `screenshot` formats | Identical in scrape, batch and crawl |
 | Sitemap mode, subdomains, `map` endpoint | URL list from `sitemap.xml` and home-page links, with include / exclude patterns |
-| PDF text | Markdown with page numbers, each passage traceable to its page; checked on 10 real reports; no OCR; PDF tables marked unverified |
 | Tables → CSV | One CSV per `<table>` with `tableIndex`, caption and source URL; 10 real table pages checked with no misaligned cells |
 | `maxAge` cache | A cache hit says so and gives the original fetch time |
 | Custom headers, mobile viewport | Recorded in the Evidence Record |
