@@ -63,14 +63,21 @@ export function parsePort(argv: readonly string[], env: NodeJS.ProcessEnv = proc
 /**
  * Every `--token` on the command line; without one, W2L_API_TOKEN and the
  * comma-separated W2L_API_TOKENS. Command-line tokens replace the
- * environment's, as `--token` has always replaced W2L_API_TOKEN.
+ * environment's, as `--token` has always replaced W2L_API_TOKEN. A `--token`
+ * that is last, followed by another flag or blank stops startup; the error
+ * never repeats a token.
  */
 function readTokens(argv: readonly string[], env: NodeJS.ProcessEnv): readonly string[] {
   const flags: string[] = []
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
-    if (arg.startsWith('--token=')) flags.push(arg.slice('--token='.length))
-    else if (arg === '--token' && argv[i + 1] !== undefined) flags.push(argv[++i]!)
+    const inline = arg.startsWith('--token=')
+    const value = inline ? arg.slice('--token='.length) : arg === '--token' ? argv[++i] : null
+    if (value === null) continue
+    if (value === undefined || !inline && value.startsWith('--') || value.trim() === '') {
+      throw new Error('--token needs a value: use --token <token> or --token=<token>, or set W2L_API_TOKEN')
+    }
+    flags.push(value)
   }
   const listed = flags.length > 0 ? flags : [env['W2L_API_TOKEN'] ?? '', ...(env['W2L_API_TOKENS'] ?? '').split(',')]
   return [...new Set(listed.map((token) => token.trim()).filter((token) => token.length > 0))]

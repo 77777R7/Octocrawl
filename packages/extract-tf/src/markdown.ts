@@ -408,11 +408,16 @@ function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
   return true
 }
 
+/**
+ * An image with its alt text and absolute target. A `data:` URI is dropped and
+ * only the alt text kept, as Firecrawl's removeBase64Images does by default:
+ * the encoded bytes are noise in Markdown and point at no source.
+ */
 function image(el: Element, out: Inline, ctx: Context): void {
   const alt = (el.getAttribute('alt') ?? '').replace(WHITESPACE, ' ').trim()
   const src = el.getAttribute('src')
   const target = src === null ? null : linkTarget(src, ctx.base)
-  if (target !== null) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
+  if (target !== null && !/^data:/i.test(target)) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
   else if (alt) out.content(alt)
 }
 
@@ -464,6 +469,11 @@ function flowNode(node: Node, flow: Flow): void {
       flow.add(codeBlock(el, ctx))
       return
     case 'table':
+      // A table that holds another table lays out the page (Hacker News puts
+      // its header, story list and footer in one), and so does a single row
+      // (a bar of links): their cells are blocks, and only the data tables
+      // inside are grids.
+      if (el.querySelector('table') !== null || el.querySelectorAll('tr').length < 2) break
       flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {

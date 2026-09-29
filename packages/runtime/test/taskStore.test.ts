@@ -155,6 +155,8 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       await store.putStep(step({ id: 'step-3', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', status: 'failed', result: null, createdAt: LATER }))
       expect(await store.countCompletedSteps('task-1')).toBe(1)
       expect((await store.listStepsPage('task-1', { limit: 10, kind: 'all' })).steps).toHaveLength(3)
+      expect(await store.countSteps('task-1', 'attempt-1')).toEqual({ success: 2, failed: 1 })
+      expect(await store.countSteps('task-1', 'attempt-2')).toEqual({})
     })
 
     it('is idempotent: the same (taskId, attemptId, stepId) does not create a second row', async () => {
@@ -302,9 +304,12 @@ describe('@w2l/runtime public surface', () => {
       'assessConfiguredDocument',
       'assessFirecrawlIntroduction',
       'canonicalizeUrl',
+      'compilePathFilter',
       'crawlReportFromStore',
       'createHttpsWebhookTransport',
+      'decodeStepCursor',
       'diffDocument',
+      'encodeStepCursor',
       'hostOf',
       'initializeFirecrawlMonitor',
       'initializeMonitor',
@@ -313,6 +318,7 @@ describe('@w2l/runtime public surface', () => {
       'runConfiguredMonitor',
       'runFirecrawlMonitor',
       'systemClock',
+      'toEvidenceRecord',
       'verifyWebhookSignature',
       'webhookSignature',
     ])

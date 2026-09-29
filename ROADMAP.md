@@ -4,7 +4,7 @@ Version 2, updated 2026-09-29. Weeks 1–16 run from 2026-09-28 to 2027-01-17. T
 
 ## Current phase: P0 validation and P1 core correctness, in parallel
 
-**This week (week 1):** P1 items 1–5 and 7 fixed and checked on real sites, items 6, 8 and 9 in review; next, item 10 and the rest of the audit's first 12 URLs (L01–L12).
+**This week (week 1):** P1 items 1–10 fixed and checked on real sites. Two of the exit's three conditions are met: the first 12 URLs pass, and 61 of the seed user's 72 URLs succeed with the rest reporting their reason ([batch run](research/coos-pilot/runs/2026-09-29-p1-wave5-batch.md)). The core-features condition is not: 14 of the 21 are solid ([core-status-2026-09-29-p1-wave5.md](research/parity/core-status-2026-09-29-p1-wave5.md)). Next, the seven weak ones, starting with table-route selection, which drops the text of multi-table pages such as SEC filings. P2 has opened with file download and PDF text.
 
 P0 is the user track (weeks 1–2) and P1 the engine track (weeks 1–6). P1 does not wait for P0: when the seed user's URLs point to a different P1 item than the order below, their URLs decide.
 
@@ -80,7 +80,7 @@ The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2
 
 | Item | Accepted when |
 | --- | --- |
-| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified |
+| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified<br>**Status 2026-09-29:** implemented on branch `claude/p2-file-download`, not yet merged. PDF text was checked on all 10 corpus reports ([corpus run](research/pdf-corpus/runs/2026-09-29.md)); through the API, 9 of them (F01–F08, and F11 reached by a crawl), a CSV, ZIP, JSON and XLSX (F09, F10, F15, F16), `/fc`, the browser download and JSON from a PDF are real-site cases: 15 of 16 passed in the [recorded run](research/parity/runs/2026-09-29-file-download.md); F03 failed on a connection timeout before any file was read and passed when run again |
 | `html` / `rawHtml` / `screenshot` formats | Identical in scrape, batch and crawl |
 | Sitemap mode, subdomains, `map` endpoint | URL list from `sitemap.xml` and home-page links, with include / exclude patterns |
 | Tables → CSV | One CSV per `<table>` with `tableIndex`, caption and source URL; 10 real table pages checked with no misaligned cells |
@@ -135,15 +135,15 @@ Every result from every lane carries the same record. It is the product's identi
 
 | Field | Meaning | Today |
 | --- | --- | --- |
-| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | The first two exist; the redirect chain needs one output form |
-| `fetchedAt` | UTC ISO timestamp | Exists as `observedAt`; rename |
-| `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists |
-| `lane` | `http` / `browser_local` / `my_browser` / `vendor` | Debug output only; move to the default output |
-| `robotsDecision` | The robots.txt verdict, including a recorded user override | Obeyed but not recorded |
-| `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | Partial; unify |
-| `extractor` | Name, version, commit | Exists as `sourceCommit` |
-| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | Amazon path only; generalise |
-| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | Failure evidence only; make an optional output |
+| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | In `evidenceRecord` in one form for every lane; the browser lane lists every hop Chromium followed, and a lane that observes only the endpoints (provider) says so (`complete: false`) |
+| `fetchedAt` | UTC ISO timestamp | In `evidenceRecord`, from each lane's `evidence.fetchedAt`; Monitor observations keep `observedAt` |
+| `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists; `evidenceRecord.reason` is the failure, block or budget reason in one field |
+| `lane` | `http` / `browser_local` / `my_browser` / `vendor` | In `evidenceRecord` on every default response (lane names as today: `http`, `browser_local`, `provider`, …) |
+| `robotsDecision` | The robots.txt verdict, including a recorded user override | Recorded in `evidenceRecord` (decision, robots.txt URL and hash, unreachable reason, crawl delay); `userOverride` is always false, as no override exists yet |
+| `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | In `evidenceRecord`: the body each lane read, the delivered Markdown and `json.data` as canonical JSON |
+| `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf` and `EXTRACTOR_VERSION` for a page, `pdf-text/1` or `file-text/1` for a file, and the commit when `W2L_SOURCE_COMMIT` is set |
+| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; a PDF's `Label: value` lines as `pdf` with `page N "label"` |
+| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256: a downloaded file (`kind: "file"`, with size and type), the raw snapshot when `W2L_CAPTURE_RAW_DIR` is set; no screenshot; not yet a request option |
 
 ### Free core and Pro
 

@@ -56,20 +56,51 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
-/** Polling for waitBatch and waitCrawl. */
+/**
+ * Polling for waitBatch and waitCrawl. A status request that fails with a
+ * network error, HTTP 408, 429 or 5xx is retried: after 1, 2, 4, 8, then
+ * 10 s, or after the response's Retry-After when it asks for a minute or
+ * less. Any other error ends the wait at once.
+ */
 export interface WaitOptions extends RequestOptions {
   /** Delay between status requests. Default 500 ms. */
   pollIntervalMs?: number
-  /** Stop waiting after this long and throw a WaitTimeoutError. Default: no limit. The task keeps running. */
+  /**
+   * Stop waiting after this long, a status request in flight or a retry's
+   * wait included, and throw a WaitTimeoutError. Default: no limit. The task
+   * keeps running.
+   */
   timeoutMs?: number
+  /** Consecutive failed status requests retried before the last error is thrown. Default 5; 0 retries none. */
+  maxRetries?: number
 }
 
-/** The task was still unfinished when the wait's timeoutMs ran out; `last` is the final status read. */
+/**
+ * The task was still unfinished when the wait's timeoutMs ran out. `last` is
+ * the final status read, null when no status request answered in time;
+ * `cause` is the error of the last status request that failed, when no
+ * status was read after it.
+ */
 export class WaitTimeoutError<T extends { status: string } = { status: string }> extends Error {
   override readonly name = 'WaitTimeoutError'
-  constructor(readonly taskId: string, readonly last: T, readonly timeoutMs: number) {
-    super(`task ${taskId} still ${last.status} after ${timeoutMs} ms`)
+  constructor(readonly taskId: string, readonly last: T | null, readonly timeoutMs: number, options?: { cause?: unknown }) {
+    super(last === null ? `task ${taskId} status not read within ${timeoutMs} ms` : `task ${taskId} still ${last.status} after ${timeoutMs} ms`, options)
   }
+}
+
+/** crawlAndWait's result: the final status, every page and every error of the crawl's latest attempt. */
+export interface CrawlCollected {
+  taskId: string
+  report: CrawlReport
+  pages: CrawlPage[]
+  errors: CrawlError[]
+}
+
+/** batchAndWait's result: the final status and every item, failed ones included. */
+export interface BatchCollected {
+  taskId: string
+  report: BatchStatusResponse
+  items: CrawlPage[]
 }
 
 /**
@@ -85,6 +116,8 @@ export class W2LError extends Error {
     readonly method: 'GET' | 'POST',
     readonly path: string,
     readonly body: unknown,
+    /** The response's Retry-After in milliseconds; null when it sent none or one that does not parse. */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message)
   }
@@ -96,7 +129,40 @@ async function responseError(method: 'GET' | 'POST', path: string, res: Response
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
   const code = body !== null && typeof body === 'object' && isApiErrorCode((body as { code?: unknown }).code) ? (body as { code: ApiErrorCode }).code : undefined
-  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body)
+  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body, retryAfterMs(res.headers.get('retry-after')))
+}
+
+/** Retry-After as delay-seconds or an HTTP-date, in milliseconds from now. */
+function retryAfterMs(value: string | null): number | null {
+  if (value === null) return null
+  const trimmed = value.trim()
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000
+  const at = /^[+-]?[\d.]+$/.test(trimmed) ? Number.NaN : Date.parse(trimmed)
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null
+}
+
+/** The longest Retry-After a wait follows; a longer one ends the wait with its error. */
+const MAX_RETRY_AFTER_MS = 60_000
+
+/**
+ * How long to wait before retrying a failed status request, or null when the
+ * error is not transient: a network error (fetch's TypeError), or HTTP 408,
+ * 429 or 5xx, after 1, 2, 4, 8, then 10 s or the server's Retry-After.
+ */
+function retryDelayMs(error: unknown, failures: number): number | null {
+  if (error instanceof W2LError) {
+    if (error.status !== 408 && error.status !== 429 && error.status < 500) return null
+    if (error.retryAfterMs !== null) return error.retryAfterMs <= MAX_RETRY_AFTER_MS ? error.retryAfterMs : null
+  } else if (!(error instanceof TypeError)) return null
+  return Math.min(10_000, 1_000 * 2 ** (failures - 1))
+}
+
+function checkWaitOptions(options: WaitOptions): void {
+  for (const name of ['pollIntervalMs', 'timeoutMs'] as const) {
+    const value = options[name]
+    if (value !== undefined && !(Number.isFinite(value) && value >= 0)) throw new RangeError(`${name} must be a finite number of milliseconds, 0 or more`)
+  }
+  if (options.maxRetries !== undefined && !(Number.isInteger(options.maxRetries) && options.maxRetries >= 0)) throw new RangeError('maxRetries must be an integer, 0 or more')
 }
 
 const FINISHED = ['completed', 'failed', 'cancelled']
@@ -151,9 +217,19 @@ export class W2L {
     } while (cursor !== undefined)
   }
 
-  /** Polls a batch until it completes, fails or is cancelled. */
+  /** Polls a batch until it completes, fails or is cancelled. Items come from listBatchItems. */
   async waitBatch(id: string, options: WaitOptions = {}): Promise<BatchStatusResponse> {
-    return this.waitFor(id, () => this.getBatch(id, options), options)
+    return this.waitFor(id, (request) => this.getBatch(id, request), options)
+  }
+
+  /** Starts a batch, waits for it (as waitBatch) and lists every item, failed ones included. */
+  async batchAndWait(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, wait: WaitOptions = {}): Promise<BatchCollected> {
+    checkWaitOptions(wait)
+    const { taskId } = await this.batchScrape(urls, opts, wait)
+    const report = await this.waitBatch(taskId, wait)
+    const items: CrawlPage[] = []
+    for await (const item of this.listBatchItems(taskId, { limit: 50 }, wait)) items.push(item)
+    return { taskId, report, items }
   }
 
   async cancelBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
@@ -166,7 +242,25 @@ export class W2L {
 
   /** Polls a crawl until it completes, fails or is cancelled. Pages come from listCrawlPages. */
   async waitCrawl(id: string, options: WaitOptions = {}): Promise<CrawlReport> {
-    return this.waitFor(id, () => this.getCrawl(id, options), options)
+    return this.waitFor(id, (request) => this.getCrawl(id, request), options)
+  }
+
+  /** Starts a crawl, waits for it (as waitCrawl) and lists every page and every error of its latest attempt. */
+  async crawlAndWait(url: string, opts: Omit<CrawlStartRequest, 'url'> = {}, wait: WaitOptions = {}): Promise<CrawlCollected> {
+    checkWaitOptions(wait)
+    const { taskId } = await this.crawl(url, opts, wait)
+    const report = await this.waitCrawl(taskId, wait)
+    const pages: CrawlPage[] = []
+    for await (const page of this.listCrawlPages(taskId, { limit: 100 }, wait)) pages.push(page)
+    const errors: CrawlError[] = []
+    let cursor: string | undefined
+    do {
+      const page = await this.getCrawlErrors(taskId, { limit: 100, cursor }, wait)
+      errors.push(...page.items)
+      cursor = page.hasMore ? page.nextCursor ?? undefined : undefined
+      if (page.hasMore && cursor === undefined) throw new Error('crawl errors response omitted nextCursor')
+    } while (cursor !== undefined)
+    return { taskId, report, pages, errors }
   }
 
   async getCrawlPages(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlPage>> {
@@ -288,19 +382,46 @@ export class W2L {
     return this.post<WebhookDelivery>(`/v1/deliveries/${encodeURIComponent(id)}/retry`, undefined, 200, request)
   }
 
-  private async waitFor<T extends { status: string }>(id: string, poll: () => Promise<T>, options: WaitOptions): Promise<T> {
+  private async waitFor<T extends { status: string }>(id: string, poll: (request: RequestOptions) => Promise<T>, options: WaitOptions): Promise<T> {
+    checkWaitOptions(options)
     const deadline = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs
-    for (;;) {
-      options.signal?.throwIfAborted()
-      const report = await poll()
-      if (FINISHED.includes(report.status)) return report
-      if (deadline !== undefined && Date.now() >= deadline) throw new WaitTimeoutError(id, report, options.timeoutMs!)
-      const pause = Math.min(options.pollIntervalMs ?? 500, deadline === undefined ? Infinity : deadline - Date.now())
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { options.signal?.removeEventListener('abort', abort); resolve() }, Math.max(0, pause))
-        const abort = () => { clearTimeout(timer); reject(options.signal?.reason) }
-        options.signal?.addEventListener('abort', abort, { once: true })
-      })
+    // The timeout also ends a status request in flight (re-armed past setTimeout's 24.8-day limit).
+    const expiry = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const arm = (): void => {
+      timer = setTimeout(() => { if (Date.now() >= deadline!) expiry.abort(new DOMException('wait timed out', 'TimeoutError')); else arm() }, Math.min(Math.max(0, deadline! - Date.now()), 2_147_483_647))
+    }
+    if (deadline !== undefined) arm()
+    const signal = options.signal === undefined ? expiry.signal : AbortSignal.any([options.signal, expiry.signal])
+    let last: T | null = null
+    let failure: unknown = undefined
+    let failures = 0
+    const timedOut = () => new WaitTimeoutError(id, last, options.timeoutMs!, failure === undefined ? undefined : { cause: failure })
+    try {
+      for (;;) {
+        options.signal?.throwIfAborted()
+        let pause = options.pollIntervalMs ?? 500
+        try {
+          const report = await poll({ signal })
+          if (FINISHED.includes(report.status)) return report
+          last = report
+          failure = undefined
+          failures = 0
+        } catch (error) {
+          options.signal?.throwIfAborted()
+          if (expiry.signal.aborted) throw timedOut()
+          const delay = failures < (options.maxRetries ?? 5) ? retryDelayMs(error, failures + 1) : null
+          if (delay === null) throw error
+          failure = error
+          failures++
+          pause = delay
+        }
+        if (deadline !== undefined && Date.now() >= deadline) throw timedOut()
+        try { await sleep(Math.min(pause, deadline === undefined ? Infinity : deadline - Date.now()), signal) }
+        catch (error) { options.signal?.throwIfAborted(); if (expiry.signal.aborted) throw timedOut(); throw error }
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 
@@ -337,4 +458,14 @@ export class W2L {
     if (!res.ok) throw await responseError('GET', path, res)
     return (await res.json()) as T
   }
+}
+
+/** Resolves after ms, or rejects with the signal's reason when it aborts first. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason); return }
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, Math.max(0, ms))
+    const abort = () => { clearTimeout(timer); reject(signal.reason) }
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }

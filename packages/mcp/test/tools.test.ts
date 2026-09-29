@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { W2L } from '@w2l/sdk'
@@ -109,13 +109,13 @@ describe('MCP tools', () => {
     }
   })
 
-  it('declares and forwards onlyMainContent, waitFor and timeout for scrape, crawl and batch_scrape', async () => {
+  it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
       bodies.push(JSON.parse(String(init?.body)))
       return String(input).endsWith('/v1/scrape') ? json({ status: 'partial' }) : json({ taskId: 'task-1' }, 202)
     }) as typeof fetch })
-    const options = { onlyMainContent: false, waitFor: 1_000, timeout: 15_000 }
+    const options = { onlyMainContent: false, waitFor: 1_000, timeout: 15_000, maxFileBytes: 1_000_000 }
     await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
@@ -129,6 +129,7 @@ describe('MCP tools', () => {
         onlyMainContent: { type: 'boolean' },
         waitFor: { type: 'integer', minimum: 0, maximum: 60_000 },
         timeout: { type: 'integer', minimum: 1_000, maximum: 300_000 },
+        maxFileBytes: { type: 'integer', minimum: 1, maximum: 500 * 1024 * 1024 },
       })
     }
   })
@@ -156,6 +157,40 @@ describe('MCP tools', () => {
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'running', completed: 0, requested: 2, remaining: 2 })) as typeof fetch })
     const state = await callTool(client, 'wait_batch', { id: 'batch-1', timeoutMs: 10 }) as { status: string }
     expect(state.status).toBe('running')
+  })
+
+  it('stops a scrape and a wait_batch when the MCP client cancels the call', async () => {
+    const signals: AbortSignal[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal ?? undefined
+      if (signal) signals.push(signal)
+      // The scrape answers only when it is cancelled; the batch stays running.
+      if (String(input).endsWith('/v1/scrape')) return new Promise<Response>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }))
+      return json({ taskId: 'batch-1', status: 'running', completed: 0, requested: 2, remaining: 2 })
+    }) as typeof fetch })
+    const mcp = new Client({ name: 'w2l-test', version: '1.0.0' })
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
+    try {
+      const scrape = new AbortController()
+      const scraping = mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } }, undefined, { signal: scrape.signal })
+      await vi.waitFor(() => expect(signals).toHaveLength(1))
+      scrape.abort()
+      await expect(scraping).rejects.toThrow()
+      await vi.waitFor(() => expect(signals[0]!.aborted).toBe(true))
+
+      const wait = new AbortController()
+      const waiting = mcp.callTool({ name: 'wait_batch', arguments: { id: 'batch-1', timeoutMs: 300_000 } }, undefined, { signal: wait.signal })
+      await vi.waitFor(() => expect(signals.length).toBeGreaterThan(1))
+      wait.abort()
+      await expect(waiting).rejects.toThrow()
+      await vi.waitFor(() => expect(signals.at(-1)!.aborted).toBe(true))
+      const polls = signals.length
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+      expect(signals).toHaveLength(polls)
+    } finally {
+      await mcp.close()
+    }
   })
 
   it('starts a failed tool call with its error code and leaves results unchanged', async () => {

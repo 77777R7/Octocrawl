@@ -7,15 +7,16 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CONTENTFUL_STATUS, defaultApiMode, describeEgressProxy, identityBundleFrom, localNetworkPolicy, modeIdentity, withEnvironmentProxy, withOperatorContact, type CrawlBudget, type Task } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, defaultApiMode, describeEgressProxy, identityBundleFrom, localNetworkPolicy, maxFileBytesFromEnv, modeIdentity, withEnvironmentProxy, withOperatorContact, type CrawlBudget, type Task } from '@w2l/contracts'
 import { CHECKPOINT_FILENAME, CrawlOrchestrator, SqliteTaskStore } from '@w2l/runtime'
 import type { CrawlPolicy } from '@w2l/http-core'
 import { LadderRunner } from './routing/ladder.js'
 import { MemoryRoutingHistory } from './routing/vendorRouter.js'
 import { buildChannels } from './ladderCli.js'
 import { LadderScrapeAtom } from './scrapeAtom.js'
+import { FileStore } from './fileStore.js'
 
 export const CRAWL_USAGE =
   'usage: w2l crawl [--research|--authed] [--headed] [--max-pages n] [--max-depth n] [--task-dir d] [--resume [d]] [--use-cached] [--allowlist-hosts a,b] <url>\n' +
@@ -184,8 +185,9 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
 
     // Local mode: outbound requests follow the operator's proxy variables,
     // and research mode declares W2L_CONTACT.
-    const networkPolicy = withOperatorContact(withEnvironmentProxy(localNetworkPolicy(), process.env), process.env)
-    const channels = buildChannels(run.mode, { headed: args.headed, networkPolicy })
+    const networkPolicy = { ...withOperatorContact(withEnvironmentProxy(localNetworkPolicy(), process.env), process.env), maxFileBytes: maxFileBytesFromEnv(process.env) }
+    // Files the crawl reaches (PDF, CSV, ...) are saved as received in the task directory.
+    const channels = buildChannels(run.mode, { headed: args.headed, networkPolicy, fileStore: new FileStore(join(taskDir, 'files')) })
     const policy: CrawlPolicy = {
       mode: run.mode,
       ...(run.allowlistedDomains.length > 0 ? { allowlistedDomains: run.allowlistedDomains } : {}),

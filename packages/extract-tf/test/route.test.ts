@@ -353,6 +353,27 @@ describe('strategies', () => {
     expect(table!.textContent).toContain('Cobalt')
     doc.close()
   })
+
+  it('selectTable picks the data table inside a layout table, not the layout table around it (Hacker News)', () => {
+    const story = (n: number) => `<tr class="athing"><td class="title">${n}.</td><td class="votelinks"><a href="vote?id=${n}"></a></td>` +
+      `<td class="title"><a href="https://news.fixture.test/${n}">Story ${n}</a></td></tr>` +
+      `<tr><td colspan="2"></td><td class="subtext">${n * 10} points by user${n} | <a href="item?id=${n}">${n} comments</a></td></tr><tr class="spacer"></tr>`
+    const html = wrap('<center><table id="hnmain">' +
+      '<tr><td><table><tr><td><a href="news">Hacker News</a> <a href="newest">new</a> | <a href="front">past</a></td><td><a href="login">login</a></td></tr></table></td></tr>' +
+      `<tr><td><table>${[1, 2, 3, 4].map(story).join('')}</table></td></tr>` +
+      '<tr><td><table><tr><td></td></tr></table><center><a href="newsguidelines.html">Guidelines</a> | <a href="newsfaq.html">FAQ</a></center></td></tr>' +
+      '</table></center>')
+    const doc = parse(html)
+    const table = selectTable(doc.document)
+    expect(table!.textContent).toContain('Story 4')
+    expect(table!.textContent).not.toContain('login')
+    expect(table!.textContent).not.toContain('Guidelines')
+    doc.close()
+    const out = extractTf.extract(html, { url: 'https://news.fixture.test/' })
+    expect(out.strategy).toBe('table')
+    expect(out.mainHtml).toContain('Story 4')
+    expect(out.mainHtml).not.toContain('Guidelines')
+  })
 })
 
 describe('extractTf page types', () => {

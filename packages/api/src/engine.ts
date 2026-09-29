@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {
   buildChannels,
   BrowserLocalSubject,
+  FileStore,
   LadderRunner,
   LadderScrapeAtom,
   MemoryRoutingHistory,
@@ -19,6 +20,7 @@ import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
   localNetworkPolicy,
+  maxFileBytesFromEnv,
   type FetchOptions,
   type PageOptions,
   type CrawlAccepted,
@@ -34,7 +36,9 @@ import {
   type NetworkPolicy,
   type ScrapeRequest,
   type StepRecord,
+  type StepStatus,
   type Task,
+  type TaskStatus,
   type CrawlPageQuery,
   type ExecutionContext,
   type CompactScrapeResponse,
@@ -52,7 +56,7 @@ import {
   type MonitorRunDetail,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, reportFromTaskAttempt, SqliteTaskStore, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
@@ -63,6 +67,20 @@ import { extractionInput, extractStructured, prepareScrapeResponse, structuredMo
 export interface CrawlWithSteps {
   report: CrawlReport
   steps: readonly StepRecord[]
+}
+
+/** One page of a crawl's latest attempt and what is known about the rest, for its /fc status. */
+export interface CrawlStatusPage {
+  status: TaskStatus
+  /** Up to `limit` of the latest attempt's steps, in the order they were recorded, after `cursor`. */
+  steps: readonly StepRecord[]
+  /** The cursor after the last of `steps`; the query's own when there are none. */
+  cursor: string | null
+  hasMore: boolean
+  /** How many of the latest attempt's steps have each status. */
+  counts: Partial<Record<StepStatus, number>>
+  /** Pages the crawl will still record, when this process runs it; null when it does not. */
+  ahead: number | null
 }
 
 /** The crawl's state does not allow the request (HTTP 409 `conflict`). */
@@ -79,6 +97,8 @@ export interface ApiEngine {
   cancelBatch(taskId: string): Promise<BatchStatusResponse | null>
   getCrawl(taskId: string): Promise<CrawlReport | null>
   getCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null>
+  /** Null when there is no such task; a RequestError for a cursor that does not parse. */
+  getCrawlStatusPage(taskId: string, query: { cursor?: string; limit: number }): Promise<CrawlStatusPage | null>
   getCrawlPages(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   getCrawlErrors(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlError> | null>
   cancelCrawl(taskId: string): Promise<CrawlReport | null>
@@ -122,7 +142,10 @@ export interface ApiEngineOptions {
   monitorAttemptTimeoutMs?: number
   headed?: boolean
   networkPolicy?: NetworkPolicy
-  /** Hosted crawl default when the request omits maxPages. Local stays unbounded. */
+  /**
+   * Hosted crawl limit: an omitted or null maxPages takes it and a larger one
+   * is refused. Null (local) leaves crawls unbounded.
+   */
   defaultMaxPages?: number | null
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
@@ -150,22 +173,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
   const headed = options.headed === true
+  const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
-    ...(options.networkPolicy ?? localNetworkPolicy()),
+    ...basePolicy,
     ...(options.perHostConcurrency === undefined ? {} : { perHostConcurrency: options.perHostConcurrency }),
     ...(options.perHostMinDelayMs === undefined ? {} : { perHostMinDelayMs: options.perHostMinDelayMs }),
+    // The operator's file cap: the policy's own, else W2L_MAX_FILE_BYTES, else the default.
+    maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
+  }
+  // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
+  const fileStore = new FileStore(join(taskRoot, 'files'))
+  /** A request may lower the file cap, never raise it past the operator's. */
+  const checkFileCap = (req: PageOptions): void => {
+    if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
+      throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes}, this server's file cap (W2L_MAX_FILE_BYTES)`)
+    }
   }
   const originScheduler = new OriginScheduler(networkPolicy)
-  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler)
+  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const inflight = new Map<string, Promise<void>>()
   let batchStartInProgress = false
   const activeScrapes = new Set<Promise<unknown>>()
   const crawlControllers = new Map<string, AbortController>()
+  const runningCrawls = new Map<string, CrawlOrchestrator>()
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -235,7 +270,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task.mode)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -304,13 +339,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       useCached: req.useCached,
       taskId: task.id,
     }).then(async () => {
-      inflight.delete(task.id); crawlControllers.delete(task.id)
+      inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await store.close()
     }).catch(async () => {
-      inflight.delete(task.id); crawlControllers.delete(task.id)
+      inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
       await store.close()
     })
+    runningCrawls.set(task.id, orchestrator)
     inflight.set(task.id, job)
   }
 
@@ -335,6 +371,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   return {
     async scrape(req, context = {}) {
+      checkFileCap(req)
       const overallStart = performance.now()
       // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
       const deadlineAt = req.timeout === undefined
@@ -365,6 +402,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async startCrawl(req) {
+      checkFileCap(req)
+      if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
+        throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
+      }
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
@@ -378,7 +419,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         mode,
         status: 'pending',
         budget: {
-          maxPages: req.maxPages === undefined ? defaultMaxPages : req.maxPages,
+          maxPages: req.maxPages ?? defaultMaxPages,
           maxWallMs: null,
           maxCostUsd: null,
           maxTokens: null,
@@ -403,6 +444,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
+      checkFileCap(req)
       batchStartInProgress = true
       try {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
@@ -463,6 +505,33 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     getCrawlWithSteps: loadCrawlWithSteps,
+
+    async getCrawlStatusPage(taskId, query) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      if (query.cursor !== undefined) {
+        try { decodeStepCursor(query.cursor) } catch { throw new RequestError('cursor is not one this API issued') }
+      }
+      const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+      try {
+        const task = await store.getTask(taskId)
+        if (task === null) return null
+        // Status, counts and one page of steps: no step body beyond that page is read.
+        const attemptId = (await store.listAttempts(taskId)).at(-1)?.id
+        const page = attemptId === undefined ? { steps: [], hasMore: false } : await store.listStepsPage(taskId, { attemptId, cursor: query.cursor, limit: query.limit, kind: 'all' })
+        const counts = attemptId === undefined ? {} : await store.countSteps(taskId, attemptId)
+        const last = page.steps.at(-1)
+        return {
+          status: task.status,
+          steps: page.steps,
+          cursor: last === undefined ? query.cursor ?? null : encodeStepCursor(last.createdAt, last.id),
+          hasMore: page.hasMore,
+          counts,
+          ahead: runningCrawls.get(taskId)?.pagesAhead() ?? null,
+        }
+      } finally {
+        await store.close()
+      }
+    },
 
     async getCrawlPages(taskId, query) {
       const page = await loadCrawlPageList(taskId, query, 'pages')
@@ -622,11 +691,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
-/** What a request or stored task asks each lane to capture; its timeout is a deadline, not a fetch option. */
+/** What a request or stored task asks each lane to capture. Its timeout is the deadline; passed on, it lets the lanes' waits run to it. */
 function fetchOptions(options: PageOptions | undefined): FetchOptions {
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
+    ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+    ...(options?.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
   }
 }
 
@@ -660,7 +731,7 @@ function linksRequested(task: Task): boolean {
   return options?.includeLinks === true || (options?.formats ?? []).includes('links')
 }
 
-function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
+function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']): CrawlPage {
   const result = step.result
   return {
     id: step.id,
@@ -673,10 +744,13 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
+    ...(result?.file === undefined ? {} : { file: result.file }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,
     evidence: result?.evidence ?? null,
+    // The stored result is the full one, trace included, with only the formats the task asked for.
+    evidenceRecord: result === null ? null : toEvidenceRecord(result, { mode }, { markdown: result.markdown, ...(result.json === undefined ? {} : { json: result.json }) }),
     usage: result?.usage ?? null,
     trace: result?.trace ?? [],
     audit: step.audit,

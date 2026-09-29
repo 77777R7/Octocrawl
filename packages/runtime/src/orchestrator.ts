@@ -78,6 +78,7 @@ export class CrawlOrchestrator {
   private readonly workerCount: number
   private readonly signal?: AbortSignal
   private readonly shutdownSignal?: AbortSignal
+  private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
     this.store = options.store
@@ -88,6 +89,15 @@ export class CrawlOrchestrator {
     this.workerCount = Math.max(1, options.workerCount ?? 4)
     this.signal = options.signal
     this.shutdownSignal = options.shutdownSignal
+  }
+
+  /**
+   * The pages this run will still record if it runs to its end: those in
+   * flight and the queued ones its page budget admits. It grows as pages add
+   * links. Null when no run is under way.
+   */
+  pagesAhead(): number | null {
+    return this.ahead?.() ?? null
   }
 
   async run(partial: Pick<CrawlSpec, 'seedUrl' | 'taskDir'> & Partial<CrawlSpec>): Promise<CrawlReport> {
@@ -162,6 +172,15 @@ export class CrawlOrchestrator {
       const taskUrls = new Set(priorSteps.map((step) => step.canonicalUrl))
       let newPagesReserved = 0
       const admit = (item: FrontierItem): boolean => maxPages === null || taskUrls.has(item.canonicalUrl) || taskUrls.size + newPagesReserved < maxPages
+      // Dequeued pages whose step is not written yet.
+      let pagesInFlight = 0
+      this.ahead = () => {
+        const queued = frontier.pendingCount()
+        if (maxPages === null) return pagesInFlight + queued
+        // A page the task already has is fetched again for free; a new one needs budget.
+        const known = frontier.pendingCount((item) => taskUrls.has(item.canonicalUrl))
+        return pagesInFlight + known + Math.min(queued - known, Math.max(0, maxPages - taskUrls.size - newPagesReserved))
+      }
       let activePages = 0
       let stopping = false
       const wakeResolvers: Array<() => void> = []
@@ -219,6 +238,8 @@ export class CrawlOrchestrator {
           if (reserved) newPagesReserved++
           const delay = crawlDelayDetail(item.host, now, next.previousStartAtMs, frontier.hostDelayMs(item.host), frontier.crawlDelayMs(item.host))
           activePages++
+          pagesInFlight++
+          let inFlight = true
           try {
             const cached = spec.useCached ? await this.store.getStepByCanonicalUrl(runningTask.id, item.canonicalUrl) : null
             const reusable = cached !== null && cached.result !== null && CONTENTFUL_STATUS.has(cached.result.status)
@@ -259,6 +280,9 @@ export class CrawlOrchestrator {
               else seenHash.set(hash, item.canonicalUrl)
             }
             const at = new Date(this.clock.now()).toISOString()
+            // Written from here on, no longer in flight (the write itself is synchronous).
+            inFlight = false
+            pagesInFlight--
             await this.store.putStep({ id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at })
             taskUrls.add(item.canonicalUrl)
             if (reserved) { newPagesReserved--; reserved = false }
@@ -291,6 +315,7 @@ export class CrawlOrchestrator {
             stopController.abort(err)
             throw err
           } finally {
+            if (inFlight) pagesInFlight--
             if (reserved) newPagesReserved--
             frontier.release(item.canonicalUrl)
             activePages--
@@ -305,6 +330,7 @@ export class CrawlOrchestrator {
     } catch (err) {
       if (!stopped()) failed = err
     } finally {
+      this.ahead = null
       pollingStopped = true
       if (pollTimer !== undefined) clearTimeout(pollTimer)
       scope.signal.removeEventListener('abort', onStop)

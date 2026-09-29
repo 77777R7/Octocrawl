@@ -10,7 +10,7 @@
  * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { type NetworkPolicy, type ExecutionContext, type RobotsUnreachable } from '@w2l/contracts'
+import { robotsAgent, type NetworkPolicy, type ExecutionContext, type RobotsUnreachable } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -189,7 +189,8 @@ export class RobotsOriginCache {
       /* keep '/' */
     }
 
-    const match = evaluateRobots(cached.robots, userAgent, path)
+    // The research product token governs SEC's format too (robotsAgent).
+    const match = evaluateRobots(cached.robots, robotsAgent(userAgent), path)
     return {
       robotsUrl: cached.robotsUrl,
       robotsSha256: cached.sha256,

@@ -2,6 +2,7 @@ import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from 
 import type { ComplianceRecord } from './compliance.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { StructuredExtractionResult } from './structured.js'
+import type { FileDescription } from './file.js'
 
 export interface ResourceTimings {
   queueMs?: number
@@ -70,12 +71,36 @@ export interface Evidence {
   /** Final URL after redirects. */
   finalUrl: string
   httpStatus: number | null
+  /**
+   * The URLs of a redirect, the requested URL first and `finalUrl` last;
+   * empty when nothing redirected.
+   */
   redirectChain: readonly string[]
+  /**
+   * True when `redirectChain` lists every hop the lane requested: the HTTP
+   * lane follows each redirect itself, and the browser lane lists each
+   * redirect Chromium followed for the page's navigation. Absent when the
+   * lane does not say (the provider lane, which sees where its vendor started
+   * and ended, and results stored before lanes recorded it).
+   */
+  redirectChainComplete?: boolean
+  /**
+   * The final response's `content-type` header as the server sent it, in
+   * every lane (the browser lane reads the rendered page, whatever it says);
+   * null when there was no response or no such header.
+   */
   contentType: string | null
   /** sha256 of the raw response body. Null only when no body was read. */
   rawBodySha256: string | null
   /** Relative artifact paths (raw body, screenshot, DOM snapshot). */
   artifacts: readonly string[]
+  /**
+   * UTC ISO time the lane received what it reports: the final response's
+   * headers (HTTP), the vendor's answer (provider), the rendered page's
+   * capture (browser). Absent when no response was read, and on results
+   * stored before lanes recorded it.
+   */
+  fetchedAt?: string
   /** HTTP validators observed for the representation, when exposed. */
   etag?: string | null
   lastModified?: string | null
@@ -174,9 +199,13 @@ export interface FetchResult {
    */
   resumeContext?: unknown | null
   /**
-   * Extracted main content as Markdown. Null unless status is contentful,
-   * except on a failed or blocked result answered with an error status: there
-   * it is that page, kept as evidence of what the server said, never content.
+   * The page as Markdown: its main content, or the whole page when
+   * `onlyMainContent` is false. `data:` image URIs are dropped, their alt
+   * text kept. Null unless status is contentful, except on a failed or
+   * blocked result that kept a page as evidence, never content: the page an
+   * error status carried, or the whole page when the extractor found no main
+   * content (`empty_unverified`, and `timeout` when the deadline then ended a
+   * later rung).
    */
   markdown: string | null
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
@@ -190,6 +219,13 @@ export interface FetchResult {
   metadata?: PageMetadata
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
+  /**
+   * Present when the response was a file (PDF, CSV, JSON, text, XLSX, XLS,
+   * ZIP) rather than a web page: what it was, its size, SHA-256 and where it
+   * was saved, and for a PDF its pages. Such a result has no `document` or
+   * `metadata`.
+   */
+  file?: FileDescription
   /**
    * Outbound http(s) links from the FULL document, collected after extract
    * and before the raw HTML is dropped. Not from `mainHtml` — prune strips

@@ -206,6 +206,106 @@ describe('W2L SDK', () => {
     expect(error).toMatchObject({ taskId: 'batch-1', last: { status: 'running' }, timeoutMs: 30 })
   })
 
+  it('retries a network error, 408, 429 and 5xx while waiting, backing off or following Retry-After', async () => {
+    vi.useFakeTimers()
+    try {
+      const answers: Array<() => Response> = [
+        () => { throw new TypeError('fetch failed') },
+        () => new Response('Bad Gateway', { status: 502 }),
+        () => new Response('{"error":"slow down"}', { status: 429, headers: { 'retry-after': '3' } }),
+        () => new Response('', { status: 408 }),
+        () => new Response(JSON.stringify({ taskId: 'crawl-1', status: 'running' })),
+        () => new Response('', { status: 503 }),
+        () => new Response(JSON.stringify({ taskId: 'crawl-1', status: 'completed' })),
+      ]
+      const at: number[] = []
+      const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => { at.push(Date.now()); return answers.shift()!() }) as typeof fetch })
+      const waiting = client.waitCrawl('crawl-1', { pollIntervalMs: 100 })
+      await vi.runAllTimersAsync()
+      await expect(waiting).resolves.toMatchObject({ status: 'completed' })
+      // 1, 2, (4) and 8 s after consecutive failures, the third one's Retry-After instead of 4 s; the poll interval after a status; 1 s again.
+      expect(at.slice(1).map((time, i) => time - at[i]!)).toEqual([1_000, 2_000, 3_000, 8_000, 100, 1_000])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rethrows other 4xx at once, and a transient error once its retries or the timeout run out', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      const answering = (response: () => Response) => new W2L({ baseUrl: 'http://localhost', fetch: (async () => { calls++; return response() }) as typeof fetch })
+      const failure = (promise: Promise<unknown>) => { const caught = promise.catch((error: unknown) => error); void vi.runAllTimersAsync(); return caught }
+
+      expect(await failure(answering(() => new Response('{"error":"not found","code":"not_found"}', { status: 404 })).waitBatch('gone'))).toMatchObject({ name: 'W2LError', status: 404, code: 'not_found' })
+      expect(calls).toBe(1)
+      calls = 0
+      expect(await failure(answering(() => new Response('{"error":"no","code":"unauthorized"}', { status: 401 })).waitCrawl('crawl-1'))).toMatchObject({ status: 401 })
+      expect(calls).toBe(1)
+
+      calls = 0
+      expect(await failure(answering(() => new Response('', { status: 503 })).waitCrawl('crawl-1'))).toMatchObject({ name: 'W2LError', status: 503 })
+      expect(calls).toBe(6)
+      calls = 0
+      expect(await failure(answering(() => new Response('', { status: 503 })).waitCrawl('crawl-1', { maxRetries: 1 }))).toMatchObject({ status: 503 })
+      expect(calls).toBe(2)
+      // A Retry-After beyond a minute is not waited out inside the wait.
+      calls = 0
+      expect(await failure(answering(() => new Response('', { status: 429, headers: { 'retry-after': '120' } })).waitCrawl('crawl-1'))).toMatchObject({ status: 429 })
+      expect(calls).toBe(1)
+
+      // The timeout still applies: it ends the backoff with the last status read, or none.
+      let statuses = [JSON.stringify({ taskId: 'crawl-1', status: 'running' })]
+      const flaky = answering(() => { const body = statuses.shift(); return body === undefined ? new Response('', { status: 503 }) : new Response(body) })
+      const timedOut = await failure(flaky.waitCrawl('crawl-1', { timeoutMs: 2_500 }))
+      expect(timedOut).toBeInstanceOf(WaitTimeoutError)
+      expect(timedOut).toMatchObject({ taskId: 'crawl-1', last: { status: 'running' }, timeoutMs: 2_500, cause: { status: 503 } })
+      statuses = []
+      expect(await failure(flaky.waitCrawl('crawl-1', { timeoutMs: 2_500 }))).toMatchObject({ name: 'WaitTimeoutError', taskId: 'crawl-1', last: null })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ends a status request still in flight when timeoutMs runs out, and checks its options', async () => {
+    const hanging = new W2L({ baseUrl: 'http://localhost', fetch: ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+    })) as typeof fetch })
+    const started = Date.now()
+    const error = await hanging.waitBatch('batch-1', { timeoutMs: 50 }).catch((reason: unknown) => reason)
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(error).toBeInstanceOf(WaitTimeoutError)
+    expect(error).toMatchObject({ taskId: 'batch-1', last: null, timeoutMs: 50 })
+    for (const options of [{ pollIntervalMs: -1 }, { timeoutMs: Number.NaN }, { maxRetries: 1.5 }]) {
+      await expect(hanging.waitCrawl('crawl-1', options)).rejects.toBeInstanceOf(RangeError)
+    }
+  })
+
+  it('crawlAndWait and batchAndWait return the final status with every page, error and item', async () => {
+    const calls: string[] = []
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      calls.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`)
+      if (init?.method === 'POST') return new Response(JSON.stringify({ taskId: 'task-1' }), { status: 202 })
+      const cursor = url.searchParams.get('cursor')
+      if (url.pathname.endsWith('/pages') || url.pathname.endsWith('/items')) {
+        return new Response(JSON.stringify(cursor === null ? { items: [{ id: 'one' }], hasMore: true, nextCursor: 'c1' } : { items: [{ id: 'two' }], hasMore: false, nextCursor: null }))
+      }
+      if (url.pathname.endsWith('/errors')) return new Response(JSON.stringify({ items: [{ id: 'bad' }], hasMore: false, nextCursor: null }))
+      return new Response(JSON.stringify({ taskId: 'task-1', status: 'completed' }))
+    }) as typeof fetch })
+    expect(await client.crawlAndWait('https://example.com/', { maxPages: 3 }, { pollIntervalMs: 1 })).toEqual({
+      taskId: 'task-1', report: { taskId: 'task-1', status: 'completed' }, pages: [{ id: 'one' }, { id: 'two' }], errors: [{ id: 'bad' }],
+    })
+    expect(await client.batchAndWait(['https://example.com/a', 'https://example.com/b'])).toEqual({
+      taskId: 'task-1', report: { taskId: 'task-1', status: 'completed' }, items: [{ id: 'one' }, { id: 'two' }],
+    })
+    expect(calls).toEqual([
+      'POST /v1/crawl', 'GET /v1/crawl/task-1', 'GET /v1/crawl/task-1/pages?limit=100', 'GET /v1/crawl/task-1/pages?cursor=c1&limit=100', 'GET /v1/crawl/task-1/errors?limit=100',
+      'POST /v1/batches', 'GET /v1/batches/task-1', 'GET /v1/batches/task-1/items?limit=50', 'GET /v1/batches/task-1/items?cursor=c1&limit=50',
+    ])
+  })
+
   it('preserves API error status and body for read and mutation failures', async () => {
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"monitor paused"}', { status: 409 })) as typeof fetch })
     await expect(client.getMonitor('catalog')).rejects.toThrow('GET /v1/monitors/catalog failed: 409 {"error":"monitor paused"}')

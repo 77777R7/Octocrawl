@@ -7,6 +7,7 @@ const engine = {
   scrape: async () => { throw new Error('SQLITE_IOERR: disk I/O error in /Users/someone/.w2l/api/checkpoint.sqlite') },
   getCrawl: async () => null,
   getCrawlWithSteps: async () => null,
+  getCrawlStatusPage: async () => null,
   retryDelivery: () => { throw new Error('delivery not found or not dead-lettered') },
 } as unknown as ApiEngine
 

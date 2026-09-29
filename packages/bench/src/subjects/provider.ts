@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -246,6 +246,22 @@ export class ProviderSubject implements SubjectAdapter {
       skippedFetch: !verdict.allowed,
       ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
     }
+    // As on the other lanes: a result without a compliance record (a vendor
+    // failure) still says which robots.txt decision it was fetched under.
+    trace.push({
+      at: Date.now() - start,
+      lane: 'provider',
+      event: 'robots_checked',
+      detail: {
+        decision: robotsDecision.decision,
+        robotsUrl: robotsDecision.robotsUrl,
+        robotsSha256: robotsDecision.robotsSha256,
+        matchedGroup: robotsDecision.matchedUserAgentGroup,
+        ruleCount: robotsDecision.appliedRules.length,
+        crawlDelayMs: robotsDecision.crawlDelayMs ?? null,
+        ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
+      },
+    })
 
     if (!verdict.allowed) {
       return this.denied(url, start, trace, verdict, robotsDecision)
@@ -258,8 +274,10 @@ export class ProviderSubject implements SubjectAdapter {
     this.lastRequestAtMsByHost.set(host, Date.now())
 
     let res: ProviderResponse
+    let fetchedAt: string
     try {
       res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal), execution.signal)
+      fetchedAt = new Date().toISOString()
       if (res.status === 429 || res.status === 503) {
         const delay = parseRetryAfterMs(res.headers['retry-after'] ?? null)
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)
@@ -389,6 +407,7 @@ export class ProviderSubject implements SubjectAdapter {
         contentType: res.headers['content-type'] ?? null,
         rawBodySha256: sha256Hex(new TextEncoder().encode(res.body)),
         artifacts: [],
+        fetchedAt,
       },
       usage: {
         wallMs,
@@ -499,9 +518,14 @@ export class ProviderSubject implements SubjectAdapter {
       },
     })
 
+    // No main content: the whole page stays on the failed result as evidence,
+    // never content. onlyMainContent: false asks for the whole page, so there
+    // it is the answer.
+    let wholePage: string | null = null
     if (extracted.escalate) {
       if (gate !== null) return blocked(gate)
-      return {
+      wholePage = wholePageMarkdown(res.body, res.finalUrl)
+      if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
         failureReason: 'empty_unverified',
@@ -509,7 +533,8 @@ export class ProviderSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'provider',
         escalations: [],
-        markdown: null,
+        markdown: wholePage,
+        ...(wholePage === null ? {} : { links }),
       }
     }
 
@@ -523,7 +548,7 @@ export class ProviderSubject implements SubjectAdapter {
 
     // onlyMainContent: false emits the whole page through the same converter and base URL.
     const markdown = options.onlyMainContent === false
-      ? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
       : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,

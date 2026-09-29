@@ -8,6 +8,7 @@
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
 import type { Evidence, FetchResult, LadderRunAudit, TraceEvent } from './result.js'
+import type { EvidenceRecord } from './evidenceRecord.js'
 import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
 import type { ExecutionContext } from './execution.js'
@@ -82,10 +83,14 @@ export interface CrawlPage {
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
   metadata?: FetchResult['metadata']
   json?: import('./structured.js').StructuredExtractionResult | null
+  /** The file the page was (PDF, CSV, ...), as on a scrape result; absent for a web page. */
+  file?: FetchResult['file']
   failureReason: string | null
   blockReason: string | null
   budgetExceeded: BudgetKind | null
   evidence: Evidence | null
+  /** The page's Evidence Record v1; null while the page has no result yet. */
+  evidenceRecord: EvidenceRecord | null
   /** Per-URL latency, attempts and metering without loading the full audit. */
   usage?: import('./result.js').ResourceUsage | null
   trace: readonly TraceEvent[]

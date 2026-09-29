@@ -10,7 +10,7 @@ import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest } from './api.js'
 import { parseCrawlStartRequest, parseScrapeRequest, RequestError } from './api.js'
 import type { CrawlReport } from './crawl.js'
 import type { FetchResult } from './result.js'
-import type { StepRecord, TaskStatus } from './checkpoint.js'
+import type { StepRecord, StepStatus, TaskStatus } from './checkpoint.js'
 
 export const FIRECRAWL_SHIM_SNAPSHOT = {
   capturedAt: '2026-09-18',
@@ -26,16 +26,19 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
 
 export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
+  'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
-  'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
+  'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
+  'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
   'Formats other than markdown/links and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them; other meta tags (og:*, twitter:* and the rest) are not passed through, and a failed or blocked page has none.',
+  'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
 ] as const
 
 export interface FirecrawlPage {
@@ -50,7 +53,11 @@ export interface FirecrawlPage {
     robots?: string
     favicon?: string
     sourceURL: string
+    /** The final URL, after redirects. */
+    url: string
     statusCode: number | null
+    /** The final response's `content-type` header; left out when there was none. */
+    contentType?: string
     error?: string
   }
 }
@@ -67,19 +74,49 @@ export interface FirecrawlCrawlStarted {
   url: string
 }
 
-export type FirecrawlCrawlJobStatus = 'scraping' | 'completed' | 'failed'
+export type FirecrawlCrawlJobStatus = 'scraping' | 'completed' | 'failed' | 'cancelled'
 
 export interface FirecrawlCrawlStatus {
   status: FirecrawlCrawlJobStatus
-  total: number
+  /**
+   * The latest attempt's pages and errors, plus, while this API process runs
+   * the crawl, the pages in flight and those queued within its page limit.
+   * Null while the crawl is unfinished and no process here runs it (paused).
+   */
+  total: number | null
+  /** The latest attempt's pages that succeeded (status success or partial): the data entries without metadata.error. */
   completed: number
   /** Null: W2L counts no credits, and an unknown count is not zero. */
   creditsUsed: number | null
   /** Null: crawl results stay until their task directory is deleted. */
   expiresAt: string | null
-  next: string | null
+  /** The URL of the next page of `data`: there while more pages are stored or the crawl is running, left out after the last. */
+  next?: string
+  /** One page of the latest attempt's steps in the order they were recorded, errors included (with `metadata.error`). */
   data: FirecrawlPage[]
 }
+
+/** What the API knows about a crawl beyond its steps, for its Firecrawl status. */
+export interface FirecrawlCrawlCounts {
+  completed: number
+  total: number | null
+  next?: string
+}
+
+/**
+ * completed and total from how many of the latest attempt's steps have each
+ * status: completed is its success and partial pages, total every step it
+ * recorded plus, while the crawl is unfinished, `ahead`, the pages it will
+ * still record, null when no process here runs it.
+ */
+export function firecrawlCrawlCounts(status: TaskStatus, steps: Partial<Record<StepStatus, number>>, ahead: number | null): { completed: number; total: number | null } {
+  const recorded = Object.values(steps).reduce((sum, count) => sum + count, 0)
+  const finished = status === 'completed' || status === 'failed' || status === 'cancelled'
+  return { completed: (steps.success ?? 0) + (steps.partial ?? 0), total: finished ? recorded : ahead === null ? null : recorded + ahead }
+}
+
+/** Default and largest number of steps one `GET /fc/v1/crawl/:id` returns in `data`. */
+export const FIRECRAWL_STATUS_PAGE_SIZE = { default: 100, max: 1000 } as const
 
 const SHIM_FORMATS: readonly string[] = ['markdown', 'links']
 /** W2L page metadata fields that Firecrawl's `metadata` also has. */
@@ -90,6 +127,7 @@ const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout'] as const
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
   ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
+  removeBase64Images: { value: true, reason: 'W2L always drops data: image URIs from Markdown and keeps their alt text' },
 }
 
 interface ShimProblems {
@@ -127,9 +165,10 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   return parseCrawlStartRequest(native)
 }
 
-/** The scrape options the shim maps: formats (markdown, links), onlyMainContent, waitFor and timeout. */
+/** The scrape options the shim maps: formats (markdown, links), onlyMainContent, waitFor and timeout; removeBase64Images only as true, which W2L always does. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
-  checkShimKeys(rec, prefix, [...keys, 'formats', ...SHIM_PAGE_OPTIONS], problems)
+  checkShimKeys(rec, prefix, [...keys, 'formats', 'removeBase64Images', ...SHIM_PAGE_OPTIONS], problems)
+  checkShimFixedValue(rec, prefix, 'removeBase64Images', problems)
   const mapped: Record<string, unknown> = {}
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
   if (rec.formats === undefined) return mapped
@@ -182,18 +221,35 @@ export function wrapCrawlAccepted(native: CrawlAccepted, seedUrl: string): Firec
   return { success: true, id: native.taskId, url: seedUrl }
 }
 
-export function wrapCrawlStatus(report: CrawlReport, steps: readonly StepRecord[]): FirecrawlCrawlStatus {
+/**
+ * The query of `GET /fc/v1/crawl/:id`: `cursor` (from a `next` URL) and
+ * `limit` (1 to 1000, default 100). Anything else, Firecrawl's `skip`
+ * included, is rejected by name: pages follow `next`.
+ */
+export function parseFirecrawlCrawlStatusQuery(query: Record<string, string | undefined>): { cursor?: string; limit: number } {
+  const unknown = Object.keys(query).filter((key) => key !== 'cursor' && key !== 'limit')
+  if (unknown.length > 0) {
+    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (follow next for further pages)`, 'unsupported_parameter', { parameters: unknown })
+  }
+  const limit = query.limit === undefined ? FIRECRAWL_STATUS_PAGE_SIZE.default : Number(query.limit)
+  if (!Number.isInteger(limit) || limit < 1 || limit > FIRECRAWL_STATUS_PAGE_SIZE.max) throw new RequestError(`limit must be an integer between 1 and ${FIRECRAWL_STATUS_PAGE_SIZE.max}`)
+  if (query.cursor !== undefined && query.cursor.length === 0) throw new RequestError('cursor must not be empty')
+  return { ...(query.cursor === undefined ? {} : { cursor: query.cursor }), limit }
+}
+
+export function wrapCrawlStatus(report: Pick<CrawlReport, 'status'>, steps: readonly StepRecord[], counts: FirecrawlCrawlCounts): FirecrawlCrawlStatus {
   const data: FirecrawlPage[] = []
   for (const step of steps) {
     if (step.result !== null) data.push(firecrawlPage(step.result))
   }
   return {
     status: firecrawlCrawlStatus(report.status),
-    total: steps.length,
-    completed: report.pagesFetched,
+    total: counts.total,
+    completed: counts.completed,
     creditsUsed: null,
     expiresAt: null,
-    next: null,
+    // Left out after the last page, as Firecrawl does: its v1 client follows `next` while the key is there.
+    ...(counts.next === undefined ? {} : { next: counts.next }),
     data,
   }
 }
@@ -228,7 +284,9 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
     metadata: {
       ...declared,
       sourceURL: result.requestedUrl,
+      url: result.evidence.finalUrl,
       statusCode: result.evidence.httpStatus,
+      ...(result.evidence.contentType === null ? {} : { contentType: result.evidence.contentType }),
       ...(error !== undefined ? { error } : {}),
     },
   }
@@ -241,8 +299,8 @@ function scrapeError(result: FetchResult): string {
   return result.status
 }
 
+/** pending, running and paused are all `scraping`: a paused crawl resumes when the API starts again. */
 function firecrawlCrawlStatus(status: TaskStatus): FirecrawlCrawlJobStatus {
-  if (status === 'completed') return 'completed'
-  if (status === 'failed' || status === 'cancelled') return 'failed'
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') return status
   return 'scraping'
 }

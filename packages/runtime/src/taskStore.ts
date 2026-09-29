@@ -6,7 +6,7 @@
  * A repeated put of the same id does not create a second row.
  */
 
-import type { Attempt, StepRecord, Task } from '@w2l/contracts'
+import type { Attempt, StepRecord, StepStatus, Task } from '@w2l/contracts'
 
 export type StepPageKind = 'pages' | 'errors' | 'all'
 export interface StepPageQuery {
@@ -33,6 +33,8 @@ export interface TaskStore {
   listSteps(taskId: string, attemptId?: string): Promise<readonly StepRecord[]>
   /** Count terminal URL checkpoints without reading their result bodies. */
   countCompletedSteps(taskId: string): Promise<number>
+  /** How many of an attempt's steps (every attempt's without attemptId) have each status, without reading their bodies. */
+  countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
   /**
    * Latest step for this canonical URL on the task (any attempt).

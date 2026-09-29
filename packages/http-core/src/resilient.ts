@@ -45,8 +45,15 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   retryBackoffBaseMs: number
   /** Extra deterministic-injection hook for tests and operators. */
   retryJitterMs: number
+  /** Default wait for a response's headers, and for each chunk of its body; never past deadlineAt. */
   headersTimeoutMs: number
   bodyTimeoutMs: number
+  /**
+   * deadlineAt is the caller's own timeout: wait for headers and body until it
+   * instead of stopping at headersTimeoutMs / bodyTimeoutMs. Without a
+   * deadline the two caps apply.
+   */
+  capsFollowDeadline?: boolean
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -72,6 +79,8 @@ export interface ResilientResponseLike {
   status: number
   headers: { get(name: string): string | null }
   bodyText(): Promise<string>
+  /** The body as received. A response without it is read as text and encoded as UTF-8. */
+  bodyBytes?(): Promise<Uint8Array>
 }
 
 /** One wire request. Throws are mapped by error name inside the engine. */
@@ -107,6 +116,8 @@ export interface ResilientOutcome {
   attemptCount: number
   headers: ResilientResponseLike['headers'] | null
   bodyText(): Promise<string>
+  /** The final body as received, within the same body budget as bodyText. */
+  bodyBytes(): Promise<Uint8Array>
   trace: Array<{ at: number; event: string; detail?: Record<string, unknown> }>
 }
 
@@ -141,6 +152,7 @@ function emptyOutcomeFields(chain: string[], requestCount: number, attemptCount:
     requestCount,
     attemptCount,
     bodyText: async () => '',
+    bodyBytes: async () => new Uint8Array(),
     trace,
   }
 }
@@ -231,9 +243,10 @@ export async function resilientFetch(
       const at = Date.now() - start
       let response: ResilientResponseLike
       try {
+        const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
         response = await raceWithSignal(fetcher(current, {
-          headersTimeoutMs: remainingTimeout(scope, cfg.headersTimeoutMs),
-          bodyTimeoutMs: remainingTimeout(scope, cfg.bodyTimeoutMs),
+          headersTimeoutMs: remainingTimeout(scope, cap(cfg.headersTimeoutMs)),
+          bodyTimeoutMs: remainingTimeout(scope, cap(cfg.bodyTimeoutMs)),
           signal: scope.signal,
         }), scope.signal)
       } catch (err) {
@@ -259,19 +272,20 @@ export async function resilientFetch(
         }
       }
 
-      let bodyPromise: Promise<string> | null = null
-      const responseBody = (): Promise<string> => {
-        bodyPromise ??= (async () => {
-          const bodyScope = createExecutionScope(cfg)
-          try {
-            throwIfExecutionStopped(bodyScope)
-            const body = await raceWithSignal(response.bodyText(), bodyScope.signal)
-            trace.push({ at: Date.now() - start, event: 'request_complete', detail: { status: response.status } })
-            return body
-          } finally { bodyScope.dispose() }
-        })()
-        return bodyPromise
+      const withinBodyBudget = async <T>(read: () => Promise<T>): Promise<T> => {
+        const bodyScope = createExecutionScope(cfg)
+        try {
+          throwIfExecutionStopped(bodyScope)
+          const body = await raceWithSignal(read(), bodyScope.signal)
+          trace.push({ at: Date.now() - start, event: 'request_complete', detail: { status: response.status } })
+          return body
+        } finally { bodyScope.dispose() }
       }
+      let bodyPromise: Promise<string> | null = null
+      let bytesPromise: Promise<Uint8Array> | null = null
+      const responseBody = (): Promise<string> => (bodyPromise ??= withinBodyBudget(() => response.bodyText()))
+      const responseBytes = (): Promise<Uint8Array> => (bytesPromise ??= withinBodyBudget(() =>
+        response.bodyBytes?.() ?? response.bodyText().then(text => new TextEncoder().encode(text))))
       if (response.status === 429 || response.status === 503) {
         const delay = parseRetryAfterMs(response.headers.get('retry-after'), now())
         if (delay !== null) cfg.onRetryAfter?.(current, now() + delay)
@@ -388,6 +402,7 @@ export async function resilientFetch(
         attemptCount,
         headers: response.headers,
         bodyText: responseBody,
+        bodyBytes: responseBytes,
         trace,
       }
     }

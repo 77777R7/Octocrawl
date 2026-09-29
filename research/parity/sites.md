@@ -74,6 +74,95 @@ Practice sites come first, because any failure there is a W2L bug. The blocking 
 | A14 | Crawl of docs.python.org/3/ with `maxPages` 30, status polled every 2 s | While it runs the status counts pages and never goes back and `/pages` lists some; at the end `pagesFetched` equals the pages and errors listed | 10 |
 | A15 | Crawl of a Statistics Canada listing (robots.txt `Crawl-delay: 2`) with `maxPages` 3 | Fetches are the robots.txt Crawl-delay apart, as estimated and as W2L records them | 10 |
 
+A16–A35 were added on 2026-09-29 for the scoring of the 29 core features ([core-status-2026-09-29.md](core-status-2026-09-29.md)): each runs the audit's real-site check from [feature-matrix.csv](feature-matrix.csv) for a core feature that had none in this set, or had only a check adapted to another site. A25 needs the environment proxy in the API's and the runner's environment. The SDK cases (`endpoint: sdk`) drive the built `@w2l/sdk`. A29 also needs a hosted-mode API started with a token, its URL in `W2L_HOSTED_API_URL` and the same token in `W2L_API_TOKEN` for the runner:
+
+```bash
+W2L_API_TOKEN=<token> W2L_TASK_ROOT=.w2l/api-hosted npm run api -- --hosted --host 127.0.0.1 --port 8817   # terminal 3
+W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/parity/run-sites.mjs
+```
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| A16 | Scrape of Wikipedia's Web scraping article with `markdown`, `links` and a `json` schema | All three in one response; the H1, absolute targets and no `data:` URIs in the Markdown | scrape-formats.formats-array |
+| A17 | Batch of 3 Wikipedia articles with `formats: ['links']` | Every item has non-empty absolute links and no Markdown | scrape-formats.formats-array |
+| A18 | Scrape of http://github.com | Requested URL, final URL, the redirect hop, status 200 and the content type | scrape-formats.metadata-response-status |
+| A19 | Scrape of httpbin.org/status/404 | Not success; `http_error`, 404 and the content type | scrape-formats.metadata-response-status |
+| A20 | Scrape of quotes.toscrape.com/js-delayed with `waitFor: 0` | The late text is absent (S06 has it with `waitFor`) | scrape-execution.wait-for |
+| A21 | The same with `waitFor: -1` | HTTP 400 `invalid_request` before any fetch | scrape-execution.wait-for |
+| A22 | Scrape of httpbin.org/delay/10 with `timeout: 3000` | `failed`/`timeout`, HTTP 200, within 3–5 s | scrape-execution.timeout |
+| A23 | The same with `timeout: 20000` | `success` with the endpoint's JSON | scrape-execution.timeout |
+| A24 | The same with `timeout: 0` | HTTP 400 `invalid_request` | scrape-execution.timeout |
+| A25 | Scrape of httpbin.org/ip through the environment proxy | The address W2L reports is the proxy's egress address, not the direct one; `evidence.envProxy` names the proxy | scrape-execution.proxy-basic |
+| A26 | SDK: crawl docs.python.org/3/tutorial/ (10 pages), `waitCrawl` 120 s, list pages; the same crawl waited on for 1 s | 10 pages with Markdown; `WaitTimeoutError` with the crawl's id; the probe crawl cancelled | crawl-batch.crawl-wait |
+| A27 | SDK: crawl books.toscrape.com (20 pages), `waitCrawl` polling every 1 s; the same crawl waited on for 1 s | All 20 steps; `WaitTimeoutError` with the crawl's id | platform.sdk.waiters |
+| A28 | SDK: batch of 10 Wikipedia articles, `waitBatch` 120 s, list items; the same batch waited on for 1 s | 10 successful items with Markdown; `WaitTimeoutError` with the batch's id; the probe batch cancelled | crawl-batch.batch-wait |
+| A29 | SDK against a hosted-mode API, token from `W2L_API_TOKEN`; again with no token and a wrong one | The scrape succeeds; the other two get HTTP 401 `unauthorized` | platform.client.api-key |
+| A30 | Crawl of docs.python.org/3/ with `includePaths: ['^/3/library/.*']`, `maxPages` 15 | Every page after the seed is under /3/library/ | crawl-batch.include-paths |
+| A31 | Crawl of docs.python.org/3/ with `excludePaths: ['^/3/whatsnew/.*']`, `maxPages` 30 | Nothing under /3/whatsnew/ is fetched | crawl-batch.exclude-paths |
+| A32 | Crawl of Wikipedia's Web crawler article with `maxPages` 7 | Exactly 7 steps and `budgetExceeded: pages` | crawl-batch.page-limit |
+| A33 | Crawl of books.toscrape.com with `maxPages` 5, product-page `includePaths`, `markdown`, `links` and a `json` schema | Every page has Markdown and absolute links; every product page JSON with its title and a numeric price | crawl-batch.crawl-scrape-options |
+| A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
+| A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
+| T01 | Scrape of httpbin.org/delay/10 with `timeout: 45000` | The HTTP rung waits past its default 10 s and receives the 200; `success` with the endpoint's JSON (through the browser rung, which fetches JSON again) | scrape-execution.timeout |
+| T02 | SDK: `crawlAndWait` on books.toscrape.com (20 pages), its first three status requests answered by the runner with a 503, a network error and a 429 | The wait retries through all three; completed with all 20 steps | platform.sdk.waiters |
+| T03 | SDK: `batchAndWait` on 5 Wikipedia articles, its first two status requests answered with a 502 and a network error | The wait retries through both; 5 successful items with Markdown | crawl-batch.batch-wait |
+| T04 | `/fc` crawl of docs.python.org/3/ (`limit` 30), status polled every 2 s, data read 10 at a time | While scraping, `total` known, never below `completed`, above it at some poll, `next` present; at the end `completed`, `total` data entries with unique URLs, `completed` of them without an error, no `next` on the last page | crawl-batch.crawl-status |
+| T05 | `/fc` crawl of books.toscrape.com (`limit` 40), cancelled after 3 completed pages | Status `cancelled`; `total` equals the data entries; no `next` on the last page | crawl-batch.crawl-status |
+
+J01–J03 were added on 2026-09-29 for the JSON extraction gaps of [core-status-2026-09-29.md](core-status-2026-09-29.md): schemas as Pydantic and Zod write them, the evidence of every value, and the prompt-only half of the audit's check, which W2L refuses.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| J01 | Scrape of the L01 book page with a Pydantic v2 `model_json_schema()` schema (`$schema`, `title`, nullable `anyOf`, `default`, `pattern`, `format`) | Accepted; title, price, UPC, availability and reviews read from the page, each with its evidence (`h1[0]`, `p.price_color`, the table row, `fetch` for the URL); the missing ISBN is `null` with an issue | scrape-formats.json |
+| J02 | Scrape of a catalog.data.gov dataset page with a zod-to-json-schema schema (draft-07 `$schema`, root `$ref` into `definitions`, nullable type lists, `enum`, `pattern`) | Accepted; the DCAT fields from the page's metadata table with their rows as evidence; the missing `spatial` is `null` with an issue | scrape-formats.json |
+| J03 | Scrape of the L01 book page with a `json` format that has a prompt and no schema | HTTP 400 `invalid_request`, as documented: W2L does not extract JSON without a schema | scrape-formats.json |
+
+M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M01 | Scrape of MDN's 404 status page | The H1, absolute targets, no `data:` URIs, no header or footer text | scrape-formats.markdown |
+| M02 | Scrape of the Hacker News front page | The story list, absolute targets, no `data:` URIs, neither the header's nor the footer's links | scrape-formats.markdown |
+| M03 | Scrape of a path MDN answers with 404 | The error page kept as evidence has absolute link targets | scrape-formats.markdown |
+| M04 | Scrape of BBC News technology, then again with `onlyMainContent: false` | True leaves out the navigation and footer; false keeps them and is longer | scrape-formats.only-main-content |
+| M05 | Scrape of the Wikipedia portal with `onlyMainContent: false`, then with the default | On a page with no main block, false returns the whole page as success; the default keeps it as evidence | scrape-formats.only-main-content |
+| M06 | Scrape of http://www.github.com with `waitFor` (browser lane) | The response's content type and both redirect hops, `redirectChain.complete: true` | scrape-formats.metadata-response-status |
+| M07 | Compact scrape (`debug: false`) of http://github.com | `snapshot.httpStatus` and `snapshot.contentType`; the hop in the Evidence Record | scrape-formats.metadata-response-status |
+| M08 | `/fc/v1/scrape` of http://github.com | `data.metadata` with `sourceURL`, the final `url`, `statusCode` and `contentType` | scrape-formats.metadata-response-status |
+
+A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
+
+| Case | Request | What it tests | P1 items |
+| --- | --- | --- | --- |
+| A36 | Scrape of an SEC EDGAR filing (IREN Limited, quarter to 31 December 2025) with `mode: "research"` | `success` with HTTP 200 and the filing's text; the Evidence Record's User-Agent is `W2L Research <W2L_CONTACT>` and its contact is `W2L_CONTACT` | FS, ER |
+
+E01–E06 were added on 2026-09-29 for the Evidence Record v1 ([packages/contracts/schemas/evidence-record.v1.json](../../packages/contracts/schemas/evidence-record.v1.json)). Each checks that the record validates against the schema, and the fields below.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| E01 | Scrape of books.toscrape.com | An HTTP-lane success: lane, final URL, robots decision (`no_robots`), hashes | ER |
+| E02 | Scrape of quotes.toscrape.com/js | A browser-lane success: the browser's identity and a complete redirect chain | ER |
+| E03 | Scrape of the S03 404 page | A failure kept as evidence: `http_error`, HTTP 404, the page's hash | ER |
+| E04 | JSON extraction on a books.toscrape.com product | `fieldEvidence` for each field (UPC from the product table, price from `p.price_color`), no Markdown hash | ER |
+| E05 | Batch of three URLs, the 404 included | Every item carries its own record | ER |
+| E06 | Crawl of books.toscrape.com, 3 pages | Every crawl page, and every item under `/errors`, carries its own record | ER |
+
+F01–F16 were added on 2026-09-29 for P2 file download and PDF text. The PDFs are the seed user's (S1–S6) and research PDFs (R1, R2, R4) of [research/pdf-corpus/manifest.v1.json](../pdf-corpus/manifest.v1.json); a PDF case checks the manifest's SHA-256 and size and that each of its phrases is on its page after the `<!-- page N -->` marker, so a publisher that replaces the file fails the case.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| F01–F06 | Scrape of each of the seed user's six PDFs (F02 and F03 through a page that redirects to the PDF) | Read on the HTTP lane alone, saved as received, text by page | scrape-formats.pdf-parser |
+| F07 | Scrape of the IEA's Energy and AI report (R1, 304 pages) | A long PDF: saved as received, text by page | scrape-formats.pdf-parser |
+| F08 | Scrape of Eurostat's Key figures on Europe (R4, 11.1 MB) | A file above the 10 MiB page cap, with pages that have no text layer | scrape-formats.pdf-parser |
+| F09 | Scrape of a Eurostat SDMX CSV | A CSV served as `application/vnd.sdmx.data+csv`: saved, its text as Markdown | file download |
+| F10 | Scrape of a Statistics Canada table ZIP | A ZIP saved as received, no Markdown | file download |
+| F11 | Crawl of an Insee publication page limited to its PDF (R2) | A PDF reached by a crawl becomes a crawl page with its file and Evidence Record | file download |
+| F12 | `/fc/v1/scrape` of the S4 PDF | The shim answers success with the PDF text and page markers | scrape-formats.pdf-parser |
+| F13 | Scrape of the S4 PDF with `waitFor` (browser rung first) | The browser catches the download: the same file and text as the HTTP lane | file download |
+| F14 | JSON extraction from the S5 PDF | Fields only from `Label: value` lines, each with its page; conflicting labels left out as `field_ambiguous` | scrape-formats.json |
+| F15 | Scrape of a World Bank API JSON | A JSON file saved, its text as Markdown | file download |
+| F16 | Scrape of a GOV.UK Energy Trends XLSX | An XLSX saved as received with its hash and size, no Markdown | file download |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

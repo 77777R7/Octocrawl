@@ -2,7 +2,7 @@
   "id": "parity-sites.v1",
   "frozenOn": "2026-09-29",
   "firecrawlSnapshot": "firecrawl-js 4.42.0",
-  "purpose": "Real-site checks for the P1 items in ROADMAP.md. Batch L is the audit's first live batch (real-site-test-set.md, in its order), the 'first 12 real-site URLs' of the P1 exit. Batch 1 holds P1 defect checks written before that list was committed: practice sites first, where any failure is a W2L bug, and the blocking site last. Batch api covers the P1 items that are API behaviour rather than page content. Each check names the P1 item it accepts ('FS' = no false success in general), or the audit's feature id (feature-matrix.csv) where no P1 item fits; each batch L case names its main feature.",
+  "purpose": "Real-site checks for the P1 items in ROADMAP.md. Batch L is the audit's first live batch (real-site-test-set.md, in its order), the 'first 12 real-site URLs' of the P1 exit. Batch 1 holds P1 defect checks written before that list was committed: practice sites first, where any failure is a W2L bug, and the blocking site last. Batch api covers the P1 items that are API behaviour rather than page content. Batch E checks the Evidence Record ('ER', ROADMAP 'Throughout P1') against its published schema on each lane's output. Each check names the P1 item it accepts ('FS' = no false success in general), or the audit's feature id (feature-matrix.csv) where no P1 item fits; each batch L case names its main feature.",
   "rules": [
     "Cases and URLs are not replaced or dropped after freezing; a site that changes or disappears stays in the record with its result.",
     "A check encodes the correct result, not the current one. A case passes when every check passes.",
@@ -603,6 +603,1089 @@
         { "item": "crawl-batch.crawl-delay", "type": "field", "path": "report.pagesFetched", "equals": 3 },
         { "item": "crawl-batch.crawl-delay", "type": "fetchSpacing", "robotsCrawlDelay": true, "record": true },
         { "item": "crawl-batch.crawl-delay", "type": "crawlDelay", "record": true }
+      ]
+    },
+    {
+      "id": "E01",
+      "batch": "E",
+      "url": "https://books.toscrape.com/",
+      "request": { "formats": ["markdown"] },
+      "note": "An HTTP-lane success. On 2026-09-29 books.toscrape.com answers 200 without a redirect and its robots.txt answers 404 (no_robots).",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "http" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.finalUrl", "equals": "https://books.toscrape.com/" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fetchedAt", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.robotsDecision.robotsUrl", "equals": "https://books.toscrape.com/robots.txt" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equalsPath": "snapshot.rawBodySha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E02",
+      "batch": "E",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": { "formats": ["markdown"] },
+      "note": "A browser-lane success: the quotes are written by script (S05). The page is not redirected and the browser lane lists every hop Chromium followed (M06), so its redirect chain is complete.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "browser_local" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "includes": "Chrome/" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fetchedAt", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E03",
+      "batch": "E",
+      "url": "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html",
+      "request": { "formats": ["markdown"] },
+      "note": "The S03 page: a 404 whose page is kept as evidence, never content. The record gives its status and reason and hashes the page as delivered.",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.reason", "equals": "http_error" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 404 },
+        { "item": "2", "type": "markdownIncludes", "text": "404 Not Found" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
+      ]
+    },
+    {
+      "id": "E04",
+      "batch": "E",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": {
+        "formats": [{
+          "type": "json",
+          "schema": {
+            "type": "object",
+            "properties": { "title": { "type": "string" }, "price": { "type": "number" }, "upc": { "type": "string" }, "availability": { "type": "string" }, "numberOfReviews": { "type": "integer" } },
+            "required": ["title", "price", "upc"]
+          }
+        }]
+      },
+      "note": "JSON with field evidence. On 2026-09-29 the product table's first row is UPC a897fe39b1053632 and the visible price is £51.77 in p.price_color. Only JSON was requested, so no Markdown hash.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "1", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "ER", "type": "evidenceSchema", "record": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.source", "equals": "dom" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.locator", "equals": "table[0] tr[0] \"UPC\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price.locator", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.json", "present": true },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": false }
+      ]
+    },
+    {
+      "id": "E05",
+      "batch": "E",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/", "https://quotes.toscrape.com/", "https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html"],
+      "request": { "formats": ["markdown"] },
+      "note": "Every batch item carries its own record, the failed 404 item included.",
+      "checks": [
+        { "item": "5", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "5", "type": "itemCount", "equals": 3 },
+        { "item": "ER", "type": "eachItem", "minItems": 3, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "evidenceRecord.requestedUrl", "equalsPath": "url" } }
+      ]
+    },
+    {
+      "id": "E06",
+      "batch": "E",
+      "endpoint": "crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 3, "formats": ["markdown"] },
+      "note": "Every crawl page carries its own record, and so does every item listed under /errors, if any.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 3 },
+        { "item": "ER", "type": "eachItem", "minItems": 1, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "path": "errors", "minItems": 0, "check": { "type": "evidenceSchema" } },
+        { "item": "ER", "type": "eachItem", "minItems": 1, "check": { "type": "field", "path": "evidenceRecord.requestedUrl", "equalsPath": "url" } }
+      ]
+    },
+    {
+      "id": "A16",
+      "batch": "api",
+      "feature": "scrape-formats.formats-array",
+      "url": "https://en.wikipedia.org/wiki/Web_scraping",
+      "request": { "formats": ["markdown", "links", { "type": "json", "schema": { "type": "object", "properties": { "title": { "type": "string" } }, "required": ["title"] } }] },
+      "note": "Added 2026-09-29 for the core-29 scoring. The feature matrix check for scrape-formats.formats-array, first half: markdown, links and a json schema in one call on the audit's Wikipedia article (real-site-test-set.md row 15), each present and non-empty, plus that row's expectations for the Markdown (the H1, absolute link targets, no data: URIs). On 2026-09-29 the article's heading was 'Web scraping' and it linked to Data scraping. Like S10 and L06, this case needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "5", "type": "markdownMatches", "pattern": "^# Web scraping$" },
+        { "item": "5", "type": "linksAbsolute" },
+        { "item": "5", "type": "linksInclude", "url": "https://en.wikipedia.org/wiki/Data_scraping" },
+        { "item": "5", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "5", "type": "field", "path": "json.data.title", "equals": "Web scraping" },
+        { "item": "4", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" }
+      ]
+    },
+    {
+      "id": "A17",
+      "batch": "api",
+      "feature": "scrape-formats.formats-array",
+      "endpoint": "batch",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping"],
+      "request": { "formats": ["links"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.formats-array, second half: a batch of 3 URLs that asks only for links gives every item a non-empty links array, and no Markdown it did not ask for. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "5", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "5", "type": "itemCount", "equals": 3 },
+        { "item": "FS", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "5", "type": "eachItem", "minItems": 3, "check": { "type": "linksAbsolute" } },
+        { "item": "5", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "markdown", "equals": null } }
+      ]
+    },
+    {
+      "id": "A18",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.metadata-response-status, first half (real-site-test-set.md row 38): an http:// URL that redirects to https:// records the requested URL, the final URL, the hop, status 200 and the content type. On 2026-09-29 http://github.com answered 301 with https://github.com/. The default REST response is the full one, with evidence; the compact (MCP) response has no contentType.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "requestedUrl", "equals": "http://github.com" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["http://github.com", "https://github.com/"] },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.httpStatus", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" }
+      ]
+    },
+    {
+      "id": "A19",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "https://httpbin.org/status/404",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.metadata-response-status, second half: a 404 is not success, and carries http_error, status 404 and the content type. On 2026-09-29 httpbin.org answered 404 with an empty text/html body. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "notIn": ["success"] },
+        { "item": "2", "type": "field", "path": "failureReason", "equals": "http_error" },
+        { "item": "2", "type": "field", "path": "evidence.httpStatus", "equals": 404 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" }
+      ]
+    },
+    {
+      "id": "A20",
+      "batch": "api",
+      "feature": "scrape-execution.wait-for",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": 0 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.wait-for, first half: with waitFor 0 the late text is absent; S06 has it with waitFor 12000. On 2026-09-29 the quotes on /js-delayed/ appeared about 10 s after load.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "markdown", "present": false }],
+          [{ "type": "markdownExcludes", "text": "The world as we have created it is a process of our thinking." }]
+        ] }
+      ]
+    },
+    {
+      "id": "A21",
+      "batch": "api",
+      "feature": "scrape-execution.wait-for",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": -1 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.wait-for, second half: a negative waitFor is refused with HTTP 400 by the request parser, which runs before the engine fetches anything.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 400 },
+        { "item": "6", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "6", "type": "field", "path": "error", "includes": "waitFor" }
+      ]
+    },
+    {
+      "id": "A22",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 3000 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, first part (row 38): httpbin.org/delay/10 answers after 10 s, so a 3 s timeout ends the scrape as failed/timeout, HTTP 200, within about 3 to 5 s of the runner's call (elapsedMs).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "6", "type": "field", "path": "failureReason", "equals": "timeout" },
+        { "item": "6", "type": "field", "path": "usage.deadlineExceeded", "equals": true },
+        { "item": "6", "type": "field", "path": "elapsedMs", "min": 3000, "max": 5000, "record": true }
+      ]
+    },
+    {
+      "id": "A23",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 20000 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, second part: with timeout 20000 the same endpoint, which answers after 10 s, succeeds; its JSON echoes the URL. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "status", "equals": "success" },
+        { "item": "6", "type": "markdownIncludes", "text": "https://httpbin.org/delay/10" },
+        { "item": "6", "type": "field", "path": "elapsedMs", "max": 20000, "record": true }
+      ]
+    },
+    {
+      "id": "A24",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 0 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, third part: timeout 0 is refused with HTTP 400 by the request parser, before any fetch.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 400 },
+        { "item": "6", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "6", "type": "field", "path": "error", "includes": "timeout" }
+      ]
+    },
+    {
+      "id": "A25",
+      "batch": "api",
+      "feature": "scrape-execution.proxy-basic",
+      "url": "https://httpbin.org/ip",
+      "request": { "formats": ["markdown"] },
+      "egress": true,
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.proxy-basic, for the basic proxy P1 item 9 defines (the operator's environment proxy in local mode): the address W2L's page shows is the one httpbin.org/ip shows the runner through the same environment proxy, not the one it shows the runner directly, and the result names the proxy in evidence.envProxy. Needs HTTPS_PROXY in the API's and the runner's environment. On 2026-09-29 the scoring machine's proxy (127.0.0.1:7890) reached httpbin.org from a different address than the direct route. W2L has no request-level proxy: 'basic' (HTTP 400 for the parameter) and no metadata.proxyUsed.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "9", "type": "field", "path": "evidence.envProxy", "present": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIp", "present": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIp", "equalsPath": "egress.proxiedIp", "record": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIsDirect", "equals": false }
+      ]
+    },
+    {
+      "id": "A26",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-wait",
+      "endpoint": "sdk",
+      "url": "https://docs.python.org/3/tutorial/",
+      "request": { "maxPages": 10, "includePaths": ["^/3/tutorial/"] },
+      "sdk": { "op": "crawlWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.crawl-wait through the SDK: crawl, waitCrawl with a 120 s timeout, then listCrawlPages, since waitCrawl returns the crawl's status and its pages are listed separately (docs/batch-scrape.md). A Firecrawl crawl of /3/tutorial/ stays under that path by default; a W2L crawl follows the whole host, so includePaths keeps the audit's scope. The same crawl started again and waited on for 1 s must throw WaitTimeoutError carrying its id; it is then cancelled.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 10 },
+        { "item": "8", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.elapsedMs", "max": 5000, "record": true },
+        { "item": "crawl-batch.crawl-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A27",
+      "batch": "api",
+      "feature": "platform.sdk.waiters",
+      "endpoint": "sdk",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 20 },
+      "sdk": { "op": "crawlWait", "pollIntervalMs": 1000, "timeoutMs": 300000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for platform.sdk.waiters: waitCrawl polling every second returns once the 20-page crawl completes, and listCrawlPages (with getCrawlErrors) then gives all 20 steps; a 1 s timeoutMs on the same crawl started again throws WaitTimeoutError with its id, and that crawl is cancelled.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "field", "path": "report.pagesFetched", "equals": 20 },
+        { "item": "8", "type": "field", "path": "stepCount", "equals": 20 },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "crawl-batch.crawl-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A28",
+      "batch": "api",
+      "feature": "crawl-batch.batch-wait",
+      "endpoint": "sdk",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping", "https://en.wikipedia.org/wiki/Search_engine", "https://en.wikipedia.org/wiki/Web_archiving", "https://en.wikipedia.org/wiki/Robots.txt", "https://en.wikipedia.org/wiki/Sitemaps", "https://en.wikipedia.org/wiki/Hyperlink", "https://en.wikipedia.org/wiki/HTML", "https://en.wikipedia.org/wiki/World_Wide_Web"],
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "batchWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-wait through the SDK: batchScrape of 10 Wikipedia URLs, waitBatch with a 120 s timeout, then listBatchItems, since waitBatch returns the batch's status and its items are listed separately (docs/batch-scrape.md). The same 10 URLs submitted again and waited on for 1 s must throw WaitTimeoutError carrying that batch's id; it is then cancelled. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 10 },
+        { "item": "FS", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "8", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "crawl-batch.batch-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A29",
+      "batch": "api",
+      "feature": "platform.client.api-key",
+      "endpoint": "sdk",
+      "apiEnv": "W2L_HOSTED_API_URL",
+      "url": "https://example.com/",
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "scrape" },
+      "note": "Added 2026-09-29. The feature matrix check for platform.client.api-key: a hosted-mode API started with a token (npm run api -- --hosted --token …; its URL in W2L_HOSTED_API_URL), scraped through the SDK with the key taken from W2L_API_TOKEN in the runner's environment (no token option), then with no token and with a wrong one: HTTP 401, code unauthorized. Hosted mode never uses the environment proxy; example.com answered directly on 2026-09-29, with no <h1> on the page.",
+      "checks": [
+        { "item": "platform.client.api-key", "type": "field", "path": "tokenInEnvironment", "equals": true },
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "markdownIncludes", "text": "This domain is for use in documentation examples" },
+        { "item": "platform.client.api-key", "type": "field", "path": "withoutToken.status", "equals": 401 },
+        { "item": "platform.client.api-key", "type": "field", "path": "withoutToken.code", "equals": "unauthorized" },
+        { "item": "platform.client.api-key", "type": "field", "path": "wrongToken.status", "equals": 401 },
+        { "item": "platform.client.api-key", "type": "field", "path": "wrongToken.code", "equals": "unauthorized" }
+      ]
+    },
+    {
+      "id": "A30",
+      "batch": "api",
+      "feature": "crawl-batch.include-paths",
+      "endpoint": "crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "maxPages": 15, "includePaths": ["^/3/library/.*"] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.include-paths (row 32): with includePaths ^/3/library/ every page after the seed is under /3/library/. A kept link that robots.txt disallows would be a policy_denied step under /errors; those are checked too.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 15 },
+        { "item": "7", "type": "itemUrls", "minItems": 10, "pattern": "^https://docs\\.python\\.org/3/(library/.*)?$" },
+        { "item": "7", "type": "itemUrls", "path": "errors", "minItems": 0, "pattern": "^https://docs\\.python\\.org/3/(library/.*)?$" }
+      ]
+    },
+    {
+      "id": "A31",
+      "batch": "api",
+      "feature": "crawl-batch.exclude-paths",
+      "endpoint": "crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "maxPages": 30, "excludePaths": ["^/3/whatsnew/.*"] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.exclude-paths: a 30-page crawl of docs.python.org/3/ with excludePaths ^/3/whatsnew/ fetches nothing under /3/whatsnew/, which the /3/ page links near its top.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 30 },
+        { "item": "7", "type": "itemUrls", "minItems": 10, "pattern": "^https://docs\\.python\\.org/(?!3/whatsnew/)" },
+        { "item": "7", "type": "itemUrls", "path": "errors", "minItems": 0, "pattern": "^https://docs\\.python\\.org/(?!3/whatsnew/)" }
+      ]
+    },
+    {
+      "id": "A32",
+      "batch": "api",
+      "feature": "crawl-batch.page-limit",
+      "endpoint": "crawl",
+      "url": "https://en.wikipedia.org/wiki/Web_crawler",
+      "request": { "maxPages": 7 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.page-limit: a crawl of the Web crawler article with maxPages 7 records exactly 7 steps and stops with budgetExceeded pages. The API keeps no request log, so 'no 8th request' is read from pagesFetched and the pages plus errors listed. Links robots.txt disallows (Special: pages and the like) are policy_denied steps and count. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "report.budgetExceeded", "equals": "pages" },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "report.pagesFetched", "equals": 7 },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "stepCount", "equals": 7 }
+      ]
+    },
+    {
+      "id": "A33",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-scrape-options",
+      "endpoint": "crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 5, "includePaths": ["^/catalogue/(?!category/)[^/]+/index\\.html$"], "formats": ["markdown", "links", { "type": "json", "schema": { "type": "object", "properties": { "title": { "type": "string" }, "price": { "type": "number" } }, "required": ["title", "price"] } }] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.crawl-scrape-options: a 5-page crawl with formats markdown, links and a json schema gives every page Markdown and absolute links, and every product page JSON with its title and a numeric price. A05's path filter makes the four pages after the seed product pages; without it they are category listings.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "itemCount", "equals": 5 },
+        { "item": "7", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "7", "type": "eachItem", "minItems": 5, "check": { "type": "linksAbsolute" } },
+        { "item": "7", "type": "eachItem", "minItems": 4, "urlPattern": "^https://books\\.toscrape\\.com/catalogue/(?!category/)[^/]+/index\\.html$", "check": { "type": "field", "path": "json.data.title", "present": true } },
+        { "item": "7", "type": "eachItem", "minItems": 4, "urlPattern": "^https://books\\.toscrape\\.com/catalogue/(?!category/)[^/]+/index\\.html$", "check": { "type": "fieldType", "path": "json.data.price", "equals": "number" } }
+      ]
+    },
+    {
+      "id": "A34",
+      "batch": "api",
+      "feature": "crawl-batch.batch-status",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/catalogue/page-21.html", "https://books.toscrape.com/catalogue/page-22.html", "https://books.toscrape.com/catalogue/page-23.html", "https://books.toscrape.com/catalogue/page-24.html", "https://books.toscrape.com/catalogue/page-25.html", "https://books.toscrape.com/catalogue/page-26.html", "https://books.toscrape.com/catalogue/page-27.html", "https://books.toscrape.com/catalogue/page-28.html", "https://books.toscrape.com/catalogue/page-29.html", "https://books.toscrape.com/catalogue/page-30.html", "https://books.toscrape.com/catalogue/page-31.html", "https://books.toscrape.com/catalogue/page-32.html", "https://books.toscrape.com/catalogue/page-33.html", "https://books.toscrape.com/catalogue/page-34.html", "https://books.toscrape.com/catalogue/page-35.html", "https://books.toscrape.com/catalogue/page-36.html", "https://books.toscrape.com/catalogue/page-37.html", "https://books.toscrape.com/catalogue/page-38.html", "https://books.toscrape.com/catalogue/page-39.html", "https://books.toscrape.com/catalogue/page-40.html", "https://books.toscrape.com/catalogue/page-41.html", "https://books.toscrape.com/catalogue/page-42.html", "https://books.toscrape.com/catalogue/page-43.html", "https://books.toscrape.com/catalogue/page-44.html", "https://books.toscrape.com/catalogue/page-45.html", "https://books.toscrape.com/catalogue/page-46.html", "https://books.toscrape.com/catalogue/page-47.html", "https://books.toscrape.com/catalogue/page-48.html", "https://books.toscrape.com/catalogue/page-49.html", "https://books.toscrape.com/catalogue/page-50.html"],
+      "request": { "formats": ["markdown"] },
+      "pollMs": 1000,
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-status: the status of a 30-URL batch polled every second. completed never goes back while the batch runs, the items listed mid-run are all in the final list, and at the end completed is 30 and remaining 0.",
+      "checks": [
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "report.completed", "equals": 30 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "report.remaining", "equals": 0 },
+        { "item": "crawl-batch.batch-status", "type": "itemCount", "equals": 30 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.maxCompletedWhileRunning", "min": 1, "record": true },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.monotonic", "equals": true },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.midRunItems", "min": 1 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.midRunSubset", "equals": true }
+      ]
+    },
+    {
+      "id": "A35",
+      "batch": "api",
+      "feature": "crawl-batch.batch-start-async",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/catalogue/page-1.html", "https://books.toscrape.com/catalogue/page-2.html", "https://books.toscrape.com/catalogue/page-3.html", "https://books.toscrape.com/catalogue/page-4.html", "https://books.toscrape.com/catalogue/page-5.html", "https://books.toscrape.com/catalogue/page-6.html", "https://books.toscrape.com/catalogue/page-7.html", "https://books.toscrape.com/catalogue/page-8.html", "https://books.toscrape.com/catalogue/page-9.html", "https://books.toscrape.com/catalogue/page-10.html", "https://books.toscrape.com/catalogue/page-11.html", "https://books.toscrape.com/catalogue/page-12.html", "https://books.toscrape.com/catalogue/page-13.html", "https://books.toscrape.com/catalogue/page-14.html", "https://books.toscrape.com/catalogue/page-15.html", "https://books.toscrape.com/catalogue/page-16.html", "https://books.toscrape.com/catalogue/page-17.html", "https://books.toscrape.com/catalogue/page-18.html", "https://books.toscrape.com/catalogue/page-19.html", "https://books.toscrape.com/catalogue/page-20.html", "https://quotes.toscrape.com/page/1/", "https://quotes.toscrape.com/page/2/", "https://quotes.toscrape.com/page/3/", "https://quotes.toscrape.com/page/4/", "https://quotes.toscrape.com/page/5/", "https://quotes.toscrape.com/page/6/", "https://quotes.toscrape.com/page/7/", "https://quotes.toscrape.com/page/8/", "https://quotes.toscrape.com/page/9/", "https://quotes.toscrape.com/page/10/", "https://quotes.toscrape.com/tag/love/", "https://quotes.toscrape.com/tag/inspirational/", "https://quotes.toscrape.com/tag/life/", "https://quotes.toscrape.com/tag/humor/", "https://quotes.toscrape.com/tag/books/", "https://quotes.toscrape.com/tag/reading/", "https://quotes.toscrape.com/tag/friendship/", "https://quotes.toscrape.com/tag/friends/", "https://quotes.toscrape.com/tag/truth/", "https://quotes.toscrape.com/tag/simile/", "https://en.wikipedia.org/wiki/Web_page", "https://en.wikipedia.org/wiki/Website", "https://en.wikipedia.org/wiki/URL", "https://en.wikipedia.org/wiki/Web_browser", "https://en.wikipedia.org/wiki/HTTP", "https://en.wikipedia.org/wiki/Markdown", "https://en.wikipedia.org/wiki/JSON", "https://en.wikipedia.org/wiki/Comma-separated_values", "https://en.wikipedia.org/wiki/Web_indexing", "https://en.wikipedia.org/wiki/Metadata"],
+      "request": { "formats": ["markdown"] },
+      "debug": true,
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-start-async: 50 URLs on 3 hosts. The start answers at once with a task id, every URL ends with an item, and on each host consecutive fetch starts are at least the delay W2L requires apart (the minimum interval, 250 ms by default, or a longer robots.txt Crawl-delay), as each item's crawl_delay trace event records them (items read with debug=true). The runner cannot see W2L's requests, so the spacing is W2L's own record. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "startMs", "max": 1000, "record": true },
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.batch-start-async", "type": "itemCount", "equals": 50 },
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
+        { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
+      ]
+    },
+    {
+      "id": "J01",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": { "formats": [{ "type": "json", "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "description": "A book on its catalogue page.", "properties": { "title": { "minLength": 1, "title": "Title", "type": "string" }, "price": { "minimum": 0, "title": "Price", "type": "number" }, "availability": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "title": "Availability" }, "upc": { "anyOf": [{ "pattern": "^[0-9a-f]{16}$", "type": "string" }, { "type": "null" }], "default": null, "title": "Upc" }, "numberOfReviews": { "anyOf": [{ "minimum": 0, "type": "integer" }, { "type": "null" }], "default": null, "title": "Numberofreviews" }, "isbn": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "description": "Not on the page", "title": "Isbn" }, "url": { "format": "uri", "maxLength": 2083, "minLength": 1, "title": "Url", "type": "string" } }, "required": ["title", "price", "url"], "title": "Book", "type": "object" } }] },
+      "note": "Added 2026-09-29 for the JSON extraction gaps. The schema half of the feature matrix check for scrape-formats.json with a Pydantic v2 model_json_schema() schema: title on every node, $schema (2020-12), anyOf [X, null] with default null for the optional fields, minimum, minLength, maxLength, pattern and format. Before, title, $schema and anyOf were each a 400. On 2026-09-29 the page showed £51.77, UPC a897fe39b1053632, 'In stock (22 available)' and 0 reviews in its Product Information table, and no ISBN: isbn must be null with an issue, and every other value must name where it was read.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.title", "equals": "A Light in the Attic" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.price", "equals": 51.77 },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.upc", "equals": "a897fe39b1053632" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.availability", "includes": "In stock (22 available)" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.numberOfReviews", "equals": 0 },
+        { "item": "1", "type": "field", "path": "json.data.isbn", "equals": null },
+        { "item": "1", "type": "jsonIssue", "includes": "/isbn" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./title", "equals": { "source": "dom", "locator": "h1[0]" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price", "equals": { "source": "text", "locator": "p.price_color" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.locator", "equals": "table[0] tr[0] \"UPC\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./url", "equals": { "source": "fetch", "locator": "finalUrl" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./isbn", "present": false }
+      ]
+    },
+    {
+      "id": "J02",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://catalog.data.gov/dataset/electric-vehicle-population-data",
+      "request": { "formats": [{ "type": "json", "schema": { "$ref": "#/definitions/Dataset", "definitions": { "Dataset": { "type": "object", "properties": { "title": { "type": "string", "description": "The dataset's name" }, "identifier": { "type": "string", "format": "uri" }, "accessLevel": { "type": "string", "enum": ["public", "restricted public", "non-public"] }, "issued": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }, "modified": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }, "license": { "type": ["string", "null"], "format": "uri" }, "spatial": { "type": ["string", "null"] }, "url": { "type": "string", "format": "uri" } }, "required": ["title", "identifier", "accessLevel", "issued", "modified", "license", "spatial", "url"], "additionalProperties": false } }, "$schema": "http://json-schema.org/draft-07/schema#" } }] },
+      "note": "Added 2026-09-29 for the JSON extraction gaps. A dataset page with a zod-to-json-schema schema: $schema (draft-07), a root $ref into definitions, additionalProperties false, nullable type lists, enum, pattern and format. The page's metadata table (DCAT fields) gives the values; spatial is not on it, so it must be null with an issue. On 2026-09-29: identifier https://data.wa.gov/api/views/f6w7-q2d2, accessLevel public, issued 2023-10-19, modified 2026-09-15 (the catalogue updates it; checked as present, and the schema's pattern holds it to a date), licence http://opendatacommons.org/licenses/odbl/1.0/.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.title", "equals": "Electric Vehicle Population Data" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.identifier", "equals": "https://data.wa.gov/api/views/f6w7-q2d2" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.accessLevel", "equals": "public" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.issued", "equals": "2023-10-19" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.modified", "present": true },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.license", "equals": "http://opendatacommons.org/licenses/odbl/1.0/" },
+        { "item": "1", "type": "field", "path": "json.data.spatial", "equals": null },
+        { "item": "1", "type": "jsonIssue", "includes": "/spatial" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./title", "equals": { "source": "dom", "locator": "h1[0]" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./identifier.locator", "includes": "\"identifier\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./license.locator", "includes": "\"license\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./url", "equals": { "source": "fetch", "locator": "finalUrl" } }
+      ]
+    },
+    {
+      "id": "J03",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": { "formats": [{ "type": "json", "prompt": "extract the book title and price" }] },
+      "note": "Added 2026-09-29. The prompt-only half of the feature matrix check for scrape-formats.json. W2L does not extract JSON without a schema: that would need a model for every page (LLM extraction is maintained, not extended: ROADMAP.md Paused). The documented result is a 400 invalid_request, never an answer that ignored the prompt.",
+      "checks": [
+        { "item": "scrape-formats.json", "type": "apiStatus", "equals": 400 },
+        { "item": "scrape-formats.json", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "scrape-formats.json", "type": "field", "path": "error", "includes": "schema" }
+      ]
+    },
+    {
+      "id": "T01",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 45000 },
+      "note": "Added 2026-09-29 for the lane waits a timeout sets. httpbin.org/delay/10 answers after 10 s, about 11.5 s through the scoring machine's proxy: past the HTTP lane's default 10 s wait for headers. With a 45 s timeout the HTTP rung must receive that 200 (summary.attempts.0 is the http rung, its wall time over 10 s). Its body is JSON, not HTML: on 2026-09-29 the HTTP rung reports it empty_unverified and the browser rung fetches the URL again, so the answer takes two 10 s waits (about 28 s in a trial run). That is why A23's 20 s is too short and this case gives 45 s. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.channel", "equals": "http" },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.result.evidence.httpStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 10000, "record": true },
+        { "item": "6", "type": "field", "path": "status", "equals": "success" },
+        { "item": "6", "type": "markdownIncludes", "text": "https://httpbin.org/delay/10" },
+        { "item": "6", "type": "field", "path": "elapsedMs", "max": 45000, "record": true }
+      ]
+    },
+    {
+      "id": "T02",
+      "batch": "api",
+      "feature": "platform.sdk.waiters",
+      "endpoint": "sdk",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 20 },
+      "sdk": { "op": "crawlAndWait", "pollIntervalMs": 1000, "timeoutMs": 300000, "pollFaults": [503, "network", 429] },
+      "note": "Added 2026-09-29 for the waiters' retry and the wait-and-collect helper. crawlAndWait crawls books.toscrape.com (20 pages), polling every second, while the runner answers its first three status requests itself with a 503, a network error and a 429 (Retry-After: 1) instead of passing them to the API. The wait must retry through all three and return the completed crawl with all 20 steps, the start page with Markdown. (On 2026-09-29 /index.html repeats / and is a duplicate page, which has no Markdown of its own.) The faults are injected in the runner's fetch, not on the network.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "field", "path": "report.pagesFetched", "equals": 20 },
+        { "item": "8", "type": "field", "path": "stepCount", "equals": 20 },
+        { "item": "8", "type": "field", "path": "items.0.markdown", "present": true },
+        { "item": "8", "type": "field", "path": "faults.injected", "equals": 3 },
+        { "item": "8", "type": "field", "path": "faults.remaining", "equals": 0 },
+        { "item": "8", "type": "field", "path": "waitMs", "max": 300000, "record": true }
+      ]
+    },
+    {
+      "id": "T03",
+      "batch": "api",
+      "feature": "crawl-batch.batch-wait",
+      "endpoint": "sdk",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping", "https://en.wikipedia.org/wiki/Search_engine", "https://en.wikipedia.org/wiki/Web_archiving"],
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "batchAndWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "pollFaults": [502, "network"] },
+      "note": "Added 2026-09-29 for the waiters' retry and the wait-and-collect helper. batchAndWait scrapes 5 Wikipedia articles while the runner answers its first two status requests with a 502 and a network error. The wait must retry through both and return the completed batch with 5 successful items with Markdown. The faults are injected in the runner's fetch, not on the network. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 5 },
+        { "item": "FS", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "8", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "faults.injected", "equals": 2 },
+        { "item": "8", "type": "field", "path": "faults.remaining", "equals": 0 }
+      ]
+    },
+    {
+      "id": "T04",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-status",
+      "endpoint": "fc-crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "limit": 30 },
+      "pageLimit": 10,
+      "note": "Added 2026-09-29 for the /fc crawl status. A 30-page Firecrawl crawl of docs.python.org, its status polled every 2 s. While it scrapes, total is known (this API runs the crawl) and never below completed, is above it at some poll, and next is present. At the end the status is completed, the data read 10 at a time through next has total entries with unique URLs, the entries without metadata.error number completed, and the last page has no next. On 2026-09-29 docs.python.org/robots.txt disallows some linked paths; those pages are failed data entries (policy_denied) and count in total, not completed.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.status", "equals": "completed" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.polls", "min": 1, "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.nullTotals", "equals": 0 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.totalAboveCompleted", "min": 1 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.totalBelowCompleted", "equals": 0 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "progress.nextWhileScraping", "equals": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "equalsPath": "final.dataLength", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.completed", "equalsPath": "final.pagesWithoutError", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.nextOnLastPage", "equals": false },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "pageRequests", "min": 3, "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "uniqueUrls" }
+      ]
+    },
+    {
+      "id": "T05",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-status",
+      "endpoint": "fc-crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "limit": 40 },
+      "cancelAfterCompleted": 3,
+      "note": "Added 2026-09-29 for the /fc crawl status of a cancelled crawl. A 40-page Firecrawl crawl of books.toscrape.com, cancelled (native POST /v1/crawl/:id/cancel; the shim has no cancel) once its status counts 3 completed pages. The status must then say cancelled, not failed; total is the pages the crawl recorded, all of them in data, and there is no next after the last page.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "cancel", "equals": "cancelled" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.status", "equals": "cancelled" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "equalsPath": "final.dataLength", "record": true },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.completed", "equalsPath": "final.pagesWithoutError" },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.total", "max": 39 },
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "final.nextOnLastPage", "equals": false }
+      ]
+    },
+    {
+      "id": "M01",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps. The feature matrix check for scrape-formats.markdown, first half: MDN's page on the 404 status. The Markdown has the H1, only absolute link and image targets (same-page #fragments stay as written), no data: image URIs, and none of the page's header or footer. On 2026-09-29 the URL redirected to /en-US/docs/Web/HTTP/Reference/Status/404; the footer read 'Your blueprint for a better internet.' and 'Website Privacy Notice', the header 'Skip to main content'.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^# 404 Not Found$" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Skip to main content" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Your blueprint for a better internet" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Website Privacy Notice" }
+      ]
+    },
+    {
+      "id": "M02",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://news.ycombinator.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps. The feature matrix check for scrape-formats.markdown, second half: the Hacker News front page, which lays out its header, story list and footer in one table. The Markdown is the story list (rank, title and site, points and comments), with absolute targets, no data: image URIs and neither the header's links (new | past | comments | ask | show | jobs | submit) nor the footer's (Guidelines | FAQ | ... | Apply to YC | Contact, Search:). The page has no H1, so the audit's H1 check does not apply. Story titles change by the minute; the checks read only the page's fixed parts.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^\\| 1\\. \\|" },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "\\d+ points by \\S+" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "jobs \\| submit" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "jobs | submit" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Apply to YC" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "Search:" }
+      ]
+    },
+    {
+      "id": "M03",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://developer.mozilla.org/en-US/docs/w2l-does-not-exist",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29 for the Markdown gaps: an error page kept as evidence has absolute link targets, like a success. On 2026-09-29 MDN answered this path with a 404 page (its header, a 'Page not found' heading and its footer, with site-relative links) that has no main block, so the whole page is the evidence.",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "2", "type": "field", "path": "failureReason", "equals": "http_error" },
+        { "item": "2", "type": "field", "path": "snapshot.httpStatus", "equals": 404 },
+        { "item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^# Page not found$" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" }
+      ]
+    },
+    {
+      "id": "M04",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.bbc.com/news/technology",
+      "request": { "formats": ["markdown"] },
+      "compareRequest": { "formats": ["markdown"], "onlyMainContent": false },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.only-main-content: BBC News technology with onlyMainContent true (the default, doc) and false (doc.compare). True leaves out the site navigation and footer; false keeps them and is longer. On 2026-09-29 the URL redirected to https://www.bbc.com/technology, whose H1 was 'Technology'; the header had 'Skip to content', the footer 'Follow BBC on:' and a 'Terms of Use' link.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "field", "path": "compare.status", "equals": "success" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# Technology$" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Skip to content" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Follow BBC on" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Terms of Use" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "Skip to content" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "Follow BBC on" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown", "includes": "[Terms of Use](https://www.bbc.com/pages/terms-of-use)" },
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "compare.markdown.length", "abovePath": "markdown.length", "record": true },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" }
+      ]
+    },
+    {
+      "id": "M05",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.wikipedia.org/",
+      "request": { "formats": ["markdown"], "onlyMainContent": false },
+      "compareRequest": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29: onlyMainContent false on a page where the extractor finds no main block returns the whole page (README), not a failure. On 2026-09-29 the Wikipedia portal (a logo, the 'Wikipedia The Free Encyclopedia' heading and links to the language editions) had no main block on the HTTP rung (the traceEvent check) nor, rendered, on the browser rung. With the default (doc.compare) the result is failed/empty_unverified with the whole page kept as evidence; a success would also be honest if the extractor ever finds a main block there.",
+      "checks": [
+        { "item": "scrape-formats.only-main-content", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.only-main-content", "type": "traceEvent", "path": "summary.attempts.0.result.trace", "match": { "event": "extract", "detail.escalate": true } },
+        { "item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# Wikipedia" },
+        { "item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "](https://en.wikipedia.org/)" },
+        { "item": "scrape-formats.markdown", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "compare.status", "equals": "success" }],
+          [{ "type": "field", "path": "compare.failureReason", "equals": "empty_unverified" }, { "type": "field", "path": "compare.markdown", "includes": "](https://en.wikipedia.org/)" }]
+        ] }
+      ]
+    },
+    {
+      "id": "M06",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://www.github.com",
+      "request": { "formats": ["markdown"], "waitFor": 500 },
+      "note": "Added 2026-09-29: the browser lane (waitFor starts there) reports the response's content type and every redirect hop, like the HTTP lane in A18. On 2026-09-29 http://www.github.com redirected to https://www.github.com/ (for Chromium an HSTS upgrade) and then to https://github.com/, which answered text/html; charset=utf-8.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "lane", "equals": "browser_local" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "notIn": ["text/html; rendered"] },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["http://www.github.com", "https://www.github.com/", "https://github.com/"] },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "M07",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"], "debug": false },
+      "note": "Added 2026-09-29: the compact response (MCP's default shape) carries the status and content type in snapshot, and the redirect hop in its Evidence Record. On 2026-09-29 http://github.com answered 301 with https://github.com/ (A18).",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "snapshot.httpStatus", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "snapshot.contentType", "includes": "text/html" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidenceRecord.redirectChain.urls", "equals": ["http://github.com", "https://github.com/"] },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "M08",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "endpoint": "fc-scrape",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29: /fc metadata has the final URL and the content type next to sourceURL and statusCode, as Firecrawl's does.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "success", "equals": true },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.sourceURL", "equals": "http://github.com" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.url", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.statusCode", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "data.metadata.contentType", "includes": "text/html" }
+      ]
+    },
+    {
+      "id": "F01",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://airtrunk.com/wp-content/uploads/2023/03/AirTrunk-Green-Financing-Framework-Final-1.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S1 of research/pdf-corpus/manifest.v1.json (AirTrunk Green Financing Framework). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "PUEs as low as 1.15" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Portfolio average annual operating PUE for FY24 is 1.32" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 5, "text": "A$10 billion+ in debt across our portfolio as at February 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 12 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "dfa24a3fe9f8c87b20bce5763fad53e07bda57ff2866f853d2817acf57d698cb" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 342998 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "dfa24a3fe9f8c87b20bce5763fad53e07bda57ff2866f853d2817acf57d698cb" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F02",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://sustainability.atmeta.com/asset/2025-environmental-data-index/",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S2 of research/pdf-corpus/manifest.v1.json (Meta 2025 Environmental Data Index, requested at its /asset/ page, which redirects to the PDF). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "48,826" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 4, "text": "Altoona (IA) - 555,000 - 425,377 - 474,826 - 532,158 0 666,434" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 18, "text": "We have publicly committed to matching 100% of our electricity use with clean and renewable energy" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 19 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "d7527cd23308869105b404b486117603bb3f5ee10e30499367f8698110afb66d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 2266742 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "d7527cd23308869105b404b486117603bb3f5ee10e30499367f8698110afb66d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F03",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://sustainability.atmeta.com/asset/2025-independent-accountants-review-report/",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S3 of research/pdf-corpus/manifest.v1.json (Meta FY24 Independent Accountants’ Review Report, requested at its /asset/ page, which redirects to the PDF). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "for the year-ended December 31, 2024" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "47,468" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 16, "text": "are equal to 70,529 mtCO2e" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 17 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "0bdd15186f7401891c7b0c59314657144f5a34d2ea8a1a9fa4c09183602e5d24" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 407496 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "0bdd15186f7401891c7b0c59314657144f5a34d2ea8a1a9fa4c09183602e5d24" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F04",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S4 of research/pdf-corpus/manifest.v1.json (OVHcloud PUE, WUE, REF values FY2025). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 3 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 267398 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F05",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S5 of research/pdf-corpus/manifest.v1.json (STT GDC Sustainability-Linked Financing Framework). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "Base year 2021: 597 tonnes/SGD millions" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 16, "text": "Increase the percentage of renewable energy to 85% by 2028." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 17, "text": "Reduce carbon intensity by 70% compared to the base year by 2028." },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 26 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "c5608d0b6f75b57a63cf418ed249fc380a44bf5ef64814c7508422e6229d3d4d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 6313505 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "c5608d0b6f75b57a63cf418ed249fc380a44bf5ef64814c7508422e6229d3d4d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F06",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://assets.nebius.com/assets/79cf11ba-bb23-4cb8-802e-21dc155be31c/Nebius%202025%20Sustainability%20Report.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S6 of research/pdf-corpus/manifest.v1.json (Nebius 2025 Sustainability Report). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 10, "text": "At our Finland-1 data center, 19.5 GWh of heat" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "power usage effectiveness (PUE) of 1.25" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 30, "text": "stands at over 7,500 graduates" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 72 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "38a7d1750df525cde74cdd5b6560762672d56c0a22b2fa367cfb59ebca814b23" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 4878004 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "38a7d1750df525cde74cdd5b6560762672d56c0a22b2fa367cfb59ebca814b23" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F07",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://iea.blob.core.windows.net/assets/de9dea13-b07d-42c5-a398-d1b3ae17d866/EnergyandAI.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: research PDF R1 of research/pdf-corpus/manifest.v1.json (the International Energy Agency’s Energy and AI report, 304 pages). Read on the HTTP lane alone, saved with the manifest's SHA-256 and size, each manifest phrase on its page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "Data centre electricity consumption is set to more than double to around 945 TWh by 2030." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 63, "text": "This is more than double the estimated approximately 415 TWh for 2024" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 64, "text": "increases by around 240 TWh (up 130%) in the United States" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 304 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "3956b80152d4aac6b659a09d0cd7671a4bd53efeeb067e4d50df4230701b33e4" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 8213160 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "3956b80152d4aac6b659a09d0cd7671a4bd53efeeb067e4d50df4230701b33e4" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F08",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://ec.europa.eu/eurostat/documents/15216629/22447468/KS-01-25-003-EN-N.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: research PDF R4 of research/pdf-corpus/manifest.v1.json (Eurostat’s Key figures on Europe, 11.1 MB, above the 10 MiB body cap web pages keep, with three pages that have no text layer). Read on the HTTP lane alone, saved with the manifest's SHA-256 and size, each manifest phrase on its page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 20, "text": "In 2024, the share of early leavers from education and training in the EU was 9.3%, ranging from 16.8% in Romania to 2.0% in Croatia." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 21, "text": "In 2024, the NEET rate for young people in the EU stood at 9.1%." },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 84 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.1.code", "equals": "no_text_layer" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "6a39b318af350a35520571b41d7ada3ca971dffc29492049b87b9e2152baf607" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 11145558 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "6a39b318af350a35520571b41d7ada3ca971dffc29492049b87b9e2152baf607" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F09",
+      "batch": "F",
+      "url": "https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/nrg_ind_ren/A.REN.PC.EU27_2020?format=SDMX-CSV",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a CSV from a statistics office, Eurostat's SDMX API (share of energy from renewable sources, EU27, annual). Eurostat serves it as application/vnd.sdmx.data+csv with a .csv attachment name; ec.europa.eu's robots.txt disallows /eurostat/SDMX/diss-web/rest/ but not /eurostat/api/. The file is saved as received and its text is the Markdown. Values and the LAST UPDATE column change with Eurostat's releases, so they are checked by pattern; on 2026-09-29 the 2004 value was 9.605.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "csv" },
+        { "item": "P2-files", "type": "field", "path": "file.markdownFrom", "equals": "text" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "^DATAFLOW,LAST UPDATE,freq,nrg_bal,unit,geo,TIME_PERIOD,OBS_VALUE" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "^ESTAT:NRG_IND_REN\\(1\\.0\\),[^,]*,A,REN,PC,EU27_2020,2004,[0-9]" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equalsPath": "file.bytes" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "includes": "+csv" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F10",
+      "batch": "F",
+      "url": "https://www150.statcan.gc.ca/n1/tbl/csv/17100005-eng.zip",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a ZIP from a statistics office, Statistics Canada table 17-10-0005 (population estimates) as its full-table CSV download. Its robots.txt (User-agent *, Crawl-delay 2) disallows *.csv but not this .zip. A ZIP is saved as received and has no Markdown. The table is updated on StatCan's schedule, so its hash and size are compared with the saved file's, not fixed; on 2026-09-29 it was about 3.9 MB.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "zip" },
+        { "item": "P2-files", "type": "field", "path": "markdown", "present": false },
+        { "item": "P2-files", "type": "field", "path": "file.bytes", "min": 100000, "record": true },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equalsPath": "file.bytes" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "equals": "application/zip" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F11",
+      "batch": "F",
+      "endpoint": "crawl",
+      "url": "https://www.insee.fr/fr/statistiques/8654458",
+      "request": { "maxPages": 2, "includePaths": ["^/fr/statistiques/fichier/version-html/8654458/ip2077\\.pdf$"] },
+      "note": "Added 2026-09-29. P2 file download in a crawl: Insee's publication page for Insee Première 2077 links the PDF that is R2 in research/pdf-corpus/manifest.v1.json. A 2-page crawl limited to that link reaches the PDF, which becomes a crawl page with its file, its text by page and its Evidence Record. Insee's robots.txt disallows *.xls, *.csv, *.zip and *.xlsx, not *.pdf.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "P2-files", "type": "itemCount", "equals": 2 },
+        { "item": "P2-files", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "file.kind", "equals": "pdf" } },
+        { "item": "P2-files", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 1, "text": "s’élèvent à 404 millions de tonnes équivalent CO2 (Mt CO2 éq)" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 2, "text": "est estimée à 563 Mt CO2 éq, en baisse de 3,4 % par rapport à 2023" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 2, "text": "Depuis 1990, les émissions de la France ont baissé de 31 %" } },
+        { "item": "ER", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "5a2b836faef7c04a980ed2ef3b9760df3cfd2cc5dab86d7fdf31572d1bae69df" } },
+        { "item": "ER", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" } },
+        { "item": "ER", "type": "eachItem", "minItems": 2, "check": { "type": "evidenceSchema" } }
+      ]
+    },
+    {
+      "id": "F12",
+      "batch": "F",
+      "endpoint": "fc-scrape",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download through the Firecrawl shim: /fc/v1/scrape of the seed user's PDF S4 answers success with the PDF text as data.markdown, page markers included (Firecrawl's PDF markdown has none; see docs/firecrawl-shim.md).",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "success", "equals": true },
+        { "item": "P2-files", "type": "field", "path": "data.metadata.statusCode", "equals": 200 },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "path": "data.markdown", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "path": "data.markdown", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" }
+      ]
+    },
+    {
+      "id": "F13",
+      "batch": "F",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"], "waitFor": 1000 },
+      "note": "Added 2026-09-29. P2 file download on the browser lane: with waitFor the scrape starts at the browser rung, whose navigation to a PDF starts a download ('Download is starting', failed as connection_error before). The download is caught, and the file is the one the HTTP lane saves (the manifest's SHA-256) with the same text by page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "lane", "equals": "browser_local" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["browser_local"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "browser_local" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F14",
+      "batch": "F",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "kpi1": { "type": "string" }, "kpi2": { "type": "string" }, "totalItLoad": { "type": "string" } }, "required": ["kpi1", "kpi2"] } }] },
+      "note": "Added 2026-09-29. P2 JSON extraction from a PDF: fields come only from 'Label: value' lines of the PDF text, each with its page. On the seed user's PDF S5, pdftotext 26.04.0 per page shows 'KPI 1: Increase the percentage of renewable energy in total electricity consumption' on page 13, 'KPI 2: Reduction of carbon intensity' on page 14, and eleven different 'Total IT load: ...' lines on page 4, so totalItLoad must be left out as ambiguous, never picked.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "P2-files", "type": "field", "path": "json.data.kpi1", "equals": "Increase the percentage of renewable energy in total electricity consumption" },
+        { "item": "P2-files", "type": "field", "path": "json.data.kpi2", "equals": "Reduction of carbon intensity" },
+        { "item": "P2-files", "type": "field", "path": "json.data.totalItLoad", "present": false },
+        { "item": "P2-files", "type": "jsonIssue", "includes": "field_ambiguous" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./kpi1", "equals": { "source": "pdf", "locator": "page 13 \"KPI 1\"" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./kpi2", "equals": { "source": "pdf", "locator": "page 14 \"KPI 2\"" } },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "F15",
+      "batch": "F",
+      "url": "https://api.worldbank.org/v2/country/FR/indicator/SP.POP.TOTL?format=json&date=2020:2023",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a JSON file from a data portal, the World Bank API's population of France for 2020-2023 (application/json; api.worldbank.org answers robots.txt with a 404, so nothing is disallowed). The file is saved as received and its text is the Markdown. The World Bank revises figures, so values are checked by pattern; on 2026-09-29 the 2023 value was 68372286.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "json" },
+        { "item": "P2-files", "type": "field", "path": "file.markdownFrom", "equals": "text" },
+        { "item": "P2-files", "type": "markdownIncludes", "text": "\"indicator\":{\"id\":\"SP.POP.TOTL\",\"value\":\"Population, total\"}" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "\"countryiso3code\":\"FRA\",\"date\":\"2023\",\"value\":[0-9]+" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "includes": "application/json" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F16",
+      "batch": "F",
+      "url": "https://assets.publishing.service.gov.uk/media/6aba6dd9a9c3d267bcccefb0/ET_5.1_SEP_26.xlsx",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: an XLSX from a statistics office, the UK Department for Energy Security and Net Zero's Energy Trends table 5.1 (September 2026 release), linked from gov.uk/government/statistics/electricity-section-5-energy-trends. assets.publishing.service.gov.uk answers robots.txt with a 404. Downloaded once with curl on 2026-09-29 it was 368197 bytes with SHA-256 2be6ab036d7b034ca544ecb9f17cdcbcb2d60dbad5aec16c15f0ff62ef0eca9d, served as application/vnd.openxmlformats-officedocument.spreadsheetml.sheet. An XLSX is saved as received and has no Markdown (XLSX parsing is a later P2 item).",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "xlsx" },
+        { "item": "P2-files", "type": "field", "path": "file.detectedBy", "equals": "content_type" },
+        { "item": "P2-files", "type": "field", "path": "markdown", "present": false },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "2be6ab036d7b034ca544ecb9f17cdcbcb2d60dbad5aec16c15f0ff62ef0eca9d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 368197 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "A36",
+      "batch": "api",
+      "url": "https://www.sec.gov/Archives/edgar/data/1878848/000187884826000015/iren-20251231.htm",
+      "requiresEnv": "W2L_CONTACT",
+      "request": { "mode": "research", "formats": ["markdown"] },
+      "note": "Added 2026-09-29. An SEC EDGAR filing (IREN Limited's quarterly report for the quarter to 31 December 2025) in research mode. SEC.gov answers 403 'Your Request Originates from an Undeclared Automated Tool' to the research User-Agent, with or without a contact, and serves the format its fair-access policy prescribes, '<Company or name> <email>', which research mode sends to sec.gov hosts when W2L_CONTACT is set. Runs only when W2L_CONTACT is set in the runner's environment, and the API must be started with the same W2L_CONTACT; the record shows the value as <W2L_CONTACT>. SEC asks for at most 10 requests per second; this case is one scrape. On 2026-09-29 (first run, b0ad21b) SEC.gov answered robots.txt and the filing with 200 to 'W2L Research <W2L_CONTACT>', but the default Markdown held one table only, the statement of operations (6,843 characters; document.strategy 'table', confidence 0.08), so the filing's own text, which names IREN throughout, was missing while the status said success.",
+      "checks": [
+        { "item": "FS", "type": "apiStatus", "equals": 200 },
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "markdownMatches", "pattern": "IREN" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.mode", "equals": "research" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "equalsEnv": "W2L Research ${W2L_CONTACT}" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.contact", "equalsEnv": "${W2L_CONTACT}" }
       ]
     }
   ]

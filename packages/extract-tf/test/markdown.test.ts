@@ -21,6 +21,20 @@ describe('htmlToMarkdown', () => {
     expect(md).toContain('| 1 | 2 |')
   })
 
+  it('lays out a table that holds a table as blocks, and only the inner table as a grid (Hacker News)', () => {
+    const md = htmlToMarkdown(
+      '<table id="hnmain"><tr><td><table><tr><td><b><a href="news">Hacker News</a></b> <a href="newest">new</a></td><td><a href="login">login</a></td></tr></table></td></tr>' +
+        '<tr><td><table><tr><td>1.</td><td>Story one</td></tr><tr><td></td><td>10 points</td></tr></table></td></tr>' +
+        '<tr><td><center><a href="newsguidelines.html">Guidelines</a> | <a href="newsfaq.html">FAQ</a></center></td></tr></table>',
+      { baseUrl: 'https://news.fixture.test/' },
+    )
+    expect(md).toBe(
+      '**[Hacker News](https://news.fixture.test/news)** [new](https://news.fixture.test/newest)\n\n[login](https://news.fixture.test/login)\n\n' +
+        '| 1. | Story one |\n| --- | --- |\n|  | 10 points |\n\n' +
+        '[Guidelines](https://news.fixture.test/newsguidelines.html) | [FAQ](https://news.fixture.test/newsfaq.html)',
+    )
+  })
+
   it('keeps an empty corner header cell empty instead of inventing its text', () => {
     const md = htmlToMarkdown(
       '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',
@@ -102,18 +116,29 @@ describe('htmlToMarkdown lists and code', () => {
 })
 
 describe('htmlToMarkdown link and image targets', () => {
-  it('resolves relative targets against the base URL and keeps fragments, mailto and data', () => {
+  it('resolves relative targets against the base URL and keeps fragments and mailto', () => {
     const md = htmlToMarkdown(
       '<p><a href="../guide/">Guide</a> <img src="//cdn.fixture.test/a.png" alt="A"> <a href="#top">Top</a> ' +
-        '<a href="mailto:x@fixture.test">Mail</a> <img src="data:image/gif;base64,R0lGOD" alt="Dot"> <a href="javascript:void(0)">Menu</a></p>',
+        '<a href="mailto:x@fixture.test">Mail</a> <a href="javascript:void(0)">Menu</a></p>',
       { baseUrl: BASE },
     )
     expect(md).toBe(
       '[Guide](https://fixture.test/guide/) ![A](https://cdn.fixture.test/a.png) [Top](#top) ' +
-        '[Mail](mailto:x@fixture.test) ![Dot](data:image/gif;base64,R0lGOD) Menu',
+        '[Mail](mailto:x@fixture.test) Menu',
     )
     // A heading's empty permalink anchor says nothing and is dropped.
     expect(htmlToMarkdown('<h2><a class="anchor" href="#install"></a>Install</h2>')).toBe('## Install')
+  })
+
+  it('drops data: image URIs and keeps their alt text, as Firecrawl removeBase64Images does', () => {
+    const md = htmlToMarkdown(
+      '<p>Chart <img src="data:image/png;base64,iVBORw0KGgo=" alt="Monthly [output]"> and ' +
+        '<a href="/logo"><img src=" DATA:image/svg+xml;utf8,<svg></svg>" alt="Logo"></a> and ' +
+        '<img src="data:image/gif;base64,R0lGOD">.</p>',
+      { baseUrl: BASE },
+    )
+    expect(md).toBe('Chart Monthly [output] and [Logo](https://fixture.test/logo) and .')
+    expect(htmlToMarkdown('<img src="data:image/gif;base64,R0lGOD" alt="Dot">')).toBe('Dot')
   })
 
   it('prefers the document <base href>, and keeps targets as written without a base', () => {

@@ -115,6 +115,7 @@ describe('HTTP lane on non-200 statuses', () => {
     '/empty': { status: 204, body: '' },
     '/unchanged': { status: 304, body: '' },
     '/api-missing': { status: 404, type: 'application/json', body: '{"error":"not found"}' },
+    '/gone': { status: 410, body: '<!doctype html><html><body><nav><a href="/">Home</a></nav><main><article><h1>This report was withdrawn</h1><p>The quarterly report that used to live at this address was withdrawn by the statistics office and replaced by a revised edition.</p><p>Read the <a href="reports/revised">revised edition</a> or browse <a href="/reports">all reports</a>.</p></article></main></body></html>' },
   }
   let origin: string
   let errorServer: import('node:http').Server
@@ -154,11 +155,21 @@ describe('HTTP lane on non-200 statuses', () => {
     const broken = await http.fetch(`${origin}/broken`)
     expect(broken).toMatchObject({ status: 'failed', failureReason: 'http_error' })
     expect(broken.markdown).toContain('Internal Server Error')
+    // Link targets resolve against the page URL, as on a success.
+    expect(broken.markdown).toContain(`[Status page](${origin}/status)`)
     expect(broken.links).toEqual([`${origin}/status`])
     const forbidden = await http.fetch(`${origin}/forbidden`)
     expect(forbidden).toMatchObject({ status: 'failed', failureReason: 'http_error', blockReason: null })
     expect(forbidden.evidence.httpStatus).toBe(403)
     expect(forbidden.markdown).toContain('403 Forbidden')
+  })
+
+  it('resolves the links of an error page with main content against the page URL', async () => {
+    const gone = await http.fetch(`${origin}/gone`)
+    expect(gone).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+    expect(gone.markdown).toContain('# This report was withdrawn')
+    expect(gone.markdown).toContain(`Read the [revised edition](${origin}/reports/revised) or browse [all reports](${origin}/reports).`)
+    expect(gone.markdown).not.toContain('Home')
   })
 
   it('names a gated 403 blocked with its signals and keeps the block page as evidence', async () => {
@@ -188,6 +199,57 @@ describe('HTTP lane on non-200 statuses', () => {
     const api = await http.fetch(`${origin}/api-missing`)
     expect(api).toMatchObject({ status: 'failed', failureReason: 'http_error', markdown: null })
     expect(api.evidence.httpStatus).toBe(404)
+  })
+})
+
+describe('HTTP lane on a page with no main content', () => {
+  const pages: Record<string, string> = {
+    '/nav-only': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+      '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="notices">Notices</a></li></ul></nav><footer><p>Published by the harbour office</p></footer></body></html>',
+    '/shell': '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><noscript>Enable JavaScript to run this app.</noscript></body></html>',
+  }
+  let origin: string
+  let server: import('node:http').Server
+  const http = new ResilientHttpSubject()
+
+  beforeAll(async () => {
+    const { createServer } = await import('node:http')
+    server = createServer((req, res) => {
+      const page = pages[req.url ?? '']
+      if (page === undefined) res.writeHead(404, { 'content-type': 'text/plain' }).end('not found')
+      else res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    origin = `http://127.0.0.1:${address.port}`
+  })
+
+  afterAll(async () => {
+    await http.teardown()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  const whole = () => `[Harbour office](${origin}/)\n\n- [Tide tables](${origin}/tides)\n- [Notices](${origin}/notices)\n\nPublished by the harbour office`
+
+  it('keeps the whole page as evidence on a failed result and still asks for the browser lane', async () => {
+    const out = await http.fetch(`${origin}/nav-only`)
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: whole(), usage: { contentTokens: null } })
+    expect(out.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null }])
+    expect(out.links).toEqual([`${origin}/`, `${origin}/tides`, `${origin}/notices`])
+    expect(out.document).toBeUndefined()
+    // A page with no text at all has no evidence page either.
+    expect(await http.fetch(`${origin}/shell`)).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
+  })
+
+  it('returns the whole page for onlyMainContent false and still offers it to the browser lane', async () => {
+    const out = await http.fetch(`${origin}/nav-only`, undefined, undefined, {}, undefined, { onlyMainContent: false })
+    expect(out).toMatchObject({ status: 'success', failureReason: null, escalations: [], markdown: whole(), metadata: { title: 'Harbour office' } })
+    expect(out.usage.contentTokens).toBeGreaterThan(0)
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_low_yield' }))
+    const shell = await http.fetch(`${origin}/shell`, undefined, undefined, {}, undefined, { onlyMainContent: false })
+    expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
   })
 })
 

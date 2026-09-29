@@ -19,5 +19,6 @@ Scoring: solid = 1, weak = 0.6, partial = 0.4, missing = 0; tier weights core = 
 | `milestones.json` | Feature ids per milestone |
 | `score.mjs` | `node research/parity/score.mjs` recomputes the baseline and each milestone's projected score |
 | `real-site-test-set.md` | Proposed public test sites mapped to features, with a first live batch of 12 URLs; none verified from the audit environment |
+| `core-status-2026-09-29.csv`, `core-status-2026-09-29.md` | The 29 core features re-scored on 2026-09-29 against the code at `7e2a7b3`, with tests, real-site cases and gaps; `node research/parity/score.mjs --status research/parity/core-status-2026-09-29.csv` scores with them |
 
 Statuses describe the code at `97ef3a4`. A feature becomes solid only when its real-site check passes, recorded with the command and source commit.

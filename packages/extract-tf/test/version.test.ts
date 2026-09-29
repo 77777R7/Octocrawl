@@ -16,7 +16,7 @@ const PAGES: [url: string, html: string][] = [
 npm test</code></pre></li></ol>
 <ul><li>Outputs<ul><li>Markdown</li><li>Links</li></ul></li></ul>
 <table><caption>Limits</caption><tr><th>Plan</th><th>Pages<br>per month</th></tr><tr><td>Free</td><td>500</td></tr></table>
-<p>First line<br>second line, with an image <img src="/img/a.png" alt="Diagram">.</p>
+<p>First line<br>second line, with an image <img src="/img/a.png" alt="Diagram"> and an inline one <img src="data:image/png;base64,iVBORw0KGgo=" alt="Sparkline">.</p>
 </article></main>
 <footer><p>Copyright 2026 Fixture Docs. All rights reserved.</p></footer></body></html>`],
   ['https://stats.fixture.test/energy/q2', `<html><head><base href="https://stats.fixture.test/releases/"><title>Quarterly energy release</title></head><body>
@@ -43,6 +43,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/1', digest: 'cc992843abc483af2833e33b34f0a543ad8aca02356a2fe5369c8e8b8f7fe4b9' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/2', digest: '2269ef38c956ae04bd27edba14dd50d798d93f62a0f4a9b827cb1127aee0daea' })
   })
 })
