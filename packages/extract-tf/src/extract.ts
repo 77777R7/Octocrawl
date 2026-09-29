@@ -21,6 +21,7 @@ import { pageSignalsFor, routePage, selectCardList, selectList, selectTable } fr
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
+import { collectLabelledValues } from './labels.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -207,6 +208,7 @@ export class ExtractTf implements Extractor {
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
+      labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
 

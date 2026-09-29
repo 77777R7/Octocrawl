@@ -197,6 +197,31 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     expect(out.mainHtml).not.toContain('Leave a reply')
   })
 
+  it('reads label/value pairs from two-cell rows and definition lists in the main content', () => {
+    const html = `<!doctype html><html><body>
+<aside><table><tr><th>Sidebar label</th><td>not main content</td></tr></table></aside>
+<article><h1>A Light in the Attic</h1>
+<p>A collection of poems and line drawings for readers of every age, reissued as an anniversary edition.</p>
+<table class="table table-striped">
+<tr><th>UPC</th><td>a897fe39b1053632</td></tr>
+<tr><th>Price (excl. tax)</th><td>£51.77</td></tr>
+<tr><th>Availability</th>
+<td>In stock
+  (22 available)</td></tr>
+</table>
+<table><tr><th>Year</th><th>Copies</th></tr><tr><th>2023</th><td>12</td><td>14</td></tr><tr><td>Reprint</td><td>yes</td></tr></table>
+<dl><div><dt>Unit</dt><dd>tonnes per person</dd></div><div><dt>Date range</dt><dd>1750-2024</dd></div><dt>Managed by</dt><dd>Pablo</dd><dd>Hannah</dd></dl>
+</article></body></html>`
+    expect(extractTf.extract(html).labelledValues).toEqual([
+      { label: 'UPC', value: 'a897fe39b1053632', path: 'table[0] tr[0]' },
+      { label: 'Price (excl. tax)', value: '£51.77', path: 'table[0] tr[1]' },
+      { label: 'Availability', value: 'In stock (22 available)', path: 'table[0] tr[2]' },
+      { label: 'Unit', value: 'tonnes per person', path: 'dl[0] dt[0]' },
+      { label: 'Date range', value: '1750-2024', path: 'dl[0] dt[1]' },
+    ])
+    expect(extractTf.extract('<!doctype html><html><body><div id="root"></div></body></html>').labelledValues).toEqual([])
+  })
+
   it('counts tables whose rows a script has yet to fill', () => {
     const html = `<!doctype html><html><body><main><h1>Population estimates, quarterly</h1>
 <p>Table 17-10-0009-01. Release date 2026-09-23. Frequency: quarterly. Geography: Canada, province or territory.</p>

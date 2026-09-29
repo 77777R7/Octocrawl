@@ -679,6 +679,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           adapter: extracted.adapter,
           entities: extracted.entities,
           adapterValidation: extracted.adapterValidation,
+          labelledValues: extracted.labelledValues,
         },
         usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
       }

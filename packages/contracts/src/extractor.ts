@@ -148,6 +148,22 @@ export interface ProductFacts {
   quoteState?: QuoteState
 }
 
+/**
+ * A value the page states under its own label: a two-cell table row (a `<th>`
+ * label and a `<td>` value) or a definition-list pair (one `<dt>`, one
+ * `<dd>`) in the main content. Both texts are as the page shows them, with
+ * whitespace collapsed; nothing is normalized.
+ */
+export interface LabelledValue {
+  label: string
+  value: string
+  /**
+   * `table[i] tr[j]` or `dl[i] dt[j]`: zero-based, in document order, the
+   * table or list among those in the main content and the row or term in it.
+   */
+  path: string
+}
+
 export interface DocumentExtraction {
   title: string | null
   pageType: PageType
@@ -157,6 +173,8 @@ export interface DocumentExtraction {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  /** Label/value pairs of the main content; JSON extraction matches them to schema keys. */
+  labelledValues?: readonly LabelledValue[]
 }
 
 export interface ExtractorOutput {
@@ -200,6 +218,8 @@ export interface ExtractorOutput {
    * `<tbody>` waiting for a script to fill them. The data is not in this HTML.
    */
   emptyTableShells?: number
+  /** Label/value pairs of the main content (see LabelledValue). */
+  labelledValues?: readonly LabelledValue[]
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }

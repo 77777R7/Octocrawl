@@ -41,6 +41,8 @@ export type StructuredIssueCode =
   | 'adapter_unavailable'
   | 'subject_unverified'
   | 'field_unavailable'
+  /** Page labels matching the field state different values, so none was chosen. */
+  | 'field_ambiguous'
   | 'missing_required'
   | 'schema_invalid'
   | 'model_unavailable'
