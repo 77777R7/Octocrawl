@@ -709,6 +709,331 @@
         { "item": "ER", "type": "eachItem", "path": "errors", "minItems": 0, "check": { "type": "evidenceSchema" } },
         { "item": "ER", "type": "eachItem", "minItems": 1, "check": { "type": "field", "path": "evidenceRecord.requestedUrl", "equalsPath": "url" } }
       ]
+    },
+    {
+      "id": "A16",
+      "batch": "api",
+      "feature": "scrape-formats.formats-array",
+      "url": "https://en.wikipedia.org/wiki/Web_scraping",
+      "request": { "formats": ["markdown", "links", { "type": "json", "schema": { "type": "object", "properties": { "title": { "type": "string" } }, "required": ["title"] } }] },
+      "note": "Added 2026-09-29 for the core-29 scoring. The feature matrix check for scrape-formats.formats-array, first half: markdown, links and a json schema in one call on the audit's Wikipedia article (real-site-test-set.md row 15), each present and non-empty, plus that row's expectations for the Markdown (the H1, absolute link targets, no data: URIs). On 2026-09-29 the article's heading was 'Web scraping' and it linked to Data scraping. Like S10 and L06, this case needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "5", "type": "markdownMatches", "pattern": "^# Web scraping$" },
+        { "item": "5", "type": "linksAbsolute" },
+        { "item": "5", "type": "linksInclude", "url": "https://en.wikipedia.org/wiki/Data_scraping" },
+        { "item": "5", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "5", "type": "field", "path": "json.data.title", "equals": "Web scraping" },
+        { "item": "4", "type": "markdownLinksAbsolute" },
+        { "item": "scrape-formats.markdown", "type": "markdownExcludes", "text": "data:image" }
+      ]
+    },
+    {
+      "id": "A17",
+      "batch": "api",
+      "feature": "scrape-formats.formats-array",
+      "endpoint": "batch",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping"],
+      "request": { "formats": ["links"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.formats-array, second half: a batch of 3 URLs that asks only for links gives every item a non-empty links array, and no Markdown it did not ask for. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "5", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "5", "type": "itemCount", "equals": 3 },
+        { "item": "FS", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "5", "type": "eachItem", "minItems": 3, "check": { "type": "linksAbsolute" } },
+        { "item": "5", "type": "eachItem", "minItems": 3, "check": { "type": "field", "path": "markdown", "equals": null } }
+      ]
+    },
+    {
+      "id": "A18",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "http://github.com",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.metadata-response-status, first half (real-site-test-set.md row 38): an http:// URL that redirects to https:// records the requested URL, the final URL, the hop, status 200 and the content type. On 2026-09-29 http://github.com answered 301 with https://github.com/. The default REST response is the full one, with evidence; the compact (MCP) response has no contentType.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "requestedUrl", "equals": "http://github.com" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.finalUrl", "equals": "https://github.com/" },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.redirectChain", "equals": ["http://github.com", "https://github.com/"] },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.httpStatus", "equals": 200 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" }
+      ]
+    },
+    {
+      "id": "A19",
+      "batch": "api",
+      "feature": "scrape-formats.metadata-response-status",
+      "url": "https://httpbin.org/status/404",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-formats.metadata-response-status, second half: a 404 is not success, and carries http_error, status 404 and the content type. On 2026-09-29 httpbin.org answered 404 with an empty text/html body. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "2", "type": "field", "path": "status", "notIn": ["success"] },
+        { "item": "2", "type": "field", "path": "failureReason", "equals": "http_error" },
+        { "item": "2", "type": "field", "path": "evidence.httpStatus", "equals": 404 },
+        { "item": "scrape-formats.metadata-response-status", "type": "field", "path": "evidence.contentType", "includes": "text/html" }
+      ]
+    },
+    {
+      "id": "A20",
+      "batch": "api",
+      "feature": "scrape-execution.wait-for",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": 0 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.wait-for, first half: with waitFor 0 the late text is absent; S06 has it with waitFor 12000. On 2026-09-29 the quotes on /js-delayed/ appeared about 10 s after load.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "markdown", "present": false }],
+          [{ "type": "markdownExcludes", "text": "The world as we have created it is a process of our thinking." }]
+        ] }
+      ]
+    },
+    {
+      "id": "A21",
+      "batch": "api",
+      "feature": "scrape-execution.wait-for",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": -1 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.wait-for, second half: a negative waitFor is refused with HTTP 400 by the request parser, which runs before the engine fetches anything.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 400 },
+        { "item": "6", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "6", "type": "field", "path": "error", "includes": "waitFor" }
+      ]
+    },
+    {
+      "id": "A22",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 3000 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, first part (row 38): httpbin.org/delay/10 answers after 10 s, so a 3 s timeout ends the scrape as failed/timeout, HTTP 200, within about 3 to 5 s of the runner's call (elapsedMs).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "status", "equals": "failed" },
+        { "item": "6", "type": "field", "path": "failureReason", "equals": "timeout" },
+        { "item": "6", "type": "field", "path": "usage.deadlineExceeded", "equals": true },
+        { "item": "6", "type": "field", "path": "elapsedMs", "min": 3000, "max": 5000, "record": true }
+      ]
+    },
+    {
+      "id": "A23",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 20000 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, second part: with timeout 20000 the same endpoint, which answers after 10 s, succeeds; its JSON echoes the URL. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "field", "path": "status", "equals": "success" },
+        { "item": "6", "type": "markdownIncludes", "text": "https://httpbin.org/delay/10" },
+        { "item": "6", "type": "field", "path": "elapsedMs", "max": 20000, "record": true }
+      ]
+    },
+    {
+      "id": "A24",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "url": "https://httpbin.org/delay/10",
+      "request": { "formats": ["markdown"], "timeout": 0 },
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.timeout, third part: timeout 0 is refused with HTTP 400 by the request parser, before any fetch.",
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 400 },
+        { "item": "6", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "6", "type": "field", "path": "error", "includes": "timeout" }
+      ]
+    },
+    {
+      "id": "A25",
+      "batch": "api",
+      "feature": "scrape-execution.proxy-basic",
+      "url": "https://httpbin.org/ip",
+      "request": { "formats": ["markdown"] },
+      "egress": true,
+      "note": "Added 2026-09-29. The feature matrix check for scrape-execution.proxy-basic, for the basic proxy P1 item 9 defines (the operator's environment proxy in local mode): the address W2L's page shows is the one httpbin.org/ip shows the runner through the same environment proxy, not the one it shows the runner directly, and the result names the proxy in evidence.envProxy. Needs HTTPS_PROXY in the API's and the runner's environment. On 2026-09-29 the scoring machine's proxy (127.0.0.1:7890) reached httpbin.org from a different address than the direct route. W2L has no request-level proxy: 'basic' (HTTP 400 for the parameter) and no metadata.proxyUsed.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "9", "type": "field", "path": "evidence.envProxy", "present": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIp", "present": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIp", "equalsPath": "egress.proxiedIp", "record": true },
+        { "item": "9", "type": "field", "path": "egress.reportedIsDirect", "equals": false }
+      ]
+    },
+    {
+      "id": "A26",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-wait",
+      "endpoint": "sdk",
+      "url": "https://docs.python.org/3/tutorial/",
+      "request": { "maxPages": 10, "includePaths": ["^/3/tutorial/"] },
+      "sdk": { "op": "crawlWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.crawl-wait through the SDK: crawl, waitCrawl with a 120 s timeout, then listCrawlPages, since waitCrawl returns the crawl's status and its pages are listed separately (docs/batch-scrape.md). A Firecrawl crawl of /3/tutorial/ stays under that path by default; a W2L crawl follows the whole host, so includePaths keeps the audit's scope. The same crawl started again and waited on for 1 s must throw WaitTimeoutError carrying its id; it is then cancelled.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 10 },
+        { "item": "8", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.elapsedMs", "max": 5000, "record": true },
+        { "item": "crawl-batch.crawl-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A27",
+      "batch": "api",
+      "feature": "platform.sdk.waiters",
+      "endpoint": "sdk",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 20 },
+      "sdk": { "op": "crawlWait", "pollIntervalMs": 1000, "timeoutMs": 300000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for platform.sdk.waiters: waitCrawl polling every second returns once the 20-page crawl completes, and listCrawlPages (with getCrawlErrors) then gives all 20 steps; a 1 s timeoutMs on the same crawl started again throws WaitTimeoutError with its id, and that crawl is cancelled.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "field", "path": "report.pagesFetched", "equals": 20 },
+        { "item": "8", "type": "field", "path": "stepCount", "equals": 20 },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "crawl-batch.crawl-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A28",
+      "batch": "api",
+      "feature": "crawl-batch.batch-wait",
+      "endpoint": "sdk",
+      "urls": ["https://en.wikipedia.org/wiki/Web_scraping", "https://en.wikipedia.org/wiki/Web_crawler", "https://en.wikipedia.org/wiki/Data_scraping", "https://en.wikipedia.org/wiki/Search_engine", "https://en.wikipedia.org/wiki/Web_archiving", "https://en.wikipedia.org/wiki/Robots.txt", "https://en.wikipedia.org/wiki/Sitemaps", "https://en.wikipedia.org/wiki/Hyperlink", "https://en.wikipedia.org/wiki/HTML", "https://en.wikipedia.org/wiki/World_Wide_Web"],
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "batchWait", "pollIntervalMs": 1000, "timeoutMs": 120000, "timeoutProbeMs": 1000 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-wait through the SDK: batchScrape of 10 Wikipedia URLs, waitBatch with a 120 s timeout, then listBatchItems, since waitBatch returns the batch's status and its items are listed separately (docs/batch-scrape.md). The same 10 URLs submitted again and waited on for 1 s must throw WaitTimeoutError carrying that batch's id; it is then cancelled. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "8", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "8", "type": "itemCount", "equals": 10 },
+        { "item": "FS", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "8", "type": "eachItem", "minItems": 10, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "8", "type": "field", "path": "timeoutProbe.isWaitTimeoutError", "equals": true },
+        { "item": "8", "type": "field", "path": "timeoutProbe.jobIdMatches", "equals": true },
+        { "item": "crawl-batch.batch-cancel", "type": "field", "path": "probeCancel.status", "equals": "cancelled" }
+      ]
+    },
+    {
+      "id": "A29",
+      "batch": "api",
+      "feature": "platform.client.api-key",
+      "endpoint": "sdk",
+      "apiEnv": "W2L_HOSTED_API_URL",
+      "url": "https://example.com/",
+      "request": { "formats": ["markdown"] },
+      "sdk": { "op": "scrape" },
+      "note": "Added 2026-09-29. The feature matrix check for platform.client.api-key: a hosted-mode API started with a token (npm run api -- --hosted --token …; its URL in W2L_HOSTED_API_URL), scraped through the SDK with the key taken from W2L_API_TOKEN in the runner's environment (no token option), then with no token and with a wrong one: HTTP 401, code unauthorized. Hosted mode never uses the environment proxy; example.com answered directly on 2026-09-29, with no <h1> on the page.",
+      "checks": [
+        { "item": "platform.client.api-key", "type": "field", "path": "tokenInEnvironment", "equals": true },
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "markdownIncludes", "text": "This domain is for use in documentation examples" },
+        { "item": "platform.client.api-key", "type": "field", "path": "withoutToken.status", "equals": 401 },
+        { "item": "platform.client.api-key", "type": "field", "path": "withoutToken.code", "equals": "unauthorized" },
+        { "item": "platform.client.api-key", "type": "field", "path": "wrongToken.status", "equals": 401 },
+        { "item": "platform.client.api-key", "type": "field", "path": "wrongToken.code", "equals": "unauthorized" }
+      ]
+    },
+    {
+      "id": "A30",
+      "batch": "api",
+      "feature": "crawl-batch.include-paths",
+      "endpoint": "crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "maxPages": 15, "includePaths": ["^/3/library/.*"] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.include-paths (row 32): with includePaths ^/3/library/ every page after the seed is under /3/library/. A kept link that robots.txt disallows would be a policy_denied step under /errors; those are checked too.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 15 },
+        { "item": "7", "type": "itemUrls", "minItems": 10, "pattern": "^https://docs\\.python\\.org/3/(library/.*)?$" },
+        { "item": "7", "type": "itemUrls", "path": "errors", "minItems": 0, "pattern": "^https://docs\\.python\\.org/3/(library/.*)?$" }
+      ]
+    },
+    {
+      "id": "A31",
+      "batch": "api",
+      "feature": "crawl-batch.exclude-paths",
+      "endpoint": "crawl",
+      "url": "https://docs.python.org/3/",
+      "request": { "maxPages": 30, "excludePaths": ["^/3/whatsnew/.*"] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.exclude-paths: a 30-page crawl of docs.python.org/3/ with excludePaths ^/3/whatsnew/ fetches nothing under /3/whatsnew/, which the /3/ page links near its top.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "field", "path": "report.pagesFetched", "equals": 30 },
+        { "item": "7", "type": "itemUrls", "minItems": 10, "pattern": "^https://docs\\.python\\.org/(?!3/whatsnew/)" },
+        { "item": "7", "type": "itemUrls", "path": "errors", "minItems": 0, "pattern": "^https://docs\\.python\\.org/(?!3/whatsnew/)" }
+      ]
+    },
+    {
+      "id": "A32",
+      "batch": "api",
+      "feature": "crawl-batch.page-limit",
+      "endpoint": "crawl",
+      "url": "https://en.wikipedia.org/wiki/Web_crawler",
+      "request": { "maxPages": 7 },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.page-limit: a crawl of the Web crawler article with maxPages 7 records exactly 7 steps and stops with budgetExceeded pages. The API keeps no request log, so 'no 8th request' is read from pagesFetched and the pages plus errors listed. Links robots.txt disallows (Special: pages and the like) are policy_denied steps and count. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "crawl-batch.crawl-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "report.budgetExceeded", "equals": "pages" },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "report.pagesFetched", "equals": 7 },
+        { "item": "crawl-batch.page-limit", "type": "field", "path": "stepCount", "equals": 7 }
+      ]
+    },
+    {
+      "id": "A33",
+      "batch": "api",
+      "feature": "crawl-batch.crawl-scrape-options",
+      "endpoint": "crawl",
+      "url": "https://books.toscrape.com/",
+      "request": { "maxPages": 5, "includePaths": ["^/catalogue/(?!category/)[^/]+/index\\.html$"], "formats": ["markdown", "links", { "type": "json", "schema": { "type": "object", "properties": { "title": { "type": "string" }, "price": { "type": "number" } }, "required": ["title", "price"] } }] },
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.crawl-scrape-options: a 5-page crawl with formats markdown, links and a json schema gives every page Markdown and absolute links, and every product page JSON with its title and a numeric price. A05's path filter makes the four pages after the seed product pages; without it they are category listings.",
+      "checks": [
+        { "item": "7", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "7", "type": "itemCount", "equals": 5 },
+        { "item": "7", "type": "eachItem", "minItems": 5, "check": { "type": "field", "path": "markdown", "present": true } },
+        { "item": "7", "type": "eachItem", "minItems": 5, "check": { "type": "linksAbsolute" } },
+        { "item": "7", "type": "eachItem", "minItems": 4, "urlPattern": "^https://books\\.toscrape\\.com/catalogue/(?!category/)[^/]+/index\\.html$", "check": { "type": "field", "path": "json.data.title", "present": true } },
+        { "item": "7", "type": "eachItem", "minItems": 4, "urlPattern": "^https://books\\.toscrape\\.com/catalogue/(?!category/)[^/]+/index\\.html$", "check": { "type": "fieldType", "path": "json.data.price", "equals": "number" } }
+      ]
+    },
+    {
+      "id": "A34",
+      "batch": "api",
+      "feature": "crawl-batch.batch-status",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/catalogue/page-21.html", "https://books.toscrape.com/catalogue/page-22.html", "https://books.toscrape.com/catalogue/page-23.html", "https://books.toscrape.com/catalogue/page-24.html", "https://books.toscrape.com/catalogue/page-25.html", "https://books.toscrape.com/catalogue/page-26.html", "https://books.toscrape.com/catalogue/page-27.html", "https://books.toscrape.com/catalogue/page-28.html", "https://books.toscrape.com/catalogue/page-29.html", "https://books.toscrape.com/catalogue/page-30.html", "https://books.toscrape.com/catalogue/page-31.html", "https://books.toscrape.com/catalogue/page-32.html", "https://books.toscrape.com/catalogue/page-33.html", "https://books.toscrape.com/catalogue/page-34.html", "https://books.toscrape.com/catalogue/page-35.html", "https://books.toscrape.com/catalogue/page-36.html", "https://books.toscrape.com/catalogue/page-37.html", "https://books.toscrape.com/catalogue/page-38.html", "https://books.toscrape.com/catalogue/page-39.html", "https://books.toscrape.com/catalogue/page-40.html", "https://books.toscrape.com/catalogue/page-41.html", "https://books.toscrape.com/catalogue/page-42.html", "https://books.toscrape.com/catalogue/page-43.html", "https://books.toscrape.com/catalogue/page-44.html", "https://books.toscrape.com/catalogue/page-45.html", "https://books.toscrape.com/catalogue/page-46.html", "https://books.toscrape.com/catalogue/page-47.html", "https://books.toscrape.com/catalogue/page-48.html", "https://books.toscrape.com/catalogue/page-49.html", "https://books.toscrape.com/catalogue/page-50.html"],
+      "request": { "formats": ["markdown"] },
+      "pollMs": 1000,
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-status: the status of a 30-URL batch polled every second. completed never goes back while the batch runs, the items listed mid-run are all in the final list, and at the end completed is 30 and remaining 0.",
+      "checks": [
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "report.completed", "equals": 30 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "report.remaining", "equals": 0 },
+        { "item": "crawl-batch.batch-status", "type": "itemCount", "equals": 30 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.maxCompletedWhileRunning", "min": 1, "record": true },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.monotonic", "equals": true },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.midRunItems", "min": 1 },
+        { "item": "crawl-batch.batch-status", "type": "field", "path": "progress.midRunSubset", "equals": true }
+      ]
+    },
+    {
+      "id": "A35",
+      "batch": "api",
+      "feature": "crawl-batch.batch-start-async",
+      "endpoint": "batch",
+      "urls": ["https://books.toscrape.com/catalogue/page-1.html", "https://books.toscrape.com/catalogue/page-2.html", "https://books.toscrape.com/catalogue/page-3.html", "https://books.toscrape.com/catalogue/page-4.html", "https://books.toscrape.com/catalogue/page-5.html", "https://books.toscrape.com/catalogue/page-6.html", "https://books.toscrape.com/catalogue/page-7.html", "https://books.toscrape.com/catalogue/page-8.html", "https://books.toscrape.com/catalogue/page-9.html", "https://books.toscrape.com/catalogue/page-10.html", "https://books.toscrape.com/catalogue/page-11.html", "https://books.toscrape.com/catalogue/page-12.html", "https://books.toscrape.com/catalogue/page-13.html", "https://books.toscrape.com/catalogue/page-14.html", "https://books.toscrape.com/catalogue/page-15.html", "https://books.toscrape.com/catalogue/page-16.html", "https://books.toscrape.com/catalogue/page-17.html", "https://books.toscrape.com/catalogue/page-18.html", "https://books.toscrape.com/catalogue/page-19.html", "https://books.toscrape.com/catalogue/page-20.html", "https://quotes.toscrape.com/page/1/", "https://quotes.toscrape.com/page/2/", "https://quotes.toscrape.com/page/3/", "https://quotes.toscrape.com/page/4/", "https://quotes.toscrape.com/page/5/", "https://quotes.toscrape.com/page/6/", "https://quotes.toscrape.com/page/7/", "https://quotes.toscrape.com/page/8/", "https://quotes.toscrape.com/page/9/", "https://quotes.toscrape.com/page/10/", "https://quotes.toscrape.com/tag/love/", "https://quotes.toscrape.com/tag/inspirational/", "https://quotes.toscrape.com/tag/life/", "https://quotes.toscrape.com/tag/humor/", "https://quotes.toscrape.com/tag/books/", "https://quotes.toscrape.com/tag/reading/", "https://quotes.toscrape.com/tag/friendship/", "https://quotes.toscrape.com/tag/friends/", "https://quotes.toscrape.com/tag/truth/", "https://quotes.toscrape.com/tag/simile/", "https://en.wikipedia.org/wiki/Web_page", "https://en.wikipedia.org/wiki/Website", "https://en.wikipedia.org/wiki/URL", "https://en.wikipedia.org/wiki/Web_browser", "https://en.wikipedia.org/wiki/HTTP", "https://en.wikipedia.org/wiki/Markdown", "https://en.wikipedia.org/wiki/JSON", "https://en.wikipedia.org/wiki/Comma-separated_values", "https://en.wikipedia.org/wiki/Web_indexing", "https://en.wikipedia.org/wiki/Metadata"],
+      "request": { "formats": ["markdown"] },
+      "debug": true,
+      "note": "Added 2026-09-29. The feature matrix check for crawl-batch.batch-start-async: 50 URLs on 3 hosts. The start answers at once with a task id, every URL ends with an item, and on each host consecutive fetch starts are at least the delay W2L requires apart (the minimum interval, 250 ms by default, or a longer robots.txt Crawl-delay), as each item's crawl_delay trace event records them (items read with debug=true). The runner cannot see W2L's requests, so the spacing is W2L's own record. Needs a network path to wikipedia.org.",
+      "checks": [
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "startMs", "max": 1000, "record": true },
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "crawl-batch.batch-start-async", "type": "itemCount", "equals": 50 },
+        { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
+        { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
+      ]
     }
   ]
 }
