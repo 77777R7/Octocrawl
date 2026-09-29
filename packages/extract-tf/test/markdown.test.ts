@@ -116,6 +116,38 @@ describe('htmlToMarkdown link and image targets', () => {
   })
 })
 
+// Markers a browser capture adds to its copy of the rendered page where the
+// page's CSS, not its tags, decides the layout. Unmarked HTML converts by tag.
+describe('htmlToMarkdown layout markers', () => {
+  it('starts a block at an inline element the page lays out as a block (S05)', () => {
+    const html = '<div class="quote"><span class="text" data-w2l-display="block">“The world as we have created it is a process of our thinking.”</span>' +
+      '<span>by <small class="author">Albert Einstein</small></span><div class="tags">Tags: <a class="tag">change</a> <a class="tag">thinking</a></div></div>'
+    expect(htmlToMarkdown(html)).toBe('“The world as we have created it is a process of our thinking.”\n\nby Albert Einstein\n\nTags: change thinking')
+    expect(htmlToMarkdown(html.replace(' data-w2l-display="block"', '')))
+      .toBe('“The world as we have created it is a process of our thinking.”by Albert Einstein\n\nTags: change thinking')
+  })
+
+  it('skips what the page hides, with everything inside (S09)', () => {
+    const html = '<ol><li><p>Open <span class="platform-mac">Terminal</span><span class="platform-linux" data-w2l-hidden="">Terminal</span>' +
+      '<span class="platform-windows" data-w2l-hidden="">Git <b>Bash</b></span>.</p></li><li><p>Set a Git username:</p></li></ol>'
+    expect(htmlToMarkdown(html)).toBe('1. Open Terminal.\n2. Set a Git username:')
+  })
+
+  it('keeps link and emphasis markup on a marked block, and spaces marked blocks inside a line', () => {
+    expect(htmlToMarkdown('<div><a href="/more" data-w2l-display="block">Read more</a><strong data-w2l-display="block">Note</strong>text</div>', { baseUrl: BASE }))
+      .toBe('[Read more](https://fixture.test/more)\n\n**Note**\n\ntext')
+    expect(htmlToMarkdown('<p><a href="/a"><span data-w2l-display="block">Title</span><span data-w2l-display="block">Subtitle</span></a></p>', { baseUrl: BASE }))
+      .toBe('[Title Subtitle](https://fixture.test/a)')
+  })
+
+  it('applies the markers inside tables, code blocks and code spans', () => {
+    const html = '<table><tr><th>Country</th><th>Share</th></tr><tr><td>India</td><td><span class="sortkey" data-w2l-hidden="">7001172774265385000♠</span>' +
+      '<span data-w2l-display="block">17.3%</span><span>of world</span></td></tr></table>' +
+      '<pre>ls<span data-w2l-hidden=""> # hidden note</span>\npwd</pre><p>Run <code>make<span data-w2l-hidden="">-dev</span></code>.</p>'
+    expect(htmlToMarkdown(html)).toBe('| Country | Share |\n| --- | --- |\n| India | 17.3% of world |\n\n```\nls\npwd\n```\n\nRun `make`.')
+  })
+})
+
 // Golden files: trimmed copies of the real pages in research/parity/sites.v1.json.
 describe('htmlToMarkdown golden pages', () => {
   it('quotes.toscrape.com quote blocks (S04)', () => {

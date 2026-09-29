@@ -144,6 +144,19 @@ describe('extractTf', () => {
     expect(recalled.mainHtml).toContain('Short observation number one')
   })
 
+  it('leaves out what a browser capture marked hidden', () => {
+    const menu = 'The collapsed mobile menu repeats every section title of the site in long sentences that no reader of the desktop page sees.'
+    const html = `<!doctype html><html><body>
+<div class="menu" data-w2l-hidden=""><p>${menu}</p><p>${menu}</p><p>${menu}</p></div>
+<div class="report"><p>The survey covers forty villages and three hundred households in the upper valley.</p></div>
+</body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('The survey covers forty villages')
+    expect(out.mainHtml).not.toContain('collapsed mobile menu')
+    // Unmarked HTML (every lane but the browser's) still chooses by text alone.
+    expect(extractTf.extract(html.replace(' data-w2l-hidden=""', '')).mainHtml).toContain('collapsed mobile menu')
+  })
+
   it('applies caller prune selectors', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Report</h1>

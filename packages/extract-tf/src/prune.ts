@@ -11,6 +11,7 @@
  */
 
 import { detach, qsa, tagOf, textOf } from './dom.js'
+import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
 
 const MANUALLY_CLEANED = [
@@ -204,6 +205,9 @@ export function pruneRecommendations(doc: Document): void {
  * Strip elements that can never be main content. Idempotent.
  */
 export function cleanTree(doc: Document): void {
+  // What the page's CSS hides, where a browser capture marked it, is not
+  // content either.
+  for (const el of qsa(doc, `[${LAYOUT_MARKERS.hidden}]`)) detach(el)
   // A form that wraps the page's content (an ASP.NET WebForms page, a
   // statistics table viewer with filter controls) is unwrapped rather than
   // removed: its controls still go below, its content stays.

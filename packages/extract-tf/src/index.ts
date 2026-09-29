@@ -16,7 +16,7 @@ export {
 } from './product.js'
 export { routePage, pageSignalsFor, selectList, selectTable, selectMinimal } from './route.js'
 export type { RouteDecision } from './route.js'
-export { htmlToMarkdown } from './markdown.js'
+export { htmlToMarkdown, LAYOUT_MARKERS } from './markdown.js'
 export type { MarkdownOptions } from './markdown.js'
 export { collectLinks } from './links.js'
 export { amazonAsin, inferAmazonCurrency, isAmazonProductPage, collectAmazonProductFacts, selectAmazonProduct } from './amazon.js'
