@@ -36,6 +36,18 @@ npm test</code></pre></li></ol>
 ${Array.from({ length: 6 }, (_, i) => `<div><span>Paragraph ${i + 1}: revenue rose in the quarter because the second kiln line reached full output, and the harbour office recorded every firing.</span></div>`).join('\n')}
 <div><table><tr><td></td><td></td><td></td></tr><tr><td>Revenue</td><td>1,204</td><td>987</td></tr><tr><td>Net income</td><td>402</td><td>301</td></tr></table></div>
 </body></html>`],
+  // A table page: its h1 in a banner, two captioned tables with links and images in their cells, a data: link between them.
+  ['https://survey.fixture.test/kilns/2026', `<html><head><title>Kiln survey 2026</title></head><body>
+<div id="masthead"><a href="/">Survey office</a> | <a href="/releases">Releases</a></div>
+<div class="banner"><h1>Kiln survey 2026</h1></div>
+<div id="tables"><p>Firings by kiln; see the <a href="data:text/html;base64,PGgxPg==">inline notes</a>.</p>
+<h2>North site</h2><table><caption>Table 1: North site, <a href="/method">method</a></caption><tr><th>Kiln</th><th>Firings</th><th>Report</th></tr>
+${Array.from({ length: 6 }, (_, i) => `<tr><td><a href="kilns/${i + 1}">Kiln ${i + 1}</a></td><td>${40 - i}</td><td><a href="/r/${i + 1}.pdf"><img src="/i/pdf.png" alt="PDF | ${i + 1} MB"></a> <a href="/r/${i + 1}.csv">Data<br>CSV</a></td></tr>`).join('\n')}
+</table>
+<h2>South site</h2><table><caption>Table 2: South site</caption><tr><th>Kiln</th><th>Firings</th><th>Glaze</th></tr>
+${Array.from({ length: 6 }, (_, i) => `<tr><td>Kiln ${i + 7}</td><td>${30 - i}</td><td><b>Cobalt</b> and <em>ash</em> glaze, batch ${i + 1}</td></tr>`).join('\n')}
+</table></div>
+<div id="colophon">Survey office, 2026</div></body></html>`],
 ]
 
 function monitorMarkdown([url, html]: [string, string]): string {
@@ -50,6 +62,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/3', digest: 'c87cb569f899c03bd2413c3e497a1835fac99b944843e104528eefde96edcbb5' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/4', digest: '62eb349f9b6d308cfdaafd4eeeeb691e7dd808507ba9a97c56aeef82b7849c0f' })
   })
 })
