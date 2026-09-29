@@ -23,6 +23,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, defaultNetworkP
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
+import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
@@ -518,6 +519,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const rawBodySha256 = sha256Utf8(body)
       this.onRenderedHtml?.(body, rawBodySha256)
       const rawArtifacts = await captureRawHtml(body, rawBodySha256)
+      // The layout the page's CSS gives, as markers on a copy of the body that
+      // only extraction and Markdown see; the hash, the raw artifact and the
+      // rendered-HTML witness above keep the page as rendered. Without a copy
+      // (see the trace's layout event), the body converts by its tags.
+      const layout = await captureLayout(page, body, execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt - CAPTURE_RESERVE_MS })
+      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'layout', detail: layout.detail })
+      const converted = layout.html ?? body
       const wallMs = Date.now() - start
       const browserMs = wallMs
       trace.push({ at: wallMs, lane: 'browser_local', event: 'rendered', detail: { status, attemptCount } })
@@ -600,7 +608,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       // An error status is never content, but its page is what the server
       // said: the failed or blocked result keeps it as evidence.
-      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, body, finalUrl, options)
+      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, converted, finalUrl, options)
       const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
       const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
         const next = escalationForBlock(verdict.reason, 'browser_local')
@@ -651,7 +659,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(body, { url: finalUrl })
+      const extracted = extractTf.extract(converted, { url: finalUrl })
       const links = collectLinks(body, finalUrl)
       trace.push({
         at: wallMs,
@@ -695,7 +703,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
       const markdown = options.onlyMainContent === false
-        ? htmlToMarkdown(body, { baseUrl: finalUrl })
+        ? htmlToMarkdown(converted, { baseUrl: finalUrl })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
