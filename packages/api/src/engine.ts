@@ -16,8 +16,11 @@ import {
   type Channel,
 } from '@w2l/bench'
 import {
+  DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
   localNetworkPolicy,
+  type FetchOptions,
+  type PageOptions,
   type CrawlAccepted,
   type CrawlError,
   type CrawlPage,
@@ -233,13 +236,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean }): void {
     const mode = defaultApiMode(task.mode)
     const runner = new LadderRunner(channelsForUrl(mode, task.seedUrl), { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode))
-    const ladder = new LadderScrapeAtom(runner)
-    // Batch and crawl tasks apply their stored formats to every page. A task
-    // stored before crawl formats existed has neither and keeps the full result.
+    // Batch and crawl tasks apply their stored formats and page options to
+    // every page. A task stored before crawl formats existed has neither and
+    // keeps the full result.
     const selection = task.batch ?? task.crawl
+    const ladder = new LadderScrapeAtom(runner, fetchOptions(selection))
     const atom: ScrapeAtom = selection === undefined ? ladder : {
       async scrape(url, context) {
-        const outcome = await ladder.scrape(url, context)
+        // `timeout` is each page's own deadline, inside the task's.
+        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) })
+        const outcome = await ladder.scrape(url, page).finally(() => page.dispose())
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
         const custom = formats.find(format => typeof format === 'object')
@@ -313,7 +319,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   return {
     async scrape(req, context = {}) {
       const overallStart = performance.now()
-      const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt: context.deadlineAt ?? Date.now() + 300_000})
+      // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
+      const deadlineAt = req.timeout === undefined
+        ? context.deadlineAt ?? Date.now() + DEFAULT_SCRAPE_TIMEOUT_MS
+        : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
+      const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
       const mode = defaultApiMode(req.mode)
       const channels = channelsForUrl(mode, req.url)
       const policy: CrawlPolicy = {
@@ -324,7 +334,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       const runner = new LadderRunner(channels, policy, historyFor(mode))
       const operation = (async () => {
-        const run = await runner.run(req.url, undefined, scope)
+        const run = await runner.run(req.url, undefined, scope, fetchOptions(req))
         const full: ScrapeResponse = {
           ...run.result,
           channelsTried: run.channelsTried,
@@ -361,6 +371,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           includeLinks: req.includeLinks === true,
           includePaths: req.includePaths ?? [],
           excludePaths: req.excludePaths ?? [],
+          ...pageOptions(req),
         },
         createdAt: now,
         updatedAt: now,
@@ -387,7 +398,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: { urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true },
+        batch: { urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req) },
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
@@ -563,6 +574,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       deliveryStore.close()
     },
   }
+}
+
+/** What a request or stored task asks each lane to capture; its timeout is a deadline, not a fetch option. */
+function fetchOptions(options: PageOptions | undefined): FetchOptions {
+  return {
+    ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
+    ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
+  }
+}
+
+/** The page options a batch or crawl request set, stored on its task so a resumed task keeps them. */
+function pageOptions(req: PageOptions): PageOptions {
+  return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }) }
 }
 
 /** Batch and crawl tasks return links when their formats or includeLinks asked for them. */

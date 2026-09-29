@@ -66,9 +66,21 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, waitFor: 1000, onlyMainContent: true })).toThrow('unsupported parameters: waitFor, onlyMainContent')
-    expect(() => parseBatchStartRequest({ urls: [url], timeout: 5000 })).toThrow('unsupported parameter: timeout')
+    expect(() => parseScrapeRequest({ url, actions: [], mobile: true })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
+  })
+
+  it('accepts onlyMainContent, waitFor and timeout on scrape, batch and crawl within their bounds', () => {
+    const url = 'https://example.com/'
+    const options = { onlyMainContent: false, waitFor: 60_000, timeout: 1_000 }
+    expect(parseScrapeRequest({ url, ...options })).toMatchObject(options)
+    expect(parseBatchStartRequest({ urls: [url], ...options })).toMatchObject(options)
+    expect(parseCrawlStartRequest({ url, ...options })).toMatchObject(options)
+    expect(parseScrapeRequest({ url, waitFor: 0, timeout: 300_000 })).toMatchObject({ waitFor: 0, timeout: 300_000 })
+    expect(() => parseScrapeRequest({ url, onlyMainContent: 'false' })).toThrow('onlyMainContent must be a boolean')
+    for (const waitFor of [-1, 60_001, 1.5, '500']) expect(() => parseBatchStartRequest({ urls: [url], waitFor })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
+    for (const timeout of [999, 300_001, null]) expect(() => parseCrawlStartRequest({ url, timeout })).toThrow('timeout must be an integer number of milliseconds from 1000 to 300000')
   })
 
   it('accepts crawl formats and pathname filters, and rejects an invalid regex', () => {

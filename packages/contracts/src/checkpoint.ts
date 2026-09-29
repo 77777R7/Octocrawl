@@ -8,6 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
+import type { PageOptions } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
@@ -59,10 +60,10 @@ export interface Task {
   mode: CrawlMode
   status: TaskStatus
   budget: CrawlBudget
-  /** Present only for an explicit URL-array batch. Stored with the checkpoint. */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean }
-  /** Crawl output formats and link path filters, stored so a resumed crawl keeps them. */
-  crawl?: { formats?: readonly ScrapeFormat[]; includeLinks?: boolean; includePaths?: readonly string[]; excludePaths?: readonly string[] }
+  /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options included. */
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean } & PageOptions
+  /** Crawl output formats, link path filters and page options, stored so a resumed crawl keeps them. */
+  crawl?: { formats?: readonly ScrapeFormat[]; includeLinks?: boolean; includePaths?: readonly string[]; excludePaths?: readonly string[] } & PageOptions
   createdAt: string
   updatedAt: string
 }

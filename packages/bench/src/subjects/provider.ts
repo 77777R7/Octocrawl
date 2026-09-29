@@ -1,4 +1,4 @@
-import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   createExecutionScope,
@@ -174,12 +174,12 @@ export class ProviderSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
-    try { return await this.fetchWithinBudget(url, scope) } finally { scope.dispose() }
+    try { return await this.fetchWithinBudget(url, scope, options) } finally { scope.dispose() }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, options: FetchOptions): Promise<FetchResult> {
     throwIfExecutionStopped(execution)
     const start = Date.now()
     const trace: TraceEvent[] = [
@@ -395,7 +395,7 @@ export class ProviderSubject implements SubjectAdapter {
     })
     // An error status is never content, but its page is what the origin
     // said: the failed or blocked result keeps it as evidence.
-    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl)
+    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl, options)
     const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (v: NonNullable<typeof gate>): FetchResult => {
       trace.push({
@@ -478,6 +478,7 @@ export class ProviderSubject implements SubjectAdapter {
         confidence: extracted.confidence,
         escalate: extracted.escalate,
         linkCount: links.length,
+        ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
       },
     })
 
@@ -503,7 +504,10 @@ export class ProviderSubject implements SubjectAdapter {
     })
     if (decisive !== null) return blocked(decisive)
 
-    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    // onlyMainContent: false emits the whole page through the same converter and base URL.
+    const markdown = options.onlyMainContent === false
+      ? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+      : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
     // RoutingHistory all follow it): a fetch whose wire identity was

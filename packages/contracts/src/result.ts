@@ -53,6 +53,12 @@ export interface ResourceUsage {
   externalCostUsd: number | null
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
+  /**
+   * True when the caller's deadline (a scrape's `timeout`) ended this fetch
+   * before it finished: the result is then `partial` with the content
+   * fetched so far, or `failed` with `timeout`. Absent otherwise.
+   */
+  deadlineExceeded?: boolean
 }
 
 export interface Meter {

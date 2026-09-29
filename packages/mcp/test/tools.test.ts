@@ -106,6 +106,30 @@ describe('MCP tools', () => {
     }
   })
 
+  it('declares and forwards onlyMainContent, waitFor and timeout for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'partial' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { onlyMainContent: false, waitFor: 1_000, timeout: 15_000 }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...options },
+      { url: 'https://example.com/', ...options },
+      { urls: ['https://example.com/a'], ...options },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      expect(TOOLS.find(tool => tool.name === name)?.inputSchema.properties).toMatchObject({
+        onlyMainContent: { type: 'boolean' },
+        waitFor: { type: 'integer', minimum: 0, maximum: 60_000 },
+        timeout: { type: 'integer', minimum: 1_000, maximum: 300_000 },
+      })
+    }
+  })
+
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

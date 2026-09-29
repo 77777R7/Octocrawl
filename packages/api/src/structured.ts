@@ -242,10 +242,10 @@ function validationMessage(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? []).map(error => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`).join('; ') || 'model output did not match the schema'
 }
 
-/** Fields are read only from a successful page: a 404, block or failed
- * identity check is not the subject, whatever its document says. */
+/** Fields are read only from a successful or partial page: a 404, block or
+ * failed identity check is not the subject, whatever its document says. */
 function unsuccessfulPage(result: FetchResult): StructuredExtractionIssue | null {
-  if (result.status === 'success') return null
+  if (result.status === 'success' || result.status === 'partial') return null
   const httpStatus = result.evidence.httpStatus
   const detail = [result.failureReason ?? result.blockReason ?? result.budgetExceeded, typeof httpStatus === 'number' ? `HTTP ${httpStatus}` : null]
     .filter((part): part is string => typeof part === 'string')
@@ -255,9 +255,22 @@ function unsuccessfulPage(result: FetchResult): StructuredExtractionIssue | null
   }
 }
 
+/**
+ * A partial page (the scrape's timeout ended it) still gives fields with
+ * their evidence, but its JSON is never complete and no model call runs:
+ * the time the caller allowed is over.
+ */
+function partialPage(result: FetchResult): StructuredExtractionIssue[] {
+  return result.status !== 'partial' ? [] : [{
+    code: 'page_partial',
+    message: 'page status is partial: the scrape timeout ended it early, so fields come only from the content fetched so far and the result cannot be complete',
+  }]
+}
+
 function canonicalStructured(result: FetchResult): StructuredExtractionResult {
   const document = result.document
   const pageIssue = unsuccessfulPage(result)
+  const partial = partialPage(result)
   if (pageIssue !== null) {
     return {
       status: 'incomplete',
@@ -272,7 +285,7 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
       status: 'incomplete',
       data: { adapter: document.adapter, pageType: document.pageType, entities: [] },
       evidence: [],
-      issues: document.adapterValidation.issues.map(message => ({ code: 'subject_unverified', message })),
+      issues: [...partial, ...document.adapterValidation.issues.map(message => ({ code: 'subject_unverified' as const, message }))],
       modelUsage: null,
     }
   }
@@ -285,7 +298,7 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
         entities: [],
       },
       evidence: [],
-      issues: [{ code: 'adapter_unavailable', message: 'no normalized entity was confirmed from the public page' }],
+      issues: [...partial, { code: 'adapter_unavailable', message: 'no normalized entity was confirmed from the public page' }],
       modelUsage: null,
     }
   }
@@ -296,10 +309,10 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
     }
   }
   return {
-    status: 'complete',
+    status: partial.length > 0 ? 'incomplete' : 'complete',
     data: { adapter: document.adapter, pageType: document.pageType, entities: document.entities },
     evidence,
-    issues: [],
+    issues: partial,
     modelUsage: null,
   }
 }
@@ -377,13 +390,14 @@ export async function extractStructured(
   const schemaSha256 = sha256Utf8(JSON.stringify(format.schema))
   const pageIssue = unsuccessfulPage(result)
   if (pageIssue !== null) return { status: 'incomplete', data: null, schemaSha256, evidence: [], issues: [pageIssue], modelUsage: null }
+  const partial = partialPage(result)
   if (result.document?.adapterValidation?.valid === false) {
     return {
       status: 'incomplete',
       data: null,
       schemaSha256,
       evidence: [],
-      issues: result.document.adapterValidation.issues.map(message => ({ code: 'subject_unverified', message })),
+      issues: [...partial, ...result.document.adapterValidation.issues.map(message => ({ code: 'subject_unverified' as const, message }))],
       modelUsage: null,
     }
   }
@@ -405,10 +419,10 @@ export async function extractStructured(
   let missing = requiredMissing(format.schema, format.schema, data)
   const deterministicValid = validate(data)
   if (missing.length === 0 && deterministicValid) {
-    return { status: 'complete', data, schemaSha256, evidence, issues: nullableMissingIssues(format.schema,format.schema,data), modelUsage: null }
+    return { status: partial.length > 0 ? 'incomplete' : 'complete', data, schemaSha256, evidence, issues: [...partial, ...nullableMissingIssues(format.schema,format.schema,data)], modelUsage: null }
   }
-  const issues: StructuredExtractionIssue[] = []
-  if (format.modelFallback !== true) {
+  const issues: StructuredExtractionIssue[] = [...partial]
+  if (format.modelFallback !== true || partial.length > 0) {
     for (const path of missing) issues.push({ code: 'missing_required', path, message: `required field unavailable: ${path}` })
     if (!deterministicValid && missing.length === 0) issues.push({ code: 'field_unavailable', message: validationMessage(validate.errors) })
     return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }

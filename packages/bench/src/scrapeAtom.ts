@@ -2,14 +2,15 @@
  * LadderRunner as a ScrapeAtom. Crawl composes this; it does not rewrite fetch.
  */
 
-import type { ExecutionContext, ScrapeAtom, ScrapeOutcome } from '@w2l/contracts'
+import type { ExecutionContext, FetchOptions, ScrapeAtom, ScrapeOutcome } from '@w2l/contracts'
 import { LadderRunner } from './routing/ladder.js'
 
 export class LadderScrapeAtom implements ScrapeAtom {
-  constructor(private readonly runner: LadderRunner) {}
+  /** `options` apply to every page this atom scrapes (a batch's or crawl's page options). */
+  constructor(private readonly runner: LadderRunner, private readonly options: FetchOptions = {}) {}
 
   async scrape(url: string, execution?: ExecutionContext): Promise<ScrapeOutcome> {
-    const run = await this.runner.run(url, undefined, execution)
+    const run = await this.runner.run(url, undefined, execution, this.options)
     const robotsTrace = run.result.trace.find((event) => event.event === 'robots_checked')
     const crawlDelayMs = typeof robotsTrace?.detail?.crawlDelayMs === 'number' ? robotsTrace.detail.crawlDelayMs : null
     return {

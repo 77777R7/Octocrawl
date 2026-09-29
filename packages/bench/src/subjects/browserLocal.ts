@@ -1,4 +1,4 @@
-import { estimateTokens, type ExecutionContext, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -39,6 +39,12 @@ import {
   type CrawlMode,
   type HonestyVerdict,
 } from '@w2l/contracts'
+
+/**
+ * Time kept free before the caller's deadline when a waitFor wait would run
+ * into it, so the page can still be captured and extracted.
+ */
+const CAPTURE_RESERVE_MS = 1_000
 
 /**
  * Browser-local subject: the escalation target the http lane flags into.
@@ -144,7 +150,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
@@ -174,7 +180,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options)
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -193,7 +199,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -473,6 +479,20 @@ export class BrowserLocalSubject implements SubjectAdapter {
         break
       }
       throwIfExecutionStopped(execution)
+      // waitFor: the caller's extra wait after load and stability. It counts
+      // toward the scrape's deadline; when the deadline would end it, the
+      // wait stops early enough to capture the page as it is then, and that
+      // capture is partial, never success.
+      const waitFor = options.waitFor ?? 0
+      let waitCutShort = false
+      if (waitFor > 0) {
+        const waitMs = execution.deadlineAt === undefined ? waitFor : Math.min(waitFor, Math.max(0, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now()))
+        waitCutShort = waitMs < waitFor
+        const waitStarted = performance.now()
+        if (waitMs > 0) await abortableSleep(waitMs, signal)
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'wait_for', detail: { requestedMs: waitFor, waitedMs: Math.round(performance.now() - waitStarted), ...(waitCutShort ? { cutShortBy: 'timeout' } : {}) } })
+        throwIfExecutionStopped(execution)
+      }
       const status = response?.status() ?? 0
       const finalUrl = page.url()
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
@@ -571,7 +591,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       // An error status is never content, but its page is what the server
       // said: the failed or blocked result keeps it as evidence.
-      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, body, finalUrl)
+      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, body, finalUrl, options)
       const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
       const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
         const next = escalationForBlock(verdict.reason, 'browser_local')
@@ -634,20 +654,24 @@ export class BrowserLocalSubject implements SubjectAdapter {
           confidence: extracted.confidence,
           escalate: extracted.escalate,
           linkCount: links.length,
+          ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
         },
       })
 
       if (extracted.escalate) {
         if (gate !== null) return blocked(gate)
+        // A page captured before its wait ended is not proven empty: the
+        // deadline, not the page, is the reason there is no content.
         return {
           ...base,
           status: 'failed',
-          failureReason: 'empty_unverified',
+          failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
           blockReason: null,
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
           markdown: null,
+          ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
       }
 
@@ -659,10 +683,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       if (decisive !== null) return blocked(decisive)
 
-      const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+      // onlyMainContent: false emits the whole rendered page (header,
+      // navigation and footer kept) through the same converter and base URL.
+      const markdown = options.onlyMainContent === false
+        ? htmlToMarkdown(body, { baseUrl: finalUrl })
+        : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
-        status: 'success',
+        status: waitCutShort ? 'partial' : 'success',
         failureReason: null,
         blockReason: null,
         budgetExceeded: null,
@@ -680,7 +708,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           entities: extracted.entities,
           adapterValidation: extracted.adapterValidation,
         },
-        usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
+        usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
       }
     } catch (err) {
       const wallMs = Date.now() - start

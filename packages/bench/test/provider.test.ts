@@ -92,6 +92,19 @@ describe('ProviderSubject robots gate', () => {
     expect(transport.calls).toHaveLength(1)
   })
 
+  it('returns the whole page for onlyMainContent false, with the same evidence', async () => {
+    const body = PAGE.replace('<body>', '<body><nav><a href="/shop">Shop navigation</a></nav>').replace('</body>', '<footer>Provider footer</footer></body>')
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const main = await subject.fetch('https://shop.example/dp/B0TEST')
+    const full = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { onlyMainContent: false })
+    expect(main.markdown).not.toContain('Shop navigation')
+    expect(full.markdown).toContain('[Shop navigation](https://shop.example/shop)')
+    expect(full.markdown).toContain('Provider footer')
+    expect(full.markdown).toContain('four spouts for even infusion')
+    expect(full).toMatchObject({ status: 'success', evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
+  })
+
   it('evaluates robots under the PROVIDER UA, not ours', async () => {
     const transport = new CountingTransport()
     const { fetcher, fetches } = robotsServing(AMAZON_SHAPED)

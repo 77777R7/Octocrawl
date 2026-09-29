@@ -64,6 +64,9 @@ Practice sites come first, because any failure there is a W2L bug. The blocking 
 | A04 | `/fc/v1/scrape` with `actions` | An unsupported Firecrawl parameter is rejected by name | 5 |
 | A05 | Crawl of books.toscrape.com with `includePaths` | Only matching paths after the seed | 7 |
 | A06 | Crawl with `excludePaths` and `formats` | Excluded paths skipped; crawl pages carry `links` | 7 |
+| A07 | Scrape of quotes.toscrape.com with `onlyMainContent: false` | The whole page: the header's Login link and the footer that main content drops, with the quotes | 6 |
+| A08 | Scrape of quotes.toscrape.com/js-delayed with `waitFor` and a `timeout` shorter than the page's delay | HTTP 200 with `partial` or `failed`/`timeout`, never HTTP 500 | 6 |
+| A09 | A08 through `/fc/v1/scrape` | The shim answers the timeout with HTTP 200 too | 6 |
 
 ## Later batches
 
