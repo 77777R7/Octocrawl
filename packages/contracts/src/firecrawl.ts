@@ -129,7 +129,7 @@ const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout'] as const
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
   ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
-  removeBase64Images: { value: true, reason: 'W2L always drops data: image URIs from Markdown and keeps their alt text' },
+  removeBase64Images: { value: true, reason: 'W2L always drops data: URIs from Markdown, keeping an image\'s alt text and a link\'s text' },
 }
 
 interface ShimProblems {
