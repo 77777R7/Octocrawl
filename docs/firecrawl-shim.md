@@ -16,7 +16,7 @@ Covered:
 - `POST /fc/v1/crawl` → native crawl start → `{ success, id, url }` (HTTP 200)
 - `GET /fc/v1/crawl/:id` → native report + steps → Firecrawl crawl status
 
-Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
+Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Map is not implemented yet; the [roadmap](../ROADMAP.md) schedules a native `map` endpoint for P2.
 
 ## Known diffs
 
