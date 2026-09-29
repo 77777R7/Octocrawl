@@ -44,6 +44,24 @@ describe('htmlToMarkdown', () => {
     expect(md).toBe('| Kiln | Firings | Glazes |\n| --- | --- | --- |\n| North | 41 | By glaze Cobalt 12 Ash 29 |\n| South | 37 | Celadon |')
   })
 
+  it('keeps link and image targets in table cells, absolute and on one line, with | escaped', () => {
+    const md = htmlToMarkdown(
+      '<table><caption>Front page, <a href="/front">archive</a></caption>' +
+        '<tr><th>Story</th><th><a href="/sort?by=site">Site</a></th><th>Logo</th></tr>' +
+        '<tr><td><a href="https://example.org/story">A story</a></td><td><a href="/from?site=a|b">a|b<br>site</a></td><td><img src="/logo.png" alt="Logo | mark"></td></tr>' +
+        '<tr><td><a href="item?id=1"><b>Bold</b> <code>link</code></a> and <em>text</em></td><td><a href="vote?id=1"><div class="votearrow"></div></a></td><td><img src="//cdn.fixture.test/a.png" alt=""></td></tr></table>',
+      { baseUrl: 'https://news.fixture.test/' },
+    )
+    expect(md).toBe([
+      'Front page, [archive](https://news.fixture.test/front)',
+      '| Story | [Site](https://news.fixture.test/sort?by=site) | Logo |',
+      '| --- | --- | --- |',
+      '| [A story](https://example.org/story) | [a\\|b site](https://news.fixture.test/from?site=a\\|b) | ![Logo \\| mark](https://news.fixture.test/logo.png) |',
+      // Emphasis and code stay plain text in a cell; a link with no text keeps its target as its text, as in a paragraph.
+      '| [Bold link](https://news.fixture.test/item?id=1) and text | [https://news.fixture.test/vote?id=1](https://news.fixture.test/vote?id=1) | ![](https://cdn.fixture.test/a.png) |',
+    ].join('\n'))
+  })
+
   it('keeps an empty corner header cell empty instead of inventing its text', () => {
     const md = htmlToMarkdown(
       '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',
@@ -388,12 +406,14 @@ describe('htmlToMarkdown golden pages', () => {
 <td style="text-align:right">1,429,404,000</td><td style="text-align:right;font-size:inherit"><span data-sort-value="7,001,172,774,265,385,000♠" style="display:none"></span>17.3%</td><td><span data-sort-value="000000002026-07-01-0000" style="white-space:nowrap">1 Jul 2026</span></td>
 <td>Official projection<sup class="mw-ref reference"><a href="#cite_note-5"><span class="mw-reflink-text"><span class="cite-bracket">[</span>4<span class="cite-bracket">]</span></span></a></sup></td><td><sup class="mw-ref reference"><a href="#cite_note-6"><span class="mw-reflink-text"><span class="cite-bracket">[</span>b<span class="cite-bracket">]</span></span></a></sup></td></tr>
 </tbody></table>`
+    // Cells keep their links and images as a paragraph does: the flag, the
+    // country's article, and the citations as same-page fragments.
     expect(htmlToMarkdown(html, { baseUrl: 'https://en.wikipedia.org/wiki/List_of_countries_and_dependencies_by_population' })).toBe(
       [
         'List of countries and territories by total population',
-        '| Location | Population | % of world | Date | Source (official or from the United Nations) | Notes |',
+        '| Location | Population | % of world | Date | Source (official or from the [United Nations](https://en.wikipedia.org/wiki/United_Nations)) | Notes |',
         '| --- | --- | --- | --- | --- | --- |',
-        '| India | 1,429,404,000 | 17.3% | 1 Jul 2026 | Official projection[4] | [b] |',
+        '| ![](https://thumb.wikimedia.org/wikipedia/en/thumb/4/41/Flag_of_India.svg/40px-Flag_of_India.svg.png) [India](https://en.wikipedia.org/wiki/Demographics_of_India) | 1,429,404,000 | 17.3% | 1 Jul 2026 | Official projection[[4]](#cite_note-5) | [[b]](#cite_note-6) |',
       ].join('\n'),
     )
   })
