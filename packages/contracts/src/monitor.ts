@@ -60,6 +60,12 @@ export interface MonitorRevision {
   createdAt: number
 }
 export type MonitorChange = 'initialized' | 'changed' | 'unchanged' | 'cannot_verify'
+/**
+ * Why a committed run moved the baseline. `extraction_reprocessed`: W2L's
+ * reading changed, either a revised rule or fields that changed over a
+ * byte-identical raw body (an extractor upgrade).
+ */
+export type MonitorChangeReason = 'source_changed' | 'initialized' | 'extraction_reprocessed' | 'schema_migrated'
 export interface DocumentDiff {
   field: DocumentField
   before: string | FieldValue | null
@@ -82,6 +88,12 @@ export interface MonitorRun {
   endedAt: number | null
   quality: DocumentAssessment['quality'] | null
   change: MonitorChange | null
+  /**
+   * Set when the run initialized or changed the baseline, also when no event
+   * was emitted for it (an extractor upgrade over an unchanged raw body). Null
+   * otherwise and for runs committed before W2L recorded it.
+   */
+  changeReason?: MonitorChangeReason | null
   error: string | null
 }
 export interface MonitorAttempt {
@@ -100,6 +112,10 @@ export interface MonitorObservation {
   observedAt: number
   clientWallMs: number
   markdownSha256: string | null
+  /** sha256 of the raw body the assessed Markdown came from; after a 304, the reused body's. Null or absent when unknown. */
+  rawBodySha256?: string | null
+  /** EXTRACTOR_VERSION of the extractor that produced that Markdown. Null or absent when unknown: rows and cached bodies from before W2L recorded it. */
+  extractorVersion?: string | null
   transport?: { etag: string | null; lastModified: string | null; representationKey: string; reusedFrom?: string; responseStatus?: number | null } | null
   outcome: ScrapeOutcome | null
   error: string | null
@@ -112,6 +128,8 @@ export interface MonitorSnapshot {
   observationId: string
   assessmentId: string
   fields: DocumentFields
+  /** The extractor that produced these fields; null for snapshots committed before W2L recorded it. */
+  extractorVersion?: string | null
   createdAt: number
 }
 export interface MonitorEvent {
@@ -119,9 +137,15 @@ export interface MonitorEvent {
   runId: string
   monitorId: string
   kind: 'initialized' | 'changed'
-  reason: 'source_changed' | 'initialized' | 'extraction_reprocessed' | 'schema_migrated'
+  reason: MonitorChangeReason
   fromSnapshotId: string | null
   toSnapshotId: string
+  /**
+   * Present when the extractor behind this snapshot differs from the one behind
+   * the previous snapshot: part of `changes` may then come from W2L, not the
+   * source. `from: null` means the previous snapshot predates recorded versions.
+   */
+  extractorChange?: { from: string | null; to: string | null }
   changes: DocumentDiff[]
   observedAt: number
 }
@@ -163,5 +187,7 @@ export interface TransportRepresentation {
   etag: string | null
   lastModified: string | null
   outcome: ScrapeOutcome
+  /** EXTRACTOR_VERSION that produced `outcome.result.markdown`; absent on bodies cached before W2L recorded it. */
+  extractorVersion?: string
   storedAt: number
 }
