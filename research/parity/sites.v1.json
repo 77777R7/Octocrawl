@@ -629,12 +629,12 @@
       "batch": "E",
       "url": "https://quotes.toscrape.com/js/",
       "request": { "formats": ["markdown"] },
-      "note": "A browser-lane success: the quotes are written by script (S05). A browser lane sees only where navigation started and ended, so its redirect chain is not complete.",
+      "note": "A browser-lane success: the quotes are written by script (S05). The page is not redirected and the browser lane lists every hop Chromium followed (M06), so its redirect chain is complete.",
       "checks": [
         { "item": "FS", "type": "field", "path": "status", "equals": "success" },
         { "item": "ER", "type": "evidenceSchema", "record": true },
         { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "browser_local" },
-        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": false },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true },
         { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "includes": "Chrome/" },
         { "item": "ER", "type": "field", "path": "evidenceRecord.fetchedAt", "present": true },
         { "item": "ER", "type": "field", "path": "evidenceRecord.outputSha256.markdown", "present": true }
