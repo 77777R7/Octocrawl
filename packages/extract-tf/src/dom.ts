@@ -89,3 +89,15 @@ export function commonAncestor(a: Element, b: Element): Element | null {
   }
   return null
 }
+
+/**
+ * A table that lays out other tables: the tables nested in it hold at least
+ * half of its text (Hacker News puts its header, story list and footer in
+ * one). A data table with a small table in one of its cells is not one.
+ */
+export function isLayoutTable(table: Element): boolean {
+  const nested = qsa(table, 'table').filter((inner) => inner.parentElement?.closest('table') === table)
+  if (nested.length === 0) return false
+  const length = (el: Element): number => (el.textContent ?? '').replace(/\s+/g, '').length
+  return nested.reduce((sum, inner) => sum + length(inner), 0) * 2 >= length(table)
+}
