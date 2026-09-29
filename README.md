@@ -30,6 +30,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 3. **Execution ladder** — HTTP → browser → user auth → proxy, with automatic routing, per-attempt trace, and task-level cost accounting
 4. **Ground-truth benchmark** — 30 adversarial fixtures (soft 404s, challenge pages, SPAs, timeouts, zip bombs) with verified false-success rates
 5. **Honest evidence** — `artifacts: []` is an explicit empty artifact list, not a promise that every failed page has a screenshot or DOM snapshot; browser `bytesWire: null` means wire bytes were not measured
+6. **One Evidence Record** — every scrape result, batch item and crawl page carries `evidenceRecord` (final URL, redirect chain, fetch time, status and reason, lane, robots.txt decision, raw and output hashes, field evidence), stated the same way in every lane and described by a versioned [JSON Schema](packages/contracts/schemas/evidence-record.v1.json); see the [reference](apps/public-web/content/reference.md#evidence-record)
 
 ## Quick Start
 

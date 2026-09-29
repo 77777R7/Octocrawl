@@ -12,6 +12,31 @@ Scrape results, batch items and crawl pages carry `metadata`: the page's `<title
 
 Start the repository API only after reviewing its network and task-store settings. For full request shapes and examples, use the repository's `docs/onboarding.md`, `docs/batch-scrape.md`, and `examples/monitor-workflow.ts` from the **same checkout and commit** as the running service. Mixing a guide from another branch with a local server can change the apparent contract.
 
+## Evidence Record
+
+Every scrape result (full or compact, so MCP `scrape` too), batch item and crawl page carries `evidenceRecord`: the evidence for that page in one shape, whichever lane fetched it. Its JSON Schema (draft 2020-12) is [`packages/contracts/schemas/evidence-record.v1.json`](https://github.com/77777R7/w2l/blob/main/packages/contracts/schemas/evidence-record.v1.json) in the repository, which describes every field; each record names it with `schemaVersion: "w2l.evidence/1"`. Every field is always present, and a value W2L did not observe is `null`, never `0` or a guess. The record sits beside the existing fields (`evidence`, `snapshot`, `compliance`, `lane`), which do not change. The Firecrawl-compatible `/fc` routes keep Firecrawl's shape and do not carry it.
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | `w2l.evidence/1`. |
+| `requestedUrl` | The URL as requested. |
+| `finalUrl` | The last URL W2L requested for the page, after redirects. `null` when it sent none: a robots.txt disallow, a DNS failure or a policy refusal came first. |
+| `redirectChain` | `{ urls, complete }`. `urls` runs from `requestedUrl` to `finalUrl` (`[requestedUrl]` without a redirect, `[]` when nothing was requested). `complete` is `true` on the HTTP lane, which requests every hop itself, and `false` on browser and provider lanes, which see only where navigation started and ended. |
+| `fetchedAt` | When the reported response was received, UTC ISO 8601 with milliseconds: its headers on the HTTP lane, the capture of the rendered page on browser lanes, the vendor's answer on the provider lane. `null` without a response. |
+| `httpStatus` | The response's HTTP status; `null` without one. |
+| `status`, `reason` | W2L's verdict, and the failure, block or budget reason (`null` for other statuses). |
+| `lane` | `http`, `browser_local`, `browser_local_authed`, `browser_proxy` or `provider`. |
+| `robotsDecision` | `{ decision, robotsUrl, robotsSha256, unreachable, crawlDelayMs, userOverride }`, or `null` when the result ended before robots.txt was checked. `decision` is `allowed`, `disallowed` or `no_robots` (the site has none); `unreachable` says why robots.txt could not be fetched, which counts as a disallow. `userOverride` is `false`: W2L has no override. |
+| `rawSha256` | SHA-256 of the body W2L read, as `evidence.rawBodySha256`: the response body as UTF-8 text on the HTTP lane, the rendered HTML on browser lanes, the vendor's HTML on the provider lane. |
+| `outputSha256` | `{ markdown, json }`: SHA-256 of the UTF-8 bytes of the `markdown` delivered in this response, and of `json.data` as canonical JSON (RFC 8785: keys sorted at every level, no whitespace). `null` for what was not delivered. |
+| `extractor` | `{ name, version, commit }`: `extract-tf`, its version (`extract-tf/1`), and the source commit when the operator sets `W2L_SOURCE_COMMIT`, else `null`. |
+| `fieldEvidence` | For a JSON request, each field's JSON Pointer mapped to `{ source, locator }`: the source is `jsonld`, `microdata`, `meta`, `hydration`, `dom`, `text`, `inferred` or `model`, and the locator says where, such as `table[0] tr[3] "UPC"`. JSON-LD, microdata and meta values outside the Amazon adapter have no locator yet (`null`). `pdf` is reserved for PDF text, with the page as locator. `null` without a JSON request. |
+| `artifacts` | Files saved for the result, each `{ kind, path, sha256 }`. Today only the page snapshot (`kind: "snapshot"`) when `W2L_CAPTURE_RAW_DIR` is set; otherwise `[]`. |
+| `proxy` | `host:port` of the environment proxy the request went through (local mode). `null` when it went direct or the lane does not report its route, which the provider lane never does. |
+| `identity` | `{ userAgent, mode, contact }`: the User-Agent observed on the request for the page (`null` when none was sent or observed), the crawl mode, and the contact a research-mode User-Agent declares (`W2L_CONTACT`). |
+
+To check a cited value, hash the `markdown` you received as UTF-8 and compare it with `outputSha256.markdown`; for JSON, serialize `json.data` with sorted keys and no whitespace first.
+
 ## Errors
 
 When the API refuses or fails a request, it returns an error body instead of a result:
