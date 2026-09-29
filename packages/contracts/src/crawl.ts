@@ -40,6 +40,12 @@ export interface CrawlSpec {
   useCached: boolean
   /** When set, openRun updates this existing task instead of inserting a new id. */
   taskId?: string
+  /**
+   * Pathname regexes for discovered links (the seed is always fetched); a
+   * match in excludePaths wins. Stored on a new task; a resumed task keeps its own.
+   */
+  includePaths?: readonly string[]
+  excludePaths?: readonly string[]
 }
 
 export interface CrawlReport {
@@ -65,6 +71,8 @@ export interface CrawlPage {
   status: StepStatus
   lane: Lane | null
   markdown: string | null
+  /** Absolute outbound links; present when the task requested links. */
+  links?: readonly string[]
   json?: import('./structured.js').StructuredExtractionResult | null
   failureReason: string | null
   blockReason: string | null

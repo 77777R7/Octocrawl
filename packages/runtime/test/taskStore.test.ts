@@ -137,6 +137,13 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getStepByCanonicalUrl('task-1', 'https://example.com/')).toEqual(step())
     })
 
+    it('round-trips crawl formats and path filters on the task', async () => {
+      ;({ store, cleanup } = await open())
+      const crawl = task({ crawl: { formats: ['markdown', 'links'], includeLinks: false, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'] } })
+      await store.putTask(crawl)
+      expect(await store.getTask('task-1')).toEqual(crawl)
+    })
+
     it('counts unique completed URLs and pages all outcomes without loading bodies for status', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)

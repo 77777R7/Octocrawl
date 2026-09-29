@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_CRAWL_BUDGET, type FetchResult, type ScrapeAtom, type ScrapeOutcome } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
+import type { TaskStore } from '../src/taskStore.js'
 
 class FakeClock implements CrawlClock {
   t = 1_000
@@ -88,7 +89,7 @@ function outcome(url: string, links: readonly string[], hash = url): ScrapeOutco
   return { result, links }
 }
 
-function runWith(atom: FakeAtom, spec: Parameters<CrawlOrchestrator['run']>[0], store = new MemoryTaskStore()) {
+function runWith(atom: FakeAtom, spec: Parameters<CrawlOrchestrator['run']>[0], store: TaskStore = new MemoryTaskStore()) {
   const clock = new FakeClock()
   const orchestrator = new CrawlOrchestrator({ store, atom, clock })
   return { store, atom, clock, orchestrator, go: () => orchestrator.run(spec) }
@@ -200,6 +201,8 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(dup?.contentHash).toBe('same-body')
     expect(dup?.result?.failureReason).toBeNull()
     expect(dup?.result?.markdown).toBeNull()
+    // The page's own links stay on the record (an empty list would claim it has none); the crawl does not follow them.
+    expect(dup?.result?.links).toEqual([SEED])
     expect(dup?.result?.trace.some((t) => t.event === 'duplicate_content')).toBe(true)
     const other = steps.find((s) => s.canonicalUrl === ITEM_B)
     expect(other?.status).toBe('success')
@@ -231,6 +234,37 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(resumeReport.attemptId).not.toBe(firstReport.attemptId)
     expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
     expect(resumeReport.cachedPages).toBe(0)
+  })
+
+  it('never fetches filtered links and keeps the path filters of a SQLite task on resume', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { SqliteTaskStore } = await import('../src/sqliteStore.js')
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-paths-'))
+    const ITEM_C = 'https://fixture.test/c'
+    // B is excluded and C is not included: the fake atom has no page for either.
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B, ITEM_C])], [ITEM_A, outcome(ITEM_A, [])]])
+    try {
+      const firstStore = SqliteTaskStore.open(dir)
+      const first = runWith(new FakeAtom(pages), {
+        seedUrl: SEED, taskDir: dir, includePaths: ['^/[ab]$'], excludePaths: ['^/b$'],
+        budget: { maxPages: 1, maxWallMs: null, maxCostUsd: null, maxTokens: null },
+      }, firstStore)
+      const firstReport = await first.go()
+      expect(first.atom.fetches).toEqual([SEED])
+      await firstStore.close()
+
+      const resumeStore = SqliteTaskStore.open(dir)
+      const resumeAtom = new FakeAtom(pages)
+      const resumed = await runWith(resumeAtom, { seedUrl: SEED, taskDir: dir, resumeFrom: firstReport.taskId }, resumeStore).go()
+      expect(resumed.status).toBe('completed')
+      expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
+      expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({ includePaths: ['^/[ab]$'], excludePaths: ['^/b$'] })
+      await resumeStore.close()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('skips the fake fetch for cached pages only with --use-cached, and marks them', async () => {
