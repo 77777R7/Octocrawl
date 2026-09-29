@@ -4,7 +4,7 @@ Version 2, updated 2026-09-29. Weeks 1–16 run from 2026-09-28 to 2027-01-17. T
 
 ## Current phase: P0 validation and P1 core correctness, in parallel
 
-**This week (week 1):** P1 items 1–10 fixed and checked on real sites. Two of the exit's three conditions are met: the first 12 URLs pass, and 61 of the seed user's 72 URLs succeed with the rest reporting their reason ([batch run](research/coos-pilot/runs/2026-09-29-p1-wave5-batch.md)). The core-features condition is not: 14 of the 21 are solid ([core-status-2026-09-29-p1-wave5.md](research/parity/core-status-2026-09-29-p1-wave5.md)). Next, the seven weak ones, starting with table-route selection, which drops the text of multi-table pages such as SEC filings. P2 has opened with file download and PDF text.
+**This week (week 1):** P1 items 1–10 fixed and checked on real sites. Two of the exit's three conditions are met: the first 12 URLs pass, and 61 of the seed user's 72 URLs succeed with the rest reporting their reason ([batch run](research/coos-pilot/runs/2026-09-30-main-5bfffec-batch.md)). The core-features condition is not: 17 of the 21 are solid ([core-status-2026-09-30.md](research/parity/core-status-2026-09-30.md)). The docs contradictions that kept crawl-status and batch-wait weak are corrected; next, markdown and only-main-content, which share one fix: the table strategy keeps only the largest table, and table-cell links lose their targets. P2 has opened with file download and PDF text.
 
 P0 is the user track (weeks 1–2) and P1 the engine track (weeks 1–6). P1 does not wait for P0: when the seed user's URLs point to a different P1 item than the order below, their URLs decide.
 
