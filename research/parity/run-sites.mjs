@@ -67,6 +67,12 @@
 //               hostSpacing: every fetched item has a crawl_delay trace event and, per host,
 //               consecutive recorded starts are at least the delay W2L recorded as required
 //               (requiredDelayMs) apart, on at least minHosts hosts.
+// Added for file download and PDF text (P2, 2026-09-29):
+//   checks      pdfPage: the text between the Markdown line <!-- page N --> (N = spec.page) and the
+//               next page marker contains spec.text, every run of whitespace collapsed to one space
+//               in both (the rule of research/pdf-corpus/manifest.v1.json); the Markdown is doc.markdown,
+//               or the string at spec.path (data.markdown on /fc). When it fails, the observed value
+//               says whether the text is on another page or absent.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -440,6 +446,16 @@ function check(doc, spec, response) {
       const missing = events.filter((event) => event === undefined).length
       const smallest = gaps.length === 0 ? null : Math.min(...gaps)
       return { pass: required !== null && missing === 0 && unnamed === 0 && smallest !== null && smallest >= required, actual: `${events.length} fetches, ${missing} without a crawl_delay event, smallest recorded gap ${smallest === null ? 'n/a' : `${smallest} ms`}, robots.txt Crawl-delay ${required ?? 'none'}, ${unnamed} later pages not naming it` }
+    }
+    case 'pdfPage': {
+      const collapse = (text) => text.replace(/\s+/g, ' ').trim()
+      const text = spec.path === undefined ? markdown : typeof get(doc, spec.path) === 'string' ? get(doc, spec.path) : ''
+      const marker = new RegExp(`^<!-- page ${spec.page} -->$`, 'm').exec(text)
+      if (marker === null) return { pass: false, actual: text === '' ? 'no markdown' : `no <!-- page ${spec.page} --> marker` }
+      const rest = text.slice(marker.index + marker[0].length)
+      const next = /^<!-- page \d+ -->$/m.exec(rest)
+      const pass = collapse(next === null ? rest : rest.slice(0, next.index)).includes(collapse(spec.text))
+      return { pass, actual: pass ? undefined : collapse(text).includes(collapse(spec.text)) ? 'on another page' : 'absent' }
     }
     case 'markdownIncludes':
       return { pass: markdown.includes(spec.text), actual: markdown.length === 0 ? 'no markdown' : undefined }

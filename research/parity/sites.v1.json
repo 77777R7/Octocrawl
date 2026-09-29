@@ -1034,6 +1034,301 @@
         { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
         { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
       ]
+    },
+    {
+      "id": "F01",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://airtrunk.com/wp-content/uploads/2023/03/AirTrunk-Green-Financing-Framework-Final-1.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S1 of research/pdf-corpus/manifest.v1.json (AirTrunk Green Financing Framework). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "PUEs as low as 1.15" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Portfolio average annual operating PUE for FY24 is 1.32" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 5, "text": "A$10 billion+ in debt across our portfolio as at February 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 12 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "dfa24a3fe9f8c87b20bce5763fad53e07bda57ff2866f853d2817acf57d698cb" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 342998 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "dfa24a3fe9f8c87b20bce5763fad53e07bda57ff2866f853d2817acf57d698cb" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F02",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://sustainability.atmeta.com/asset/2025-environmental-data-index/",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S2 of research/pdf-corpus/manifest.v1.json (Meta 2025 Environmental Data Index, requested at its /asset/ page, which redirects to the PDF). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "48,826" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 4, "text": "Altoona (IA) - 555,000 - 425,377 - 474,826 - 532,158 0 666,434" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 18, "text": "We have publicly committed to matching 100% of our electricity use with clean and renewable energy" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 19 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "d7527cd23308869105b404b486117603bb3f5ee10e30499367f8698110afb66d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 2266742 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "d7527cd23308869105b404b486117603bb3f5ee10e30499367f8698110afb66d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F03",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://sustainability.atmeta.com/asset/2025-independent-accountants-review-report/",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S3 of research/pdf-corpus/manifest.v1.json (Meta FY24 Independent Accountants’ Review Report, requested at its /asset/ page, which redirects to the PDF). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "for the year-ended December 31, 2024" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "47,468" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 16, "text": "are equal to 70,529 mtCO2e" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 17 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "0bdd15186f7401891c7b0c59314657144f5a34d2ea8a1a9fa4c09183602e5d24" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 407496 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "0bdd15186f7401891c7b0c59314657144f5a34d2ea8a1a9fa4c09183602e5d24" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F04",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S4 of research/pdf-corpus/manifest.v1.json (OVHcloud PUE, WUE, REF values FY2025). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 3 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 267398 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F05",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S5 of research/pdf-corpus/manifest.v1.json (STT GDC Sustainability-Linked Financing Framework). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "Base year 2021: 597 tonnes/SGD millions" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 16, "text": "Increase the percentage of renewable energy to 85% by 2028." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 17, "text": "Reduce carbon intensity by 70% compared to the base year by 2028." },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 26 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "c5608d0b6f75b57a63cf418ed249fc380a44bf5ef64814c7508422e6229d3d4d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 6313505 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "c5608d0b6f75b57a63cf418ed249fc380a44bf5ef64814c7508422e6229d3d4d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F06",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://assets.nebius.com/assets/79cf11ba-bb23-4cb8-802e-21dc155be31c/Nebius%202025%20Sustainability%20Report.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: the seed user's PDF S6 of research/pdf-corpus/manifest.v1.json (Nebius 2025 Sustainability Report). The PDF is read on the HTTP lane alone, saved as received with the manifest's SHA-256 and size, and each of the manifest's phrases is on its page after the <!-- page N --> marker. A publisher that replaces the file fails the hash checks; the case stays in the record.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 10, "text": "At our Finland-1 data center, 19.5 GWh of heat" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "power usage effectiveness (PUE) of 1.25" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 30, "text": "stands at over 7,500 graduates" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 72 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "38a7d1750df525cde74cdd5b6560762672d56c0a22b2fa367cfb59ebca814b23" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 4878004 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "38a7d1750df525cde74cdd5b6560762672d56c0a22b2fa367cfb59ebca814b23" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F07",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://iea.blob.core.windows.net/assets/de9dea13-b07d-42c5-a398-d1b3ae17d866/EnergyandAI.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: research PDF R1 of research/pdf-corpus/manifest.v1.json (the International Energy Agency’s Energy and AI report, 304 pages). Read on the HTTP lane alone, saved with the manifest's SHA-256 and size, each manifest phrase on its page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 14, "text": "Data centre electricity consumption is set to more than double to around 945 TWh by 2030." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 63, "text": "This is more than double the estimated approximately 415 TWh for 2024" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 64, "text": "increases by around 240 TWh (up 130%) in the United States" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 304 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "3956b80152d4aac6b659a09d0cd7671a4bd53efeeb067e4d50df4230701b33e4" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 8213160 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "3956b80152d4aac6b659a09d0cd7671a4bd53efeeb067e4d50df4230701b33e4" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F08",
+      "batch": "F",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://ec.europa.eu/eurostat/documents/15216629/22447468/KS-01-25-003-EN-N.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download and PDF text: research PDF R4 of research/pdf-corpus/manifest.v1.json (Eurostat’s Key figures on Europe, 11.1 MB, above the 10 MiB body cap web pages keep, with three pages that have no text layer). Read on the HTTP lane alone, saved with the manifest's SHA-256 and size, each manifest phrase on its page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 20, "text": "In 2024, the share of early leavers from education and training in the EU was 9.3%, ranging from 16.8% in Romania to 2.0% in Croatia." },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 21, "text": "In 2024, the NEET rate for young people in the EU stood at 9.1%." },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "equals": 84 },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.0.code", "equals": "tables_unverified" },
+        { "item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.warnings.1.code", "equals": "no_text_layer" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "6a39b318af350a35520571b41d7ada3ca971dffc29492049b87b9e2152baf607" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 11145558 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equals": "6a39b318af350a35520571b41d7ada3ca971dffc29492049b87b9e2152baf607" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F09",
+      "batch": "F",
+      "url": "https://ec.europa.eu/eurostat/api/dissemination/sdmx/2.1/data/nrg_ind_ren/A.REN.PC.EU27_2020?format=SDMX-CSV",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a CSV from a statistics office, Eurostat's SDMX API (share of energy from renewable sources, EU27, annual). Eurostat serves it as application/vnd.sdmx.data+csv with a .csv attachment name; ec.europa.eu's robots.txt disallows /eurostat/SDMX/diss-web/rest/ but not /eurostat/api/. The file is saved as received and its text is the Markdown. Values and the LAST UPDATE column change with Eurostat's releases, so they are checked by pattern; on 2026-09-29 the 2004 value was 9.605.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "csv" },
+        { "item": "P2-files", "type": "field", "path": "file.markdownFrom", "equals": "text" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "^DATAFLOW,LAST UPDATE,freq,nrg_bal,unit,geo,TIME_PERIOD,OBS_VALUE" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "^ESTAT:NRG_IND_REN\\(1\\.0\\),[^,]*,A,REN,PC,EU27_2020,2004,[0-9]" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.rawSha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equalsPath": "file.bytes" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "includes": "+csv" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F10",
+      "batch": "F",
+      "url": "https://www150.statcan.gc.ca/n1/tbl/csv/17100005-eng.zip",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a ZIP from a statistics office, Statistics Canada table 17-10-0005 (population estimates) as its full-table CSV download. Its robots.txt (User-agent *, Crawl-delay 2) disallows *.csv but not this .zip. A ZIP is saved as received and has no Markdown. The table is updated on StatCan's schedule, so its hash and size are compared with the saved file's, not fixed; on 2026-09-29 it was about 3.9 MB.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "zip" },
+        { "item": "P2-files", "type": "field", "path": "markdown", "present": false },
+        { "item": "P2-files", "type": "field", "path": "file.bytes", "min": 100000, "record": true },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equalsPath": "file.bytes" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "equals": "application/zip" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F11",
+      "batch": "F",
+      "endpoint": "crawl",
+      "url": "https://www.insee.fr/fr/statistiques/8654458",
+      "request": { "maxPages": 2, "includePaths": ["^/fr/statistiques/fichier/version-html/8654458/ip2077\\.pdf$"] },
+      "note": "Added 2026-09-29. P2 file download in a crawl: Insee's publication page for Insee Première 2077 links the PDF that is R2 in research/pdf-corpus/manifest.v1.json. A 2-page crawl limited to that link reaches the PDF, which becomes a crawl page with its file, its text by page and its Evidence Record. Insee's robots.txt disallows *.xls, *.csv, *.zip and *.xlsx, not *.pdf.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "completed" },
+        { "item": "P2-files", "type": "itemCount", "equals": 2 },
+        { "item": "P2-files", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "file.kind", "equals": "pdf" } },
+        { "item": "P2-files", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "status", "equals": "success" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 1, "text": "s’élèvent à 404 millions de tonnes équivalent CO2 (Mt CO2 éq)" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 2, "text": "est estimée à 563 Mt CO2 éq, en baisse de 3,4 % par rapport à 2023" } },
+        { "item": "scrape-formats.pdf-parser", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "pdfPage", "page": 2, "text": "Depuis 1990, les émissions de la France ont baissé de 31 %" } },
+        { "item": "ER", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "5a2b836faef7c04a980ed2ef3b9760df3cfd2cc5dab86d7fdf31572d1bae69df" } },
+        { "item": "ER", "type": "eachItem", "urlPattern": "ip2077\\.pdf$", "check": { "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" } },
+        { "item": "ER", "type": "eachItem", "minItems": 2, "check": { "type": "evidenceSchema" } }
+      ]
+    },
+    {
+      "id": "F12",
+      "batch": "F",
+      "endpoint": "fc-scrape",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download through the Firecrawl shim: /fc/v1/scrape of the seed user's PDF S4 answers success with the PDF text as data.markdown, page markers included (Firecrawl's PDF markdown has none; see docs/firecrawl-shim.md).",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "success", "equals": true },
+        { "item": "P2-files", "type": "field", "path": "data.metadata.statusCode", "equals": 200 },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "path": "data.markdown", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "path": "data.markdown", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" }
+      ]
+    },
+    {
+      "id": "F13",
+      "batch": "F",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": { "formats": ["markdown"], "waitFor": 1000 },
+      "note": "Added 2026-09-29. P2 file download on the browser lane: with waitFor the scrape starts at the browser rung, whose navigation to a PDF starts a download ('Download is starting', failed as connection_error before). The download is caught, and the file is the one the HTTP lane saves (the manifest's SHA-256) with the same text by page.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "lane", "equals": "browser_local" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["browser_local"] },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 1, "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025" },
+        { "item": "scrape-formats.pdf-parser", "type": "pdfPage", "page": 3, "text": "Hillsboro – United States, OR 1.27 1.35 1.46" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.lane", "equals": "browser_local" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "pdf-text/1" }
+      ]
+    },
+    {
+      "id": "F14",
+      "batch": "F",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "kpi1": { "type": "string" }, "kpi2": { "type": "string" }, "totalItLoad": { "type": "string" } }, "required": ["kpi1", "kpi2"] } }] },
+      "note": "Added 2026-09-29. P2 JSON extraction from a PDF: fields come only from 'Label: value' lines of the PDF text, each with its page. On the seed user's PDF S5, pdftotext 26.04.0 per page shows 'KPI 1: Increase the percentage of renewable energy in total electricity consumption' on page 13, 'KPI 2: Reduction of carbon intensity' on page 14, and eleven different 'Total IT load: ...' lines on page 4, so totalItLoad must be left out as ambiguous, never picked.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "P2-files", "type": "field", "path": "json.data.kpi1", "equals": "Increase the percentage of renewable energy in total electricity consumption" },
+        { "item": "P2-files", "type": "field", "path": "json.data.kpi2", "equals": "Reduction of carbon intensity" },
+        { "item": "P2-files", "type": "field", "path": "json.data.totalItLoad", "present": false },
+        { "item": "P2-files", "type": "jsonIssue", "includes": "field_ambiguous" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./kpi1", "equals": { "source": "pdf", "locator": "page 13 \"KPI 1\"" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./kpi2", "equals": { "source": "pdf", "locator": "page 14 \"KPI 2\"" } },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
     }
   ]
 }
