@@ -6,7 +6,7 @@ Choose your MCP client below. W2L currently connects through a [Streamable HTTP]
 
 ## Start W2L on your computer
 
-On macOS, from a W2L repository checkout, use Node.js 22.12+ or 24+:
+On macOS, from a W2L repository checkout, use Node.js 22.13+ or 24+:
 
 ```bash
 npm ci

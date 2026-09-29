@@ -45,7 +45,7 @@ Run `npm run public:preview:local` and open `http://127.0.0.1:8798/docs/`.
 These pages are generated from Markdown during the public web build; their
 hosted status labels must be updated only after an actual public acceptance run.
 
-Use Node.js 22.12+ or 24+ and npm. The SDK is currently a private workspace package; build it from this checkout. For the full Monitor → result → HTTPS event → restart workflow, follow [the onboarding guide](docs/onboarding.md) and [independent developer acceptance checklist](docs/independent-developer-acceptance.md).
+Use Node.js 22.13+ or 24+ and npm (the PDF text engine, pdf.js, needs 22.13 or later). The SDK is currently a private workspace package; build it from this checkout. For the full Monitor → result → HTTPS event → restart workflow, follow [the onboarding guide](docs/onboarding.md) and [independent developer acceptance checklist](docs/independent-developer-acceptance.md).
 
 ```bash
 git clone https://github.com/77777R7/w2l.git
@@ -215,9 +215,32 @@ The [Gate 2–4 acceptance record](docs/roadmap/gate-2-4-acceptance.md) links th
 
 C2 Monitor/Delivery MCP and its local HTTPS first-use workflow are implemented. C3 has a unified process and authenticated Streamable HTTP implementation; Render hosting, WorkOS browser login, real-client connection, and a hosted restart drill remain unverified. B1/B2 and C1 remain in_progress for their broader operational/adoption gates. See the [first-use walkthrough](docs/mcp-first-use.md) and [dated local evidence](docs/evidence/c2-c3-mcp-local-2026-09-23.md).
 
+## Files: PDF, CSV, XLSX, ZIP, JSON
+
+Scrape, batch items, crawl pages, MCP and `/fc` take a URL that answers with a file the same way as a web page. A 2xx response is a file when its `Content-Type` says PDF, CSV (including `+csv` types such as Eurostat's SDMX-CSV), JSON (and `+json`), plain text, XLSX, XLS or ZIP; when it says nothing useful (`application/octet-stream` and its kin, or none), the bytes decide: a `%PDF-` header in the first 1024 bytes, a ZIP header (an XLSX when the file is named `.xlsx`), an OLE header named `.xls`, or text named `.csv`, `.json` or `.txt`. A PDF header at the start overrides `text/html` or `text/plain`, and an HTML document sent as `text/plain` is still a page. The name is the `Content-Disposition` filename, else the URL path.
+
+- **Saved as received, never sent to the browser.** The HTTP lane saves every byte to `<W2L_TASK_ROOT>/files/<sha256>.<ext>` (`.w2l/api/files/` by default; `npm run scrape` uses the same place, `npm run crawl` its task directory's `files/`), so the same bytes are stored once however many URLs serve them. A file never escalates to the browser, whatever its outcome. The result's `file` block gives the kind, how it was detected, the `Content-Type` as received, the declared and received size, the SHA-256, the path, and for a PDF its pages; `evidence.rawBodySha256` and the Evidence Record's `rawSha256` are the SHA-256 of the bytes. A request refused before anything is fetched (robots.txt, policy, DNS) saves nothing, and so does a non-2xx answer.
+- **The browser lane catches the download.** When the browser is the first rung (`waitFor`) or otherwise reaches a file, it takes the file from the download the navigation starts, or from the response it displays (JSON, text), instead of failing with `Download is starting`, and saves the same bytes the same way.
+- **Size cap.** `W2L_MAX_FILE_BYTES` sets the largest file in bytes (default 52 428 800, 50 MiB; at most 524 288 000, 500 MiB; anything else stops the service at start). A request, batch or crawl can lower it with `maxFileBytes`, never raise it (a larger value is HTTP 400 `invalid_request`). A file over the cap is `failed` with `body_too_large`, with its declared size in `file.declaredBytes` when the server sent one; it is not read further and nothing is saved or truncated. Web pages keep the 10 MiB body cap.
+- **Other binary types** (images, audio, video, fonts, Word and PowerPoint documents, other archives) are `failed` with `unsupported_content_type`: not downloaded, not saved, not sent to the browser.
+- A body that stalls or breaks off after the headers is `failed` with `timeout` or `connection_error`, with nothing saved (it was an internal error before).
+
+What each kind returns:
+
+| Kind | `markdown` | Status |
+| --- | --- | --- |
+| PDF | The text layer, a `<!-- page N -->` line before each page (below) | `success` with text; `partial` when the page cap (1000), the time budget (60 s, or less when the scrape's `timeout` is nearer) or an unreadable page stopped it short; `failed`/`empty_unverified` when no page has a text layer (a scan: no OCR); `failed`/`parse_error` when it cannot be opened (no PDF header, encrypted, malformed); `failed`/`timeout` when it did not open in time |
+| CSV, JSON, text | The text as received, decoded by its byte-order mark, its declared charset or UTF-8 (the mark dropped) | `success`; without text and with a `text_not_decoded` warning when the bytes are not valid in that encoding |
+| XLSX, XLS, ZIP | `null` | `success`; the file is the deliverable. Tables → CSV and XLSX parsing come later |
+| Any, with no bytes | `null` | `empty_verified` |
+
+`onlyMainContent` does not apply to files, and `waitFor` is not waited for once the file arrives. A file result has no `document` or `metadata` and no `links`. The Evidence Record lists the file in `artifacts` as `{ kind: "file", path, sha256, bytes, contentType }` and names the extractor `pdf-text` (`PDF_TEXT_VERSION`) for a PDF or `file-text` (`FILE_TEXT_VERSION`) for another file; `outputSha256.markdown` covers the Markdown delivered.
+
+JSON extraction reads a PDF deterministically: a schema key is matched, as on a web page, to the labels of the PDF's `Label: value` lines (for example `KPI 2: Reduction of carbon intensity` fills `kpi2`), and `fieldEvidence` gives each such field `{ source: "pdf", locator: "page N \"label\"" }`. Labels that state different values leave the field out with `field_ambiguous`; prose and table cells are not read, the PDF's metadata is not used, and `modelFallback` is not applied to PDF text (a `model_unavailable` issue says so), so a field not found is reported missing, never guessed. PDF text runs on the API process's thread: the 304-page IEA report takes under a second.
+
 ## PDF text
 
-`pdfToMarkdown(bytes, options?)` in `packages/extract-tf` turns the bytes of a PDF into Markdown with page numbers, so a figure quoted from a report can be traced to its page. **It is a library function only: scrape, batch, crawl, the API and MCP do not reach it yet**, and a PDF URL still fails there until file download lands (next on the [roadmap](ROADMAP.md)).
+`pdfToMarkdown(bytes, options?)` in `packages/extract-tf` turns the bytes of a PDF into Markdown with page numbers, so a figure quoted from a report can be traced to its page. Scrape, batch, crawl, MCP and `/fc` use it for every PDF they fetch (see [Files](#files-pdf-csv-xlsx-zip-json)).
 
 What it does:
 
