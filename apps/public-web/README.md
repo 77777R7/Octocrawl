@@ -10,4 +10,4 @@ MCP setup, task guides, and limits. The static pages have unique titles and
 descriptions, shared navigation, and copyable code examples. Unknown `/docs/`
 paths return 404 rather than falling back to the product home page.
 
-The mountain Hero and octopus source are optimized WebP copies of Howard's supplied images in `Downloads`. `octopus-mark.svg` is an unapproved 32–48 px draft. The current navigation uses the supplied octopus image itself; do not treat the draft as approved branding until Howard reviews it.
+The mountain Hero and octopus source are optimized WebP copies of Howard's supplied images in `Downloads`. `octopus-silhouette.webp` is a 192 px mask made from the octopus source (its ink blurred as for the animated veil, holes filled) so the static octopus tints only its own shape. `octopus-mark.svg` is an unapproved 32–48 px draft. The current navigation uses the supplied octopus image itself; do not treat the draft as approved branding until Howard reviews it.

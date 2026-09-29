@@ -1,6 +1,8 @@
 import './styles.css'
 import { mountHeroAscii } from './ascii'
 import { mountHeroClickSpark } from './clickSpark'
+import { mountHowReplay } from './howReplay'
+import { sessionMarkup } from './sessionScript'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -30,6 +32,7 @@ app.innerHTML = `
   <div class="page-shell">
     <div class="hero" id="top">
       <div class="hero-backdrop" aria-hidden="true"></div>
+      <div class="hero-glyphs" id="hero-glyphs" aria-hidden="true"></div>
       <div class="hero-octopus-static" aria-hidden="true"></div>
       <div class="hero-shade" aria-hidden="true"></div>
       <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>
@@ -51,12 +54,11 @@ app.innerHTML = `
       <main aria-labelledby="hero-title">
         <div class="band band-dark">
           <div class="frame hero-cells">
-            <div class="hero-cell hero-cell-side" aria-hidden="true"></div>
+            <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
               <p class="hero-description">Paste a public URL. Get readable content and verifiable fields where supported.</p>
             </div>
-            <div class="hero-cell hero-cell-side hero-octopus-cell" id="hero-ascii" aria-hidden="true"></div>
           </div>
         </div>
         <div class="band band-dark">
@@ -79,6 +81,8 @@ app.innerHTML = `
             </form>
           </div>
         </div>
+        <a class="hero-scroll" id="hero-scroll" href="#how-it-works"><span class="hero-scroll-glyph" aria-hidden="true"></span><span id="hero-scroll-label">How it works</span></a>
+        <button class="motion-toggle hero-motion" id="hero-motion" type="button" aria-label="Pause motion" title="Pause motion" hidden><span class="motion-toggle-icon" aria-hidden="true"></span></button>
       </main>
     </div>
 
@@ -104,13 +108,24 @@ app.innerHTML = `
 
     <section class="how-section" id="how-it-works" aria-labelledby="how-title">
       <div class="band">
-        <div class="frame how-head"><p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p><h2 id="how-title">From web page<br />to usable content.</h2></div>
-      </div>
-      <div class="band">
-        <div class="frame how-steps">
-          <div class="how-step"><span class="step-number">01</span><h3>Paste a public URL</h3><p>No install or command line. One web address is enough to try it.</p></div>
-          <div class="how-step"><span class="step-number">02</span><h3>Read the result</h3><p>See the content, final URL, status, and total time. Failures come with a reason.</p></div>
-          <div class="how-step"><span class="step-number">03</span><h3>Check product fields</h3><p>For supported Amazon.sg pages, we also verify the product, region, and currency.</p></div>
+        <div class="frame how-grid">
+          <div class="how-intro">
+            <p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p>
+            <h2 id="how-title">From web page<br />to usable content.</h2>
+            <ol class="how-list" role="list">
+              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get 3&nbsp;previews a&nbsp;day.</p></div></li>
+              <li class="how-step"><span class="step-number" aria-hidden="true">02</span><div><h3>W2L checks, then reads</h3><p>It respects robots.txt and reads only what anyone can open, then reports the status, final URL and time.</p></div></li>
+              <li class="how-step"><span class="step-number" aria-hidden="true">03</span><div><h3>Use the content</h3><p>Copy or download readable Markdown or the result JSON. Amazon.sg product pages add checked fields.</p></div></li>
+            </ol>
+            <p class="how-links"><a href="/docs/guides/extract-page/">Extract a public page <span aria-hidden="true">↗</span></a><a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
+          </div>
+          <figure class="how-specimen">
+            <div class="how-replay" id="how-replay">
+              <div class="how-replay-window" aria-hidden="true" inert>${sessionMarkup()}</div>
+              <button class="motion-toggle replay-toggle" id="replay-toggle" type="button" aria-label="Pause replay" title="Pause replay" hidden><span class="motion-toggle-icon" aria-hidden="true"></span></button>
+            </div>
+            <figcaption>A replay of two recorded runs, 24–25 Sep 2026: the example page and an Amazon.sg product. Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://docs.firecrawl.dev/introduction passed its robots.txt check and returned success in 2.51 seconds of server time, 11,761 characters of Markdown starting with the heading Introduction. The Amazon.sg product B000NI69YA was matched and verified for Singapore 238823 in SGD at SGD 290.67, sold by Amazon US, in 12.54 seconds in the browser.</span></figcaption>
+          </figure>
         </div>
       </div>
     </section>
@@ -142,8 +157,16 @@ app.innerHTML = `
 `
 
 const hero = document.querySelector<HTMLElement>('.hero')!
-mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, hero)
+// The page is built here, so the browser's own scroll to a linked section (/#how-it-works) would come later,
+// animated, and after the hero had reported itself on screen and loaded its decoration: land there directly,
+// unless a reload has already restored a scroll position.
+try {
+  const landing = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null
+  if (landing && !hero.contains(landing) && !window.scrollY) landing.scrollIntoView({ behavior: 'instant' })
+} catch { /* A malformed fragment keeps the browser's own handling. */ }
+mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero, document.querySelector<HTMLButtonElement>('#hero-motion')!)
 mountHeroClickSpark(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
+mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!, document.querySelector<HTMLButtonElement>('#replay-toggle')!)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
 const input = document.querySelector<HTMLInputElement>('#url-input')!
@@ -158,6 +181,8 @@ const detailUrl = document.querySelector<HTMLElement>('#detail-url')!
 const content = document.querySelector<HTMLElement>('#result-content')!
 const urlCard = document.querySelector<HTMLElement>('.url-card')!
 const capabilityMessage = document.querySelector<HTMLElement>('#capability-message')!
+const heroScroll = document.querySelector<HTMLAnchorElement>('#hero-scroll')!
+const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label')!
 // Chosen in the result panel; kept for the next extraction in this visit.
 let outputFormat: OutputFormat = 'markdown'
 let capabilityTimer: number | undefined
@@ -748,6 +773,9 @@ form.addEventListener('submit', async (event) => {
   runs = [run, ...runs].slice(0, MAX_RUNS)
   selectedRunId = run.id
   section.hidden = false
+  // The cue names what sits directly below the hero.
+  heroScroll.setAttribute('href', '#result-section')
+  heroScrollLabel.textContent = 'Recent runs'
   renderRuns()
   renderDetail(run)
   const started = performance.now()
@@ -765,8 +793,9 @@ form.addEventListener('submit', async (event) => {
     if (!value || typeof value !== 'object' || !('status' in value)) throw new Error('The service returned an unrecognized result.')
     const result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
-    finishRun(run, result, started)
+    // Message first: an error style can grow the hero, and the smooth scroll must target the final layout.
     setResultMessage(result)
+    finishRun(run, result, started)
   } catch (error) {
     const aborted = controller.signal.aborted
     const result: PreviewResponse = {
@@ -778,8 +807,8 @@ form.addEventListener('submit', async (event) => {
       totalMs: performance.now() - started,
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
-    finishRun(run, result, started)
     setResultMessage(result)
+    finishRun(run, result, started)
   } finally {
     clearTimeout(timeout)
     setBusy(false)

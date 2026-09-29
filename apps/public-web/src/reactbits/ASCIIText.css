@@ -8,23 +8,23 @@
 }
 
 /* Fade in the rendered parts, not their wrapper: an opacity animation on the wrapper
-   isolates it, and the veil's backdrop-filter would then see nothing to soften. */
+   isolates it, and the veil's backdrop-filter would then see nothing to soften. The fade
+   ends on the element's own opacity and then lets go of it, so the page can still dim a
+   part, with its own transition, afterwards. */
 .w2l-ascii-filter pre,
-.w2l-ascii-filter canvas.w2l-ascii-motif,
 .w2l-ascii-veil {
-  animation: w2l-ascii-arrive .8s ease-out both;
+  animation: w2l-ascii-arrive .8s ease-out backwards;
 }
 
 @keyframes w2l-ascii-arrive {
   from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 .w2l-ascii-filter canvas {
   display: none;
 }
 
-/* Motif mode draws artwork-style glyphs on a visible canvas over a softening veil. */
+/* Motif mode types the octopus in characters on a visible canvas over a softening veil. */
 .w2l-ascii-filter canvas.w2l-ascii-motif {
   display: block;
   position: absolute;
@@ -36,14 +36,21 @@
 .w2l-ascii-veil {
   position: absolute;
   pointer-events: none;
-  /* Soften and slightly darken the artwork under the silhouette: the octopus reads as a
-     rim-lit mass in front of the sky and the sunset glow, like its source image. */
-  -webkit-backdrop-filter: blur(3px) brightness(.76);
-  backdrop-filter: blur(3px) brightness(.76);
+  /* Soften and darken the artwork under the silhouette: the octopus reads as a rim-lit mass in
+     front of the sky and the sunset glow, like its source image, and its thin type needs a darker bed.
+     The navy is the hero session veil's, so both side figures are text on the same ground, and it keeps
+     the arms legible where they cross the bright sunset. */
+  background: rgba(4, 16, 50, .46);
+  -webkit-backdrop-filter: blur(3px) brightness(.68);
+  backdrop-filter: blur(3px) brightness(.68);
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
+  /* The characters decode outward from the centre (the arm tips by about 0.8 s) while the static octopus
+     fades over 1.2 s; darkening at that pace keeps the tinted silhouette from showing up empty. */
+  animation-duration: 1.2s;
+  animation-timing-function: ease-in;
 }
 
 .w2l-ascii-filter pre {
