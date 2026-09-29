@@ -911,6 +911,7 @@ function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snapshot'] 
     rawBodySha256: result.evidence.rawBodySha256,
     artifacts: result.evidence.artifacts,
     httpStatus: result.evidence.httpStatus,
+    contentType: result.evidence.contentType,
   }
 }
 

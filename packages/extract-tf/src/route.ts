@@ -420,9 +420,12 @@ export function selectCardList(doc: Document): Element | null {
 
 /**
  * Table strategy: the main data table of a table page. Skips layout tables
- * (single cell, no data cells) and hidden/empty tables. When a lone page
- * heading shares a container with the table (product pages: title + specs),
- * that container is returned instead so the title survives.
+ * (single cell, no data cells) and hidden/empty tables. A table that holds
+ * another table is a layout table too (Hacker News lays out its header, story
+ * list and footer in one): a data table inside it is preferred, and it is
+ * chosen only when no such table qualifies. When a lone page heading shares a
+ * container with the table (product pages: title + specs), that container is
+ * returned instead so the title survives.
  */
 export function selectTable(doc: Document): Element | null {
   const tables = qsa(doc, 'table')
@@ -433,7 +436,8 @@ export function selectTable(doc: Document): Element | null {
     return qsa(t, 'td,th').length >= 4
   })
   if (dataTables.length === 0) return null
-  const table = dataTables.sort(
+  const leaves = dataTables.filter((t) => t.querySelector('table') === null)
+  const table = (leaves.length > 0 ? leaves : dataTables).sort(
     (a, b) => qsa(b, 'td,th').length - qsa(a, 'td,th').length,
   )[0]!
 

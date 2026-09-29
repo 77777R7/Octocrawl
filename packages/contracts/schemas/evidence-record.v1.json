@@ -124,7 +124,7 @@
           "items": { "type": "string", "pattern": "^https?://" }
         },
         "complete": {
-          "description": "Whether the lane lists every hop. True on the HTTP lane, which follows redirects itself and requests each hop. False on browser and provider lanes, which observe only where navigation started and where it ended: their list is [requestedUrl, finalUrl] after a redirect, and hops between the two were not observed.",
+          "description": "Whether the lane lists every hop. True on the HTTP lane, which follows redirects itself and requests each hop, and on the browser lane when it lists each redirect Chromium followed for the page's navigation; false there when a follow-up navigation or the page itself (a script, a meta refresh) moved on, so hops were not observed. False on the provider lane, which observes only where navigation started and where it ended: its list is [requestedUrl, finalUrl] after a redirect.",
           "type": "boolean"
         }
       }

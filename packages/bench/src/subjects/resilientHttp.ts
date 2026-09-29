@@ -17,7 +17,7 @@ import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 
 /**
@@ -435,7 +435,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
 
     // Same extraction convention as ExtractTfSubject: escalate means the
     // extractor found no main content — report failed/empty_unverified and
-    // flag the browser lane, never a contentful success.
+    // flag the browser lane, never a contentful success. The whole page stays
+    // on that result as evidence, never content. onlyMainContent: false asks
+    // for the whole page, not the main content, so there it is the answer,
+    // still offered to the browser lane like a thin success.
     const extractStart = performance.now()
     const extracted = extractTf.extract(body, { url: out.finalUrl })
     const extractionTotalMs = performance.now() - extractStart
@@ -456,20 +459,27 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
     })
 
+    let wholePage: string | null = null
     if (extracted.escalate) {
       if (gate !== null) return blocked(gate)
-      return finish({
-        ...base,
-        status: 'failed',
-        failureReason: 'empty_unverified',
-        blockReason: null,
-        budgetExceeded: null,
-        lane: 'http',
-        escalations: [
-          { from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null },
-        ],
-        markdown: null,
-      })
+      const formatStart = performance.now()
+      wholePage = wholePageMarkdown(body, out.finalUrl)
+      formatMs = performance.now() - formatStart
+      if (options.onlyMainContent !== false || wholePage === null) {
+        return finish({
+          ...base,
+          status: 'failed',
+          failureReason: 'empty_unverified',
+          blockReason: null,
+          budgetExceeded: null,
+          lane: 'http',
+          escalations: [
+            { from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null },
+          ],
+          markdown: wholePage,
+          ...(wholePage === null ? {} : { links }),
+        })
+      }
     }
 
     const decisive = classifyGate({
@@ -486,8 +496,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // footer kept) through the same converter and base URL. The quality
     // signal below still reads the main content, so the mode never changes
     // which lane answers.
-    const markdown = options.onlyMainContent === false ? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
-    formatMs = performance.now() - formatStart
+    const markdown = options.onlyMainContent === false ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
+    formatMs += performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
     const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
 
@@ -501,6 +511,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const emptyTableShells = extracted.emptyTableShells ?? 0
     const fetchPreloads = extracted.fetchPreloads ?? 0
     if (
+      extracted.escalate ||
       (mainTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
         extracted.confidence <= QUALITY_ESCALATION_MAX_CONFIDENCE) ||
       emptyTableShells > 0 ||

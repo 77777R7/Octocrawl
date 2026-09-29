@@ -230,6 +230,17 @@ export class LadderRunner {
         summary: { ...summary, totalMs: Math.max(0, performance.now() - startedAt) },
       }
     }
+    // A later rung that failed without a page does not erase the page an
+    // earlier rung kept as evidence when it found no main content: that
+    // result is the answer, its hop marked not improved. The later failure
+    // stays in the audit.
+    const failedAnswer = (result: FetchResult): FetchResult => {
+      if (result.status !== 'failed' || result.markdown !== null || classifyFetchFailure(result) !== null) return result
+      const kept = noMainContentEvidence(attempts)
+      if (kept === null || kept.result === result) return result
+      ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: kept.channel, detail: { kept: kept.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason } })
+      return { ...kept.result, escalations: kept.result.escalations.map((e) => (e.improved === null ? { ...e, improved: false } : e)) }
+    }
 
     // Sessions exist for authed mode ONLY. standard/research never load or
     // use login state — a session in a public run is a leak of the user's
@@ -467,7 +478,7 @@ export class LadderRunner {
         // content, that content is still the answer — the failure does not
         // erase it. Otherwise stop and report honestly.
         if (best !== null) break
-        return finish(result, false)
+        return finish(failedAnswer(result), false)
       }
 
       if (cls !== null && !LADDER_CONTINUES_FAILURE_CLASS.has(cls) && !subjectAsked) {
@@ -509,7 +520,7 @@ export class LadderRunner {
       return finish({ ...best, escalations: finalEscalations }, false)
     }
 
-    const final = best ?? last ?? this.governanceRefusal(url, 'no permitted channel was configured')
+    const final = best ?? (last === null ? null : failedAnswer(last)) ?? this.governanceRefusal(url, 'no permitted channel was configured')
     return finish(sanitizeResult(final), false)
   }
 
@@ -716,8 +727,10 @@ function deadlineReached(execution: ExecutionContext): boolean {
 /**
  * The run's answer when its deadline cut it short: the largest clean
  * contentful result any rung produced, as `partial`, or `failed`/`timeout`
- * when there is none (the rung's own timeout result when it returned one).
- * Either way the result says the deadline ended it, in its trace and usage.
+ * when there is none (the rung's own timeout result when it returned one, or
+ * the result that kept a page as evidence when its rung found no main
+ * content, with that page). Either way the result says the deadline ended
+ * it, in its trace and usage.
  */
 function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchResult | null): LadderRunResult {
   const { startedAt, channelsTried, ladderTrace, attempts } = progress
@@ -738,11 +751,26 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     const event: TraceEvent = { at, lane: best.result.lane, event: 'deadline_exceeded', detail }
     result = { ...best.result, status: 'partial', failureReason: null, blockReason: null, budgetExceeded: null, usage: { ...best.result.usage, deadlineExceeded: true }, trace: [...best.result.trace, event] }
   } else {
-    const base = returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at)
-    const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail }
-    result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
+    // A page a rung kept as evidence when it found no main content stays on
+    // the timeout, as evidence.
+    const evidence = noMainContentEvidence(attempts)
+    const base = evidence?.result ?? (returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
+    const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: evidence === null ? detail : { ...detail, evidence: evidence.channel } }
+    result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
   }
   return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...summarize(channelsTried, attempts), totalMs: at } }
+}
+
+/**
+ * The latest attempt whose extractor found no main content and kept the whole
+ * page as evidence (failed/empty_unverified with Markdown).
+ */
+function noMainContentEvidence(attempts: readonly LadderAttempt[]): LadderAttempt | null {
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const { result } = attempts[i]!
+    if (result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null) return attempts[i]!
+  }
+  return null
 }
 
 /** A timeout for a rung the deadline interrupted before it returned anything. */

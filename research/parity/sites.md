@@ -117,6 +117,19 @@ J01–J03 were added on 2026-09-29 for the JSON extraction gaps of [core-status-
 | J02 | Scrape of a catalog.data.gov dataset page with a zod-to-json-schema schema (draft-07 `$schema`, root `$ref` into `definitions`, nullable type lists, `enum`, `pattern`) | Accepted; the DCAT fields from the page's metadata table with their rows as evidence; the missing `spatial` is `null` with an issue | scrape-formats.json |
 | J03 | Scrape of the L01 book page with a `json` format that has a prompt and no schema | HTTP 400 `invalid_request`, as documented: W2L does not extract JSON without a schema | scrape-formats.json |
 
+M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M01 | Scrape of MDN's 404 status page | The H1, absolute targets, no `data:` URIs, no header or footer text | scrape-formats.markdown |
+| M02 | Scrape of the Hacker News front page | The story list, absolute targets, no `data:` URIs, neither the header's nor the footer's links | scrape-formats.markdown |
+| M03 | Scrape of a path MDN answers with 404 | The error page kept as evidence has absolute link targets | scrape-formats.markdown |
+| M04 | Scrape of BBC News technology, then again with `onlyMainContent: false` | True leaves out the navigation and footer; false keeps them and is longer | scrape-formats.only-main-content |
+| M05 | Scrape of the Wikipedia portal with `onlyMainContent: false`, then with the default | On a page with no main block, false returns the whole page as success; the default keeps it as evidence | scrape-formats.only-main-content |
+| M06 | Scrape of http://www.github.com with `waitFor` (browser lane) | The response's content type and both redirect hops, `redirectChain.complete: true` | scrape-formats.metadata-response-status |
+| M07 | Compact scrape (`debug: false`) of http://github.com | `snapshot.httpStatus` and `snapshot.contentType`; the hop in the Evidence Record | scrape-formats.metadata-response-status |
+| M08 | `/fc/v1/scrape` of http://github.com | `data.metadata` with `sourceURL`, the final `url`, `statusCode` and `contentType` | scrape-formats.metadata-response-status |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

@@ -83,6 +83,11 @@
 //               page from GET /fc/v1/crawl/:id?limit=<case.pageLimit, default 100>, following
 //               next: doc.items (all data), doc.pageRequests, doc.final {status, completed, total,
 //               nextOnLastPage, dataLength, errorPages, pagesWithoutError}.
+// Added for the Markdown and response-metadata gaps (2026-09-29):
+//   scrape      case.compareRequest scrapes case.url a second time with that request, into
+//               doc.compare (the audit's onlyMainContent check compares the two responses).
+//   checks      field abovePath: a number greater than the number at that path (a string's
+//               length is <path>.length).
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -210,6 +215,11 @@ const runners = {
     const began = Date.now()
     const response = await call('POST', '/v1/scrape', { url: c.url, ...c.request })
     const doc = { ...(response.json ?? {}), elapsedMs: Date.now() - began }
+    if (c.compareRequest) {
+      const compare = await call('POST', '/v1/scrape', { url: c.url, ...c.compareRequest })
+      doc.compare = compare.json ?? {}
+      response.compare = compare
+    }
     if (c.egress) {
       const ips = await egressIps(c.url)
       const reportedIp = ipv4(typeof doc.markdown === 'string' ? doc.markdown : '')
@@ -443,6 +453,7 @@ function check(doc, spec, response) {
       if ('present' in spec) return { pass: (actual !== undefined && actual !== null && actual !== '') === spec.present, actual: actual === undefined ? 'undefined' : typeof actual }
       if ('includes' in spec) return { pass: typeof actual === 'string' && actual.includes(spec.includes), actual }
       if ('equalsPath' in spec) return { pass: actual !== undefined && actual === get(doc, spec.equalsPath), actual: `${actual} vs ${get(doc, spec.equalsPath)}` }
+      if ('abovePath' in spec) return { pass: typeof actual === 'number' && typeof get(doc, spec.abovePath) === 'number' && actual > get(doc, spec.abovePath), actual: `${actual} vs ${get(doc, spec.abovePath)}` }
       if ('min' in spec || 'max' in spec) return { pass: typeof actual === 'number' && actual >= (spec.min ?? -Infinity) && actual <= (spec.max ?? Infinity), actual }
       if (typeof spec.equals === 'object' && spec.equals !== null) return { pass: JSON.stringify(actual) === JSON.stringify(spec.equals), actual: JSON.stringify(actual) }
       return { pass: actual === spec.equals, actual }

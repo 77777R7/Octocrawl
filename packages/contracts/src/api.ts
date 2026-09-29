@@ -51,8 +51,12 @@ export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: Compact
 export interface CompactScrapeResponse {
   requestedUrl: string
   finalUrl: string
-  /** Small capture identity for field audits; the HTML body remains local. */
-  snapshot: { rawBodySha256: string | null; artifacts: readonly string[]; httpStatus: number | null }
+  /**
+   * Small capture identity for field audits; the HTML body remains local.
+   * `httpStatus` and `contentType` are the final response's status and
+   * `content-type` header (`evidence.httpStatus`, `evidence.contentType`).
+   */
+  snapshot: { rawBodySha256: string | null; artifacts: readonly string[]; httpStatus: number | null; contentType: string | null }
   /** The result's Evidence Record v1, the same as on the full response. */
   evidenceRecord: EvidenceRecord
   status: FetchResult['status']

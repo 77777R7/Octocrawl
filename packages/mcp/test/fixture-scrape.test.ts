@@ -49,9 +49,12 @@ describe('MCP scrape against the fixture catalog', () => {
       status: string
       markdown: string | null
       metadata?: unknown
+      snapshot?: unknown
       evidenceRecord?: unknown
     }
     expect(result.status).toBe('success')
+    // The compact MCP result names the response's status and content type.
+    expect(result.snapshot).toMatchObject({ httpStatus: 200, contentType: 'text/html; charset=utf-8' })
     expect(result.markdown).toContain('Harbour lantern catalog')
     expect(result.metadata).toMatchObject({ title: 'Harbour lantern catalog', language: 'en', favicon: null })
     // The compact MCP result carries the same Evidence Record as REST.

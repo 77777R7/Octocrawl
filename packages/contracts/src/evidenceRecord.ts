@@ -39,8 +39,11 @@ export interface EvidenceRedirectChain {
   urls: readonly string[]
   /**
    * True when every hop is listed. The HTTP lane follows redirects itself and
-   * lists each; browser and provider lanes see only where navigation started
-   * and ended, so their chain is `[requested, final]` and this is false.
+   * lists each; the browser lane lists each redirect Chromium followed for the
+   * page's navigation, and is false only when a follow-up navigation or the
+   * page itself (a script, a meta refresh) moved on. The provider lane sees
+   * only where its vendor started and ended, so its chain is
+   * `[requested, final]` and this is false.
    */
   complete: boolean
 }

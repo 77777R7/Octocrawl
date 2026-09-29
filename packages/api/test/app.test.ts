@@ -89,7 +89,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ url: `${server.url}/error/404`, ...body }),
     })).json()
-    const snapshot = { httpStatus: 404, rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) }
+    const snapshot = { httpStatus: 404, contentType: 'text/html; charset=utf-8', rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) }
     const full = await post('/v1/scrape', { formats: ['markdown'] })
     expect(full).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { httpStatus: 404 }, snapshot })
     expect(full.markdown).toContain('Not Found')
@@ -97,7 +97,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(compact).toMatchObject({ status: 'failed', failureReason: 'http_error', snapshot })
     expect(compact.markdown).toContain('Not Found')
     const shim = await post('/fc/v1/scrape', {})
-    expect(shim).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { statusCode: 404, error: 'http_error' } } })
+    expect(shim).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { url: `${server.url}/error/404`, statusCode: 404, contentType: 'text/html; charset=utf-8', error: 'http_error' } } })
     expect(shim.data.markdown).toContain('Not Found')
   })
 
@@ -123,7 +123,9 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       description: 'Synthetic fixture page for benchmark purposes.',
       language: 'en',
       sourceURL: url,
+      url,
       statusCode: 200,
+      contentType: 'text/html; charset=utf-8',
     })
     const batch = await post('/v1/batches', { urls: [url] })
     const crawl = await post('/v1/crawl', { url, maxPages: 1 })

@@ -25,7 +25,7 @@ import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -569,6 +569,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         access: this.access,
       })
 
+      const navigation = redirectHops(url, response, finalUrl)
       const base = {
         requestedUrl: url,
         ...([429, 503].includes(status) ? { retryAt: Date.now() + (parseRetryAfterMs(response?.headers()['retry-after'] ?? null) ?? 250) } : {}),
@@ -578,8 +579,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         evidence: {
           finalUrl,
           httpStatus: status,
-          redirectChain: finalUrl !== url ? [url, finalUrl] : [],
-          contentType: 'text/html; rendered',
+          redirectChain: navigation.chain,
+          redirectChainComplete: navigation.complete,
+          contentType: response?.headers()['content-type'] ?? null,
           rawBodySha256,
           artifacts: rawArtifacts,
           fetchedAt,
@@ -679,11 +681,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
         },
       })
 
+      // No main content: the whole rendered page stays on the failed result
+      // as evidence, never content. onlyMainContent: false asks for the whole
+      // page, not the main content, so there it is the answer.
+      let wholePage: string | null = null
       if (extracted.escalate) {
         if (gate !== null) return blocked(gate)
+        wholePage = wholePageMarkdown(converted, finalUrl)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
-        return {
+        if (options.onlyMainContent !== false || wholePage === null) return {
           ...base,
           status: 'failed',
           failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
@@ -691,7 +698,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
-          markdown: null,
+          markdown: wholePage,
+          ...(wholePage === null ? {} : { links }),
           ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
       }
@@ -707,7 +715,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
       const markdown = options.onlyMainContent === false
-        ? htmlToMarkdown(converted, { baseUrl: finalUrl })
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: finalUrl })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
@@ -916,5 +924,39 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.browser = null
     this.browserPromise = null
     await this.robotsCache.teardown()
+  }
+}
+
+/**
+ * The redirect chain of the page's final navigation, as Chromium followed it:
+ * each request the response was redirected from, the requested URL first and
+ * the final URL last, or empty when nothing redirected. It is complete when
+ * it lists every hop W2L requested for the page. A navigation that did not
+ * start at the requested URL (a follow-up navigation) or a page that moved on
+ * after its response (a script or a meta refresh) leaves hops unobserved.
+ */
+function redirectHops(requested: string, response: Response | null, finalUrl: string): { chain: string[]; complete: boolean } {
+  if (response === null) return { chain: sameDocument(requested, finalUrl) ? [] : [requested, finalUrl], complete: false }
+  const hops: string[] = []
+  for (let request: ReturnType<Response['request']> | null = response.request(); request !== null; request = request.redirectedFrom()) hops.unshift(request.url())
+  let complete = true
+  // The ends are written as requested and as the page reports its URL (a fragment kept).
+  if (sameDocument(hops[0]!, requested)) hops[0] = requested
+  else { hops.unshift(requested); complete = false }
+  if (sameDocument(hops.at(-1)!, finalUrl)) hops[hops.length - 1] = finalUrl
+  else { hops.push(finalUrl); complete = false }
+  return { chain: hops.length > 1 ? hops : [], complete }
+}
+
+/** Two URLs name the same document: equal once parsed, fragments aside. */
+function sameDocument(a: string, b: string): boolean {
+  try {
+    const left = new URL(a)
+    const right = new URL(b)
+    left.hash = ''
+    right.hash = ''
+    return left.href === right.href
+  } catch {
+    return a === b
   }
 }
