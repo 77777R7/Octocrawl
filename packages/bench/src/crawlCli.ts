@@ -2,13 +2,14 @@
  * `w2l crawl <url>` — multi-page composition over the scrape atom.
  *
  * Checkpoint SQLite sits in `--task-dir` (default `.w2l/crawl-<stamp>`).
- * `--headed` only reaches BrowserLocalSubject. CI stays headless.
+ * `--resume` continues the latest task there with the options it was started
+ * with. `--headed` only reaches BrowserLocalSubject. CI stays headless.
  */
 
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CONTENTFUL_STATUS, describeEgressProxy, identityForRoute, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, defaultApiMode, describeEgressProxy, identityForRoute, localNetworkPolicy, withEnvironmentProxy, type CrawlBudget, type Task } from '@w2l/contracts'
 import { CHECKPOINT_FILENAME, CrawlOrchestrator, SqliteTaskStore } from '@w2l/runtime'
 import type { CrawlPolicy } from '@w2l/http-core'
 import { LadderRunner } from './routing/ladder.js'
@@ -109,6 +110,47 @@ function defaultTaskDir(): string {
   return resolve(`.w2l/crawl-${stamp}`)
 }
 
+/** What a crawl run uses: the flags for a new crawl, the stored task for `--resume`. */
+export interface CrawlRunOptions {
+  seedUrl: string
+  mode: CrawlArgs['mode']
+  budget: CrawlBudget
+  maxDepth: number | null
+  allowlistedDomains: readonly string[]
+}
+
+/**
+ * `--resume` runs a task with the options it was started with. A flag naming
+ * a different value is an error, never silently replaced or ignored; a task
+ * stored before its depth and hosts were kept takes those two from the flags.
+ */
+export function resumeOptions(task: Task, args: CrawlArgs): CrawlRunOptions {
+  const stored = task.crawl
+  const mode = defaultApiMode(task.mode)
+  const differ: string[] = []
+  if (args.url !== null && args.url !== task.seedUrl) differ.push(`${args.url} (the task's seed is ${task.seedUrl})`)
+  if (args.mode !== 'standard' && args.mode !== mode) differ.push(`--${args.mode} (the task runs in ${mode} mode)`)
+  if (args.maxPages !== null && args.maxPages !== task.budget.maxPages) differ.push(`--max-pages ${args.maxPages} (the task's is ${task.budget.maxPages ?? 'unbounded'})`)
+  if (args.maxDepth !== null && stored?.maxDepth !== undefined && args.maxDepth !== stored.maxDepth) differ.push(`--max-depth ${args.maxDepth} (the task's is ${stored.maxDepth ?? 'unbounded'})`)
+  if (args.allowlistedDomains.length > 0 && stored?.allowlistedDomains !== undefined && !sameHosts(args.allowlistedDomains, stored.allowlistedDomains)) {
+    differ.push(`--allowlist-hosts ${args.allowlistedDomains.join(',')} (the task's is ${stored.allowlistedDomains.join(',') || 'the seed host'})`)
+  }
+  if (differ.length > 0) throw new Error(`--resume continues a crawl with the options it was started with; these differ: ${differ.join('; ')}`)
+  return {
+    seedUrl: task.seedUrl,
+    mode,
+    budget: task.budget,
+    maxDepth: stored?.maxDepth !== undefined ? stored.maxDepth : args.maxDepth,
+    allowlistedDomains: stored?.allowlistedDomains ?? args.allowlistedDomains,
+  }
+}
+
+function sameHosts(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a.map((host) => host.toLowerCase()))
+  const right = new Set(b.map((host) => host.toLowerCase()))
+  return left.size === right.size && [...left].every((host) => right.has(host))
+}
+
 export async function latestTaskId(store: { listTasks: () => Promise<readonly { id: string }[]> }): Promise<string> {
   const tasks = await store.listTasks()
   const last = tasks[tasks.length - 1]
@@ -122,46 +164,54 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
   const store = SqliteTaskStore.open(taskDir)
 
   try {
-    let seedUrl = args.url
     let resumeFrom: string | null = null
+    let run: CrawlRunOptions | null = null
     if (args.resume) {
       resumeFrom = await latestTaskId(store)
       const task = await store.getTask(resumeFrom)
       if (task === null) throw new Error(`resume: unknown task ${resumeFrom}`)
-      seedUrl = args.url ?? task.seedUrl
-    }
-    if (seedUrl === null) throw new Error(CRAWL_USAGE)
-
-    // Local mode: outbound requests follow the operator's proxy variables.
-    const networkPolicy = withEnvironmentProxy(localNetworkPolicy(), process.env)
-    const channels = buildChannels(args.mode, { headed: args.headed, networkPolicy })
-    const policy: CrawlPolicy = {
-      mode: args.mode,
-      ...(args.allowlistedDomains.length > 0 ? { allowlistedDomains: args.allowlistedDomains } : {}),
-    }
-    const runner = new LadderRunner(channels, policy, new MemoryRoutingHistory())
-    const atom = new LadderScrapeAtom(runner)
-    const orchestrator = new CrawlOrchestrator({ store, atom })
-    const identity = identityForRoute(args.mode)
-
-    console.log(`mode        : ${args.mode}`)
-    console.log(`identity    : ${identity.userAgent}`)
-    console.log(`seed        : ${seedUrl}`)
-    console.log(`task dir    : ${taskDir}`)
-    console.log(`checkpoint  : ${taskDir}/${CHECKPOINT_FILENAME}`)
-    console.log(`headed      : ${args.headed ? 'yes (browser arm only)' : 'no (CI default)'}`)
-    if (networkPolicy.egressProxy) console.log(`proxy       : ${describeEgressProxy(networkPolicy.egressProxy)}`)
-    if (args.resume) console.log(`resume      : ${resumeFrom}`)
-    if (args.useCached) console.log('cache       : --use-cached')
-
-    try {
-      const report = await orchestrator.run({
-        seedUrl,
-        taskDir,
+      run = resumeOptions(task, args)
+    } else if (args.url !== null) {
+      run = {
+        seedUrl: args.url,
         mode: args.mode,
         budget: { maxPages: args.maxPages, maxWallMs: null, maxCostUsd: null, maxTokens: null },
         maxDepth: args.maxDepth,
         allowlistedDomains: args.allowlistedDomains,
+      }
+    }
+    if (run === null) throw new Error(CRAWL_USAGE)
+
+    // Local mode: outbound requests follow the operator's proxy variables.
+    const networkPolicy = withEnvironmentProxy(localNetworkPolicy(), process.env)
+    const channels = buildChannels(run.mode, { headed: args.headed, networkPolicy })
+    const policy: CrawlPolicy = {
+      mode: run.mode,
+      ...(run.allowlistedDomains.length > 0 ? { allowlistedDomains: run.allowlistedDomains } : {}),
+    }
+    const runner = new LadderRunner(channels, policy, new MemoryRoutingHistory())
+    const atom = new LadderScrapeAtom(runner)
+    const orchestrator = new CrawlOrchestrator({ store, atom })
+    const identity = identityForRoute(run.mode)
+
+    console.log(`mode        : ${run.mode}`)
+    console.log(`identity    : ${identity.userAgent}`)
+    console.log(`seed        : ${run.seedUrl}`)
+    console.log(`task dir    : ${taskDir}`)
+    console.log(`checkpoint  : ${taskDir}/${CHECKPOINT_FILENAME}`)
+    console.log(`headed      : ${args.headed ? 'yes (browser arm only)' : 'no (CI default)'}`)
+    if (networkPolicy.egressProxy) console.log(`proxy       : ${describeEgressProxy(networkPolicy.egressProxy)}`)
+    if (args.resume) console.log(`resume      : ${resumeFrom} (stored limits: max pages ${run.budget.maxPages ?? 'unbounded'}, max depth ${run.maxDepth ?? 'unbounded'}, hosts ${run.allowlistedDomains.join(',') || 'seed host'})`)
+    if (args.useCached) console.log('cache       : --use-cached')
+
+    try {
+      const report = await orchestrator.run({
+        seedUrl: run.seedUrl,
+        taskDir,
+        mode: run.mode,
+        budget: run.budget,
+        maxDepth: run.maxDepth,
+        allowlistedDomains: run.allowlistedDomains,
         resumeFrom,
         useCached: args.useCached,
       })

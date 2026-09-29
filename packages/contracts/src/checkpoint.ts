@@ -62,8 +62,22 @@ export interface Task {
   budget: CrawlBudget
   /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options included. */
   batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean } & PageOptions
-  /** Crawl output formats, link path filters and page options, stored so a resumed crawl keeps them. */
-  crawl?: { formats?: readonly ScrapeFormat[]; includeLinks?: boolean; includePaths?: readonly string[]; excludePaths?: readonly string[] } & PageOptions
+  /**
+   * Every crawl option but the page budget (`budget`), stored when the crawl
+   * starts so a resumed crawl runs with the options it was started with.
+   */
+  crawl?: {
+    formats?: readonly ScrapeFormat[]
+    includeLinks?: boolean
+    includePaths?: readonly string[]
+    excludePaths?: readonly string[]
+    /** Link hops from the seed; null is unbounded. Absent on a task stored before depth was kept. */
+    maxDepth?: number | null
+    /** Hosts links may lead to; empty follows the seed's host, its apex/www twin and where the seed redirected. */
+    allowlistedDomains?: readonly string[]
+    /** A resume reuses the pages this task already fetched instead of fetching them again. */
+    useCached?: boolean
+  } & PageOptions
   createdAt: string
   updatedAt: string
 }

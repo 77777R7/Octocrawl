@@ -77,6 +77,39 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.enqueue('https://fixture.test/sitemap.xml', 1).accepted).toBe(true)
     expect(frontier.pendingCount()).toBe(2)
   })
+
+  it('counts the apex/www twin and the host the seed redirected to as the seed host', () => {
+    const frontier = new Frontier({ seedUrl: 'https://example.com/' })
+    frontier.seed()
+    expect(frontier.enqueue('https://www.example.com/a', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://docs.example.com/a', 1).reason).toBe('host_denied')
+    expect(frontier.enqueue('https://example.org/a', 1).reason).toBe('host_denied')
+    frontier.followSeedRedirect('https://www.example.org/home')
+    expect(frontier.enqueue('https://www.example.org/a', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://example.org/a', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://cdn.example.org/a', 1).reason).toBe('host_denied')
+
+    const www = new Frontier({ seedUrl: 'https://www.example.com/' })
+    www.seed()
+    expect(www.enqueue('https://example.com/b', 1).accepted).toBe(true)
+
+    // An explicit allowlist stays the only authority.
+    const listed = new Frontier({ seedUrl: 'https://example.com/', allowlistedDomains: ['example.com'] })
+    listed.seed()
+    listed.followSeedRedirect('https://www.example.com/')
+    expect(listed.enqueue('https://www.example.com/a', 1).reason).toBe('host_denied')
+  })
+
+  it('does not enqueue image, font, style, script, media or program links; documents and the seed stay', () => {
+    const frontier = seeded()
+    for (const asset of ['/logo.PNG', '/img/photo.jpeg?w=200', '/fonts/a.woff2', '/site.css', '/app.js', '/clip.mp4', '/setup.exe']) {
+      expect(frontier.enqueue(`https://fixture.test${asset}`, 1)).toMatchObject({ accepted: false, reason: 'asset_denied' })
+    }
+    for (const page of ['/report.pdf', '/data.csv', '/sheet.xlsx', '/api/data.json', '/archive.zip', '/feed.xml', '/page.html', '/docs/v1.2/']) {
+      expect(frontier.enqueue(`https://fixture.test${page}`, 1).accepted).toBe(true)
+    }
+    expect(new Frontier({ seedUrl: 'https://fixture.test/logo.png' }).seed().accepted).toBe(true)
+  })
 })
 
 describe('Frontier dequeue host limits', () => {
@@ -90,6 +123,8 @@ describe('Frontier dequeue host limits', () => {
     const delay = DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     expect(frontier.dequeue(t0).item?.canonicalUrl).toBe(SEED)
     expect(frontier.dequeue(t0).item).toBeNull()
+    // The seed's answer: this host's robots.txt sets no Crawl-delay.
+    frontier.setCrawlDelay('fixture.test', null)
     expect(frontier.dequeue(t0 + delay).item?.canonicalUrl).toBe('https://fixture.test/a')
     expect(frontier.inFlightCount('fixture.test')).toBe(2)
     expect(frontier.dequeue(t0 + delay).item).toBeNull()
@@ -136,6 +171,34 @@ describe('Frontier dequeue host limits', () => {
     expect(frontier.hostDelayMs('fixture.test')).toBe(2500)
     expect(frontier.dequeue(t0 + 250).item).toBeNull()
     expect(frontier.dequeue(t0 + 2500).item?.canonicalUrl).toBe('https://fixture.test/a')
+  })
+
+  it('starts one page at a time on a host until a page there reports its robots.txt Crawl-delay', () => {
+    const frontier = seeded()
+    frontier.enqueue('https://fixture.test/a', 1)
+    frontier.enqueue('https://fixture.test/b', 1)
+    const t0 = 1_000
+    expect(frontier.dequeue(t0).item?.canonicalUrl).toBe(SEED)
+    expect(frontier.dequeue(t0 + 250).item).toBeNull()
+    frontier.setCrawlDelay('fixture.test', 1_000)
+    expect(frontier.dequeue(t0 + 250).item).toBeNull()
+    expect(frontier.dequeue(t0 + 1_000).item?.canonicalUrl).toBe('https://fixture.test/a')
+    expect(frontier.crawlDelayMs('fixture.test')).toBe(1_000)
+    expect(frontier.crawlDelayMs('other.test')).toBeNull()
+  })
+
+  it('drops pending pages its admit test refuses without starting them or delaying the host', () => {
+    const frontier = seeded({ seedUrl: SEED, perHostConcurrency: 1, perHostMinDelayMs: 1_000 })
+    frontier.enqueue('https://fixture.test/a', 1)
+    frontier.enqueue('https://fixture.test/b', 1)
+    const admit = (item: { canonicalUrl: string }) => item.canonicalUrl !== 'https://fixture.test/a'
+    const t0 = 1_000
+    expect(frontier.dequeue(t0, admit)).toMatchObject({ item: { canonicalUrl: SEED }, refused: 0, previousStartAtMs: null })
+    frontier.release(SEED)
+    frontier.setCrawlDelay('fixture.test', null)
+    expect(frontier.dequeue(t0 + 1, admit)).toEqual({ item: null, nextReadyAtMs: t0 + 1_000, refused: 1, previousStartAtMs: null })
+    expect(frontier.pendingCount()).toBe(1)
+    expect(frontier.dequeue(t0 + 1_000, admit)).toMatchObject({ item: { canonicalUrl: 'https://fixture.test/b' }, previousStartAtMs: t0 })
   })
 
   it('lets a second host proceed while the first is at concurrency', () => {
