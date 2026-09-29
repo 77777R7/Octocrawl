@@ -18,6 +18,7 @@ export { routePage, pageSignalsFor, selectCardList, selectList, selectTable, sel
 export type { RouteDecision } from './route.js'
 export { htmlToMarkdown } from './markdown.js'
 export type { MarkdownOptions } from './markdown.js'
+export { EXTRACTOR_VERSION } from './version.js'
 export { collectLinks } from './links.js'
 export { collectLabelledValues } from './labels.js'
 export { amazonAsin, inferAmazonCurrency, isAmazonProductPage, collectAmazonProductFacts, selectAmazonProduct } from './amazon.js'

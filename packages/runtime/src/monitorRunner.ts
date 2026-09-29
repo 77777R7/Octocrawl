@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { DOCUMENT_RULE_VERSION, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, monitorIdentity, type ExecutionContext, type MonitorRevision, type ScrapeOutcome, type TransportRepresentation } from '@w2l/contracts'
 import { createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { MonitorStore } from './monitorStore.js'
 import { assessFirecrawlIntroduction } from './documentAssessment.js'
 import { assessConfiguredDocument } from './configuredAssessment.js'
@@ -74,7 +75,7 @@ export async function runConfiguredMonitor(store: MonitorStore, revision: Monito
         if (revision.config?.conditionalRequests && !outcome.result.retryAt) {
           const e = outcome.result.evidence
           transportChange = {key, representation: e.httpStatus === 200 && cacheable(outcome) && outcome.result.markdown !== null
-            ? {key, url: revision.url, etag: e.etag ?? null, lastModified: e.lastModified ?? null, outcome, bodySha256: hash(outcome.result.markdown), storedAt: Date.now()} : null}
+            ? {key, url: revision.url, etag: e.etag ?? null, lastModified: e.lastModified ?? null, outcome, bodySha256: hash(outcome.result.markdown), extractorVersion: EXTRACTOR_VERSION, storedAt: Date.now()} : null}
         }
       }
     } catch (caught) { error = caught instanceof Error ? caught.message : String(caught) }
@@ -88,9 +89,11 @@ export async function runConfiguredMonitor(store: MonitorStore, revision: Monito
     const observationId = crypto.randomUUID(), assessmentId = crypto.randomUUID()
     const result = error ? null : validationOutcome?.result ?? null
     const assessment = revision.config ? assessConfiguredDocument(result, revision) : assessFirecrawlIntroduction(result)
+    // After a 304 the assessed Markdown is the cached one: record the extractor that produced it, not this build's.
+    const extractorVersion = result?.markdown == null ? null : reusedFrom === undefined ? EXTRACTOR_VERSION : usable?.extractorVersion ?? null
     throwIfExecutionStopped(scope)
     store.assertExecution(run)
-    store.recordObservation({ id: observationId, runId: run.id, attemptId: run.attemptId!, observedAt: Date.now(), clientWallMs: performance.now() - started, markdownSha256: result?.markdown == null ? null : hash(result.markdown), transport: outcome?.result ? { etag: outcome.result.evidence.etag ?? null, lastModified: outcome.result.evidence.lastModified ?? null, representationKey: key, reusedFrom, responseStatus: outcome.result.evidence.httpStatus } : null, outcome, error }, assessmentId, assessment, transportChange)
+    store.recordObservation({ id: observationId, runId: run.id, attemptId: run.attemptId!, observedAt: Date.now(), clientWallMs: performance.now() - started, markdownSha256: result?.markdown == null ? null : hash(result.markdown), rawBodySha256: result?.evidence.rawBodySha256 ?? null, extractorVersion, transport: outcome?.result ? { etag: outcome.result.evidence.etag ?? null, lastModified: outcome.result.evidence.lastModified ?? null, representationKey: key, reusedFrom, responseStatus: outcome.result.evidence.httpStatus } : null, outcome, error }, assessmentId, assessment, transportChange)
     if (outcome?.result.retryAt && outcome.result.retryAt > Date.now()) store.deferRun(run, Math.ceil(outcome.result.retryAt))
     else store.commit(run.id, observationId, assessmentId, assessment)
     return store.view(revision.monitorId, Date.now())

@@ -16,6 +16,8 @@ The tool sequence is `preview_monitor` → `create_monitor` → `create_delivery
 
 MCP creation starts **paused**, giving you time to register the destination. On resume, a run becomes due. The first valid observation initializes a baseline and can create an event. Compare its `eventId` with the delivery record and the receiver's stored receipt. A sent event, a `delivered` record, and one accepted receiver receipt are separate checks. A later unchanged page may produce no new change event.
 
+An event's `reason` says where a change came from. `source_changed` means the fetched page differed from the one behind the baseline, or could not be compared with it. After a W2L upgrade that reads the same page differently, a run can show `change: changed` with `changeReason: extraction_reprocessed` and a new baseline version, but no event and no delivery: the page itself did not change.
+
 `run_monitor` returns a durable `runId` immediately. Use `get_monitor_run` to inspect it later; disconnecting Codex does not cancel the queued run. `pause_monitor` stops future scheduling. Local service and receiver status can be checked with:
 
 ```bash
