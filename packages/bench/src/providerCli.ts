@@ -193,7 +193,7 @@ export async function runProvider(
 
     if (result.markdown !== null) {
       log('')
-      log('--- extracted ---')
+      log(CONTENTFUL_STATUS.has(result.status) ? '--- extracted ---' : '--- error page (evidence, not content) ---')
       log(result.markdown.slice(0, 2000))
     }
     // Non-contentful outcomes — including identity_compromised — exit

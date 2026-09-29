@@ -281,9 +281,11 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   })
 
   app.onError((err, c) => {
-    if (err instanceof RequestError) return c.json({ error: err.message }, 400)
-    if (err instanceof SyntaxError) return c.json({ error: 'body must be JSON' }, 400)
-    return c.json({ error: err instanceof Error ? err.message : 'internal error' }, 500)
+    // Firecrawl clients read failures from the { success: false, error } envelope.
+    const body = (error: string) => (c.req.path.startsWith('/fc/') ? { success: false, error } : { error })
+    if (err instanceof RequestError) return c.json(body(err.message), 400)
+    if (err instanceof SyntaxError) return c.json(body('body must be JSON'), 400)
+    return c.json(body(err instanceof Error ? err.message : 'internal error'), 500)
   })
 
   return app

@@ -1,6 +1,10 @@
-export { W2L } from './client.js'
-export type { W2LOptions, RequestOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
+export { W2L, WaitTimeoutError } from './client.js'
+export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
 export type {
+  BatchStartRequest,
+  BatchStatusResponse,
+  CompactScrapeResponse,
+  ScrapeResponse,
   CrawlAccepted,
   DeliveryAttempt,
   DeliveryDestination,

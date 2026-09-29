@@ -1,225 +1,188 @@
 # W2L Roadmap
 
-This is the current product roadmap. It reorganizes the older Phase 1/2/3 plan into three product Sections without rewriting historical documents.
+Version 2, updated 2026-09-29. Weeks 1–16 run from 2026-09-28 to 2027-01-17. This version replaces the 13-week plan of 2026-09-28 and adds the Firecrawl parity audit of 2026-09-29. The Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md) with its gates and evidence boundaries.
 
-## Current Position
+## Current phase: P0 validation and P1 core correctness, in parallel
 
-**Section B core reliability validated → Section C delivery and onboarding**
+**This week (week 1):** P1 items 1–5 and 7 fixed and checked on real sites, items 6, 8 and 9 in review; next, item 10 and the rest of the audit's first 12 URLs (L01–L12).
 
-Source freeze: `99894bd636ecafd254a7c7bc79d26e9a97fa9199`, merged by [PR #50](https://github.com/77777R7/w2l/pull/50) into `main` at `1c1481722ade26b717d18a34fa4b46362f53acf8` and published as source prerelease [`v0.4.0-rc.1`](https://github.com/77777R7/w2l/releases/tag/v0.4.0-rc.1), reviewed 2026-09-22. No npm package or permanent hosted deployment is implied. Section A remains a conditional developer alpha.
+P0 is the user track (weeks 1–2) and P1 the engine track (weeks 1–6). P1 does not wait for P0: when the seed user's URLs point to a different P1 item than the order below, their URLs decide.
 
-Current truth:
+## Direction
 
-- P0 foundation is implemented and merged.
-- P1 composition closeout is implemented and merged.
-- Local Reliability Gate is implemented and continuously checked in GitHub Actions.
-- L0–L2 internal quality benchmark is implemented.
-- Phase 3 page-quality comparison has valid Docker-runner evidence. W2L leads this fixed synthetic suite on verified completion and false-success rate; Firecrawl leads raw P95 wall time.
-- Cost per verified page is unavailable because the self-hosted comparators have no comparable invoice model.
-- Recovery comparison is unsupported for the page-only Firecrawl/Crawl4AI adapters; W2L has URL-level SQLite recovery.
-- A4 diagnostic expansion covers 20 tasks / 11 domains. Pair-level A5 quality on that slice is AI 11/11 and product 9/9 consistent after scoring calibration; run-level correct-complete is AI 22/22 and product 18/18.
-- The A4/B2 Amazon correctness slice at source SHA `04ce581` passed the fixed ten-product, three-round gate: 20/20 later-round context-comparable captures at each 1/2/4 concurrency setting, signed core-field accuracy and visible-field coverage both 105/105, and zero reviewed recommendation intrusion. It was merged by [PR #52](https://github.com/77777R7/w2l/pull/52) into `main@8ff8863`; Amazon remains beta until the 100 holdout subject gate and 1000-page reliability gate both pass. [Evidence](docs/evidence/amazon-adapter-integration-2026-09-23.md).
-- The [original 100-unseen-product Amazon holdout](docs/evidence/amazon-holdout-100-2026-09-23.md) at clean source `991097f` remains a recorded 99/100 subject failure. The [new local MCP candidate rerun](docs/evidence/dual-flow-mvp-local-100-2026-09-23.md) at clean source `8464457` returned 100/100 exact selected subjects and complete JSON; machine-assisted raw-page field review found 100% emitted accuracy and 100% visible coverage for five scored fields, with 12 pages lacking a visible selected price/currency/seller. Howard's review of **this** run and the authenticated hosted path are pending, so the 100-product gate is **not yet signed off**. Amazon remains beta; 1000-page reliability has not run.
-- A6 scale covers 100 pages / 10 domains / two runs. Outcome consistency 100/100; normalized-hash 99/100. Labeled every-fifth-task holdout is not an independent holdout.
-- Interrupt/resume lost 0 checkpointed URLs. The killed attempt was previously left `running`; resume now marks it `interrupted`.
-- Clean-clone install completed `ai-mdn-abortcontroller` on the author machine. Second-developer install is a recorded deferred exception, not a pass.
-- External billed USD is unmeasured for the recorded local runs. Resource meters are separate; missing cost must not be invented as zero. A vendor-evidenced zero is a legitimate measurement.
-- A6 is a scoped developer alpha. Unconditional pass still requires a second human install.
-- Anti-blocking reliability slice: Retry-After HTTP-date parsing, bounded 503 backoff/jitter, and same-host 429/503 cooldown are implemented. This is compliant request discipline, not stealth or CAPTCHA bypass.
-- Gate 2 execution checks passed: explicit captureMode, cancellation/deadline propagation, uncapped Retry-After, persisted Monitor origin cooldown, actual process-crash recovery and concurrent claim/fencing.
-- Generic B1/B2 public-document configuration, typed fields, rule/schema attribution, A/B/A/B changes, real HTTP 304 with cached-body reassessment and multi-Monitor isolation have controlled integration evidence. Cross-date endurance, backup/restore and broader completeness remain open.
-- B3 managed-session APIs exist; Existing Chrome/CDP and B4 Recipe are library-level implementations without dedicated integration evidence in this baseline.
-- C1's delivery engineering slice passed: persistent worker/leases, retry/dead-letter, real HTTPS, stable event IDs, receiver deduplication and restart recovery. Long-term use by a real downstream customer is unverified.
-- Gate 4 includes Crawl/Monitor/Delivery SDKs, examples, installation docs and an agent clean-install record. Independent human acceptance is pending; Gate 5 external pilots have not started.
-- C2 Monitor/Delivery MCP and the local public-document → independent HTTPS receiver first-use flow are implemented. A candidate dual-flow local entry now adds fixed-schema Amazon.sg product JSON and persistent batches; its final-path correctness and independent-use gates remain open. C3 has a unified single-instance process and authenticated Streamable HTTP implementation, but Render hosting, WorkOS browser OAuth, real Codex client connection and hosted restart acceptance remain open; [dual-flow guide](docs/dual-flow-first-use.md).
-- B3/B4 external validation is blocked on an authorized backend/account and a second reusable workflow; see `research/section-b-real-adoption-blockers.md`.
-- Hosted arbitrary-URL browser execution remains gated on a separate egress/security review.
+W2L turns a list of URLs into a table where every row can be traced to its source: *web data you can cite*. It runs locally. When a site blocks automated access, the user's own browser is the fallback, not stealth.
 
-## Section Map
+The first audience is researchers: graduate students, academic and policy researchers, data journalists and think-tank analysts who collect figures from public reports and web pages and must show where each number came from. Commerce and SaaS competitive intelligence is the second audience, after the first 90 days. Sales-lead scraping is out of scope: it values volume over evidence and carries personal-data risk.
 
-```text
-Section A: Reliable data collection
-  A1 Core collection and local reliability       accepted
-  A2 L0–L2 internal quality benchmark             accepted
-  A3 External comparison evidence                 accepted for page quality
-  A4 Real-task evaluation and diagnosis            accepted as diagnostic evidence
-  A5 Quality, efficiency, and cost fixes           quality closed on 20-task slice; billed USD unknown
-  A6 Expanded validation and base-product gate    conditional alpha; second-developer install deferred
+One user → one workflow → one payment. Work off that path goes to the [Paused](#paused) table.
 
-Section B: Continuous updates and authorized access
-  B1 Stateful recurring tasks and data versions          in_progress (core reliability validated)
-  B2 Trusted change detection and incremental updates   in_progress (typed changes/cache validated)
-  B3 Chrome/user-authorized session reuse                in_progress (API + CDP library)
-  B4 Narrow authorized-backend automation                in_progress (Recipe library)
+Success at week 16 (2027-01-17): three paying users or ten weekly active users. If neither happens, change the audience before adding features.
 
-Section C: Workflow productization and delivery
-  C1 Reliable downstream data delivery                   in_progress (engineering slice validated)
-  C2 MCP integrations, n8n and a narrow task UI           in_progress (MCP local flow; n8n/UI open)
-  C3 Self-hosting, remote URL MCP and optional hosting    in_progress (implementation; hosted acceptance open)
-  C4 Paid validation and limited scenario expansion      not_started
-```
+## How progress is measured
 
-Section B has controlled B1+B2, B3 managed-session, B3 CDP, and B4 restricted-Recipe slices. None is a universal production claim; B3/B4 remain bounded prototypes.
+- **Core features solid.** The parity audit marks 29 core features ([core-features.csv](research/parity/core-features.csv)). A feature is solid when it works, has tests, passes its real-site test and behaves as documented. Three were solid at the audit. P1 makes the 17 in milestone M1 solid, plus basic proxy through local-mode proxy support: 21 of 29. P2 adds `map`, `maxAge`, the published JS SDK and the Python client: 25 of 29. The other four are search, which is paused.
+- **Real-site tests passed.** The set in [research/parity/](research/parity/), including sites where the correct result is an honest `blocked`.
+- **Not Firecrawl coverage.** The comparison is frozen at firecrawl-js v4.42.0 (snapshot 2026-09-29). Newer Firecrawl releases are not tracked, and the rest of the 312 audited features is not a target.
+- Every real-site result is recorded with its command and source commit. A reported gap is first reproduced by a failing test: the audit's first pass was corrected in 90 places on review.
 
-Section B technical design: `docs/roadmap/section-b-technical-design-v1.md`.
-B/C handoff: `docs/roadmap/section-b-handoff.md`.
-Stage review: `docs/roadmap/stage-review-2026-09-22.md`.
-Section C complete plan: `docs/roadmap/section-c-delivery.md`.
+## Phases
 
-### Gate Status
+| Phase | Weeks | Goal | Exit |
+| --- | --- | --- | --- |
+| P0 · Validation (user track) | 1–2 | Real URLs and real conversations replace assumptions | Status distribution of the seed user's URLs; 8 interviews; repository and docs corrected |
+| P1 · Core correctness (engine track) | 1–6 | Core features give correct output on real sites and never report false success | First 12 real-site URLs pass; 21 of the core 29 solid (M1's 17, the 3 already solid, basic proxy); seed-user URLs ≥70% success, the rest with honest reasons |
+| P2 · Breadth for researchers | 7–10 | Install, formats, Python client, guides | 25 of the core 29 solid; the seed user runs a regression on W2L data; a non-author installs W2L unaided |
+| P3 · Browser lane and Pro | 11–14 | A lane for blocked sites and something to sell | Published success rates of the user-browser lane against HTTP; 3 early users used queue mode |
+| P4 · Paid launch | 15–16 | First payment | 3 paying or 10 weekly active users by week 16 |
 
-| Gate | Current status |
+Weeks are a guide. A phase ends when its exit condition is met, not when its weeks run out.
+
+### P0 · Validation (weeks 1–2)
+
+- [ ] **Seed-user URLs.** Freeze [research/coos-pilot/coos-manifest.v1.json](research/coos-pilot/coos-manifest.v1.json) (72 URLs) after asking about the two suspect links (the CyrusOne location source reuses a press-release URL; the Equinix green finance framework URL looks truncated). Run the current build (`npm run api`, then `node research/coos-pilot/run-baseline.mjs`), report success / blocked / timeout / incomplete shares per site, classify each non-success by the capability that would fix it, and run the value check (`research/coos-pilot/check-observations.py`). These URLs become the second batch of the real-site test set. Failed URLs are not replaced after freezing.
+- [ ] **Interviews.** At least 8, of them at least 6 researchers. Record how each gets data today, the time it takes, sites that blocked them and their reaction to the price. At least 3 join the founding-member list or offer to prepay.
+- [ ] **Package names.** Register the npm organisation `@w2l` and the PyPI name `w2l`. The unscoped npm name `w2l` belongs to someone else.
+- [ ] **Repository cleanup.** The root keeps README, LICENSE, CONTRIBUTING, CHANGELOG and configuration only; `q2.py`, `q3.py` and `generate_report*.py` move to `research/`. The audit's feature matrix and plan are committed to `research/parity/`. Render and WorkOS material leaves the docs (the WorkOS code in `packages/mcp/src/host.ts` stays, marked experimental). The README stops describing Amazon work as living on a side branch. Live-network tests run under `npm run test:live`.
+- [ ] **Docs corrections.** The Codex link points to `developers.openai.com/codex/extend/mcp`. The Connect MCP page installs the service before giving the client command. Codex, Claude Code, Cursor and Claude Desktop configurations are each tested. A port table is added. The README calls `/fc` partially compatible until P1 item 5 is fixed.
+- [x] **ROADMAP and AGENTS.md.** Current phase set to P0 and P1; the Paused table names features precisely, so agents can decide instead of refusing all Firecrawl-related work.
+
+**Decision rule:** if the seed user's sources succeed at 70% or more over HTTP plus the local browser, the extension stays in P3. Below 50%, P3's extension queue mode moves to week 7, and P2's `map` and cache move later.
+
+### P1 · Core correctness (weeks 1–6)
+
+Order: first what silently returns wrong data, then what loses data, then missing options. An item is accepted when its real-site test passes, recorded with command and commit.
+
+| # | Item | Accepted when |
+| --- | --- | --- |
+| 1 | False success: JSON extraction reports `complete` while a required field is missing | A missing required field gives `status: incomplete` with a reason per missing field; regression test added |
+| 2 | A non-200 response becomes an empty failure | The fetched content is returned with `httpStatus`; status is judged from the content; a 403 block page is `blocked` with evidence |
+| 3 | Markdown: adjacent `div`s glued into one word; ordered-list numbers lost; code blocks and tables inside list items dropped | Golden-file tests from books.toscrape.com, scrapethissite.com and a Wikipedia table page |
+| 4 | Relative links are not resolved | Every entry in `links` is an absolute URL resolved against `finalUrl` |
+| 5 | Batch drops `links`; `formats` is capped at 3; `/fc` silently drops `formats` | Batch and scrape outputs have the same shape; `formats` has no cap, or an explicit error past it; `/fc` rejects unsupported parameters explicitly and never drops them silently |
+| 6 | `formats`, `onlyMainContent`, `timeout` / `waitFor` | Behaviour matches the docs; a timeout returns `partial` with the content fetched so far |
+| 7 | Crawl: output format selection, `includePaths` / `excludePaths` | Path filters are tested; format options match scrape |
+| 8 | SDK wait helpers; one error-code set | Error-code table in the docs reference |
+| 9 | Local-mode proxy: `HTTPS_PROXY` / `NO_PROXY` for every lane; hosted mode stays direct | A site reachable only through the operator's proxy passes its real-site test; proxy use is recorded in the result |
+| 10 | The rest of M1 in [plan-to-70.md](research/parity/plan-to-70.md): page metadata and the page `<title>`, crawl start and resume, live crawl status, API key comparison, crawl-delay | Each feature's real-site check in [feature-matrix.csv](research/parity/feature-matrix.csv) passes |
+
+Throughout P1:
+
+- **Real-site test set.** About 40 sites in [research/parity/sites.md](research/parity/sites.md). The first 12 URLs are the audit's first live batch in [real-site-test-set.md](research/parity/real-site-test-set.md); all of them pass, and blocked sites report `blocked` honestly. The seed user's URLs are the second batch.
+- **Evidence Record correctness.** `status` / `reason`, `httpStatus`, `finalUrl`, `lane` and the hashes come out the same way in every lane ([Evidence Record](#evidence-record)). This is part of P1, not a new feature.
+- **One-line install.** `npx @w2l/cli@latest scrape <url>` gives a result within 5 minutes on clean macOS and Windows.
+- **Week 6 calibration.** Record the actual P1 time against the audit's 34-working-day estimate for its M1 and rescale P2–P4 by that ratio.
+
+**Exit:** the first 12 URLs all pass; 21 of the core 29 are solid (the 17 in M1, the 3 solid at the audit, and basic proxy); at least 70% of the seed user's URLs succeed and the rest report their reason honestly.
+
+### P2 · Breadth for researchers (weeks 7–10)
+
+The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2 opens with file download and PDF text: PDFs are the largest source type among the seed user's failures ([preliminary baseline](research/coos-pilot/runs/2026-09-29-preliminary-baseline.md)).
+
+| Item | Accepted when |
 | --- | --- |
-| Gate 2 · Sustainable execution | Listed execution-contract and reliability engineering checks passed |
-| Gate 3 · Deliverable events | Durable delivery, real HTTPS, retry, deduplication and restart recovery passed |
-| Gate 4 · Independent onboarding | SDK, docs, examples and agent clean install complete; non-author human acceptance pending |
-| Gate 5 · Pilot readiness | Two external users, two weeks of operation, repeat use and a real downstream scenario not yet verified |
+| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified |
+| `html` / `rawHtml` / `screenshot` formats | Identical in scrape, batch and crawl |
+| Sitemap mode, subdomains, `map` endpoint | URL list from `sitemap.xml` and home-page links, with include / exclude patterns |
+| Tables → CSV | One CSV per `<table>` with `tableIndex`, caption and source URL; 10 real table pages checked with no misaligned cells |
+| `maxAge` cache | A cache hit says so and gives the original fetch time |
+| Custom headers, mobile viewport | Recorded in the Evidence Record |
+| Public npm packages and a Python client | `@w2l/cli`, `@w2l/sdk` and `@w2l/mcp` published; `pip install w2l`; `w2l.batch(urls).to_pandas()` returns a DataFrame with evidence columns |
+| Cross-platform service | `w2l serve` stays up on Windows |
+| Batch reliability | 1,000 URLs over 20 domains, `kill -9` mid-run, then resume: 0 lost, 0 duplicated |
+| Throughput benchmark | HTTP lane, 32 concurrent across origins: ≥500 pages/min, p50 <800 ms; browser lane, 8 contexts: ≥60 pages/min, p95 <8 s; results in `docs/benchmarks/` |
+| Two guides | "URL list → CSV with evidence" (data-centre sources as the example) and "Citing web data in a paper" |
 
-Evidence and boundaries: [Gate 2–4 acceptance](docs/roadmap/gate-2-4-acceptance.md).
-Next priority: the [dual-flow MVP gates](docs/roadmap/dual-flow-mvp-gates.md) lock public-document Monitor/Delivery and Amazon.sg product JSON/batches as simultaneous first-release promises. The 100-product subject gate, pre-registered 1000-page reliability gate, one authenticated HTTPS MCP URL for both flows, hosted isolation/egress/resource checks, and non-author independent completion precede broader external trial or another RC. Connection, task completion, event delivery, and continued monitoring need separate acceptance. C2 n8n/UI and Gate 5 adoption remain open; the roadmap remains A → B → C.
+**Exit:** 25 of the core 29 are solid; the seed user runs a regression on data W2L produced; a non-author installs W2L on a clean machine and completes a first batch unaided.
 
-## Section A
+### P3 · Browser lane and Pro (weeks 11–14)
 
-### A1 · Core Collection And Local Reliability
-
-**Goal:** deliver stable Markdown/JSON, traceable failure, checkpointed crawl execution, explicit cost/evidence, and safe local resource cleanup.
-
-**Status:** accepted through the merged P0/P1 work and Phase 1 Local Reliability Gate.
-
-**Evidence:** PRs #14–#19, current CI workflow, SQLite task/attempt/step runtime, browser and robots regression tests.
-
-**Not included:** universal anti-bot bypass, stealth engine, proxy pool, public arbitrary-URL hosting.
-
-### A2 · L0–L2 Internal Quality Benchmark
-
-**Goal:** measure identity/policy integrity (L0), HTTP quality (L1), and browser escalation quality (L2) on a fixed, reproducible fixture suite.
-
-**Status:** accepted as an internal regression instrument.
-
-**Metrics:** verified completion, false-success rate, P95 wall time, escalation count, cost observability, and tiered quality output.
-
-**Boundary:** this is not a real-web coverage claim.
-
-### A3 · External Comparison Evidence
-
-**Goal:** compare W2L against fixed self-hosted comparator configurations with raw evidence and explicit limits.
-
-**Status:** page-quality comparison completed. W2L led the fixed synthetic suite on verified completion and false-success rate; Firecrawl led raw P95 latency.
-
-**Unfinished metrics:** cost per verified page and equivalent recovery correctness.
-
-**Evidence:** `docs/benchmark-gate.md`, GitHub Actions run artifacts, PRs #21–#30.
-
-### A4 · Real-Task Evaluation And Diagnosis
-
-**Goal:** prove that W2L can repeatedly deliver field-level data for real, permitted sources, not only synthetic fixtures.
-
-**Status:** diagnostic expansion accepted as evidence. A separate fixed ten-Amazon-product field gate passed with Howard's signed raw-page review on the isolated integration branch; it is not a general field-accuracy claim.
-
-**First task families:**
-
-- AI knowledge: official documentation with title, source URL, main content, headings/tables where present, timestamp, content hash, and missing-field reasons.
-- Product information: official product/pricing pages with product name, specification/attributes, price where present, source URL, subject-vs-recommended distinction, update time, conflicts, and missing reasons.
-
-**Current slice:** twenty tasks, forty runs, two repeats per task, eighteen holdout runs. Current slice is diagnostic evidence, not Phase A completion.
-
-**Acceptance:**
-
-- Two real task families repeat successfully.
-- Each family has field-level assertions and explicit unknowns.
-- Holdout sources are not used to tune extraction.
-- Outcomes distinguish `correct_complete`, `partial_missing_fields`, `false_success`, `reasonable_rejection`, `retryable_failure`, and `non_retryable_failure`.
-- Repeated runs record content hash consistency.
-- Wall time, tokens, request count, lane, evidence, artifacts, and cost uncertainty are preserved.
-- At least one task feeds a real research/data workflow.
-
-### A5 · Quality, Efficiency, And Cost Fixes
-
-**Entry condition:** A4 produces a trustworthy failure taxonomy and field-level diagnosis.
-
-**Status:** quality on the 20-task slice is closed at pair level. Repeat scoring now counts task pairs, not r1-null plus r2. Billed USD remains unknown.
-
-**Focus:** reusable extraction, subject/product identity, tables, dynamic readiness, unnecessary browser escalations, retry policy, and reportable resource cost. Every fix needs before/after evidence and must not improve scores by weakening assertions.
-
-### A6 · Expanded Validation And Base-Product Gate
-
-**Entry condition:** A4/A5 stop finding broad correctness failures.
-
-**Scope:** 100–200 permitted pages across 10–20 domains, development vs holdout separation, repeat runs, interruption/recovery checks, installation and first-task validation by another developer, and support-boundary documentation.
-
-**Status:** conditional developer alpha. Scale and recovery evidence exist, including a fresh recovery run that marks the killed attempt `interrupted`. Second-developer install is deferred. Quality/holdout evidence and the unverified human-time record also need calibration; see the current stage review. Billed USD is unknown, not zero.
-
-**Exit:** a self-hosted developer alpha with a clear supported scope. It is not a claim of universal web success or public hosted readiness. `accepted_with_unknown_external_usd` from PR #39 is evidence of recorded files, not this exit.
-
-## Section B
-
-Section B combines the future differentiators around one customer task rather than creating four separate products.
-
-### B1 · Stateful Recurring Tasks And Versions
-
-Track stable object identity, extraction-rule version, last valid result, last check, last success, and history. A failed refresh must not overwrite valid data.
-
-**Status:** in_progress. Generic Monitor configuration, cancellation/deadlines, durable run claims, fencing and actual crash recovery passed the scoped Gate 2 checks. Cross-date operation, managed deployment and backup/restore remain open.
-
-### B2 · Trusted Change Detection And Incremental Updates
-
-Distinguish `changed`, `unchanged`, `cannot_verify`, and `stale`. Compare target fields/content after quality validation. Do not promise a percentage cost reduction before measuring it.
-
-**Status:** in_progress. Typed fields, rule/schema attribution, controlled A/B/A/B changes, conditional HTTP/cache-body validation and multi-Monitor isolation passed. The [signed ten-Amazon-product subject/field gate](docs/evidence/amazon-adapter-integration-2026-09-23.md) adds a real-site correctness slice. The original [100-unseen-product holdout](docs/evidence/amazon-holdout-100-2026-09-23.md) failed at 99/100 exact subjects; a [later clean local MCP rerun](docs/evidence/dual-flow-mvp-local-100-2026-09-23.md) reached 100/100 with machine-assisted field checks, pending Howard's new raw-page review and final hosted-path confirmation. Broader list completeness/deletion semantics, a signed 100-product gate, 1000-page reliability and real-world efficiency measurements remain open.
-
-### B3 · Authorized Session Reuse And Handoff
-
-Reuse user-authorized sessions with isolation, expiry detection, revocation, and human handoff. Do not promise permanent login or automatic CAPTCHA defeat.
-
-**Status:** in_progress. Managed-session API and CDP library exist; verified login/handoff, shared control path and real browser lifecycle evidence remain open.
-
-### B4 · Narrow Authorized-Backend Automation
-
-Support a small number of repeatable, authorized workflows only after evidence shows multiple customers share the same backend and data shape.
-
-**Status:** in_progress. Recipe library exists; product entry, dedicated execution tests and an authorized backend pilot remain open.
-
-## Section C
-
-### C1 · Reliable Data Delivery
-
-**Status:** in_progress. Persistent HTTPS Webhook delivery, leases, retry/dead-letter and an idempotent receiver are implemented and verified. Actual customer consumption over time remains unverified. Keep the existing API/SDK as the business contract.
-
-### C2 · MCP Integrations, n8n And Narrow Task UI
-
-**Status:** in_progress. Monitor/Delivery MCP tools and the local conversational source → sample → paused task → HTTPS delivery → result/failure flow are implemented over REST/SDK and stored task state. n8n and a narrow task UI remain planned; they share the same contract.
-
-### C3 · Self-Hosted And Optional Hosted Delivery
-
-**Status:** in_progress. Installation docs, source packaging and agent clean-install evidence exist. A unified API/scheduler/delivery-worker process and restricted authenticated Streamable HTTP MCP are implemented and tested locally. Permanent Render deployment, WorkOS browser login, real Codex connection and hosted restart/continuity acceptance remain open. The wider public-hosting gates for arbitrary sources are still separate.
-
-### C4 · Paid Validation And Limited Expansion
-
-Validate repeat use and willingness to pay before adding vertical connectors. Distinguish fixed monthly hosting value from usage pricing. Do not preselect SEO, commerce, or another branch before real repeated tasks identify it.
-
-## Historical Mapping
-
-The previous phase numbers remain valid historical references:
-
-| Historical item | Current roadmap location |
+| Item | Accepted when |
 | --- | --- |
-| Phase 1 Local Reliability Gate | A1, with the gate accepted in CI |
-| Phase 2 L0–L2 benchmark | A2 |
-| Phase 3 external Benchmark Gate | A3 |
-| Phase 4 real-task validation | A4 |
-| Future real-quality and efficiency work | A5 |
-| 100–200 page/base-product validation | A6 |
+| Extension single-page capture (free) | Current tab → Markdown / tables with an Evidence Record, saved locally or sent to the local service |
+| Queue mode (Pro) | Takes a URL queue from the local service, opens each URL in a background tab, waits for load and returns the DOM; pauses and notifies the user at a login or verification page |
+| Local bridge security | WebSocket on `127.0.0.1` only; a one-time pairing code confirmed in both the extension and the CLI; Origin checked; unpaired connections refused. Any web page can try to reach a local port, so none of this is optional |
+| Least privilege | No `debugger` permission; site access requested per domain at run time through `optional_host_permissions` |
+| Access pacing | By default one request at a time per domain with random jitter, visible and adjustable; robots.txt obeyed by default, and a user override recorded in `robotsDecision` |
+| MCP | `scrape` / `batch_scrape` accept `lane: "my-browser"` with the same output shape as the other lanes |
+| Three-lane comparison | One 200-URL list through HTTP, the local browser and the user's browser; the three success rates published |
+| Evidence Pack (Pro) | One-step export in the [Evidence Pack](#evidence-pack) layout with a generated `methods.md` |
+| Pro plugin and licence | `@w2l/pro` loaded through the plugin interface, licence verified offline |
+| Chrome Web Store | Submitted; early users get a side-load build during review |
 
-`PRODUCT_PLAN_V2.md` remains the historical detailed plan and milestone record. It is not rewritten wholesale to avoid erasing historical decisions and evidence.
+**Exit:** on researcher sources the user-browser lane succeeds clearly more often than the HTTP lane, with published numbers; at least 3 early users used queue mode.
 
-## State Vocabulary
+### P4 · Paid launch (weeks 15–16)
 
-Every phase should use one of these states:
+- Payments through a merchant of record; a licence is emailed automatically after purchase.
+- Pricing page: free against Pro, the academic price and the founding-member places left.
+- Terms, privacy policy and acceptable-use policy (no bypassing paywalls or access controls, no scraping personal data for marketing), reviewed by a lawyer.
+- Launch to interviewees first, then the Chrome Web Store, Show HN, MCP directories and research mailing lists.
+- Measure licence activations and user feedback. Telemetry in the free version is off by default; if it is ever enabled, it is disclosed and can be turned off in one step.
 
-- `not_started`
-- `in_progress`
-- `implementation_complete_waiting_for_gate`
-- `accepted`
-- `blocked`
+### After week 16
 
-Merged PRs are evidence of code changes, not automatic phase acceptance.
+| Result | Reading | Next |
+| --- | --- | --- |
+| 3 or more paying users | The model works | Second audience; scheduled re-runs with change comparison as the second Pro feature; batches of tens of thousands and multiple workers |
+| Weekly users, no payment | The value is real; packaging or price is wrong | Test lab or team licences and one-off Evidence Pack purchases per project |
+| Neither | Wrong audience or channel | Reread the interviews and redo P0 with the second audience; no new features |
+
+## Product contract
+
+### Evidence Record
+
+Every result from every lane carries the same record. It is the product's identity and stays in the free core, so the evidence travels with every citation. Its JSON Schema is versioned and published in the docs reference.
+
+| Field | Meaning | Today |
+| --- | --- | --- |
+| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | The first two exist; the redirect chain needs one output form |
+| `fetchedAt` | UTC ISO timestamp | Exists as `observedAt`; rename |
+| `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists |
+| `lane` | `http` / `browser_local` / `my_browser` / `vendor` | Debug output only; move to the default output |
+| `robotsDecision` | The robots.txt verdict, including a recorded user override | Obeyed but not recorded |
+| `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | Partial; unify |
+| `extractor` | Name, version, commit | Exists as `sourceCommit` |
+| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | Amazon path only; generalise |
+| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | Failure evidence only; make an optional output |
+
+### Free core and Pro
+
+The open-source core is complete and unmetered: a limit in AGPL code can be deleted by anyone and would cost trust. Pro sells what saves time beyond the core, as the closed package `@w2l/pro` loaded through a plugin interface. Pro prices are tested in the P0 interviews.
+
+- **Free (AGPL core):** scrape, batch, crawl and map without limits; Markdown, JSON Schema extraction, tables → CSV and PDF text; the Evidence Record; CLI, local MCP and the Python client; extension single-page capture.
+- **Pro:** extension queue mode (`my-browser` lane batches); Evidence Pack export; scheduled re-runs with change comparison, built on Monitor; xlsx and Parquet export; the vendor lane (the user's own proxy or browser-service key); priority email support.
+
+A licence is Ed25519-signed JSON (email, plan, expiry) verified offline. Without one, the core works fully and only the Pro plugin is not loaded. The repository uses the DCO, which grants no right to relicense: before accepting an external contribution to the core, either adopt a CLA or keep Pro code fully independent of the core.
+
+### Evidence Pack
+
+One zip for a paper's supplementary material: `data.csv` (with `fetchedAt`, `finalUrl` and `status` columns), `evidence.jsonl` (one Evidence Record per line), `snapshots/` and `screenshots/`, `manifest.sha256`, `citations.bib` and `citations.json` (BibTeX and CSL-JSON with access dates) and a generated `methods.md` paragraph. Optionally, pages are submitted to the Internet Archive within its rate limits and the archive link is recorded.
+
+## Paused
+
+Not worked on unless the restart condition occurs or the person asking requests it.
+
+| Paused | Why | Restart when |
+| --- | --- | --- |
+| Further Amazon.sg adapter work | No overlap with the first audience | Commerce price evidence becomes the active audience |
+| Firecrawl features outside the core 29 that researchers do not use: search (including SearXNG), agent, cross-site LLM extract, browser actions, live webhook push, file upload, summary, branding and similar | They need a search backend or a model budget, or researchers do not use them. The matrix stays in `research/parity/` | A paying user asks. LLM extraction with the user's own key keeps its environment-variable fallback, maintained but not extended |
+| Own stealth, fingerprint spoofing, proxy pools | An arms race that conflicts with the evidence positioning | Not restarted; the user's browser and the vendor lane replace them |
+| Hosted API and hosted MCP | Operations, compliance and isolation cost | Users ask for runs while their computer is off and will pay more for it |
+| Monitor → webhook extensions | Researchers do not need webhooks | The second audience |
+| Internal gate process (Gate 5 and similar) | Replaced by real user signals | Not restarted |
+
+## Risks
+
+| Risk | Mitigation |
+| --- | --- |
+| The comparison target moves, and the matrix has errors | Firecrawl frozen at v4.42.0; every gap reproduced by a failing real-site test before any code changes |
+| Site terms and personal data | robots.txt obeyed by default with the decision recorded; prohibited uses in the acceptable-use policy; guides remind researchers that personal data may need ethics approval |
+| AGPL plus DCO blocks relicensing | Pro code in a separate repository; a CLA before accepting external core contributions |
+| Chrome Web Store rejection | Least privilege; a side-load build as fallback |
+| One person's bandwidth | The Paused table and the weekly cadence |
+| A shallow moat: anyone can add provenance fields | The moat is the workflow (Evidence Pack, methods paragraph, citation formats) and the reputation among researchers, not the fields |
+| Low extension throughput | The extension is the lane for blocked sites, not the default; large batches use the HTTP lane |
+
+## Weekly cadence
+
+Each Monday, set the week's single goal at the top of this file. For the first 6 weeks, talk to users at least twice a week: about 60% of the time on code and 40% with users. Each Friday, send early users a short note on what shipped and what is next. Every two weeks, review the Paused table and bring an item back only when its restart condition has actually occurred.

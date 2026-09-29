@@ -40,6 +40,24 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
+/** Polling for waitBatch and waitCrawl. */
+export interface WaitOptions extends RequestOptions {
+  /** Delay between status requests. Default 500 ms. */
+  pollIntervalMs?: number
+  /** Stop waiting after this long and throw a WaitTimeoutError. Default: no limit. The task keeps running. */
+  timeoutMs?: number
+}
+
+/** The task was still unfinished when the wait's timeoutMs ran out; `last` is the final status read. */
+export class WaitTimeoutError<T extends { status: string } = { status: string }> extends Error {
+  override readonly name = 'WaitTimeoutError'
+  constructor(readonly taskId: string, readonly last: T, readonly timeoutMs: number) {
+    super(`task ${taskId} still ${last.status} after ${timeoutMs} ms`)
+  }
+}
+
+const FINISHED = ['completed', 'failed', 'cancelled']
+
 export type CreateMonitorRequest = (Omit<MonitorRevision, 'createdAt'> & {enabled?:boolean}) | {preset:'firecrawl-introduction';enabled?:boolean}
 export type ReviseMonitorRequest = Omit<MonitorRevision, 'monitorId' | 'createdAt'>
 export interface RunMonitorRequest {
@@ -90,17 +108,9 @@ export class W2L {
     } while (cursor !== undefined)
   }
 
-  async waitBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
-    for (;;) {
-      request.signal?.throwIfAborted()
-      const report = await this.getBatch(id, request)
-      if (['completed', 'failed', 'cancelled'].includes(report.status)) return report
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { request.signal?.removeEventListener('abort', abort); resolve() }, 500)
-        const abort = () => { clearTimeout(timer); reject(request.signal?.reason) }
-        request.signal?.addEventListener('abort', abort, { once: true })
-      })
-    }
+  /** Polls a batch until it completes, fails or is cancelled. */
+  async waitBatch(id: string, options: WaitOptions = {}): Promise<BatchStatusResponse> {
+    return this.waitFor(id, () => this.getBatch(id, options), options)
   }
 
   async cancelBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
@@ -109,6 +119,11 @@ export class W2L {
 
   async getCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {
     return this.get<CrawlReport>(`/v1/crawl/${encodeURIComponent(id)}`, request, `crawl not found: ${id}`)
+  }
+
+  /** Polls a crawl until it completes, fails or is cancelled. Pages come from listCrawlPages. */
+  async waitCrawl(id: string, options: WaitOptions = {}): Promise<CrawlReport> {
+    return this.waitFor(id, () => this.getCrawl(id, options), options)
   }
 
   async getCrawlPages(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlPage>> {
@@ -223,6 +238,22 @@ export class W2L {
 
   async retryDelivery(id: string, request: RequestOptions = {}): Promise<WebhookDelivery> {
     return this.post<WebhookDelivery>(`/v1/deliveries/${encodeURIComponent(id)}/retry`, undefined, 200, request)
+  }
+
+  private async waitFor<T extends { status: string }>(id: string, poll: () => Promise<T>, options: WaitOptions): Promise<T> {
+    const deadline = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs
+    for (;;) {
+      options.signal?.throwIfAborted()
+      const report = await poll()
+      if (FINISHED.includes(report.status)) return report
+      if (deadline !== undefined && Date.now() >= deadline) throw new WaitTimeoutError(id, report, options.timeoutMs!)
+      const pause = Math.min(options.pollIntervalMs ?? 500, deadline === undefined ? Infinity : deadline - Date.now())
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { options.signal?.removeEventListener('abort', abort); resolve() }, Math.max(0, pause))
+        const abort = () => { clearTimeout(timer); reject(options.signal?.reason) }
+        options.signal?.addEventListener('abort', abort, { once: true })
+      })
+    }
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {

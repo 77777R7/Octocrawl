@@ -23,6 +23,7 @@ import {
 import { DEFAULT_NETWORK_POLICY, type CrawlMode } from '@w2l/contracts'
 import type { SubjectAdapter } from '../subject.js'
 import { identityCompromised } from '../routing/identity.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 
 /**
@@ -392,6 +393,10 @@ export class ProviderSubject implements SubjectAdapter {
       header: (name) => res.headers[name.toLowerCase()] ?? null,
       body: res.body,
     })
+    // An error status is never content, but its page is what the origin
+    // said: the failed or blocked result keeps it as evidence.
+    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl)
+    const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (v: NonNullable<typeof gate>): FetchResult => {
       trace.push({
         at: wallMs,
@@ -413,7 +418,7 @@ export class ProviderSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'provider',
         escalations: next === null ? [] : [{ ...next, improved: null }],
-        markdown: null,
+        ...errorPageFields,
         // A captcha or login wall with an open live-view door is a handoff
         // point: the ladder pauses here and asks a human, exactly because
         // the refused capabilities (auto-solving) are not on the table. A
@@ -436,11 +441,23 @@ export class ProviderSubject implements SubjectAdapter {
 
     const nonOk = res.status !== 200 && res.status !== 0
     if (nonOk && gate !== null) return blocked(gate)
-    if (nonOk) {
+    if (nonOk && !isSuccessStatus(res.status)) {
       return {
         ...base,
         status: 'failed',
         failureReason: 'http_error',
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'provider',
+        escalations: [],
+        ...errorPageFields,
+      }
+    }
+    if (isNoContentStatus(res.status)) {
+      return {
+        ...base,
+        status: 'empty_verified',
+        failureReason: null,
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',
@@ -486,7 +503,7 @@ export class ProviderSubject implements SubjectAdapter {
     })
     if (decisive !== null) return blocked(decisive)
 
-    const markdown = htmlToMarkdown(extracted.mainHtml)
+    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
     // RoutingHistory all follow it): a fetch whose wire identity was

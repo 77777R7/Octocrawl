@@ -306,7 +306,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // real document. It classifies as a gate only with a second signal:
   // an empty or near-empty body (the shape of a swallowed request), another
   // gate signal already firing, or a gate-shaped header. A 202 carrying a
-  // substantive page stays a plain http_error.
+  // substantive page is no gate: the caller judges it from its content, like
+  // any other 2xx answer.
   if (res.status === 202) {
     const bodyNearEmpty = head.trim().length <= 512
     const gateHeader = VENDOR_HEADERS.some(([name]) => res.header(name) !== null)

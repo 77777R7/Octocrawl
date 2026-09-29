@@ -18,6 +18,7 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
+import { CONTENTFUL_STATUS } from '@w2l/contracts'
 
 export interface StructuredModelConfig {
   baseUrl: string
@@ -79,35 +80,43 @@ function addProductCandidates(
   put(['rating'], product.rating, product.rating ? numeric(product.rating.value) : undefined)
   put(['reviewcount', 'reviews'], product.reviewCount, product.reviewCount ? numeric(product.reviewCount.value, true) : undefined)
   map.set('kind', { value: product.kind ?? 'unknown' })
-  map.set('images', { value: (product.images ?? []).map(item => item.value), fact: product.images?.[0] })
-  map.set('prices', {
-    value: (product.prices ?? []).map(item => ({
-      amount: numeric(item.amount.value),
-      currency: item.currency?.value ?? null,
-      priceType: item.priceType,
-      seller: item.seller?.value ?? null,
-    })),
-    fact: product.prices?.[0]?.amount,
-  })
-  map.set('variants', {
-    value: (product.variants ?? []).map(item => ({
-      name: item.name,
-      value: item.value,
-      selected: item.selected,
-    })),
-    fact: product.variants?.[0] === undefined ? undefined : {
-      value: product.variants[0].value,
-      source: product.variants[0].source,
-      path: product.variants[0].path,
-    },
-  })
-  const specifications = Object.fromEntries(
-    Object.entries(product.specifications ?? {}).map(([key, fact]) => [key, fact.value]),
-  )
-  map.set('specifications', {
-    value: specifications,
-    fact: Object.values(product.specifications ?? {})[0],
-  })
+  // A list is a source only when the extractor read it from the page. The
+  // Amazon adapter reports what it observed on the verified subject, possibly
+  // an empty list; a generic product page has no such list, and an invented []
+  // or {} would claim the page has none.
+  const { images, prices, variants, specifications } = product
+  if (images !== undefined) map.set('images', { value: images.map(item => item.value), fact: images[0] })
+  if (prices !== undefined) {
+    map.set('prices', {
+      value: prices.map(item => ({
+        amount: numeric(item.amount.value),
+        currency: item.currency?.value ?? null,
+        priceType: item.priceType,
+        seller: item.seller?.value ?? null,
+      })),
+      fact: prices[0]?.amount,
+    })
+  }
+  if (variants !== undefined) {
+    map.set('variants', {
+      value: variants.map(item => ({
+        name: item.name,
+        value: item.value,
+        selected: item.selected,
+      })),
+      fact: variants[0] === undefined ? undefined : {
+        value: variants[0].value,
+        source: variants[0].source,
+        path: variants[0].path,
+      },
+    })
+  }
+  if (specifications !== undefined) {
+    map.set('specifications', {
+      value: Object.fromEntries(Object.entries(specifications).map(([key, fact]) => [key, fact.value])),
+      fact: Object.values(specifications)[0],
+    })
+  }
 }
 
 function schemaTypes(schema: JsonSchema): readonly string[] {
@@ -147,10 +156,10 @@ function mapSchema(
   source: Map<string, Candidate>,
   path: string,
   evidence: StructuredFieldEvidence[],
+  key: string | null = null,
 ): JsonValue | undefined {
   const schema = resolveRef(root, schemaInput)
-  const key = path.split('/').at(-1)?.toLowerCase() ?? ''
-  const direct = source.get(key)
+  const direct = key === null ? undefined : source.get(key.toLowerCase())
   if (direct !== undefined) {
     const value = coerce(direct.value, schema)
     if (value !== undefined) {
@@ -167,32 +176,31 @@ function mapSchema(
   if (schemaTypes(schema).includes('object') || schema.properties !== undefined) {
     const out: Record<string, JsonValue> = {}
     for (const [name, child] of Object.entries(schema.properties ?? {})) {
-      const mapped = mapSchema(root, child, source, `${path}/${name}`, evidence)
+      // Candidates describe the page and its subject, so only a top-level
+      // property can match one: /author/title is not the page title.
+      const mapped = mapSchema(root, child, source, `${path}/${name}`, evidence, path === '' ? name : null)
       if (mapped !== undefined) out[name] = mapped
     }
-    return out
+    // A nested object exists only when something inside it had a source.
+    return path === '' || Object.keys(out).length > 0 ? out : undefined
   }
   return undefined
 }
 
 function fillNullableMissing(root: JsonSchema, schemaInput: JsonSchema, value: JsonValue | undefined): JsonValue | undefined {
   const schema = resolveRef(root, schemaInput)
-  if ((schemaTypes(schema).includes('object') || schema.properties !== undefined) && value !== null) {
-    const out: Record<string, JsonValue> = value !== undefined && typeof value === 'object' && !Array.isArray(value)
-      ? { ...value }
-      : {}
-    for (const [name, child] of Object.entries(schema.properties ?? {})) {
+  // A field without a source stays absent, so a required one is reported
+  // missing. Only a nullable field becomes an explained null.
+  if (value === undefined) return schemaTypes(schema).includes('null') ? null : undefined
+  if (schema.properties !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const out: Record<string, JsonValue> = { ...value }
+    for (const [name, child] of Object.entries(schema.properties)) {
       const next = fillNullableMissing(root, child, out[name])
       if (next !== undefined) out[name] = next
     }
     return out
   }
-  if (value !== undefined) return value
-  const types = schemaTypes(schema)
-  if (types.includes('null')) return null
-  if (types.includes('array')) return []
-  if (types.includes('object')) return {}
-  return undefined
+  return value
 }
 
 function nullableMissingIssues(root: JsonSchema, schemaInput: JsonSchema, value: JsonValue | undefined, path = ''): StructuredExtractionIssue[] {
@@ -234,8 +242,31 @@ function validationMessage(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? []).map(error => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`).join('; ') || 'model output did not match the schema'
 }
 
+/** Fields are read only from a successful page: a 404, block or failed
+ * identity check is not the subject, whatever its document says. */
+function unsuccessfulPage(result: FetchResult): StructuredExtractionIssue | null {
+  if (result.status === 'success') return null
+  const httpStatus = result.evidence.httpStatus
+  const detail = [result.failureReason ?? result.blockReason ?? result.budgetExceeded, typeof httpStatus === 'number' ? `HTTP ${httpStatus}` : null]
+    .filter((part): part is string => typeof part === 'string')
+  return {
+    code: 'page_unsuccessful',
+    message: `page status is ${result.status}${detail.length > 0 ? ` (${detail.join(', ')})` : ''}, not success; no fields were read from it`,
+  }
+}
+
 function canonicalStructured(result: FetchResult): StructuredExtractionResult {
   const document = result.document
+  const pageIssue = unsuccessfulPage(result)
+  if (pageIssue !== null) {
+    return {
+      status: 'incomplete',
+      data: document === undefined || document === null ? null : { adapter: document.adapter, pageType: document.pageType, entities: [] },
+      evidence: [],
+      issues: [pageIssue],
+      modelUsage: null,
+    }
+  }
   if (document?.adapterValidation?.valid === false) {
     return {
       status: 'incomplete',
@@ -344,6 +375,8 @@ export async function extractStructured(
 ): Promise<StructuredExtractionResult> {
   if (format === undefined) return canonicalStructured(result)
   const schemaSha256 = sha256Utf8(JSON.stringify(format.schema))
+  const pageIssue = unsuccessfulPage(result)
+  if (pageIssue !== null) return { status: 'incomplete', data: null, schemaSha256, evidence: [], issues: [pageIssue], modelUsage: null }
   if (result.document?.adapterValidation?.valid === false) {
     return {
       status: 'incomplete',
@@ -481,7 +514,7 @@ export async function prepareScrapeResponse(
   const formats = requestedFormats(req, result)
   const modelStart = performance.now()
   const json = hasFormat(formats, 'json')
-    ? await extractStructured(result, customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
+    ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   const serializeStart = performance.now()
@@ -497,6 +530,7 @@ export async function prepareScrapeResponse(
   const totalMs = Math.max(0, performance.now() - overallStart)
   const withTiming: ScrapeResponse = {
     ...next,
+    snapshot: scrapeSnapshot(next),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -506,6 +540,27 @@ export async function prepareScrapeResponse(
   }
   if (req.debug !== false) return withTiming
   return compactScrapeResponse(withTiming, req, formats, totalMs)
+}
+
+/**
+ * What JSON extraction may read. A failed or blocked result's Markdown is the
+ * page an error status carried, evidence rather than content, so extraction
+ * sees such a result as it did before that page was kept.
+ */
+export function extractionInput<T extends FetchResult>(result: T): T {
+  return CONTENTFUL_STATUS.has(result.status) ? result : { ...result, markdown: null }
+}
+
+/**
+ * The capture identity of whatever response was received, success or not,
+ * in both the full and the compact response shape.
+ */
+function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snapshot'] {
+  return {
+    rawBodySha256: result.evidence.rawBodySha256,
+    artifacts: result.evidence.artifacts,
+    httpStatus: result.evidence.httpStatus,
+  }
 }
 
 export function compactScrapeResponse(
@@ -518,11 +573,7 @@ export function compactScrapeResponse(
   return {
     requestedUrl: next.requestedUrl,
     finalUrl: next.evidence.finalUrl,
-    snapshot: {
-      rawBodySha256: next.evidence.rawBodySha256,
-      artifacts: next.evidence.artifacts,
-      httpStatus: next.evidence.httpStatus,
-    },
+    snapshot: scrapeSnapshot(next),
     status: next.status,
     failureReason: next.failureReason,
     blockReason: next.blockReason,

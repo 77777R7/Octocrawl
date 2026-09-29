@@ -96,7 +96,7 @@
 **仍然失败的原因(每一条都查过,不是猜)**:
 
 - **etsy.com** — 两条通道都 `bot_gate`(403 挑战页)。robots.txt 允许,但站方的 bot 检测拦所有非真人流量。爬过它的唯一方式是解验证码或伪造指纹——两者都是结构性拒绝的能力,所以这是梯子的诚实终点,不是缺失。
-- **amazon.com** — http 和浏览器都是 `bot_gate`。诊断抓到了具体信号:浏览器拿回 **202 + 空/近空文档**(Amazon 吞掉请求而不承认)。`classifyGate` 的多信号规则:202 只有在**空/近空内容,或同时出现其他 gate 信号**时才判 bot_gate;带实质页面的 202 保持普通 http_error(有负向测试钉住)。这个失败现在被正确地叫 bot_gate,而不是伪装成 http_error。
+- **amazon.com** — http 和浏览器都是 `bot_gate`。诊断抓到了具体信号:浏览器拿回 **202 + 空/近空文档**(Amazon 吞掉请求而不承认)。`classifyGate` 的多信号规则:202 只有在**空/近空内容,或同时出现其他 gate 信号**时才判 bot_gate;带实质页面的 202 不算 gate,和其他 2xx 一样按内容判定(有负向测试钉住)。这个失败现在被正确地叫 bot_gate,而不是伪装成 http_error。
 - **glassdoor.com** — 后两次被 `login_required`(浏览器通道)。这不是验证码,是登录墙——梯子的正确答案是 `browser_local_authed` 或真人接管,而不是更强的伪装。
 
 这些失败类型全部映射进七类路由分类(bot_gate / captcha_required / login_required / rate_limited / geo_blocked / provider_error / identity_mismatch),挑战页 0 次被算作成功。

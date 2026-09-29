@@ -20,6 +20,7 @@ import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from '.
 import { pageSignalsFor, routePage, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
+import { documentBaseUrl } from './links.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -93,6 +94,7 @@ export class ExtractTf implements Extractor {
     // which would otherwise suppress forum routing.
     const signals = pageSignalsFor(doc.document)
     const preliminaryAdapter = adapterFor(doc.document, options.url)
+    const baseUrl = documentBaseUrl(doc.document, options.url)
 
     // Declared product facts share those carriers, so they are read from the
     // raw tree too. The visible-price fallback runs much later, after
@@ -103,6 +105,8 @@ export class ExtractTf implements Extractor {
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
+    // Counted before cleaning, which may drop empty elements.
+    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -176,6 +180,7 @@ export class ExtractTf implements Extractor {
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
       mainHtml: main ? outerHtml(main) : '',
+      baseUrl,
       confidence: confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,
@@ -195,6 +200,7 @@ export class ExtractTf implements Extractor {
       adapter: adapter.descriptor,
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
+      emptyTableShells,
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
 

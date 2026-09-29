@@ -11,6 +11,7 @@ interface Candidate {
   el: Element
   score: number
   blockCount: number
+  textLength: number
 }
 
 /** Small bonus per heading, so container quality beats raw size on tie. */
@@ -42,9 +43,10 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
   for (const block of blocks) {
     let el: Element | null = block.el.parentElement
     while (el && el !== doc.body && el !== doc.documentElement) {
-      const cand = candidates.get(el) ?? { el, score: 0, blockCount: 0 }
+      const cand = candidates.get(el) ?? { el, score: 0, blockCount: 0, textLength: 0 }
       cand.blockCount++
       cand.score += block.length
+      cand.textLength += block.length
       candidates.set(el, cand)
       el = el.parentElement
     }
@@ -62,9 +64,19 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
   const best = list[0]
   if (!best) return null
 
-  // A container wins when it holds most blocks or dominates the runner-up.
-  const second = list[1]?.score ?? 0
-  if (best.blockCount >= blocks.length * 0.5 || second === 0 || best.score >= second * 1.4) {
+  // A container wins when it holds most blocks or most of the text, or when
+  // it dominates the best competing region. Its own ancestors and descendants
+  // hold the same blocks, so they are not competitors: counting them would tie
+  // one long block (a news release in a single <pre>) with its wrappers.
+  const totalLength = blocks.reduce((sum, b) => sum + b.length, 0)
+  const rival = list.find((c) => c !== best && !c.el.contains(best.el) && !best.el.contains(c.el))
+  const second = rival?.score ?? 0
+  if (
+    best.blockCount >= blocks.length * 0.5 ||
+    best.textLength >= totalLength * 0.5 ||
+    second === 0 ||
+    best.score >= second * 1.4
+  ) {
     return best.el
   }
 
@@ -73,21 +85,29 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
 }
 
 /**
- * Longest run of blocks sharing a common parent, or single longest block.
+ * Run of blocks sharing a common parent with the most text, or the single
+ * longest block.
  */
 function longestRun(blocks: TextBlock[]): Element | null {
   // Blocks arrive in document order (querySelectorAll order).
   let bestRun: TextBlock[] = []
+  let bestLength = 0
   let run: TextBlock[] = []
+  let runLength = 0
   let prevParent: Element | null = null
   for (const b of blocks) {
     if (prevParent === b.el.parentElement) {
       run.push(b)
+      runLength += b.length
     } else {
       run = [b]
+      runLength = b.length
       prevParent = b.el.parentElement
     }
-    if (run.length > bestRun.length) bestRun = run
+    if (runLength > bestLength) {
+      bestRun = run
+      bestLength = runLength
+    }
   }
   if (bestRun.length === 0) return null
   // Emit the common ancestor of the run.

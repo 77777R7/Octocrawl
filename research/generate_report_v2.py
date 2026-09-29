@@ -51,7 +51,7 @@ from generate_report import (
 )
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output" / "pdf" / "AI爬虫与增长自动化SaaS创业机会_执行导向重写版.pdf"
 
 

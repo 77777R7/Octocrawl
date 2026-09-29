@@ -47,6 +47,8 @@ export type StructuredIssueCode =
   | 'model_provider_error'
   | 'model_output_invalid'
   | 'model_timeout'
+  /** The page status is not `success`, so no fields were read from it. */
+  | 'page_unsuccessful'
 
 export interface StructuredExtractionIssue {
   code: StructuredIssueCode

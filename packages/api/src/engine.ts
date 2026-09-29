@@ -55,7 +55,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from './structured.js'
+import { extractionInput, extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -211,15 +211,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try {
       const report = allAttempts ? null : await crawlReportFromStore(store, taskId)
       if (!allAttempts && report === null) return null
-      if (allAttempts && await store.getTask(taskId) === null) return null
+      const task = await store.getTask(taskId)
+      if (task === null) return null
       const page = await store.listStepsPage(taskId, {
         attemptId: query?.attemptId ?? (!allAttempts && report !== null && report.attemptId.length > 0 ? report.attemptId : undefined),
         cursor: query?.cursor,
         limit: query?.limit ?? 50,
         kind,
       })
+      const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -232,13 +234,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const mode = defaultApiMode(task.mode)
     const runner = new LadderRunner(channelsForUrl(mode, task.seedUrl), { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode))
     const ladder = new LadderScrapeAtom(runner)
-    const atom: ScrapeAtom = task.batch === undefined ? ladder : {
+    // Batch and crawl tasks apply their stored formats to every page. A task
+    // stored before crawl formats existed has neither and keeps the full result.
+    const selection = task.batch ?? task.crawl
+    const atom: ScrapeAtom = selection === undefined ? ladder : {
       async scrape(url, context) {
         const outcome = await ladder.scrape(url, context)
-        const formats = task.batch!.formats
+        const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
         const custom = formats.find(format => typeof format === 'object')
-        const json = wants('json') ? await extractStructured(outcome.result, custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
+        const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
@@ -252,7 +257,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         return { ...outcome, ...(audit === undefined ? {} : { audit }), result: {
           ...outcome.result,
           markdown: wants('markdown') ? outcome.result.markdown : null,
-          links: wants('links') || task.batch!.includeLinks ? outcome.result.links : [],
+          // A crawl stores every page's links: its frontier and resume follow them. Output filters them.
+          links: task.batch === undefined || wants('links') || selection.includeLinks === true ? outcome.result.links : [],
           ...(json === undefined ? {} : { json }),
         } }
       },
@@ -349,6 +355,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxWallMs: null,
           maxCostUsd: null,
           maxTokens: null,
+        },
+        crawl: {
+          formats: req.formats ?? ['markdown'],
+          includeLinks: req.includeLinks === true,
+          includePaths: req.includePaths ?? [],
+          excludePaths: req.excludePaths ?? [],
         },
         createdAt: now,
         updatedAt: now,
@@ -553,7 +565,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
-function toCrawlPage(step: StepRecord): CrawlPage {
+/** Batch and crawl tasks return links when their formats or includeLinks asked for them. */
+function linksRequested(task: Task): boolean {
+  const options = task.batch ?? task.crawl
+  return options?.includeLinks === true || (options?.formats ?? []).includes('links')
+}
+
+function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
   const result = step.result
   return {
     id: step.id,
@@ -563,6 +581,7 @@ function toCrawlPage(step: StepRecord): CrawlPage {
     status: step.status,
     lane: step.lane,
     markdown: result?.markdown ?? null,
+    ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.json === undefined ? {} : { json: result.json }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,

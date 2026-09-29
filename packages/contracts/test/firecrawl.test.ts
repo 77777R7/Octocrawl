@@ -64,29 +64,40 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /refetch|useCached/i.test(d))).toBe(true)
   })
 
-  it('maps url + limit + maxDepth and ignores Firecrawl extras', () => {
-    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown'], actions: [] })).toEqual({
+  it('maps the supported Firecrawl fields onto the native request', () => {
+    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: true, origin: 'js-sdk@1.29.3' })).toEqual({
       url: 'https://example.com/',
-      mode: undefined,
-      allowlistedDomains: undefined,
+      formats: ['markdown', 'links'],
     })
     expect(
       parseFirecrawlCrawlRequest({
         url: 'https://example.com/listing',
         limit: 4,
         maxDepth: 2,
-        useCached: true,
-        proxy: 'stealth',
-        scrapeOptions: { formats: ['html'] },
+        includePaths: ['^/item/'],
+        excludePaths: ['^/item/2$'],
+        ignoreSitemap: true,
+        origin: 'js-sdk@1.29.3',
+        scrapeOptions: { formats: ['links'], onlyMainContent: true },
       }),
-    ).toEqual({
+    ).toMatchObject({
       url: 'https://example.com/listing',
-      mode: undefined,
       maxPages: 4,
       maxDepth: 2,
-      useCached: undefined,
-      allowlistedDomains: undefined,
+      includePaths: ['^/item/'],
+      excludePaths: ['^/item/2$'],
+      formats: ['links'],
     })
+  })
+
+  it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
+    const url = 'https://example.com/'
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html'] })).toThrow('unsupported format: html (the /fc shim supports markdown, links)')
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], waitFor: 500, timeout: 5000 })).toThrow('unsupported parameters: actions, waitFor, timeout')
+    expect(() => parseFirecrawlScrapeRequest({ url, onlyMainContent: false })).toThrow('onlyMainContent: false is not supported')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['html'], waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.waitFor; unsupported format: html')
+    expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
   })
 
   it('rejects a missing url the same way the native parser does', () => {
@@ -113,6 +124,35 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(wrapped.success).toBe(false)
     expect(wrapped.error).toMatch(/cloudflare_challenge/)
     expect(wrapped.data.metadata.error).toBe('cloudflare_challenge')
+  })
+
+  it('keeps an error-status page success: false while returning its markdown and status code', () => {
+    const wrapped = wrapScrape(
+      page({
+        requestedUrl: 'https://example.com/missing',
+        status: 'failed',
+        failureReason: 'http_error',
+        markdown: '# 404 Not Found',
+        links: [],
+        evidence: {
+          finalUrl: 'https://example.com/missing',
+          httpStatus: 404,
+          redirectChain: [],
+          contentType: 'text/html',
+          rawBodySha256: 'a'.repeat(64),
+          artifacts: [],
+        },
+      }),
+    )
+    expect(wrapped).toEqual({
+      success: false,
+      error: 'failed: http_error',
+      data: {
+        markdown: '# 404 Not Found',
+        links: [],
+        metadata: { sourceURL: 'https://example.com/missing', statusCode: 404, error: 'http_error' },
+      },
+    })
   })
 
   it('wraps a contentful scrape and a crawl start onto the Firecrawl envelope', () => {

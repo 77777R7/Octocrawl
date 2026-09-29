@@ -63,6 +63,15 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.enqueue('https://fixture.test/b', 2).reason).toBe('depth')
   })
 
+  it('filters discovered links by includePaths / excludePaths on the pathname, never the seed', () => {
+    const frontier = seeded({ seedUrl: SEED, includePaths: ['^/item/'], excludePaths: ['^/item/private'] })
+    expect(frontier.enqueue('https://fixture.test/item/1', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://fixture.test/item/2?from=/about', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://fixture.test/about', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    expect(frontier.enqueue('https://fixture.test/item/private-3', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    expect(frontier.pendingCount()).toBe(3)
+  })
+
   it('does not enqueue sitemap XML as a discovery path of its own', () => {
     const frontier = seeded()
     expect(frontier.enqueue('https://fixture.test/sitemap.xml', 1).accepted).toBe(true)

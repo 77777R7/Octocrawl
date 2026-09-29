@@ -47,6 +47,19 @@ beforeAll(async () => {
           '<div><p>A closing note at the bottom of the page with a few more words.</p></div>' +
           '</body></html>',
       )
+    } else if (req.url === '/table-shell') {
+      // A statistics table viewer: the HTML carries a confident-looking page
+      // and an empty table inside the viewer's form; a script fills the rows.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Population estimates, quarterly</h1>' +
+          '<p>Table 17-10-0009-01. Release date 2026-09-23. Frequency: quarterly. Geography: Canada, province or territory.</p>' +
+          '<form id="viewForm"><button>Apply</button><table><thead id="head"></thead><tbody id="body"></tbody></table></form>' +
+          '<script>' +
+          'document.getElementById("head").innerHTML = "<tr><th>Geography</th><th>July 1, 2026</th></tr>";' +
+          'document.getElementById("body").innerHTML = "<tr><th>Canada</th><td>41,651,653</td></tr><tr><th>Ontario</th><td>16,258,255</td></tr>";' +
+          '</script></main></body></html>',
+      )
     } else if (req.url === '/gate') {
       res.writeHead(403, {
         'content-type': 'text/html; charset=utf-8',
@@ -119,6 +132,32 @@ describe('ladder with real subjects on a real server', () => {
       expect(run.result.status).toBe('blocked')
       expect(run.result.blockReason).toBe('cloudflare_challenge')
       expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    } finally {
+      await browser.teardown()
+    }
+  })
+
+  it('empty table shell: http offers the page to the browser, which returns the rows', async () => {
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const runner = new LadderRunner(
+        [
+          { id: 'http', identity: IDENTITY, fetch: (url) => new ResilientHttpSubject().fetch(url) },
+          { id: 'browser_local', identity: IDENTITY, fetch: (url) => browser.fetch(url) },
+        ],
+        { mode: 'authed' },
+      )
+
+      const run = await runner.run(`${base}/table-shell`)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      expect(run.result.status).toBe('success')
+      expect(run.result.lane).toBe('browser_local')
+      expect(run.result.markdown).toMatch(/\| Canada \| 41,651,653 \|/)
+      const steps = run.ladderTrace.filter((t) => t.event === 'ladder_step')
+      expect(steps[0]).toMatchObject({
+        channel: 'http',
+        detail: { escalate: 'quality_low_yield', status: 'success' },
+      })
     } finally {
       await browser.teardown()
     }

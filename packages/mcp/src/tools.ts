@@ -56,7 +56,6 @@ export const TOOLS = [
         formats: {
           type: 'array',
           minItems: 1,
-          maxItems: 3,
           items: {
             anyOf: [
               { type: 'string', enum: ['markdown', 'links', 'json'] },
@@ -93,6 +92,13 @@ export const TOOLS = [
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
+        formats: { type: 'array', minItems: 1, items: { anyOf: [
+          { type: 'string', enum: ['markdown', 'links', 'json'] },
+          { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
+        ] } },
+        includeLinks: { type: 'boolean' },
+        includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a discovered link must match; the start URL is always fetched.' },
+        excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that skip a discovered link; they win over includePaths.' },
       },
       required: ['url'],
       additionalProperties: false,
@@ -158,7 +164,7 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, maxItems: 3, items: { anyOf: [
+        formats: { type: 'array', minItems: 1, items: { anyOf: [
           { type: 'string', enum: ['markdown', 'links', 'json'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
@@ -206,6 +212,10 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       maxDepth: req.maxDepth,
       useCached: req.useCached,
       allowlistedDomains: req.allowlistedDomains,
+      formats: req.formats,
+      includeLinks: req.includeLinks,
+      includePaths: req.includePaths,
+      excludePaths: req.excludePaths,
     })
   }
   if (name === 'get_crawl') {

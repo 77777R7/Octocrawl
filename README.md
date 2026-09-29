@@ -25,7 +25,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 
 ## What's Different
 
-1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties
+1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success
 2. **Five false-success checks** — challenge text, wrong-page content, missing facts, truncation, yield-below-floor
 3. **Execution ladder** — HTTP → browser → user auth → proxy, with automatic routing, per-attempt trace, and task-level cost accounting
 4. **Ground-truth benchmark** — 30 adversarial fixtures (soft 404s, challenge pages, SPAs, timeouts, zip bombs) with verified false-success rates
@@ -124,6 +124,8 @@ MCP `scrape` is compact by default: it returns the selected content, document/pr
 
 For many known URLs, use `batch_scrape` in MCP, then `get_batch`, `get_batch_items`, or `wait_batch`. REST and SDK support the same durable task, paginated items, and completion events; see [batch scraping](docs/batch-scrape.md). The per-origin concurrency ceiling is configurable up to four, with a shared Retry-After cooldown and minimum request interval. The controlled [1/2/4 comparison](docs/evidence/same-origin-concurrency-controlled.json) is local fixture evidence, not an Amazon speed claim.
 
+A crawl (`POST /v1/crawl`, MCP `crawl`) takes the same `formats` and `includeLinks` as scrape, plus `includePaths` / `excludePaths`: regular expressions matched against the URL path of each discovered link. The start URL is always fetched and an `excludePaths` match wins. Scrape, batch and crawl reject an unknown field or an unsupported format with HTTP 400 naming it.
+
 Request deterministic structured data with a JSON Schema alongside, or instead of, Markdown:
 
 ```ts
@@ -163,7 +165,7 @@ The setup uses an anonymous Singapore public delivery preference for this benchm
 The concurrency-1 command can exit nonzero because its ten-page median exceeds 20 seconds; inspect its report for comparability and blocking before continuing to 2. The signed run had 37.93 seconds at 1, 19.92 at 2, and 12.39 at 4.
 This signed Amazon slice is currently on the local `codex/amazon-adapter-integration` branch, not the released `main` or `v0.4.0-rc.1` source.
 
-Firecrawl v1 clients: set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
+Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim maps `url` and the `markdown` and `links` formats; the crawl shim maps `url`, `limit`, `maxDepth`, `includePaths`, `excludePaths` and `scrapeOptions.formats`. Any other parameter or format is rejected with HTTP 400 and `success: false`, naming it. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
 
 ## Continuous Monitors and event delivery
 
@@ -228,7 +230,7 @@ packages/
 examples/monitor-workflow.ts       Runnable Monitor + Delivery SDK workflow
 examples/webhook-receiver.ts       Durable idempotent sample receiver
 
-ROADMAP.md                         Current Section A/B/C roadmap
+ROADMAP.md                         Current phase plan
 
 docs/
   onboarding.md                  Install, Crawl, Monitor, HTTPS events and recovery
@@ -282,7 +284,7 @@ docs/
 - [x] Phase 3 Benchmark Gate harness: fixed W2L run, comparator evidence, and blocked-until-real-comparators decision
 - [ ] Hosted Egress Gate: browser subresource policy enforcement and DNS-to-connection binding
 
-See [ROADMAP.md](ROADMAP.md) for the current Section/Phase plan. [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
+See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
 
 ## Contributing
 

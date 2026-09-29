@@ -4,7 +4,9 @@
  * No fetch. The orchestrator (Phase 4/5) calls seed/enqueue/dequeue/release.
  * Host delay is max(perHostMinDelayMs, robots crawlDelayMs for that host).
  * Default host filter is the seed host; a non-empty allowlist uses the same
- * exact / `*.domain` match as governance.
+ * exact / `*.domain` match as governance. includePaths / excludePaths are
+ * regexes on an enqueued link's pathname (Firecrawl semantics, exclude wins);
+ * seeds bypass them, so the seed URL is always fetched.
  */
 
 import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
@@ -28,6 +30,7 @@ export interface FrontierEnqueueResult {
     | 'malformed'
     | 'depth'
     | 'host_denied'
+    | 'path_denied'
     | 'scheme_denied'
 }
 
@@ -45,6 +48,8 @@ export interface FrontierOptions {
   perHostMinDelayMs?: number
   /** robots.txt Crawl-delay per host, already parsed to milliseconds. */
   crawlDelayMsByHost?: ReadonlyMap<string, number>
+  includePaths?: readonly string[]
+  excludePaths?: readonly string[]
 }
 
 export class Frontier {
@@ -52,6 +57,8 @@ export class Frontier {
   private readonly seedHost: string
   private readonly maxDepth: number | null
   private readonly allowlistedDomains: readonly string[]
+  private readonly includePaths: readonly RegExp[]
+  private readonly excludePaths: readonly RegExp[]
   private readonly perHostConcurrency: number
   private readonly perHostMinDelayMs: number
   private crawlDelayMsByHost: ReadonlyMap<string, number>
@@ -67,6 +74,8 @@ export class Frontier {
     this.seedHost = hostOf(seed)
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
+    this.includePaths = (options.includePaths ?? []).map((pattern) => new RegExp(pattern))
+    this.excludePaths = (options.excludePaths ?? []).map((pattern) => new RegExp(pattern))
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
@@ -170,6 +179,9 @@ export class Frontier {
     if (!this.hostAllowed(host)) {
       return { accepted: false, canonicalUrl, reason: 'host_denied' }
     }
+    if (acceptedReason === 'enqueued' && !this.pathAllowed(new URL(canonicalUrl).pathname)) {
+      return { accepted: false, canonicalUrl, reason: 'path_denied' }
+    }
     if (this.visited.has(canonicalUrl)) {
       return { accepted: false, canonicalUrl, reason: 'duplicate' }
     }
@@ -183,6 +195,11 @@ export class Frontier {
       return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
     }
     return host === this.seedHost
+  }
+
+  private pathAllowed(pathname: string): boolean {
+    if (this.excludePaths.some((pattern) => pattern.test(pathname))) return false
+    return this.includePaths.length === 0 || this.includePaths.some((pattern) => pattern.test(pathname))
   }
 }
 
