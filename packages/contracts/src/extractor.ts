@@ -164,6 +164,34 @@ export interface LabelledValue {
   path: string
 }
 
+/**
+ * What the page's own markup declares about the page, read from the whole
+ * document before cleaning. Each value is that declaration or null when the
+ * page makes none: nothing is inferred from the URL, the content or another
+ * tag (no `og:description` for a missing description, no `/favicon.ico` for a
+ * missing icon).
+ */
+export interface PageMetadata {
+  /**
+   * The document's `<title>`, whitespace collapsed as `document.title` does
+   * (an SVG `<title>` does not count). Unlike `document.title`, the content
+   * title, it never comes from a heading.
+   */
+  title: string | null
+  /** `<meta name="description">`. */
+  description: string | null
+  /** `<html lang>`; when `<html>` has no lang attribute, `<meta http-equiv="content-language">`. */
+  language: string | null
+  /** `<meta name="keywords">` as declared, not split. */
+  keywords: string | null
+  /** `<meta name="robots">`. */
+  robots: string | null
+  /** The first `<link rel~="icon">` that resolves, against the document base URL, to an http(s) URL. */
+  favicon: string | null
+  /** The first `<link rel~="canonical">` that resolves to an http(s) URL. */
+  canonicalUrl: string | null
+}
+
 export interface DocumentExtraction {
   title: string | null
   pageType: PageType
@@ -189,6 +217,8 @@ export interface ExtractorOutput {
    * Null when no absolute URL is known.
    */
   baseUrl: string | null
+  /** The page's own declarations (title, description, language, ...), from the whole document. */
+  metadata: PageMetadata
   /** 0..1 self-assessed extraction confidence. */
   confidence: number
   /**

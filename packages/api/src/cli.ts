@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
   })
-  const app = createApp(engine, { token: listen.token, exposeInternalErrors: listen.mode === 'local' })
+  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local' })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
   let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => {

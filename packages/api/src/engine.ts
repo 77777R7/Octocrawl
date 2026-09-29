@@ -606,6 +606,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
+    ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,

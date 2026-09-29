@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { ApiEngine } from './engine.js'
+import { bearerTokenMatcher } from './auth.js'
 import {
   API_ERROR_STATUS,
   type ApiErrorBody,
@@ -25,7 +26,10 @@ import {
 } from '@w2l/contracts'
 
 export interface AppOptions {
+  /** A bearer token requests must present; accepted together with `tokens`. */
   token?: string | null
+  /** Bearer tokens any one of which a request may present, e.g. one per client so each can be revoked. */
+  tokens?: readonly string[]
   /**
    * Return an unexpected error's own message in its 500 response. Only for a
    * local single-user server; otherwise the response says "internal error" and
@@ -42,13 +46,14 @@ function fail(c: Context, code: ApiErrorCode, message: string, details?: ApiErro
 
 export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   const app = new Hono()
-  const token = options.token ?? null
+  const tokens = [...(options.tokens ?? []), ...(options.token ? [options.token] : [])].filter((token) => token.length > 0)
 
-  if (token !== null && token.length > 0) {
+  if (tokens.length > 0) {
+    const accepts = bearerTokenMatcher(tokens)
     app.use('*', async (c, next) => {
       const header = c.req.header('authorization') ?? ''
       const presented = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
-      if (presented.length === 0 || presented !== token) {
+      if (presented.length === 0 || !accepts(presented)) {
         return fail(c, 'unauthorized', 'unauthorized')
       }
       await next()

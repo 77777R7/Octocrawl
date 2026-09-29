@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
@@ -73,6 +73,32 @@ describe('W2L SDK', () => {
     })
     await client.scrape('https://example.com/')
     expect(headers).toEqual(['Bearer secret'])
+  })
+
+  it('takes the token from W2L_API_TOKEN when none is passed; a passed one, even empty, wins', async () => {
+    const sent = async (options: { token?: string }): Promise<string | null> => {
+      let authorization: string | null = null
+      const client = new W2L({
+        baseUrl: 'http://127.0.0.1:8787',
+        ...options,
+        fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          authorization = new Headers(init?.headers).get('authorization')
+          return new Response(JSON.stringify({ status: 'success' }), { status: 200 })
+        }) as typeof fetch,
+      })
+      await client.scrape('https://example.com/')
+      return authorization
+    }
+    try {
+      vi.stubEnv('W2L_API_TOKEN', 'from-env')
+      expect(await sent({})).toBe('Bearer from-env')
+      expect(await sent({ token: 'passed' })).toBe('Bearer passed')
+      expect(await sent({ token: '' })).toBeNull()
+      vi.stubEnv('W2L_API_TOKEN', '')
+      expect(await sent({})).toBeNull()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('uses the Monitor and Delivery routes, payloads, filters and control actions', async () => {
