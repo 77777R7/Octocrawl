@@ -2,7 +2,8 @@
  * Firecrawl v1 scrape/crawl snapshot, frozen 2026-09-18.
  *
  * A one-shot migration shim: map the two main paths onto the native
- * contract. Not a compatibility layer. Unknown fields are ignored.
+ * contract. Not a compatibility layer. A parameter or format the shim cannot
+ * honour is rejected by name (HTTP 400, success: false), never ignored.
  */
 
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest } from './api.js'
@@ -28,8 +29,10 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
+  'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
-  'creditsUsed is always 0. Formats other than markdown/links are dropped.',
+  'creditsUsed is always 0.',
+  'Formats other than markdown/links and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
 ] as const
 
 export interface FirecrawlPage {
@@ -66,17 +69,83 @@ export interface FirecrawlCrawlStatus {
   data: FirecrawlPage[]
 }
 
+const SHIM_FORMATS: readonly string[] = ['markdown', 'links']
+
+/** Accepted only with the value W2L already implements; any other value is rejected. */
+const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
+  onlyMainContent: { value: true, reason: 'W2L always extracts the main content' },
+  ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
+}
+
+interface ShimProblems {
+  parameters: string[]
+  values: string[]
+  formats: Set<string>
+}
+
 export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
-  return parseScrapeRequest({ url: rec.url })
+  const problems: ShimProblems = { parameters: [], values: [], formats: new Set() }
+  // `origin` is the Firecrawl SDKs' client label; it does not change the result.
+  const formats = readShimScrapeOptions(rec, '', ['url', 'origin'], problems)
+  throwShimProblems(problems)
+  return parseScrapeRequest({ url: rec.url, ...(formats === undefined ? {} : { formats }) })
 }
 
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
+  const problems: ShimProblems = { parameters: [], values: [], formats: new Set() }
+  checkShimKeys(rec, '', ['url', 'origin', 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions'], problems)
+  checkShimFixedValue(rec, '', 'ignoreSitemap', problems)
+  let formats: readonly string[] | undefined
+  if (rec.scrapeOptions !== undefined) {
+    const options = rec.scrapeOptions
+    if (options === null || typeof options !== 'object' || Array.isArray(options)) throw new RequestError('scrapeOptions must be an object')
+    formats = readShimScrapeOptions(options as Record<string, unknown>, 'scrapeOptions.', [], problems)
+  }
+  throwShimProblems(problems)
   const native: Record<string, unknown> = { url: rec.url }
   if (rec.limit !== undefined) native.maxPages = rec.limit
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
+  if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
+  if (rec.excludePaths !== undefined) native.excludePaths = rec.excludePaths
+  if (formats !== undefined) native.formats = formats
   return parseCrawlStartRequest(native)
+}
+
+/** The scrape options the shim maps: formats (markdown, links) and onlyMainContent: true. */
+function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): readonly string[] | undefined {
+  checkShimKeys(rec, prefix, [...keys, 'formats', 'onlyMainContent'], problems)
+  checkShimFixedValue(rec, prefix, 'onlyMainContent', problems)
+  if (rec.formats === undefined) return undefined
+  if (!Array.isArray(rec.formats) || rec.formats.some((item) => typeof item !== 'string')) throw new RequestError(`${prefix}formats must be an array of strings`)
+  const formats = [...new Set(rec.formats as string[])]
+  for (const format of formats) if (!SHIM_FORMATS.includes(format)) problems.formats.add(format)
+  return formats
+}
+
+function checkShimKeys(rec: Record<string, unknown>, prefix: string, known: readonly string[], problems: ShimProblems): void {
+  for (const key of Object.keys(rec)) if (rec[key] !== undefined && !known.includes(key)) problems.parameters.push(`${prefix}${key}`)
+}
+
+function checkShimFixedValue(rec: Record<string, unknown>, prefix: string, key: string, problems: ShimProblems): void {
+  const value = rec[key]
+  const fixed = SHIM_FIXED_VALUES[key]!
+  if (value === undefined) return
+  if (typeof value !== 'boolean') throw new RequestError(`${prefix}${key} must be a boolean`)
+  if (value !== fixed.value) problems.values.push(`${prefix}${key}: ${String(value)} is not supported (${fixed.reason})`)
+}
+
+function throwShimProblems(problems: ShimProblems): void {
+  const parts: string[] = []
+  if (problems.parameters.length > 0) {
+    parts.push(`unsupported ${problems.parameters.length === 1 ? 'parameter' : 'parameters'}: ${problems.parameters.join(', ')}`)
+  }
+  parts.push(...problems.values)
+  if (problems.formats.size > 0) {
+    parts.push(`unsupported ${problems.formats.size === 1 ? 'format' : 'formats'}: ${[...problems.formats].join(', ')} (the /fc shim supports ${SHIM_FORMATS.join(', ')})`)
+  }
+  if (parts.length > 0) throw new RequestError(parts.join('; '))
 }
 
 export function wrapScrape(result: FetchResult): FirecrawlScrapeResponse {
