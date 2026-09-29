@@ -16,7 +16,7 @@ Covered:
 - `POST /fc/v1/crawl` → native crawl start → `{ success, id, url }` (HTTP 200)
 - `GET /fc/v1/crawl/:id` → the crawl's status, counts and one page of its steps → Firecrawl crawl status, further pages through `next`
 
-Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
+Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Map is not implemented yet; the [roadmap](../ROADMAP.md) schedules a native `map` endpoint for P2.
 
 ## Known diffs
 
@@ -26,7 +26,7 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - `data.metadata` has `title` (the page's `<title>`), `description`, `language`, `keywords`, `robots` and `favicon` only when the page declares them, next to `sourceURL` (the requested URL), `url` (the final URL, after redirects), `statusCode`, `contentType` (the response's `content-type` header, left out when there was none) and `error`. `keywords` is the declared string, not split. Other `<meta>` tags (`og:*`, `twitter:*` and the rest) are not passed through, and a failed or blocked page, an error-status page included, has none of the six.
 - No fire-engine, proxy pools, `actions`, JSON extract, or screenshots.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
-- Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
+- Omitted `limit` / `maxDepth` stay unbounded on a local server. A hosted server enforces its crawl limit (100 pages): an omitted or `null` `limit` takes it, and a larger one is refused with HTTP 400 `invalid_request`. Firecrawl defaults are 10000 / 10.
 - `maxDepth` counts link hops from the start URL, which Firecrawl calls `maxDiscoveryDepth`; Firecrawl's own `maxDepth` limits URL path depth.
 - Shim crawl start is HTTP 200 `{success,id,url}`. Native crawl start stays 202 `{taskId}`.
 - `creditsUsed` and `expiresAt` are `null`: W2L counts no credits and keeps crawl results until their task directory is deleted.
@@ -40,4 +40,4 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - `timeout` must be 1 000 to 300 000 ms; an omitted one stays W2L's 300 000 ms (Firecrawl: 30 000). When it fires, the answer is still HTTP 200: `success: true` with the content fetched so far (native status `partial`), or `success: false` with `failed: timeout`. Firecrawl answers a timeout with an error. As on the native API, the lanes wait for a slow server until a `timeout` you set, instead of their default 10 s for headers and 20 s for navigation.
 - Scrape without `formats` returns markdown and links; Firecrawl returns markdown only. Crawl status pages carry each page's links whatever `scrapeOptions.formats` says.
 - A PDF answers `success: true` with its text layer as `data.markdown`, a line `<!-- page N -->` before each page (N counts pages in the file), which Firecrawl's PDF Markdown does not have; `data.metadata` has no `numPages` (the native response's `file.pdf.pageCount` has it) and none of the PDF's own title or language. A PDF with no text layer at all is `success: false` with `failed: empty_unverified`: W2L runs no OCR. CSV, JSON and plain-text files give their text as received; XLSX, XLS and ZIP files are `success: true` with `data.markdown: null`, the file itself saved on the W2L host. A file over `W2L_MAX_FILE_BYTES` (default 50 MiB) is `success: false` with `failed: body_too_large`; images, video and similar are `failed: unsupported_content_type`. `maxFileBytes` is W2L's own option and is not accepted on `/fc`.
-- `includePaths` / `excludePaths` are regular expressions matched against the URL path of each discovered link, as in Firecrawl. The start URL is always fetched and an `excludePaths` match wins. W2L follows links anywhere on the start URL's host, its `www.` twin and the host the start URL redirects to; Firecrawl's default follows only paths below the start URL, and `crawlEntireDomain` is rejected.
+- `includePaths` / `excludePaths` are regular expressions matched against the URL path of each discovered link, as in Firecrawl. The start URL is always fetched and an `excludePaths` match wins. W2L refuses with HTTP 400 `invalid_request` a pattern that can backtrack catastrophically, such as `^/(a+)+$` or `.*a.*b`. It matches the rest in linear time where V8's linear-time engine can run them, and runs one with a lookaround, a backreference or a counted repetition above 16 only on paths of up to 2,048 characters with a 100 ms limit per link; a link a filter cannot decide is not followed. W2L follows links anywhere on the start URL's host, its `www.` twin and the host the start URL redirects to; Firecrawl's default follows only paths below the start URL, and `crawlEntireDomain` is rejected.

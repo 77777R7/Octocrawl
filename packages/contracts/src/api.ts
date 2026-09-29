@@ -9,6 +9,7 @@ import type { CrawlMode } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
+import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
@@ -447,7 +448,11 @@ function readBound(value: unknown, name: string, min: number): number | null | u
   return value
 }
 
-/** Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns of at most 2000 characters. */
+/**
+ * Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns
+ * of at most 2000 characters, none that can backtrack catastrophically
+ * (unsafeRegexReason).
+ */
 function readPathPatterns(value: unknown, name: string): readonly string[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length > 1000 || value.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 2000)) {
@@ -460,6 +465,8 @@ function readPathPatterns(value: unknown, name: string): readonly string[] | und
     } catch {
       throw new RequestError(`${name} contains an invalid regular expression: ${pattern}`)
     }
+    const unsafe = unsafeRegexReason(pattern)
+    if (unsafe !== null) throw new RequestError(`${name} contains a regular expression that can take too long to match (${unsafe}): ${pattern}`)
   }
   return patterns
 }

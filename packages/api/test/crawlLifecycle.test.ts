@@ -117,6 +117,20 @@ describe('crawl lifecycle', () => {
     expect(report.pagesFetched).toBe(1 + LETTERS.length + DOCUMENTS.length)
   })
 
+  it('holds a hosted crawl to the server limit: an omitted or null maxPages takes it, a larger one is refused', async () => {
+    const s = await site()
+    const hosted = s.engine({ defaultMaxPages: 2 })
+    for (const maxPages of [undefined, null, 2]) {
+      const { taskId } = await hosted.startCrawl({ url: `${s.origin}/`, maxDepth: 1, maxPages })
+      expect(await waitFor(hosted, taskId, (r) => r.status === 'completed'), String(maxPages)).toMatchObject({ budgetExceeded: 'pages', pagesFetched: 2 })
+    }
+    await expect(hosted.startCrawl({ url: `${s.origin}/`, maxPages: 3 })).rejects.toMatchObject({ code: 'invalid_request', message: 'maxPages must be at most 2 on this server' })
+    // A local server has no limit: null stays unbounded.
+    const local = s.engine()
+    const { taskId } = await local.startCrawl({ url: `${s.origin}/`, maxDepth: 1, maxPages: null })
+    expect((await waitFor(local, taskId, (r) => r.status === 'completed')).pagesFetched).toBe(1 + LETTERS.length + DOCUMENTS.length)
+  })
+
   it('counts pages while the crawl runs; pages carry audit and trace only with debug=true', async () => {
     const s = await site({ gate: '/b' })
     const engine = s.engine({ workerCount: 1 })

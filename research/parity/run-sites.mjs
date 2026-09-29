@@ -94,6 +94,12 @@
 //               in both (the rule of research/pdf-corpus/manifest.v1.json); the Markdown is doc.markdown,
 //               or the string at spec.path (data.markdown on /fc). When it fails, the observed value
 //               says whether the text is on another page or absent.
+// Added for SEC's declared User-Agent (2026-09-29):
+//   requiresEnv a case may name an environment variable it needs (A36: W2L_CONTACT, which the API
+//               must be started with too). Unset, the case is not run and is reported as skipped:
+//               it stays in the case count, is never counted as passing, and the exit code is 1.
+//               The Markdown summary shows such a variable's value as <NAME>, never the value.
+//   checks      field equalsEnv: equals the string with each ${NAME} replaced by that variable.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -458,6 +464,7 @@ function check(doc, spec, response) {
       if ('notIn' in spec) return { pass: !spec.notIn.includes(actual), actual }
       if ('present' in spec) return { pass: (actual !== undefined && actual !== null && actual !== '') === spec.present, actual: actual === undefined ? 'undefined' : typeof actual }
       if ('includes' in spec) return { pass: typeof actual === 'string' && actual.includes(spec.includes), actual }
+      if ('equalsEnv' in spec) return { pass: actual === spec.equalsEnv.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] ?? ''), actual }
       if ('equalsPath' in spec) return { pass: actual !== undefined && actual === get(doc, spec.equalsPath), actual: `${actual} vs ${get(doc, spec.equalsPath)}` }
       if ('abovePath' in spec) return { pass: typeof actual === 'number' && typeof get(doc, spec.abovePath) === 'number' && actual > get(doc, spec.abovePath), actual: `${actual} vs ${get(doc, spec.abovePath)}` }
       if ('min' in spec || 'max' in spec) return { pass: typeof actual === 'number' && actual >= (spec.min ?? -Infinity) && actual <= (spec.max ?? Infinity), actual }
@@ -618,6 +625,11 @@ await mkdir(outDir, { recursive: true })
 const startedAt = new Date().toISOString()
 const results = []
 for (const c of cases) {
+  if (c.requiresEnv !== undefined && !process.env[c.requiresEnv]) {
+    results.push({ id: c.id, url: c.url ?? c.urls?.join(' '), endpoint: c.endpoint ?? 'scrape', skipped: `${c.requiresEnv} is not set`, seconds: 0, passed: 0, total: 0, envProxies: [], checks: [] })
+    console.log(`${c.id} skipped (${c.requiresEnv} is not set) ${c.url ?? c.urls?.[0]}`)
+    continue
+  }
   const runner = runners[c.endpoint ?? 'scrape']
   const began = Date.now()
   let outcome
@@ -645,8 +657,9 @@ const summary = {
   workingTreeDirty: dirty,
   startedAt,
   finishedAt: new Date().toISOString(),
-  casesPassed: results.filter((r) => r.passed === r.total).length,
+  casesPassed: results.filter((r) => !r.skipped && r.passed === r.total).length,
   cases: results.length,
+  casesSkipped: results.filter((r) => r.skipped).length,
   checksPassed: results.reduce((sum, r) => sum + r.passed, 0),
   checks: results.reduce((sum, r) => sum + r.total, 0),
   results,
@@ -665,17 +678,20 @@ const lines = [
   ...(cases.some((c) => c.endpoint === 'sdk') ? [`SDK: the built @w2l/sdk; W2L_API_TOKEN ${summary.tokenInEnvironment ? 'set' : 'not set'} in the runner's environment (its value is not recorded).`] : []),
   `Network: ${proxyVars.length === 0 ? 'no proxy variables set in the runner' : `${proxyVars.join(', ')} set in the runner's environment`}; ${proxiedCases} of ${results.length} cases' responses record an environment proxy in evidence.envProxy${proxyEndpoints.length === 0 ? '' : ` (${proxyEndpoints.join(', ')})`}.`,
   '',
-  `Cases fully passing: ${summary.casesPassed}/${summary.cases}; checks passing: ${summary.checksPassed}/${summary.checks}.`,
+  `Cases fully passing: ${summary.casesPassed}/${summary.cases}${summary.casesSkipped === 0 ? '' : ` (${summary.casesSkipped} skipped, not run)`}; checks passing: ${summary.checksPassed}/${summary.checks}${summary.casesSkipped === 0 ? '' : ' (skipped cases\' checks not counted)'}.`,
   '',
   '| Case | URL | Checks | Failed checks (P1 item) |',
   '| --- | --- | --- | --- |',
-  ...results.map((r) => `| ${r.id} | ${r.url} | ${r.passed}/${r.total} | ${r.checks.filter((x) => !x.pass).map((x) => `${x.type}${x.text ? ` "${x.text}"` : ''}${x.path ? ` ${x.path}` : ''} (${x.item})`).join('; ') || '—'} |`),
+  ...results.map((r) => `| ${r.id} | ${r.url} | ${r.skipped ? 'skipped' : `${r.passed}/${r.total}`} | ${r.skipped ?? (r.checks.filter((x) => !x.pass).map((x) => `${x.type}${x.text ? ` "${x.text}"` : ''}${x.path ? ` ${x.path}` : ''} (${x.item})`).join('; ') || '—')} |`),
 ]
 const recorded = results.flatMap((r) => r.checks.filter((x) => x.record).map((x) => `- ${r.id} ${x.type}${x.path ? ` ${x.path}` : ''}: ${x.actual}`))
 if (recorded.length > 0) lines.push('', 'Recorded values:', '', ...recorded)
 const target = (x) => x.text ?? x.url ?? x.pattern ?? x.path ?? x.header?.join(' ')
 const failed = results.flatMap((r) => r.checks.filter((x) => !x.pass).map((x) => `- ${r.id} [${x.item}] ${x.type}${target(x) ? ` \`${target(x)}\`` : ''}: ${x.actual ?? (x.type === 'markdownExcludes' ? 'present' : 'absent')}`))
 if (failed.length > 0) lines.push('', 'Failed checks with the observed value:', '', ...failed)
-console.log(`\n${lines.join('\n')}\n\nRaw responses: ${outDir}`)
-if (recordFile) await writeFile(recordFile, `${lines.join('\n')}\n`)
+// A variable a case requires (W2L_CONTACT) never appears in the summary by value.
+let text = lines.join('\n')
+for (const name of new Set(cases.map((c) => c.requiresEnv).filter(Boolean))) if (process.env[name]) text = text.replaceAll(process.env[name], `<${name}>`)
+console.log(`\n${text}\n\nRaw responses: ${outDir}`)
+if (recordFile) await writeFile(recordFile, `${text}\n`)
 process.exitCode = summary.casesPassed === summary.cases ? 0 : 1

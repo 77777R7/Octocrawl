@@ -130,6 +130,12 @@ M01–M08 were added on 2026-09-29 for the remaining gaps of three core features
 | M07 | Compact scrape (`debug: false`) of http://github.com | `snapshot.httpStatus` and `snapshot.contentType`; the hop in the Evidence Record | scrape-formats.metadata-response-status |
 | M08 | `/fc/v1/scrape` of http://github.com | `data.metadata` with `sourceURL`, the final `url`, `statusCode` and `contentType` | scrape-formats.metadata-response-status |
 
+A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
+
+| Case | Request | What it tests | P1 items |
+| --- | --- | --- | --- |
+| A36 | Scrape of an SEC EDGAR filing (IREN Limited, quarter to 31 December 2025) with `mode: "research"` | `success` with HTTP 200 and the filing's text; the Evidence Record's User-Agent is `W2L Research <W2L_CONTACT>` and its contact is `W2L_CONTACT` | FS, ER |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

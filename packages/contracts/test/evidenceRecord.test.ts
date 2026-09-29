@@ -73,6 +73,8 @@ describe('Evidence Record v1 schema file', () => {
 describe('declaredContact', () => {
   it('reads the contact a research User-Agent declares, and nothing else', () => {
     expect(declaredContact(researchUserAgent('Jane Doe jane@example.org'))).toBe('Jane Doe jane@example.org')
+    expect(declaredContact(researchUserAgent('Jane Doe jane@example.org', 'www.sec.gov'))).toBe('Jane Doe jane@example.org')
+    expect(declaredContact('W2L Research ')).toBeNull()
     expect(declaredContact(researchUserAgent())).toBeNull()
     expect(declaredContact(MODE_IDENTITIES.standard.userAgent)).toBeNull()
     expect(declaredContact('Mozilla/5.0 (X11; contact: someone)')).toBeNull()

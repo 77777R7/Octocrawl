@@ -104,22 +104,58 @@ function contactIssue(contact: string): string | null {
   return null
 }
 
+/** The name research mode declares to SEC.gov, before the contact, in SEC's `<Company or name> <email>` format. */
+export const SEC_DECLARED_NAME = 'W2L Research'
+
+/** The robots.txt product token of both research User-Agent formats (RFC 9309 §2.2.1). */
+export const RESEARCH_PRODUCT_TOKEN = 'w2l-research'
+
+/**
+ * Whether a host is sec.gov or one of its subdomains. SEC's fair-access
+ * policy prescribes the declared User-Agent `<Company or name> <email>`, and
+ * SEC.gov answers 403 to the research format even when it declares a contact.
+ */
+export function isSecHost(host: string): boolean {
+  const name = host.toLowerCase().replace(/\.$/, '')
+  return name === 'sec.gov' || name.endsWith('.sec.gov')
+}
+
 /**
  * The research-mode User-Agent. With the operator's contact (`W2L_CONTACT`,
  * such as a name and email address or a URL), it ends `; contact: <contact>)`:
- * publishers such as the SEC ask automated clients to declare one.
+ * publishers such as the SEC ask automated clients to declare one. To an SEC
+ * host (`host`, see isSecHost) it is SEC's own format instead,
+ * `W2L Research <contact>`.
  */
-export function researchUserAgent(contact: string | null = null): string {
+export function researchUserAgent(contact: string | null = null, host: string | null = null): string {
   if (contact === null) return RESEARCH_USER_AGENT
   const issue = contactIssue(contact)
   if (issue !== null) throw new Error(`W2L_CONTACT ${issue}.`)
+  if (host !== null && isSecHost(host)) return `${SEC_DECLARED_NAME} ${contact}`
   return `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: ${contact})`
 }
 
-/** The contact a research-mode User-Agent declares (see researchUserAgent); null for any other User-Agent. */
+/** The contact a research-mode User-Agent declares, in either format (see researchUserAgent); null for any other User-Agent. */
 export function declaredContact(userAgent: string): string | null {
   const prefix = `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: `
-  return userAgent.startsWith(prefix) && userAgent.endsWith(')') ? userAgent.slice(prefix.length, -1) : null
+  if (userAgent.startsWith(prefix) && userAgent.endsWith(')')) return userAgent.slice(prefix.length, -1)
+  const sec = userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? userAgent.slice(SEC_DECLARED_NAME.length + 1) : null
+  return sec !== null && contactIssue(sec) === null ? sec : null
+}
+
+/** Whether a User-Agent is one research mode declares, in either format. */
+export function isResearchUserAgent(userAgent: string): boolean {
+  return /\bw2l-research\b/.test(userAgent) || userAgent.startsWith(`${SEC_DECLARED_NAME} `)
+}
+
+/**
+ * The text robots.txt `User-agent` lines are matched against for a
+ * User-Agent W2L sends. SEC's format names no product token, so the research
+ * token is added: a group for w2l-research governs research requests to
+ * SEC.gov as it does on every other host.
+ */
+export function robotsAgent(userAgent: string): string {
+  return userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
 }
 
 /** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
@@ -186,12 +222,13 @@ export const BROWSER_FINGERPRINT = {
  * The identity for a mode. `standard`, `authed`, and `proxy` share one
  * consistent-browser identity (they differ only in execution lane — session,
  * egress); `research` is the declared bot with no client hints, declaring the
- * operator's `contact` when there is one.
+ * operator's `contact` when there is one, in the format the page's `host`
+ * asks for (see researchUserAgent).
  */
-export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null): ModeIdentity {
+export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null, host: string | null = null): ModeIdentity {
   switch (mode) {
     case 'research':
-      return { mode, userAgent: researchUserAgent(contact), clientHints: {}, respectsRobots: true, lane: 'browser_local' }
+      return { mode, userAgent: researchUserAgent(contact, host), clientHints: {}, respectsRobots: true, lane: 'browser_local' }
     case 'standard':
       return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_local' }
     case 'authed':

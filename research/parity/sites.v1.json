@@ -1669,6 +1669,24 @@
         { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 368197 },
         { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
       ]
+    },
+    {
+      "id": "A36",
+      "batch": "api",
+      "url": "https://www.sec.gov/Archives/edgar/data/1878848/000187884826000015/iren-20251231.htm",
+      "requiresEnv": "W2L_CONTACT",
+      "request": { "mode": "research", "formats": ["markdown"] },
+      "note": "Added 2026-09-29. An SEC EDGAR filing (IREN Limited's quarterly report for the quarter to 31 December 2025) in research mode. SEC.gov answers 403 'Your Request Originates from an Undeclared Automated Tool' to the research User-Agent, with or without a contact, and serves the format its fair-access policy prescribes, '<Company or name> <email>', which research mode sends to sec.gov hosts when W2L_CONTACT is set. Runs only when W2L_CONTACT is set in the runner's environment, and the API must be started with the same W2L_CONTACT; the record shows the value as <W2L_CONTACT>. SEC asks for at most 10 requests per second; this case is one scrape. On 2026-09-29 (first run, b0ad21b) SEC.gov answered robots.txt and the filing with 200 to 'W2L Research <W2L_CONTACT>', but the default Markdown held one table only, the statement of operations (6,843 characters; document.strategy 'table', confidence 0.08), so the filing's own text, which names IREN throughout, was missing while the status said success.",
+      "checks": [
+        { "item": "FS", "type": "apiStatus", "equals": 200 },
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "FS", "type": "markdownMatches", "pattern": "IREN" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.mode", "equals": "research" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.userAgent", "equalsEnv": "W2L Research ${W2L_CONTACT}" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.identity.contact", "equalsEnv": "${W2L_CONTACT}" }
+      ]
     }
   ]
 }

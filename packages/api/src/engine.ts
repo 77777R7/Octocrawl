@@ -142,7 +142,10 @@ export interface ApiEngineOptions {
   monitorAttemptTimeoutMs?: number
   headed?: boolean
   networkPolicy?: NetworkPolicy
-  /** Hosted crawl default when the request omits maxPages. Local stays unbounded. */
+  /**
+   * Hosted crawl limit: an omitted or null maxPages takes it and a larger one
+   * is refused. Null (local) leaves crawls unbounded.
+   */
   defaultMaxPages?: number | null
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
@@ -400,6 +403,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startCrawl(req) {
       checkFileCap(req)
+      if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
+        throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
+      }
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
@@ -413,7 +419,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         mode,
         status: 'pending',
         budget: {
-          maxPages: req.maxPages === undefined ? defaultMaxPages : req.maxPages,
+          maxPages: req.maxPages ?? defaultMaxPages,
           maxWallMs: null,
           maxCostUsd: null,
           maxTokens: null,

@@ -29,7 +29,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
-  'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
+  'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
