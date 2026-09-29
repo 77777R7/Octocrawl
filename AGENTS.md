@@ -2,9 +2,15 @@
 
 ## What to work on
 
-Read the "Current phase" section of [ROADMAP.md](ROADMAP.md) before starting. Work only on items of the current phase, or on what the person asking explicitly requests. Items in the roadmap's "Paused" table are not worked on unless the person asks; if a task seems to require one, say so instead of starting it.
+Read the "Current phase" section of [ROADMAP.md](ROADMAP.md) before starting. Work only on items of the current phases, or on what the person asking explicitly requests. The roadmap's "Paused" table names paused features precisely; they are not worked on unless the person asks, and if a task seems to require one, say so instead of starting it. Firecrawl-compatible features that the table does not name, such as the P1 items, are in scope.
 
-A change is done when it serves the current phase's exit condition: the seed user can use the result. A merged PR, a green test run or a new evidence document is not by itself progress on the roadmap.
+A change is done when it moves the current phase's exit condition. In P1 that means a core feature becomes solid (it works, has tests, passes its real-site test and behaves as documented) or a real-site test passes. A merged PR, a green test run or a new evidence document is not by itself progress on the roadmap.
+
+## Parity work
+
+- Reproduce a reported gap with a failing test before changing code: a local fixture, plus the matching real-site case in [research/parity/sites.md](research/parity/sites.md) where one exists. The audit's first pass was wrong in 90 places, so a gap nobody has reproduced is not yet a task.
+- The comparison is frozen at firecrawl-js v4.42.0. Do not follow newer Firecrawl behaviour.
+- Record every real-site run with its command and source commit.
 
 ## Evidence honesty
 

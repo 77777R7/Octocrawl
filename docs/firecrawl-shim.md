@@ -25,4 +25,5 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
 - Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
 - Shim crawl start is HTTP 200 `{success,id,url}`. Native crawl start stays 202 `{taskId}`.
-- `creditsUsed` is always 0. Formats other than markdown / links are dropped.
+- `creditsUsed` is always 0.
+- Scrape uses only `url`: `formats` and every other option are ignored, and the response always carries markdown and links. Crawl uses only `url`, `limit` and `maxDepth`; `includePaths`, `excludePaths` and `scrapeOptions` are ignored.

@@ -163,7 +163,7 @@ The setup uses an anonymous Singapore public delivery preference for this benchm
 The concurrency-1 command can exit nonzero because its ten-page median exceeds 20 seconds; inspect its report for comparability and blocking before continuing to 2. The signed run had 37.93 seconds at 1, 19.92 at 2, and 12.39 at 4.
 This signed Amazon slice is currently on the local `codex/amazon-adapter-integration` branch, not the released `main` or `v0.4.0-rc.1` source.
 
-Firecrawl v1 clients: set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
+Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim currently uses only `url` and ignores every other parameter, including `formats`; the crawl shim uses only `url`, `limit` and `maxDepth`. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
 
 ## Continuous Monitors and event delivery
 
