@@ -38,10 +38,16 @@
 //               trace event, and per host its recorded starts are at least the robots.txt
 //               Crawl-delay the runner read (doc.robots) apart, which each page after the
 //               first also names as robotsCrawlDelayMs.
+//
+// Added for the Evidence Record:
+//   checks      evidenceSchema: the value at path (default evidenceRecord) is valid against
+//               packages/contracts/schemas/evidence-record.v1.json (ajv, draft 2020-12); inside
+//               eachItem it checks each batch item or crawl page.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import Ajv2020 from 'ajv/dist/2020.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
@@ -56,6 +62,8 @@ const recordFile = flag('--record')
 const outDir = join(here, '../../.w2l/parity', new Date().toISOString().replace(/[:.]/g, '-'))
 
 const manifest = JSON.parse(await readFile(join(here, 'sites.v1.json'), 'utf8'))
+const evidenceSchema = new Ajv2020({ allErrors: true, allowUnionTypes: true })
+  .compile(JSON.parse(await readFile(join(here, '../../packages/contracts/schemas/evidence-record.v1.json'), 'utf8')))
 const cases = manifest.cases.filter((c) =>
   (batchFilter === undefined || String(c.batch) === batchFilter) &&
   (onlyFilter === undefined || onlyFilter.includes(c.id)))
@@ -351,6 +359,12 @@ function check(doc, spec, response) {
       const urls = (doc.items ?? []).map((item) => item.url ?? item.canonicalUrl ?? '')
       const bad = urls.filter((url) => !new RegExp(spec.pattern).test(url))
       return { pass: urls.length >= (spec.minItems ?? 1) && bad.length === 0, actual: `${urls.length} pages, ${bad.length} outside the pattern${bad[0] ? `: ${bad[0]}` : ''}` }
+    }
+    case 'evidenceSchema': {
+      const record = get(doc, spec.path ?? 'evidenceRecord')
+      if (record === undefined) return { pass: false, actual: `no ${spec.path ?? 'evidenceRecord'}` }
+      const valid = evidenceSchema(record)
+      return { pass: valid, actual: valid ? `valid (${record.lane}, ${record.status})` : evidenceSchema.errors.slice(0, 3).map((error) => `${error.instancePath || '/'} ${error.message}`).join('; ') }
     }
     case 'anyOf': {
       const results = spec.checks.map((group) => group.map((inner) => check(doc, inner, response)))
