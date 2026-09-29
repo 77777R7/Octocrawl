@@ -246,6 +246,22 @@ export class ProviderSubject implements SubjectAdapter {
       skippedFetch: !verdict.allowed,
       ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
     }
+    // As on the other lanes: a result without a compliance record (a vendor
+    // failure) still says which robots.txt decision it was fetched under.
+    trace.push({
+      at: Date.now() - start,
+      lane: 'provider',
+      event: 'robots_checked',
+      detail: {
+        decision: robotsDecision.decision,
+        robotsUrl: robotsDecision.robotsUrl,
+        robotsSha256: robotsDecision.robotsSha256,
+        matchedGroup: robotsDecision.matchedUserAgentGroup,
+        ruleCount: robotsDecision.appliedRules.length,
+        crawlDelayMs: robotsDecision.crawlDelayMs ?? null,
+        ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
+      },
+    })
 
     if (!verdict.allowed) {
       return this.denied(url, start, trace, verdict, robotsDecision)
@@ -258,8 +274,10 @@ export class ProviderSubject implements SubjectAdapter {
     this.lastRequestAtMsByHost.set(host, Date.now())
 
     let res: ProviderResponse
+    let fetchedAt: string
     try {
       res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal), execution.signal)
+      fetchedAt = new Date().toISOString()
       if (res.status === 429 || res.status === 503) {
         const delay = parseRetryAfterMs(res.headers['retry-after'] ?? null)
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)
@@ -389,6 +407,7 @@ export class ProviderSubject implements SubjectAdapter {
         contentType: res.headers['content-type'] ?? null,
         rawBodySha256: sha256Hex(new TextEncoder().encode(res.body)),
         artifacts: [],
+        fetchedAt,
       },
       usage: {
         wallMs,
