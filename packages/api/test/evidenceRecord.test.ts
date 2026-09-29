@@ -41,6 +41,9 @@ const PAGES: Record<string, { status?: number; headers?: Record<string, string>;
   '/moved': { status: 301, headers: { location: '/article' }, body: '' },
   '/loop/a': { status: 302, headers: { location: '/loop/b' }, body: '' },
   '/loop/b': { status: 302, headers: { location: '/loop/a' }, body: '' },
+  // Pages that move on by themselves once they answered: a script and a meta refresh.
+  '/leaving': { headers: { 'content-type': 'text/html; charset=windows-1252' }, body: '<!doctype html><html><body><p>Leaving.</p><script>location.replace("/missing")</script></body></html>' },
+  '/refresh': { body: '<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/article"></head><body><p>Moving on.</p></body></html>' },
   '/article': { body: ARTICLE },
   '/hub': { body: ARTICLE.replace('<p><a href="/missing">Archive</a></p>', '<p><a href="/article">Report</a> <a href="/missing">Archive</a> <a href="/private">Staff</a></p>') },
   '/missing': { status: 404, body: '<!doctype html><html><head><title>Not found</title></head><body><main><h1>Page not found</h1><p>The page you asked for is not on this server.</p></main></body></html>' },
@@ -218,6 +221,26 @@ describe('Evidence Record: browser lane', () => {
     expect(valid(missing.evidenceRecord)).toMatchObject({ status: 'failed', reason: 'http_error', httpStatus: 404, lane: 'browser_local' })
     const blocked = await scrape(browser, { url: `${origin}/challenge` })
     expect(valid(blocked.evidenceRecord)).toMatchObject({ status: 'blocked', httpStatus: 403, lane: 'browser_local' })
+  })
+
+  it('records the document a script or a meta refresh moved on to, in every response shape', async () => {
+    const snapshot = { httpStatus: 404, contentType: 'text/html; charset=utf-8' }
+    const full = await scrape(browser, { url: `${origin}/leaving`, formats: ['markdown'] })
+    expect(full).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { finalUrl: `${origin}/missing`, ...snapshot } })
+    expect(full.markdown).toContain('Page not found')
+    expect(valid(full.evidenceRecord)).toMatchObject({
+      finalUrl: `${origin}/missing`,
+      redirectChain: { urls: [`${origin}/leaving`, `${origin}/missing`], complete: true },
+      httpStatus: 404, status: 'failed', reason: 'http_error', lane: 'browser_local',
+    })
+    const compact = await scrape(browser, { url: `${origin}/leaving`, formats: ['markdown'], debug: false })
+    expect(compact).toMatchObject({ status: 'failed', finalUrl: `${origin}/missing`, snapshot })
+    const shim = await createApp(browser).request('/fc/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `${origin}/leaving` }) })
+    expect(await shim.json()).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { url: `${origin}/missing`, statusCode: 404, contentType: 'text/html; charset=utf-8', error: 'http_error' } } })
+
+    const refreshed = await scrape(browser, { url: `${origin}/refresh`, formats: ['markdown'], waitFor: 500 })
+    expect(refreshed).toMatchObject({ status: 'success', evidence: { finalUrl: `${origin}/article`, httpStatus: 200 } })
+    expect(valid(refreshed.evidenceRecord)).toMatchObject({ finalUrl: `${origin}/article`, redirectChain: { urls: [`${origin}/refresh`, `${origin}/article`], complete: true }, httpStatus: 200, status: 'success' })
   })
 
   it('records JSON field evidence and a partial capture', async () => {

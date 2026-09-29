@@ -24,13 +24,14 @@ import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
-import { waitForRenderedStability } from '../browserSettle.js'
+import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
+import { MainFrameDocuments, reported, type MainFrameEntry } from './browserDocuments.js'
 import {
   BROWSER_FINGERPRINT,
   CHROME_MAJOR_FLOOR,
@@ -48,6 +49,31 @@ import {
  * into it, so the page can still be captured and extracted.
  */
 const CAPTURE_RESERVE_MS = 1_000
+
+/**
+ * Reads of a page that loads new documents while W2L reads it, before W2L
+ * gives up pairing what it read with one of them: such a page (a client-side
+ * redirect loop, a meta refresh to itself) fails with `redirect_loop`.
+ */
+const CAPTURE_ATTEMPTS = 3
+
+/** Time a page's close may take before W2L closes its context instead. */
+const PAGE_CLOSE_MS = 2_000
+
+/**
+ * Close a page, waiting `timeoutMs` at most: Chromium can leave the close of
+ * a page that keeps navigating (a refresh loop) unanswered, and a fetch that
+ * waited for it would never end, nor would the next one to its origin.
+ * Closing the page's context, which follows, ends it. True when it closed in
+ * time.
+ */
+export async function closePage(page: Pick<Page, 'close'>, timeoutMs = PAGE_CLOSE_MS): Promise<boolean> {
+  const closing = page.close().then(() => true, () => true)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const closed = await Promise.race([closing, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })])
+  clearTimeout(timer)
+  return closed
+}
 
 /**
  * Browser-local subject: the escalation target the http lane flags into.
@@ -412,6 +438,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const seen: { download: Download | null; navigations: Response[] } = { download: null, navigations: [] }
       page.on('download', download => { seen.download ??= download })
       page.on('response', navigation => { if (navigation.request().isNavigationRequest()) seen.navigations.push(navigation) })
+      // The document the main frame shows, which a script, a meta refresh or
+      // the history API can change after the navigation W2L started answered.
+      const documents = new MainFrameDocuments(page)
+      const shownPage = page
+      // Documents loaded when the last wait for stability began: one loaded since has not settled.
+      let settledLoads = 0
+      const settle = async (maxMs: number) => {
+        settledLoads = documents.loads
+        await raceWithSignal(waitForRenderedStability(shownPage, { maxMs }), signal)
+      }
 
       // Rate-limit facts are captured at actual navigation, after setup.
       let previousRequestAtMs: number | null = null
@@ -447,6 +483,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         const envProxy = proxyFor(navigationUrl, this.networkPolicy)
         if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
         try {
+          documents.restart()
           response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
         } catch (error) {
           if (!(error instanceof Error) || !error.message.includes('Download is starting')) throw error
@@ -471,7 +508,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           if (execution.deadlineAt !== undefined && retryAt >= execution.deadlineAt) {
             trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'retry_deferred', detail: { retryAt, delayMs, status } })
             const deferred = this.denied(url, start, trace, new Error('aborted'))
-            return { ...deferred, retryAt, evidence: { ...deferred.evidence, httpStatus: status, finalUrl: page.url() } }
+            return { ...deferred, retryAt, evidence: { ...deferred.evidence, httpStatus: status, finalUrl: response?.url() ?? page.url() } }
           }
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'retry', detail: { attempt: attemptCount, status, delayMs } })
           statusRetries++
@@ -482,7 +519,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           continue
         }
-        await raceWithSignal(waitForRenderedStability(page, { maxMs: remainingTimeout(execution, 1_500) }), signal)
+        await settle(remainingTimeout(execution, 1_500))
         throwIfExecutionStopped(execution)
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({
@@ -508,7 +545,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         break
       }
       throwIfExecutionStopped(execution)
-      const file = await this.fileAnswer(url, start, trace, execution, options, seen, response, attemptCount, (finalUrl, sentHeaders) => this.chain.append({
+      // A file the page displays is the document it shows now, not necessarily the one W2L navigated to.
+      const shownFirst = documents.shown()
+      const file = await this.fileAnswer(url, start, trace, execution, options, seen, shownFirst === null ? response : shownFirst.response, documents, attemptCount, (finalUrl, sentHeaders) => this.chain.append({
         recordId: crypto.randomUUID(),
         mode: this.mode,
         requestedUrl: url,
@@ -534,9 +573,35 @@ export class BrowserLocalSubject implements SubjectAdapter {
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'wait_for', detail: { requestedMs: waitFor, waitedMs: Math.round(performance.now() - waitStarted), ...(waitCutShort ? { cutShortBy: 'timeout' } : {}) } })
         throwIfExecutionStopped(execution)
       }
-      const status = response?.status() ?? 0
-      const finalUrl = page.url()
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
+      // The page as it is now, read while no new document loads, so that what
+      // is read and the document's response belong together. A document
+      // loaded since the last wait for stability (a script or a meta refresh
+      // moved the page on) settles first, within the capture reserve.
+      let body: string | null = null
+      let shown: MainFrameEntry | null = null
+      let pageUrl = page.url()
+      let steady = false
+      for (let attempt = 1; attempt <= CAPTURE_ATTEMPTS && !steady; attempt++) {
+        if (documents.loads !== settledLoads) {
+          const settleMs = execution.deadlineAt === undefined ? 1_500 : Math.min(1_500, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
+          if (settleMs > 0) await settle(settleMs)
+          throwIfExecutionStopped(execution)
+        }
+        const loads = documents.loads
+        try {
+          body = await raceWithSignal(page.content(), signal)
+        } catch (error) {
+          if (!isNavigationError(error)) throw error
+          continue
+        }
+        shown = documents.shown()
+        pageUrl = page.url()
+        steady = documents.loads === loads
+      }
+      // The document's own response, and the URL it answered (see reported);
+      // with nothing committed since the navigation, the navigation's answer.
+      const { finalUrl, response: documentResponse } = reported(shown ?? { url: pageUrl, response, kind: 'document' })
       if (finalUrl !== url) {
         try {
           await assertSafeUrl(finalUrl, this.networkPolicy)
@@ -544,7 +609,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
           return this.denied(url, start, trace, err)
         }
       }
-      const body = await page.content()
+      if (!steady || body === null) return this.keptNavigating(url, start, trace, documents, finalUrl, attemptCount)
+      // Status, headers and verdict are the document's own. A document that
+      // came without a response (status 0 here) is judged by its content.
+      const status = documentResponse?.status() ?? 0
+      const documentHeaders = documentResponse?.headers() ?? {}
+      // Links and Markdown resolve against the page's URL, the document's base.
+      if (pageUrl !== finalUrl && documentResponse !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'same_document_navigation', detail: { from: finalUrl, to: pageUrl } })
       const fetchedAt = new Date().toISOString()
       if (Buffer.byteLength(body) > this.networkPolicy.maxDecompressedBytes) {
         return this.denied(url, start, trace, new BodyTooLargeError(this.networkPolicy.maxDecompressedBytes))
@@ -565,7 +636,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // What actually went on the wire, as Playwright saw it — the fact the
       // honesty check compares against, and the record signs.
-      const sentHeaders: ComplianceSentHeader[] = Object.entries(response?.request().headers() ?? {})
+      const sentHeaders: ComplianceSentHeader[] = Object.entries((documentResponse ?? response)?.request().headers() ?? {})
         .map(([name, value]) => ({ name: name.toLowerCase(), value }))
         .sort((a, b) => a.name.localeCompare(b.name))
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
@@ -599,19 +670,19 @@ export class BrowserLocalSubject implements SubjectAdapter {
         access: this.access,
       })
 
-      const navigation = redirectHops(url, response, finalUrl)
+      const navigation = documents.chain(url, finalUrl)
       const base = {
         requestedUrl: url,
-        ...([429, 503].includes(status) ? { retryAt: Date.now() + (parseRetryAfterMs(response?.headers()['retry-after'] ?? null) ?? 250) } : {}),
+        ...([429, 503].includes(status) ? { retryAt: Date.now() + (parseRetryAfterMs(documentHeaders['retry-after'] ?? null) ?? 250) } : {}),
         truncated: false,
         truncatedAt: null,
         compliance: record,
         evidence: {
           finalUrl,
-          httpStatus: status,
+          httpStatus: documentResponse?.status() ?? null,
           redirectChain: navigation.chain,
           redirectChainComplete: navigation.complete,
-          contentType: response?.headers()['content-type'] ?? null,
+          contentType: documentHeaders['content-type'] ?? null,
           rawBodySha256,
           artifacts: rawArtifacts,
           fetchedAt,
@@ -639,12 +710,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // evidence so a 200 interstitial with extractable prose is not success.
       const gate = classifyGate({
         status,
-        header: (name) => response?.headers()[name.toLowerCase()] ?? null,
+        header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
       })
       // An error status is never content, but its page is what the server
       // said: the failed or blocked result keeps it as evidence.
-      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, converted, finalUrl, options)
+      const errorPage = errorPageEvidence(status, documentHeaders['content-type'] ?? null, converted, pageUrl, options)
       const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
       const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
         const next = escalationForBlock(verdict.reason, 'browser_local')
@@ -695,8 +766,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(converted, { url: finalUrl })
-      const links = collectLinks(body, finalUrl)
+      const extracted = extractTf.extract(converted, { url: pageUrl })
+      const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -717,7 +788,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let wholePage: string | null = null
       if (extracted.escalate) {
         if (gate !== null) return blocked(gate)
-        wholePage = wholePageMarkdown(converted, finalUrl)
+        wholePage = wholePageMarkdown(converted, pageUrl)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
         if (options.onlyMainContent !== false || wholePage === null) return {
@@ -736,7 +807,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const decisive = classifyGate({
         status,
-        header: (name) => response?.headers()[name.toLowerCase()] ?? null,
+        header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
         contentful: true,
       })
@@ -745,7 +816,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
       const markdown = options.onlyMainContent === false
-        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: finalUrl })
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
@@ -774,12 +845,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
     } catch (err) {
       const wallMs = Date.now() - start
       // Playwright surfaces deadline misses as TimeoutError; map them to the
-      // contract's timeout reason so the timeout fixtures match, and leave
-      // every other navigation failure as connection_error.
+      // contract's timeout reason so the timeout fixtures match. Chromium
+      // stops following redirects after 20, a loop included. Every other
+      // navigation failure is a connection_error.
       const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
         : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
           : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
-            : 'connection_error'
+            : err instanceof Error && err.message.includes('net::ERR_TOO_MANY_REDIRECTS') ? 'redirect_limit'
+              : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -820,7 +893,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      await page?.close().catch(() => {})
+      if (page !== undefined) await closePage(page)
       if (context !== this.managedContext) await context?.close().catch(() => {})
     }
   }
@@ -829,7 +902,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * The answer for a file (see fileResult.ts) the navigation downloaded, or
    * displays in place of a page (JSON, plain text, a PDF in a headed
    * browser): the bytes the browser received, saved as received. Null when
-   * the navigation is a web page after all.
+   * the navigation is a web page after all. `response` answered the document
+   * the page shows.
    */
   private async fileAnswer(
     url: string,
@@ -839,6 +913,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     options: FetchOptions,
     seen: { download: Download | null; navigations: readonly Response[] },
     response: Response | null,
+    documents: MainFrameDocuments,
     attemptCount: number,
     mint: (finalUrl: string, sentHeaders: ComplianceSentHeader[]) => ComplianceRecord,
     identity: Parameters<typeof checkIdentityHonesty>[0],
@@ -853,6 +928,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     if (download === null && (navigation === null || !isSuccessStatus(status) || isNoContentStatus(status) || typeof declared !== 'object' && declared !== 'unsupported')) return null
     const finalUrl = download?.url() ?? navigation!.url()
     if (finalUrl !== url) await raceWithSignal(assertSafeUrl(finalUrl, this.networkPolicy), execution.signal)
+    // A download commits no document: its navigation's hops end the chain.
+    const hops = documents.chain(url, finalUrl, download === null ? null : navigation)
     const at = () => Date.now() - start
     const maxBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     const declaredBytes = declaredLength(headers['content-length'])
@@ -877,7 +954,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         evidence: {
           finalUrl,
           httpStatus: status,
-          redirectChain: finalUrl !== url ? [url, finalUrl] : [],
+          redirectChain: hops.chain,
+          redirectChainComplete: hops.complete,
           contentType,
           rawBodySha256: null,
           artifacts: [],
@@ -929,6 +1007,43 @@ export class BrowserLocalSubject implements SubjectAdapter {
       file: content.file,
       evidence: { ...answered.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
       usage: { ...answered.usage, bytesDecompressed: bytes.byteLength, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
+    }
+  }
+
+  /**
+   * A page that loaded a new document during every read (a client-side
+   * redirect loop, a meta refresh to itself): what was read cannot be paired
+   * with a response, so nothing is delivered and no status is claimed. The
+   * chain shows where it went.
+   */
+  private keptNavigating(url: string, start: number, trace: TraceEvent[], documents: MainFrameDocuments, finalUrl: string, attemptCount: number): FetchResult {
+    const wallMs = Date.now() - start
+    const navigation = documents.chain(url, finalUrl)
+    trace.push({ at: wallMs, lane: 'browser_local', event: 'page_kept_navigating', detail: { reads: CAPTURE_ATTEMPTS, documentsLoaded: documents.loads, finalUrl } })
+    return {
+      requestedUrl: url,
+      status: 'failed',
+      failureReason: 'redirect_loop',
+      blockReason: null,
+      budgetExceeded: null,
+      lane: 'browser_local',
+      escalations: [],
+      markdown: null,
+      truncated: false,
+      truncatedAt: null,
+      compliance: null,
+      evidence: {
+        finalUrl,
+        httpStatus: null,
+        redirectChain: navigation.chain,
+        redirectChainComplete: navigation.complete,
+        contentType: null,
+        rawBodySha256: null,
+        artifacts: [],
+        ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
+      },
+      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: null },
+      trace,
     }
   }
 
@@ -1061,39 +1176,5 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.browser = null
     this.browserPromise = null
     await this.robotsCache.teardown()
-  }
-}
-
-/**
- * The redirect chain of the page's final navigation, as Chromium followed it:
- * each request the response was redirected from, the requested URL first and
- * the final URL last, or empty when nothing redirected. It is complete when
- * it lists every hop W2L requested for the page. A navigation that did not
- * start at the requested URL (a follow-up navigation) or a page that moved on
- * after its response (a script or a meta refresh) leaves hops unobserved.
- */
-function redirectHops(requested: string, response: Response | null, finalUrl: string): { chain: string[]; complete: boolean } {
-  if (response === null) return { chain: sameDocument(requested, finalUrl) ? [] : [requested, finalUrl], complete: false }
-  const hops: string[] = []
-  for (let request: ReturnType<Response['request']> | null = response.request(); request !== null; request = request.redirectedFrom()) hops.unshift(request.url())
-  let complete = true
-  // The ends are written as requested and as the page reports its URL (a fragment kept).
-  if (sameDocument(hops[0]!, requested)) hops[0] = requested
-  else { hops.unshift(requested); complete = false }
-  if (sameDocument(hops.at(-1)!, finalUrl)) hops[hops.length - 1] = finalUrl
-  else { hops.push(finalUrl); complete = false }
-  return { chain: hops.length > 1 ? hops : [], complete }
-}
-
-/** Two URLs name the same document: equal once parsed, fragments aside. */
-function sameDocument(a: string, b: string): boolean {
-  try {
-    const left = new URL(a)
-    const right = new URL(b)
-    left.hash = ''
-    right.hash = ''
-    return left.href === right.href
-  } catch {
-    return a === b
   }
 }
