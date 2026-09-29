@@ -108,6 +108,11 @@ export class ExtractTf implements Extractor {
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
     // Counted before cleaning, which may drop empty elements.
     const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
+    // Data the page's scripts will fetch once they run: whatever they build
+    // from it is not in this HTML either.
+    const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
+      (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('preload') &&
+      (link.getAttribute('as') ?? '').trim().toLowerCase() === 'fetch').length
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -208,6 +213,7 @@ export class ExtractTf implements Extractor {
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
+      fetchPreloads,
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

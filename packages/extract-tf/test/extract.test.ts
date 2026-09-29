@@ -231,6 +231,20 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     expect(extractTf.extract(ARTICLE).emptyTableShells).toBe(0)
   })
 
+  it('counts data the page declares its scripts will fetch', () => {
+    // ourworldindata.org's table view: the server renders the description and
+    // a picture of the chart; the table is built from the preloaded JSON.
+    const html = `<!doctype html><html><head><title>CO₂ emissions per capita | Our World in Data</title>
+<link rel="preload" href="https://api.ourworldindata.org/v1/indicators/1119914.data.json" as="fetch" crossorigin="anonymous"/>
+<link rel="preload" href="/fonts/LatoLatin-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous"/>
+<link rel="modulepreload" href="/assets/owid.mjs"/><link rel="stylesheet" href="/assets/owid.css"/>
+</head><body><main><figure class="chart"><picture><img src="/grapher/co-emissions-per-capita.png?tab=table" width="850" height="600" loading="lazy"/></picture></figure>
+<h2>CO₂ emissions per capita</h2><p>Carbon dioxide emissions from burning fossil fuels and industrial processes. This includes emissions from transport, electricity generation, and heating, but not land-use change.</p>
+</main></body></html>`
+    expect(extractTf.extract(html).fetchPreloads).toBe(1)
+    expect(extractTf.extract(ARTICLE).fetchPreloads).toBe(0)
+  })
+
   it('filters link-farm paragraphs by link density', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Directory</h1>

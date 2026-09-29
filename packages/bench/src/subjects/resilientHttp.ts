@@ -448,15 +448,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
 
     // Quality signal: a success whose content is thin AND low-confidence is
     // a success worth offering to a higher lane. So is a page whose tables
-    // are empty shells: their rows arrive by script, so this HTML cannot hold
-    // the data however confident the extraction looks. The status stays
+    // are empty shells, or that declares data its scripts will fetch: that
+    // content arrives by script, so this HTML cannot hold it however
+    // confident the extraction looks. The status stays
     // success — this is not a rewritten verdict — but the ladder reads this
     // event as "the HTTP answer is below the quality bar, try the browser".
     const emptyTableShells = extracted.emptyTableShells ?? 0
+    const fetchPreloads = extracted.fetchPreloads ?? 0
     if (
       (contentTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
         extracted.confidence <= QUALITY_ESCALATION_MAX_CONFIDENCE) ||
-      emptyTableShells > 0
+      emptyTableShells > 0 ||
+      fetchPreloads > 0
     ) {
       trace.push({
         at: wallMs,
@@ -468,6 +471,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           pageType: extracted.pageType,
           strategy: extracted.strategy,
           emptyTableShells,
+          fetchPreloads,
         },
       })
     }

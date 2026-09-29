@@ -218,6 +218,12 @@ export interface ExtractorOutput {
    * `<tbody>` waiting for a script to fill them. The data is not in this HTML.
    */
   emptyTableShells?: number
+  /**
+   * Data the page declares its scripts will fetch once they run
+   * (`<link rel="preload" as="fetch">`). Whatever the scripts build from it,
+   * a table or a chart, is not in this HTML.
+   */
+  fetchPreloads?: number
   /** Label/value pairs of the main content (see LabelledValue). */
   labelledValues?: readonly LabelledValue[]
   /** Monotonic extractor stage timings. */
