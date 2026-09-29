@@ -35,6 +35,15 @@ describe('htmlToMarkdown', () => {
     )
   })
 
+  it('keeps a data table that holds a small table in one cell as one grid, the small table as its cell text', () => {
+    const md = htmlToMarkdown(
+      '<table><tr><th>Kiln</th><th>Firings</th><th>Glazes</th></tr>' +
+        '<tr><td>North</td><td>41</td><td><table><caption>By glaze</caption><tr><td>Cobalt</td><td>12</td></tr><tr><td>Ash</td><td>29</td></tr></table></td></tr>' +
+        '<tr><td>South</td><td>37</td><td>Celadon</td></tr></table>',
+    )
+    expect(md).toBe('| Kiln | Firings | Glazes |\n| --- | --- | --- |\n| North | 41 | By glaze Cobalt 12 Ash 29 |\n| South | 37 | Celadon |')
+  })
+
   it('keeps an empty corner header cell empty instead of inventing its text', () => {
     const md = htmlToMarkdown(
       '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',

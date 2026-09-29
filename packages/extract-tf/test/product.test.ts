@@ -310,9 +310,24 @@ describe('recommendation pruning: precision guards', () => {
 
 describe('price shape', () => {
   it('matches the currency conventions storefronts actually ship', () => {
-    for (const s of ['$84.00', '£1,299.99', '€18,50', '¥3980', 'USD 84.00', '84.00 EUR', '₹1,49,900']) {
+    for (const s of ['$84.00', '£1,299.99', '€18,50', '¥3980', 'USD 84.00', '84.00 EUR', '₹1,49,900', '1 299,00 €', "CHF 1'299.00"]) {
       expect(looksLikePrice(s)).toBe(true)
     }
+  })
+
+  it('reads a price grouped by spaces or apostrophes as one amount, not its last group', () => {
+    const visible = (text: string): string | undefined => {
+      const doc = parse(`<html><body><h1>Lampe</h1><p class="price">${text}</p></body></html>`)
+      const value = collectProductFacts(doc.document).price?.value
+      doc.close()
+      return value
+    }
+    expect(visible('1 299,00 €')).toBe('1 299,00 €')
+    expect(visible('€ 1 299,00')).toBe('€ 1 299,00')
+    expect(visible("CHF 1'299.00")).toBe("CHF 1'299.00")
+    expect(visible('1’299.50 CHF')).toBe('1’299.50 CHF')
+    // A group starts where a number starts: a year before a price is not its thousands.
+    expect(visible('2024 299 €')).toBe('299 €')
   })
 
   it('does not match bare numbers or dates', () => {

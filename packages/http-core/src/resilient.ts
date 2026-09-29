@@ -107,6 +107,13 @@ export interface ResilientOutcome {
   status: number | null
   failureReason: ResilientFailureReason | null
   /**
+   * The deadline ended the request: its own timer fired, or a header or body
+   * wait set to the time left ran out. Timers run on the event loop's cached
+   * clock, so such a wait can end a few milliseconds before Date.now()
+   * reaches the deadline.
+   */
+  deadlineExceeded?: true
+  /**
    * The URL `redirectChain` ends with: the one whose response `status` is,
    * or whose request failed or was refused. The target of a redirect the
    * engine did not follow (a loop, the limit, a denied target) is not it.
@@ -246,15 +253,17 @@ export async function resilientFetch(
       requestCount++
       const at = Date.now() - start
       let response: ResilientResponseLike
+      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
+      const headersCapMs = cap(cfg.headersTimeoutMs), bodyCapMs = cap(cfg.bodyTimeoutMs)
+      let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
       try {
-        const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
-        response = await raceWithSignal(fetcher(current, {
-          headersTimeoutMs: remainingTimeout(scope, cap(cfg.headersTimeoutMs)),
-          bodyTimeoutMs: remainingTimeout(scope, cap(cfg.bodyTimeoutMs)),
-          signal: scope.signal,
-        }), scope.signal)
+        headersTimeoutMs = remainingTimeout(scope, headersCapMs)
+        bodyTimeoutMs = remainingTimeout(scope, bodyCapMs)
+        response = await raceWithSignal(fetcher(current, { headersTimeoutMs, bodyTimeoutMs, signal: scope.signal }), scope.signal)
       } catch (err) {
         const name = err instanceof Error ? err.name : ''
+        const deadlineExceeded = scope.signal.reason?.name === 'TimeoutError' ||
+          (name === 'HeadersTimeoutError' && headersTimeoutMs < headersCapMs) || (name === 'BodyTimeoutError' && bodyTimeoutMs < bodyCapMs)
         const reason: ResilientFailureReason =
           scope.signal.aborted || name === 'AbortError' || name === 'TimeoutError' || name === 'HeadersTimeoutError' || name === 'BodyTimeoutError'
             ? 'timeout'
@@ -270,6 +279,7 @@ export async function resilientFetch(
           kind: 'failure',
           status: null,
           failureReason: reason,
+          ...(reason === 'timeout' && deadlineExceeded ? { deadlineExceeded: true as const } : {}),
           finalUrl: current,
           ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
           headers: null,
@@ -416,6 +426,6 @@ export async function resilientFetch(
   } catch (error) {
     if (!scope.signal.aborted && !(error instanceof Error && error.name === 'TimeoutError')) throw error
     trace.push({ at: Date.now() - start, event: 'execution_stopped' })
-    return { kind: 'failure', status: null, failureReason: 'timeout', finalUrl: current, ...emptyOutcomeFields(chain, requestCount, attemptCount, trace), headers: null }
+    return { kind: 'failure', status: null, failureReason: 'timeout', ...(scope.signal.reason?.name === 'TimeoutError' ? { deadlineExceeded: true as const } : {}), finalUrl: current, ...emptyOutcomeFields(chain, requestCount, attemptCount, trace), headers: null }
   } finally { scope.dispose() }
 }
