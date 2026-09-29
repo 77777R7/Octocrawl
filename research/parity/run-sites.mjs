@@ -100,6 +100,16 @@
 //               it stays in the case count, is never counted as passing, and the exit code is 1.
 //               The Markdown summary shows such a variable's value as <NAME>, never the value.
 //   checks      field equalsEnv: equals the string with each ${NAME} replaced by that variable.
+// Added for MCP cancellation over Streamable HTTP (2026-09-29):
+//   mcp-cancel  a raw MCP client (JSON-RPC POSTs) against a running local MCP service whose /mcp URL
+//               is in the variable case.requiresEnv names. Two clients initialize (doc.sessions: the
+//               Mcp-Session-Id each got). The scrape tool is called on case.url with case.request, and
+//               case.cancelAfterMs later: another client sends notifications/cancelled for its id
+//               (doc.foreign: the call must run on to its answer), then the calling client does for a
+//               second call (doc.own: it must be answered at once), then two calls have their requests
+//               closed (the client disconnects) and a probe call scrapes case.probeUrl, on the same host
+//               (doc.probe: it must not wait behind the two dropped calls for the host's two slots).
+//               Each call records elapsedMs, status and failureReason of its result, or its JSON-RPC error.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -411,6 +421,54 @@ const runners = {
     const final = { status: last?.json?.status ?? null, completed: last?.json?.completed ?? null, total: last?.json?.total ?? null, nextOnLastPage: last !== null && last.json !== null && 'next' in last.json, dataLength: items.length, errorPages, pagesWithoutError: items.length - errorPages }
     const doc = { status: final.status, items: items.map((item) => ({ ...item, url: item.metadata?.sourceURL })), pageRequests: pages.length, progress, final, cancel: cancel?.json?.status ?? null }
     return { response: { start, polls, cancel, pages, last }, doc }
+  },
+  // MCP cancellation over Streamable HTTP, against a local MCP service (see the header).
+  async 'mcp-cancel'(c) {
+    const url = process.env[c.requiresEnv]
+    const post = (body, session, signal) => fetch(url, {
+      method: 'POST', signal,
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) },
+      body: JSON.stringify(body),
+    })
+    const initialize = async () => {
+      const res = await post({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'w2l-parity-runner', version: '1.0.0' } } })
+      await res.json()
+      const session = res.headers.get('mcp-session-id')
+      await (await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, session)).body?.cancel()
+      return session
+    }
+    const cancel = async (session, requestId) => (await post({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId, reason: 'parity runner' } }, session)).status
+    const scrape = async (session, id, target, signal) => {
+      const began = Date.now()
+      try {
+        const body = await (await post({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'scrape', arguments: { url: target, ...c.request } } }, session, signal)).json()
+        const text = body.result?.content?.[0]?.text
+        const result = typeof text === 'string' ? JSON.parse(text) : null
+        return { elapsedMs: Date.now() - began, status: result?.status ?? null, failureReason: result?.failureReason ?? null, error: body.error ?? null }
+      } catch (error) {
+        return { elapsedMs: Date.now() - began, thrown: error?.name ?? String(error) }
+      }
+    }
+    const mine = await initialize()
+    const other = await initialize()
+    const sessions = { mine, other, distinct: mine !== null && other !== null && mine !== other }
+    const foreignCall = scrape(mine, 1, c.url)
+    await sleep(c.cancelAfterMs)
+    const foreignCancel = await cancel(other, 1)
+    const foreign = { ...(await foreignCall), cancelStatus: foreignCancel }
+    const ownCall = scrape(mine, 2, c.url)
+    await sleep(c.cancelAfterMs)
+    const cancelledAt = Date.now()
+    const ownCancel = await cancel(mine, 2)
+    const own = { ...(await ownCall), cancelStatus: ownCancel, answeredAfterCancelMs: Date.now() - cancelledAt }
+    const disconnect = new AbortController()
+    const dropping = [scrape(mine, 3, c.url, disconnect.signal), scrape(mine, 4, c.url, disconnect.signal)]
+    await sleep(c.cancelAfterMs)
+    disconnect.abort()
+    const dropped = await Promise.all(dropping)
+    const probe = await scrape(mine, 5, c.probeUrl)
+    const doc = { sessions, foreign, own, dropped, probe }
+    return { response: { mcpUrl: url, ...doc }, doc }
   },
   // L04: follow a listing's own pagination links with a batch and count table rows,
   // for c.url and again for c.compareUrl (the same listing at another page size).
