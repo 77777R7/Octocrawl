@@ -260,6 +260,19 @@ export function browserProxySettings(policy: NetworkPolicy): { proxy: { server: 
 }
 
 /**
+ * Chromium's proxy at launch, for a launched browser or a managed profile.
+ * Without one, Chromium falls back to the operating system's proxy settings:
+ * a route the HTTP lane does not take and no result records. So the launch
+ * names the environment proxy when W2L uses one, and otherwise keeps Chromium
+ * direct like the HTTP lane with `--proxy-server=direct://`. (The headless
+ * shell Playwright runs for `headless: true` ignores `--no-proxy-server`.)
+ * A context's own proxy (the environment proxy, or a user's) still applies.
+ */
+export function chromiumProxyLaunchOptions(settings: ReturnType<typeof browserProxySettings>): { proxy: NonNullable<typeof settings>['proxy'] } | { args: string[] } {
+  return settings === null ? { args: ['--proxy-server=direct://'] } : { proxy: settings.proxy }
+}
+
+/**
  * The checks before a request leaves. A URL the policy sends through the
  * operator's proxy is resolved by that proxy, so local mode trusts the proxy
  * for resolution: only the checks that need no DNS run (scheme, credentials,

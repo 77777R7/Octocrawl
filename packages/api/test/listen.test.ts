@@ -45,6 +45,13 @@ describe('parseListen', () => {
     expect(() => parseListen([], { HTTPS_PROXY: 'socks5://127.0.0.1:1080' })).toThrow(/W2L_PROXY=off/)
   })
 
+  it('declares the operator contact from W2L_CONTACT in both modes, and refuses one it cannot declare', () => {
+    expect(parseListen([], { W2L_CONTACT: 'Jane Doe jane@example.org' }).networkPolicy.contact).toBe('Jane Doe jane@example.org')
+    expect(parseListen(['--hosted', '--token', 'secret'], { W2L_CONTACT: 'https://example.org/contact' }).networkPolicy.contact).toBe('https://example.org/contact')
+    expect(parseListen([], {}).networkPolicy.contact).toBeUndefined()
+    expect(() => parseListen([], { W2L_CONTACT: 'Jürgen' })).toThrow(/W2L_CONTACT/)
+  })
+
   it('hosted mode never uses the proxy variables and says once that it ignored them', () => {
     const hosted = parseListen(['--hosted', '--token', 'secret'], { HTTPS_PROXY: 'socks5://127.0.0.1:1080', NO_PROXY: 'localhost' })
     expect(hosted.networkPolicy.egressProxy).toBeUndefined()

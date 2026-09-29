@@ -19,7 +19,7 @@ import {
   type ComplianceSentHeader,
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, browserProxySettings, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -128,7 +128,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserAllowedHosts?: readonly string[],
     /** In-memory witness for an explicitly authorized evaluation. Never a persistence path. */
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
-    robotsFailClosed = false,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -146,7 +145,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
     this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, undefined, robotsFailClosed)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy)
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -227,7 +226,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // version we are not running is an inconsistency, not a feature.
       const version = browser.version()
       const major = Number(version.split('.')[0] ?? CHROME_MAJOR_FLOOR)
-      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR)
+      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null)
       assertIdentityBundle(
         identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR),
       )
@@ -249,7 +248,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
-          ...(cachedRobots?.unreachable === undefined ? {} : { unreachable: cachedRobots.unreachable }),
+          ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
         },
       })
 
@@ -278,7 +277,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           at: wallMs,
           lane: 'browser_local',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
         return {
           requestedUrl: url,
@@ -860,7 +859,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
           `--host-resolver-rules=${await pinnedBrowserHostRules(this.browserAllowedHosts, this.networkPolicy)}`,
         ]
         if (this.activeExecutions === 0) throw new DOMException('Browser startup abandoned', 'AbortError')
-        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? {} : { args }) })
+        // Never the operating system's proxy: the environment proxy when W2L
+        // uses one, otherwise direct (a user's proxy is set per context).
+        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
       }
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {
@@ -883,7 +884,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     throwIfExecutionStopped(execution)
     if (this.managedContext !== null) return this.managedContext
     if (this.managedContextPromise === null) {
-      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...(this.envProxy === null ? {} : { proxy: this.envProxy.proxy }) })
+      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) })
         .then(async context => {
           if (this.activeExecutions === 0) {
             if (this.managedContextPromise === pending) this.managedContextPromise = null

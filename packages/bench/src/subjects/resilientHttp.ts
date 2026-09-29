@@ -10,9 +10,9 @@ import {
   type TraceEvent,
 } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
-import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
+import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
+import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -47,16 +47,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
 
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, robotsFailClosed = false, localPreviewProxyUrl?: string, localPreviewRobotsException = false) {
-    this.prepared = prepareHttpIdentity(mode)
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false) {
+    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
+    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
-    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
     this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
@@ -182,6 +182,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
       trace.push({ at: Date.now() - start, lane: 'http', event: 'local_platform_robots_exception', detail: { host: new URL(url).hostname } })
     }
 
+    // The page's own egress checks come before robots.txt: a name that does
+    // not resolve, or an address the policy denies, is reported as itself,
+    // never as the unreachable robots.txt it would also cause.
+    try { await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal) }
+    catch (error) {
+      if (signal?.aborted) return timedDenied('timeout')
+      if (!(error instanceof DnsLookupError) && !(error instanceof SsrfDeniedError)) throw error
+      const dns = error instanceof DnsLookupError
+      trace.push({ at: Date.now() - start, lane: 'http', event: dns ? 'dns_failed' : 'ssrf_denied', detail: { to: url, error: error.message } })
+      return timedDenied(dns ? 'dns_error' : 'policy_denied')
+    }
+
     if (this.prepared.identity.respectsRobots) {
       const robotsStart = performance.now()
       let cached: Awaited<ReturnType<RobotsOriginCache['lookup']>>
@@ -203,16 +215,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
           ruleCount: robotsDecision.appliedRules.length,
           // The crawl frontier spaces this host's pages by it (LadderScrapeAtom reads it here).
           crawlDelayMs: robotsDecision.crawlDelayMs,
-          ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
+          ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
         },
       })
       robotsMs = performance.now() - robotsStart
+      // A disallow, or an unreachable robots.txt (RFC 9309 §2.3.1.4: a
+      // complete disallow); the reason says which.
       if (robotsDecision.decision === 'disallowed') {
         trace.push({
           at: Date.now() - start,
           lane: 'http',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
         return timedDenied('policy_denied')
       }
@@ -270,6 +284,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
         ...(t.detail !== undefined ? { detail: t.detail } : {}),
       })
     }
+    const contactHint = declaredContactHint(out.finalUrl, out.status, this.prepared.mode === 'research' && (this.networkPolicy.contact ?? null) !== null)
+    if (contactHint !== null) trace.push({ at: wallMs, lane: 'http', event: 'declared_contact_hint', detail: contactHint })
 
     // Redirect evidence only when a redirect actually happened; a chain of
     // just the requested URL is "no redirect" and matches the other arms.
@@ -564,6 +580,19 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close()]).then(() => {})
     await this.teardownPromise
   }
+}
+
+/**
+ * SEC.gov answers 403 to automated clients that declare no contact in their
+ * User-Agent. When a request that declared none gets that answer, the result
+ * says how to declare one; the status stays what the server said.
+ */
+function declaredContactHint(finalUrl: string, status: number | null, declaredContact: boolean): { host: string; status: 403; hint: string } | null {
+  if (status !== 403 || declaredContact) return null
+  let host: string
+  try { host = new URL(finalUrl).hostname.toLowerCase() } catch { return null }
+  if (host !== 'sec.gov' && !host.endsWith('.sec.gov')) return null
+  return { host, status, hint: 'SEC.gov asks automated clients to declare a contact in the User-Agent: use mode "research" with W2L_CONTACT set, for example W2L_CONTACT="Jane Doe jane@example.org".' }
 }
 
 /**

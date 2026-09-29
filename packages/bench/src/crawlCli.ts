@@ -9,7 +9,7 @@
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CONTENTFUL_STATUS, defaultApiMode, describeEgressProxy, identityForRoute, localNetworkPolicy, withEnvironmentProxy, type CrawlBudget, type Task } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, defaultApiMode, describeEgressProxy, identityBundleFrom, localNetworkPolicy, modeIdentity, withEnvironmentProxy, withOperatorContact, type CrawlBudget, type Task } from '@w2l/contracts'
 import { CHECKPOINT_FILENAME, CrawlOrchestrator, SqliteTaskStore } from '@w2l/runtime'
 import type { CrawlPolicy } from '@w2l/http-core'
 import { LadderRunner } from './routing/ladder.js'
@@ -182,8 +182,9 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     }
     if (run === null) throw new Error(CRAWL_USAGE)
 
-    // Local mode: outbound requests follow the operator's proxy variables.
-    const networkPolicy = withEnvironmentProxy(localNetworkPolicy(), process.env)
+    // Local mode: outbound requests follow the operator's proxy variables,
+    // and research mode declares W2L_CONTACT.
+    const networkPolicy = withOperatorContact(withEnvironmentProxy(localNetworkPolicy(), process.env), process.env)
     const channels = buildChannels(run.mode, { headed: args.headed, networkPolicy })
     const policy: CrawlPolicy = {
       mode: run.mode,
@@ -192,7 +193,7 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     const runner = new LadderRunner(channels, policy, new MemoryRoutingHistory())
     const atom = new LadderScrapeAtom(runner)
     const orchestrator = new CrawlOrchestrator({ store, atom })
-    const identity = identityForRoute(run.mode)
+    const identity = identityBundleFrom(modeIdentity(run.mode, undefined, networkPolicy.contact ?? null))
 
     console.log(`mode        : ${run.mode}`)
     console.log(`identity    : ${identity.userAgent}`)
