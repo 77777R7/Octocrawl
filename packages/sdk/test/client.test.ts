@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { W2L, type CreateMonitorRequest } from '../src/index.js'
+import { W2L, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -151,6 +151,28 @@ describe('W2L SDK', () => {
     expect((await iterator.next()).value).toEqual({ id: 'one' })
     controller.abort()
     await expect(iterator.next()).rejects.toThrow()
+  })
+
+  it('waits for a crawl to finish, and stops waiting after timeoutMs', async () => {
+    const statuses = ['pending', 'running', 'completed']
+    const urls: string[] = []
+    const client = new W2L({
+      baseUrl: 'http://127.0.0.1:8787',
+      fetch: (async (input: RequestInfo | URL) => {
+        urls.push(String(input))
+        return new Response(JSON.stringify({ taskId: 'crawl-1', status: statuses[Math.min(urls.length - 1, 2)] }), { status: 200 })
+      }) as typeof fetch,
+    })
+    await expect(client.waitCrawl('crawl-1', { pollIntervalMs: 1 })).resolves.toMatchObject({ status: 'completed' })
+    expect(urls).toEqual(Array(3).fill('http://127.0.0.1:8787/v1/crawl/crawl-1'))
+
+    const stuck = new W2L({
+      baseUrl: 'http://127.0.0.1:8787',
+      fetch: (async () => new Response(JSON.stringify({ taskId: 'batch-1', status: 'running' }), { status: 200 })) as typeof fetch,
+    })
+    const error = await stuck.waitBatch('batch-1', { pollIntervalMs: 5, timeoutMs: 30 }).catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(WaitTimeoutError)
+    expect(error).toMatchObject({ taskId: 'batch-1', last: { status: 'running' }, timeoutMs: 30 })
   })
 
   it('preserves API error status and body for read and mutation failures', async () => {
