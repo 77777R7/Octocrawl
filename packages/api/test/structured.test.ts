@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { FetchResult, JsonFormatRequest, ProductFacts, ScrapeResponse } from '@w2l/contracts'
+import type { FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
+import { extractTf } from '@w2l/extract-tf'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
 const product: ProductFacts = {
@@ -47,6 +48,25 @@ const format = (extra: Record<string, unknown> = {}): JsonFormatRequest => ({
     additionalProperties: false,
   },
   ...(extra.modelFallback ? { modelFallback: true } : {}),
+})
+
+const book = `<html><head><title>A Light in the Attic | Books to Scrape - Sandbox</title></head><body><article class="product_page">
+<h1>A Light in the Attic</h1><p class="price_color">£51.77</p><p class="instock availability">In stock (22 available)</p>
+<p>A collection of short poems and line drawings for readers of every age, reissued as an anniversary edition with a few pieces that were not in the first printing.</p>
+<table class="table table-striped"><tr><th>UPC</th><td>a897fe39b1053632</td></tr><tr><th>Number of reviews</th><td>0</td></tr></table></article></body></html>`
+const lamp = `<html><head><title>Harbour lamp | Shop</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Harbour lamp","sku":"HL-1","offers":{"@type":"Offer","price":"19.00","priceCurrency":"GBP"}}</script></head>
+<body><main><h1>Harbour lamp</h1><p>A brass harbour lamp with a frosted glass shade, sized for a desk or a bedside table and wired for a standard bulb.</p></main></body></html>`
+
+/** A FetchResult for inline HTML, with the document the HTTP lane attaches. */
+function page(html: string, url = 'https://books.example/catalogue/a-light-in-the-attic_1000/index.html'): FetchResult {
+  const out = extractTf.extract(html, { url })
+  return {
+    ...result, requestedUrl: url, markdown: 'page', evidence: { ...result.evidence, finalUrl: url },
+    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation },
+  }
+}
+const json = (properties: Record<string, JsonSchema>, required: string[], modelFallback = false): JsonFormatRequest => ({
+  type: 'json', schema: { type: 'object', properties, required }, ...(modelFallback ? { modelFallback } : {}),
 })
 
 describe('structured JSON extraction', () => {
@@ -177,5 +197,66 @@ describe('structured JSON extraction', () => {
     expect(out.status).toBe('incomplete')
     expect(out.issues.map(issue => issue.code)).toContain('model_timeout')
     expect(out.data).toMatchObject({ asin: 'B012345678', title: 'Subject headphones' })
+  })
+
+  it('reports a required array without a source as missing instead of an empty list', async () => {
+    const out = await extractStructured(page(book), json({ title: { type: 'string' }, reviews: { type: 'array', items: { type: 'string' } }, tags: { type: 'array' } }, ['title', 'reviews']), {}, null)
+    expect(out.status).toBe('incomplete')
+    // The optional tags list has no source either: it is left out, not invented as [].
+    expect(out.data).toEqual({ title: 'A Light in the Attic' })
+    expect(out.issues).toEqual([{ code: 'missing_required', path: '/reviews', message: 'required field unavailable: /reviews' }])
+  })
+
+  it('reports required objects and product lists the page never provided as missing', async () => {
+    const schema = json({
+      name: { type: 'string' }, images: { type: 'array', items: { type: 'string' } }, specifications: { type: 'object' },
+      publisher: { type: 'object', properties: { city: { type: ['string', 'null'] } }, required: ['city'] },
+    }, ['name', 'images', 'specifications', 'publisher'])
+    const out = await extractStructured(page(lamp, 'https://shop.example/lamp'), schema, {}, null)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ name: 'Harbour lamp' })
+    expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['missing_required', '/images'], ['missing_required', '/specifications'], ['missing_required', '/publisher']])
+    // Lists the Amazon adapter read from the verified subject page stay, even an empty one.
+    const observed = await extractStructured(result, json({ images: { type: 'array' }, variants: { type: 'array' } }, ['images', 'variants']), {}, null)
+    expect(observed).toMatchObject({ status: 'complete', data: { images: ['https://images.example/subject.jpg'], variants: [] }, issues: [] })
+  })
+
+  it('does not fill a nested field from a page-level value that shares its key', async () => {
+    const schema = json({ title: { type: 'string' }, author: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }, ['title', 'author'])
+    const out = await extractStructured(page(book), schema, {}, null)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ title: 'A Light in the Attic' })
+    expect(out.issues).toEqual([{ code: 'missing_required', path: '/author', message: 'required field unavailable: /author' }])
+  })
+
+  it('runs the model fallback when a required array has no deterministic source', async () => {
+    let calls = 0
+    const out = await extractStructured(page(book), json({ title: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, ['title', 'tags'], true), {}, {
+      baseUrl: 'https://model.example', model: 'extractor',
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls++
+        expect(JSON.parse(JSON.parse(String(init?.body)).messages[1].content).deterministic).toEqual({ title: 'A Light in the Attic' })
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ tags: ['poetry'] }) } }] }), { status: 200 })
+      }) as typeof fetch,
+    })
+    expect(calls).toBe(1)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ title: 'A Light in the Attic', tags: ['poetry'] })
+    expect(out.evidence).toContainEqual({ path: '/tags', source: 'model' })
+  })
+
+  it('never reports JSON complete for a page that was not fetched successfully', async () => {
+    const body = page('<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><p>The requested URL was not found on this server.</p></body></html>')
+    const notFound: FetchResult = { ...body, status: 'failed', failureReason: 'http_error', evidence: { ...body.evidence, httpStatus: 404 } }
+    let calls = 0
+    const custom = await extractStructured(notFound, json({ url: { type: 'string' }, title: { type: 'string' } }, ['url', 'title'], true), {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: (async () => { calls++; return new Response('{}') }) as typeof fetch,
+    })
+    expect(calls).toBe(0)
+    expect(custom).toMatchObject({ status: 'incomplete', data: null, issues: [{ code: 'page_unsuccessful' }] })
+    expect(custom.issues[0]?.message).toContain('failed (http_error, HTTP 404)')
+    // The canonical adapter envelope does not publish entities from such a page either.
+    const canonical = await extractStructured({ ...result, status: 'failed', failureReason: 'identity_compromised', markdown: null })
+    expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [] }, issues: [{ code: 'page_unsuccessful' }] })
   })
 })
