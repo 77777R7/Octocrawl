@@ -64,6 +64,9 @@ function factNumber(fact: ProductFact, context: NumberContext = {}): Omit<Candid
   return 'value' in reading ? { value: reading.value, text: fact.value } : { value: fact.value, unread: unreadMessage(fact.value, fact, reading.message) }
 }
 
+/** Evidence for a list or map the product extractor reported empty: nothing was read, the extractor observed none. */
+const observedNone = (name: string): NonNullable<Candidate['fact']> => ({ source: 'inferred', path: `document.product.${name}` })
+
 /** A key or page label reduced to its letters and digits: "Number of reviews" matches numberOfReviews. */
 function labelKey(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
@@ -192,9 +195,10 @@ function addProductCandidates(
   // A list is a source only when the extractor read it from the page. The
   // Amazon adapter reports what it observed on the verified subject, possibly
   // an empty list; a generic product page has no such list, and an invented []
-  // or {} would claim the page has none.
+  // or {} would claim the page has none. A list's evidence is its first
+  // item's; an empty one's is the extractor's report that it observed none.
   const { images, prices, variants, specifications } = product
-  if (images !== undefined) map.set('images', { value: images.map(item => item.value), fact: images[0] })
+  if (images !== undefined) map.set('images', { value: images.map(item => item.value), fact: images[0] ?? observedNone('images') })
   if (prices !== undefined) {
     const unreadMembers: Array<{ path: string; message: string }> = []
     map.set('prices', {
@@ -208,7 +212,7 @@ function addProductCandidates(
           seller: item.seller?.value ?? null,
         }
       }),
-      fact: prices[0]?.amount,
+      fact: prices[0]?.amount ?? observedNone('prices'),
       ...(unreadMembers.length > 0 ? { unreadMembers } : {}),
     })
   }
@@ -219,7 +223,7 @@ function addProductCandidates(
         value: item.value,
         selected: item.selected,
       })),
-      fact: variants[0] === undefined ? undefined : {
+      fact: variants[0] === undefined ? observedNone('variants') : {
         source: variants[0].source,
         path: variants[0].path,
       },
@@ -228,7 +232,7 @@ function addProductCandidates(
   if (specifications !== undefined) {
     map.set('specifications', {
       value: Object.fromEntries(Object.entries(specifications).map(([key, fact]) => [key, fact.value])),
-      fact: Object.values(specifications)[0],
+      fact: Object.values(specifications)[0] ?? observedNone('specifications'),
     })
   }
 }

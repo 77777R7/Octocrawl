@@ -272,6 +272,18 @@ describe('structured JSON extraction', () => {
     expect(observed).toMatchObject({ status: 'complete', data: { images: ['https://images.example/subject.jpg'], variants: [] }, issues: [] })
   })
 
+  it('gives a list or map the adapter observed empty an evidence entry too', async () => {
+    const empty: FetchResult = { ...result, document: { ...result.document!, product: { ...product, images: [], variants: [], specifications: {}, prices: [] } } }
+    const out = await extractStructured(empty, json({ images: { type: 'array' }, variants: { type: 'array' }, specifications: { type: 'object' }, prices: { type: 'array' } }, ['images', 'variants', 'specifications', 'prices']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { images: [], variants: [], specifications: {}, prices: [] }, issues: [] })
+    // Nothing was read from the page: the adapter reported none on the verified subject.
+    expect(out.evidence).toEqual([
+      { path: '/images', source: 'inferred', evidencePath: 'document.product.images' },
+      { path: '/variants', source: 'inferred', evidencePath: 'document.product.variants' },
+      { path: '/specifications', source: 'inferred', evidencePath: 'document.product.specifications' },
+      { path: '/prices', source: 'inferred', evidencePath: 'document.product.prices' },
+    ])
+  })
 
   it('maps page labels and the visible price to top-level keys and says where each came from', async () => {
     const schema = json({ title: { type: 'string' }, price: { type: 'number' }, availability: { type: 'string' }, upc: { type: 'string' }, isbn: { type: 'string' }, numberOfReviews: { type: 'integer' } }, ['title', 'price', 'availability', 'upc', 'isbn'])
