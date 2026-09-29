@@ -29,6 +29,13 @@ npm test</code></pre></li></ol>
 <p><sup>1</sup> Provisional figures for the second quarter.</p>
 </div></div>
 <div id="footer">© Statistics office</div></body></html>`],
+  // An SEC inline XBRL filing: sibling <div>s of the body, no <p>, a hidden XBRL header.
+  ['https://www.sec.gov/Archives/edgar/data/9990001/000999000126000001/hkl-20251231.htm', `<html><head><title>hkl-20251231</title></head><body>
+<div style="display:none"><ix:header><ix:hidden><ix:nonNumeric name="dei:EntityCentralIndexKey" contextRef="c-1">0009990001</ix:nonNumeric></ix:hidden></ix:header></div>
+<div style="text-align:center"><span><ix:nonNumeric name="dei:EntityRegistrantName" contextRef="c-1">Harbour Kiln Limited</ix:nonNumeric></span></div>
+${Array.from({ length: 6 }, (_, i) => `<div><span>Paragraph ${i + 1}: revenue rose in the quarter because the second kiln line reached full output, and the harbour office recorded every firing.</span></div>`).join('\n')}
+<div><table><tr><td></td><td></td><td></td></tr><tr><td>Revenue</td><td>1,204</td><td>987</td></tr><tr><td>Net income</td><td>402</td><td>301</td></tr></table></div>
+</body></html>`],
 ]
 
 function monitorMarkdown([url, html]: [string, string]): string {
@@ -43,6 +50,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/2', digest: '2269ef38c956ae04bd27edba14dd50d798d93f62a0f4a9b827cb1127aee0daea' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/3', digest: 'c87cb569f899c03bd2413c3e497a1835fac99b944843e104528eefde96edcbb5' })
   })
 })
