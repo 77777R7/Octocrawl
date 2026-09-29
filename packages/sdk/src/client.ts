@@ -25,7 +25,7 @@ import type {
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
-import { isApiErrorCode, type ApiErrorCode } from '@w2l/contracts'
+import { DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, type ApiErrorCode } from '@w2l/contracts'
 
 export interface W2LOptions {
   baseUrl: string
@@ -45,6 +45,29 @@ function environmentToken(): string | undefined {
     return token === undefined || token.length === 0 ? undefined : token
   } catch {
     return undefined
+  }
+}
+
+/** How long past a scrape's own deadline (its `timeout`, 300 000 ms by default) the SDK waits for the API's answer. */
+const SCRAPE_ANSWER_MARGIN_MS = 30_000
+
+/**
+ * Node's fetch (undici) stops waiting for response headers after 300 s, and
+ * the API answers a scrape at its deadline, up to 300 s. On Node this
+ * dispatcher hands a request to the process's global dispatcher (so a proxy
+ * or agent set there still applies) with its own wait for headers.
+ * Undefined elsewhere: a browser's fetch has no such wait.
+ */
+function headersWait(ms: number): { dispatch(options: object, handler: unknown): boolean } | undefined {
+  if ((globalThis as { process?: { versions?: { undici?: string } } }).process?.versions?.undici === undefined) return undefined
+  return {
+    dispatch(options, handler) {
+      // Read when fetch dispatches, by which time undici has set it.
+      const global = globalThis as unknown as Record<symbol, { dispatch(options: object, handler: unknown): boolean } | undefined>
+      const dispatcher = global[Symbol.for('undici.globalDispatcher.2')] ?? global[Symbol.for('undici.globalDispatcher.1')]
+      if (dispatcher === undefined) throw new Error('no global fetch dispatcher')
+      return dispatcher.dispatch({ ...options, headersTimeout: ms }, handler)
+    },
   }
 }
 
@@ -178,17 +201,23 @@ export class W2L {
   private readonly baseUrl: string
   private readonly token: string | undefined
   private readonly fetchImpl: typeof fetch
+  /** The platform's fetch, not one passed in options, whose own limits are the caller's. */
+  private readonly platformFetch: boolean
 
   constructor(options: W2LOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '')
     this.token = options.token ?? environmentToken()
     this.fetchImpl = options.fetch ?? fetch
+    this.platformFetch = options.fetch === undefined
   }
 
   async scrape(url: string, opts: Omit<ScrapeRequest, 'url'> & { debug: false }, request?: RequestOptions): Promise<CompactScrapeResponse>
   async scrape(url: string, opts?: Omit<ScrapeRequest, 'url'>, request?: RequestOptions): Promise<ScrapeResponse>
   async scrape(url: string, opts: Omit<ScrapeRequest, 'url'> = {}, request: RequestOptions = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
-    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url }, 200, request)
+    // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
+    // wait that long plus a margin, and no longer.
+    const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
+    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url }, 200, request, deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
   }
 
   async crawl(url: string, opts: Omit<CrawlStartRequest, 'url'> = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
@@ -431,13 +460,17 @@ export class W2L {
       : { ...extra, authorization: `Bearer ${this.token}` }
   }
 
-  private async post<T>(path: string, body: unknown, ok = 200, request: RequestOptions = {}): Promise<T> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+  /** `answerWithinMs`: how long the platform's fetch waits for the response headers, on Node instead of undici's 300 s. */
+  private async post<T>(path: string, body: unknown, ok = 200, request: RequestOptions = {}, answerWithinMs?: number): Promise<T> {
+    const dispatcher = answerWithinMs === undefined || !this.platformFetch ? undefined : headersWait(answerWithinMs)
+    const init: RequestInit & { dispatcher?: unknown } = {
       method: 'POST',
       signal: request.signal,
       headers: this.headers({ 'content-type': 'application/json' }),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
+      ...(dispatcher === undefined ? {} : { dispatcher }),
+    }
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, init)
     if (res.status !== ok) throw await responseError('POST', path, res)
     return (await res.json()) as T
   }
