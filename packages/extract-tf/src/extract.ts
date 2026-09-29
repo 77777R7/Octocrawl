@@ -103,6 +103,8 @@ export class ExtractTf implements Extractor {
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
+    // Counted before cleaning, which may drop empty elements.
+    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -195,6 +197,7 @@ export class ExtractTf implements Extractor {
       adapter: adapter.descriptor,
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
+      emptyTableShells,
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
 

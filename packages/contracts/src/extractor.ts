@@ -188,6 +188,11 @@ export interface ExtractorOutput {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  /**
+   * Tables in the fetched HTML with no rows at all: an empty `<thead>` and
+   * `<tbody>` waiting for a script to fill them. The data is not in this HTML.
+   */
+  emptyTableShells?: number
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }
