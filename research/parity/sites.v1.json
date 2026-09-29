@@ -1329,6 +1329,45 @@
         { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./kpi2", "equals": { "source": "pdf", "locator": "page 14 \"KPI 2\"" } },
         { "item": "ER", "type": "evidenceSchema" }
       ]
+    },
+    {
+      "id": "F15",
+      "batch": "F",
+      "url": "https://api.worldbank.org/v2/country/FR/indicator/SP.POP.TOTL?format=json&date=2020:2023",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: a JSON file from a data portal, the World Bank API's population of France for 2020-2023 (application/json; api.worldbank.org answers robots.txt with a 404, so nothing is disallowed). The file is saved as received and its text is the Markdown. The World Bank revises figures, so values are checked by pattern; on 2026-09-29 the 2023 value was 68372286.",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "json" },
+        { "item": "P2-files", "type": "field", "path": "file.markdownFrom", "equals": "text" },
+        { "item": "P2-files", "type": "markdownIncludes", "text": "\"indicator\":{\"id\":\"SP.POP.TOTL\",\"value\":\"Population, total\"}" },
+        { "item": "P2-files", "type": "markdownMatches", "pattern": "\"countryiso3code\":\"FRA\",\"date\":\"2023\",\"value\":[0-9]+" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equalsPath": "file.sha256" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.contentType", "includes": "application/json" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
+    },
+    {
+      "id": "F16",
+      "batch": "F",
+      "url": "https://assets.publishing.service.gov.uk/media/6aba6dd9a9c3d267bcccefb0/ET_5.1_SEP_26.xlsx",
+      "request": { "formats": ["markdown"] },
+      "note": "Added 2026-09-29. P2 file download: an XLSX from a statistics office, the UK Department for Energy Security and Net Zero's Energy Trends table 5.1 (September 2026 release), linked from gov.uk/government/statistics/electricity-section-5-energy-trends. assets.publishing.service.gov.uk answers robots.txt with a 404. Downloaded once with curl on 2026-09-29 it was 368197 bytes with SHA-256 2be6ab036d7b034ca544ecb9f17cdcbcb2d60dbad5aec16c15f0ff62ef0eca9d, served as application/vnd.openxmlformats-officedocument.spreadsheetml.sheet. An XLSX is saved as received and has no Markdown (XLSX parsing is a later P2 item).",
+      "checks": [
+        { "item": "P2-files", "type": "field", "path": "status", "equals": "success" },
+        { "item": "P2-files", "type": "field", "path": "channelsTried", "equals": ["http"] },
+        { "item": "P2-files", "type": "field", "path": "file.kind", "equals": "xlsx" },
+        { "item": "P2-files", "type": "field", "path": "file.detectedBy", "equals": "content_type" },
+        { "item": "P2-files", "type": "field", "path": "markdown", "present": false },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.kind", "equals": "file" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.sha256", "equals": "2be6ab036d7b034ca544ecb9f17cdcbcb2d60dbad5aec16c15f0ff62ef0eca9d" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.artifacts.0.bytes", "equals": 368197 },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.extractor.version", "equals": "file-text/1" }
+      ]
     }
   ]
 }
