@@ -20,6 +20,17 @@ export class SsrfDeniedError extends Error {
   }
 }
 
+/** The target name did not resolve: a DNS fact, reported as dns_error, never as a policy denial. */
+export class DnsLookupError extends Error {
+  override readonly name = 'DnsLookupError'
+  constructor(
+    readonly hostname: string,
+    cause: unknown,
+  ) {
+    super(`dns lookup failed for ${hostname}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+  }
+}
+
 export class BodyTooLargeError extends Error {
   override readonly name = 'BodyTooLargeError'
   constructor(maxBytes: number) {
@@ -86,7 +97,8 @@ export async function pinnedBrowserHostRules(hosts: readonly string[], policy: N
     } else {
       let records: ResolvedAddress[]
       try { records = await resolve(hostname, { all: true }) }
-      catch (error) { throw new SsrfDeniedError(hostname, error instanceof Error ? error.message : 'dns lookup failed') }
+      catch (error) { throw new DnsLookupError(hostname, error) }
+      if (records.length === 0) throw new DnsLookupError(hostname, 'no addresses')
       const decision = evaluateResolved(hostname, records.map(record => record.address), policy)
       if (!decision.allowed) throw new SsrfDeniedError(hostname, decision.detail ?? decision.violation ?? 'denied')
       pinned = records.find(record => isIP(record.address) === 4)?.address ?? decision.pinnedAddress
@@ -124,6 +136,10 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
     }
     const normalizedHostname = hostname.replace(/^\[|\]$/g, '').toLowerCase()
     void resolve(normalizedHostname, { all: true }).then((records) => {
+      if (records.length === 0) {
+        callback(new DnsLookupError(normalizedHostname, 'no addresses'), '')
+        return
+      }
       const verdict = evaluateResolved(normalizedHostname, records.map(record => record.address), policy)
       if (!verdict.allowed || verdict.pinnedAddress === null) {
         callback(new SsrfDeniedError(hostname, verdict.detail ?? verdict.violation ?? 'denied'), '')
@@ -136,8 +152,8 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
       }
       const pinned = { address: selected.address, family: isIP(selected.address) }
       callback(null, options.all ? [pinned] : pinned.address, pinned.family)
-    }).catch((error: unknown) => {
-      callback(new SsrfDeniedError(hostname, error instanceof Error ? error.message : 'dns lookup failed'), '')
+    }, (error: unknown) => {
+      callback(new DnsLookupError(normalizedHostname, error), '')
     })
   }
   return new Agent({
@@ -157,8 +173,9 @@ export async function assertSafeUrl(url: string, policy: NetworkPolicy): Promise
   try {
     records = await lookup(first.hostname, { all: true })
   } catch (err) {
-    throw new SsrfDeniedError(url, err instanceof Error ? err.message : 'dns lookup failed')
+    throw new DnsLookupError(first.hostname, err)
   }
+  if (records.length === 0) throw new DnsLookupError(first.hostname, 'no addresses')
   const decision = evaluateResolved(
     first.hostname,
     records.map((record) => record.address),

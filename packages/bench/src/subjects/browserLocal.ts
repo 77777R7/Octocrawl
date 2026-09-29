@@ -687,7 +687,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // Playwright surfaces deadline misses as TimeoutError; map them to the
       // contract's timeout reason so the timeout fixtures match, and leave
       // every other navigation failure as connection_error.
-      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout' : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied' : 'connection_error'
+      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
+        : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
+          : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
+            : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -745,11 +748,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       ? 'timeout'
       : err instanceof Error && err.name === 'BodyTooLargeError'
         ? 'body_too_large'
-        : failureReason
+        : err instanceof Error && err.name === 'DnsLookupError'
+          ? 'dns_error'
+          : failureReason
     trace.push({
       at: wallMs,
       lane: 'browser_local',
-      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : 'ssrf_denied',
+      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : reason === 'dns_error' ? 'dns_failed' : 'ssrf_denied',
       detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
     })
     return {

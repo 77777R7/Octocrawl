@@ -13,7 +13,8 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
  *    maxRetries times; 429 and every other status never retry
  *  - honour Retry-After seconds / HTTP-date without shortening server waits
  *  - map thrown transport errors by name: undici HeadersTimeoutError /
- *    BodyTimeoutError -> timeout, everything else -> connection_error
+ *    BodyTimeoutError -> timeout, DnsLookupError -> dns_error, everything
+ *    else -> connection_error
  *
  * Counting semantics: `attemptCount` counts logical attempts (the outer
  * loop; one attempt may contain a whole redirect chain), `requestCount`
@@ -24,10 +25,10 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
 export type UrlGuard = (url: string) => Promise<void>
 
 /** Undici may wrap a connector rejection as the cause of its socket error. */
-function isSsrfDeniedError(error: unknown): boolean {
+function hasErrorNamed(error: unknown, name: 'SsrfDeniedError' | 'DnsLookupError'): boolean {
   let current = error
   for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
-    if ('name' in current && current.name === 'SsrfDeniedError') return true
+    if ('name' in current && current.name === name) return true
     current = 'cause' in current ? current.cause : null
   }
   return false
@@ -81,6 +82,7 @@ export type ResilientFetcher = (
 
 export type ResilientFailureReason =
   | 'timeout'
+  | 'dns_error'
   | 'connection_error'
   | 'http_error'
   | 'redirect_loop'
@@ -150,11 +152,12 @@ function denied(
   attemptCount: number,
   trace: ResilientOutcome['trace'],
   headers: ResilientOutcome['headers'] = null,
+  failureReason: 'policy_denied' | 'dns_error' = 'policy_denied',
 ): ResilientOutcome {
   return {
     kind: 'failure',
     status: null,
-    failureReason: 'policy_denied',
+    failureReason,
     finalUrl: current,
     ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
     headers,
@@ -176,12 +179,14 @@ async function guardUrl(
     await assertUrl(url)
     return null
   } catch (err) {
+    // A name that does not resolve is a DNS fact about the target, not a policy decision.
+    const dns = hasErrorNamed(err, 'DnsLookupError')
     trace.push({
       at,
-      event: 'ssrf_denied',
+      event: dns ? 'dns_failed' : 'ssrf_denied',
       detail: { to: url, error: err instanceof Error ? err.message : String(err) },
     })
-    return denied(current, chain, requestCount, attemptCount, trace)
+    return denied(current, chain, requestCount, attemptCount, trace, null, dns ? 'dns_error' : 'policy_denied')
   }
 }
 
@@ -236,11 +241,13 @@ export async function resilientFetch(
         const reason: ResilientFailureReason =
           scope.signal.aborted || name === 'AbortError' || name === 'TimeoutError' || name === 'HeadersTimeoutError' || name === 'BodyTimeoutError'
             ? 'timeout'
-            : isSsrfDeniedError(err)
+            : hasErrorNamed(err, 'SsrfDeniedError')
               ? 'policy_denied'
-              : name === 'BodyTooLargeError'
-                ? 'body_too_large'
-                : 'connection_error'
+              : hasErrorNamed(err, 'DnsLookupError')
+                ? 'dns_error'
+                : name === 'BodyTooLargeError'
+                  ? 'body_too_large'
+                  : 'connection_error'
         trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err) } })
         return {
           kind: 'failure',

@@ -200,3 +200,15 @@ describe('hosted network policy on the HTTP arm', () => {
     expect(out.usage.requestCount).toBe(0)
   })
 })
+
+describe('HTTP lane egress failures', () => {
+  it('reports a host that does not resolve as dns_error, not policy_denied', async () => {
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch('http://w2l-dns-failure.invalid/page')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+      expect(out.usage.requestCount).toBe(0)
+      expect(out.trace.some(event => event.event === 'dns_failed')).toBe(true)
+    } finally { await http.teardown() }
+  })
+})

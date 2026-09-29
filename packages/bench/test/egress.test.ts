@@ -70,6 +70,16 @@ describe('guarded socket lookup', () => {
     }
   })
 
+  it('reports a failed lookup as a DNS error, not a policy denial', async () => {
+    const dispatcher = createGuardedDispatcher(localNetworkPolicy(), async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND nx.test'), { code: 'ENOTFOUND' }) })
+    try {
+      const failure: unknown = await request('http://nx.test/', { dispatcher }).catch((error: unknown) => error)
+      const names = [failure, (failure as { cause?: unknown }).cause].map(error => (error as { name?: string } | undefined)?.name)
+      expect(names).toContain('DnsLookupError')
+      expect(names).not.toContain('SsrfDeniedError')
+    } finally { await dispatcher.close() }
+  })
+
   it('rejects a mixed public and private answer set without selecting the public member', async () => {
     const dispatcher = createGuardedDispatcher(hostedNetworkPolicy(), async () => [
       { address: '93.184.215.14', family: 4 },

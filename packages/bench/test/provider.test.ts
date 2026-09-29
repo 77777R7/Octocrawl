@@ -265,6 +265,13 @@ describe('ProviderSubject result mapping', () => {
     expect(out.compliance).toBeNull()
   })
 
+  it('reports a target the vendor browser cannot resolve as dns_error, not a vendor fault', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const transport: ProviderTransport = { fetch: async () => { throw new Error('page.goto: net::ERR_NAME_NOT_RESOLVED at https://nx.example/') } }
+    const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://nx.example/')
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+  })
+
   it('classifies an origin challenge as blocked, not as a plain http_error', async () => {
     const transport = new CountingTransport({
       status: 403,

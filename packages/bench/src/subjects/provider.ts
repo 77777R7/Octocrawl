@@ -260,8 +260,9 @@ export class ProviderSubject implements SubjectAdapter {
         requestedUrl: url,
         status: 'failed',
         // The provider broke, not the target. Reporting this as http_error
-        // would blame the publisher for our vendor's outage.
-        failureReason: execution.signal?.aborted ? 'timeout' : 'provider_error',
+        // would blame the publisher for our vendor's outage. A target name
+        // the vendor's browser could not resolve is a DNS fact, not a fault.
+        failureReason: execution.signal?.aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',
