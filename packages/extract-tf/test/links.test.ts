@@ -54,6 +54,24 @@ describe('collectLinks', () => {
     expect(collectLinks(html, 'https://fixture.test/x')).toEqual(['https://fixture.test/ok'])
   })
 
+  it('resolves against <base href>, and extract exposes that base for Markdown', () => {
+    const html = `<!doctype html><html><head><title>Kiln guide</title><base href="/v2/"></head><body>
+<article><h1>Kiln guide</h1>
+<p>Read the <a href="firing.html">firing guide</a> before loading the kiln, and the <a href="/faq">FAQ</a> for glaze defects.</p>
+<p><img src="img/kiln.png" alt="Kiln"> Every reading was logged in the ledger kept by the harbour office.</p>
+</article></body></html>`
+    const url = 'https://fixture.test/docs/index.html'
+    expect(collectLinks(html, url)).toEqual(['https://fixture.test/v2/firing.html', 'https://fixture.test/faq'])
+
+    const extracted = extractTf.extract(html, { url })
+    expect(extracted.baseUrl).toBe('https://fixture.test/v2/')
+    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    expect(markdown).toContain('[firing guide](https://fixture.test/v2/firing.html)')
+    expect(markdown).toContain('[FAQ](https://fixture.test/faq)')
+    expect(markdown).toContain('![Kiln](https://fixture.test/v2/img/kiln.png)')
+    expect(extractTf.extract(html).baseUrl).toBeNull()
+  })
+
   it('does not put chrome boilerplate into mainHtml even when links keep nav', () => {
     const extracted = extractTf.extract(LISTING)
     expect(extracted.mainHtml).not.toContain(NAV_MARKER)
