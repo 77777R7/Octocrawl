@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
+
+const thrown = (fn: () => unknown): unknown => {
+  try { fn() } catch (error) { return error }
+  return undefined
+}
 
 describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('accepts the CLI modes and not proxy', () => {
@@ -71,5 +76,22 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('has one request-error code set, each code with its HTTP status', () => {
+    expect([...API_ERROR_CODES]).toEqual(['invalid_json', 'invalid_request', 'unsupported_parameter', 'unsupported_format', 'unauthorized', 'not_found', 'conflict', 'internal_error'])
+    expect(API_ERROR_CODES.map((code) => API_ERROR_STATUS[code])).toEqual([400, 400, 400, 400, 401, 404, 409, 500])
+    expect(isApiErrorCode('not_found')).toBe(true)
+    expect(isApiErrorCode('blocked')).toBe(false)
+  })
+
+  it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
+    const url = 'https://example.com/'
+    expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
+    expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'html', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
+    expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
+    expect((invalid as { details?: unknown }).details).toBeUndefined()
   })
 })
