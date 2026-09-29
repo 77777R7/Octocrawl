@@ -45,8 +45,15 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   retryBackoffBaseMs: number
   /** Extra deterministic-injection hook for tests and operators. */
   retryJitterMs: number
+  /** Default wait for a response's headers, and for each chunk of its body; never past deadlineAt. */
   headersTimeoutMs: number
   bodyTimeoutMs: number
+  /**
+   * deadlineAt is the caller's own timeout: wait for headers and body until it
+   * instead of stopping at headersTimeoutMs / bodyTimeoutMs. Without a
+   * deadline the two caps apply.
+   */
+  capsFollowDeadline?: boolean
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -231,9 +238,10 @@ export async function resilientFetch(
       const at = Date.now() - start
       let response: ResilientResponseLike
       try {
+        const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
         response = await raceWithSignal(fetcher(current, {
-          headersTimeoutMs: remainingTimeout(scope, cfg.headersTimeoutMs),
-          bodyTimeoutMs: remainingTimeout(scope, cfg.bodyTimeoutMs),
+          headersTimeoutMs: remainingTimeout(scope, cap(cfg.headersTimeoutMs)),
+          bodyTimeoutMs: remainingTimeout(scope, cap(cfg.bodyTimeoutMs)),
           signal: scope.signal,
         }), scope.signal)
       } catch (err) {

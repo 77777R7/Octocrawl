@@ -67,6 +67,22 @@
 //               hostSpacing: every fetched item has a crawl_delay trace event and, per host,
 //               consecutive recorded starts are at least the delay W2L recorded as required
 //               (requiredDelayMs) apart, on at least minHosts hosts.
+// Added for the timeout, waiter and /fc crawl status gaps (2026-09-29):
+//   sdk         case.sdk.op 'crawlAndWait' / 'batchAndWait' calls the SDK helper of that name
+//               (case.url or case.urls, case.request, pollIntervalMs / timeoutMs); doc.items are
+//               its pages or items, doc.errors a crawl's errors. case.sdk.pollFaults lists faults
+//               answered, one each, to the wait's first status requests instead of the API: an
+//               HTTP status (429 with Retry-After: 1) or 'network' (a thrown TypeError). The
+//               injection happens in the runner's fetch, not on the network; doc.faults counts
+//               {injected, remaining}.
+//   fc-crawl    POST /fc/v1/crawl with case.request, polls GET /fc/v1/crawl/:id?limit=1 every 2 s
+//               while it is scraping, recording doc.progress {polls, nullTotals,
+//               totalAboveCompleted, totalBelowCompleted, nextWhileScraping}; with
+//               case.cancelAfterCompleted it cancels the crawl (native POST /v1/crawl/:id/cancel,
+//               the shim has no cancel) once completed reaches that many. Then it reads every data
+//               page from GET /fc/v1/crawl/:id?limit=<case.pageLimit, default 100>, following
+//               next: doc.items (all data), doc.pageRequests, doc.final {status, completed, total,
+//               nextOnLastPage, dataLength, errorPages, pagesWithoutError}.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -236,7 +252,19 @@ const runners = {
     const baseUrl = c.apiEnv === undefined ? api : process.env[c.apiEnv]
     if (!baseUrl) throw new Error(`${c.apiEnv} is not set`)
     // No token option: the SDK sends W2L_API_TOKEN from the environment when it is set.
-    const w2l = new W2L({ baseUrl })
+    // case.sdk.pollFaults answers the first status requests (GET /v1/crawl/:id or /v1/batches/:id) itself.
+    const faults = [...(c.sdk?.pollFaults ?? [])]
+    const statusPath = /^\/v1\/(crawl|batches)\/[^/]+$/
+    const faultyFetch = async (input, init) => {
+      if ((init?.method ?? 'GET') === 'GET' && statusPath.test(new URL(String(input)).pathname) && faults.length > 0) {
+        const fault = faults.shift()
+        if (fault === 'network') throw new TypeError('fetch failed (injected by the runner)')
+        return new Response(`injected ${fault}`, { status: fault, headers: fault === 429 ? { 'retry-after': '1' } : {} })
+      }
+      return fetch(input, init)
+    }
+    const w2l = new W2L({ baseUrl, ...(c.sdk?.pollFaults === undefined ? {} : { fetch: faultyFetch }) })
+    const faultCount = () => (c.sdk?.pollFaults === undefined ? undefined : { injected: c.sdk.pollFaults.length - faults.length, remaining: faults.length })
     const failure = async (promise) => {
       try { await promise; return null } catch (error) { return { name: error?.name ?? null, status: error?.status ?? null, code: error?.code ?? null } }
     }
@@ -249,6 +277,15 @@ const runners = {
       const wrongToken = await failure(new W2L({ baseUrl, token: 'w2l-parity-wrong-token' }).scrape(c.url, c.request ?? {}))
       const tokenInEnvironment = Boolean(process.env.W2L_API_TOKEN)
       return { response: { baseUrl, tokenInEnvironment, scrape, withoutToken, wrongToken }, doc: { ...scrape, elapsedMs, tokenInEnvironment, withoutToken, wrongToken } }
+    }
+    if (op === 'crawlAndWait' || op === 'batchAndWait') {
+      const began = Date.now()
+      const wait = { pollIntervalMs: c.sdk.pollIntervalMs, timeoutMs: c.sdk.timeoutMs }
+      const result = op === 'crawlAndWait' ? await w2l.crawlAndWait(c.url, c.request ?? {}, wait) : await w2l.batchAndWait(c.urls, c.request ?? {}, wait)
+      const items = result.pages ?? result.items
+      const errors = result.errors ?? []
+      const doc = { status: result.report.status, report: result.report, items, errors, stepCount: items.length + errors.length, waitMs: Date.now() - began, faults: faultCount() }
+      return { response: { taskId: result.taskId, ...doc }, doc }
     }
     if (op !== 'crawlWait' && op !== 'batchWait') throw new Error(`unknown sdk op ${op}`)
     const crawl = op === 'crawlWait'
@@ -283,7 +320,7 @@ const runners = {
       const cancelled = crawl ? await w2l.cancelCrawl(probe.taskId) : await w2l.cancelBatch(probe.taskId)
       probeCancel = { taskId: probe.taskId, status: cancelled.status }
     }
-    const doc = { status: report.status, report, items, errors, stepCount: items.length + errors.length, waitMs, timeoutProbe, probeCancel }
+    const doc = { status: report.status, report, items, errors, stepCount: items.length + errors.length, waitMs, timeoutProbe, probeCancel, faults: faultCount() }
     return { response: { taskId, ...doc }, doc }
   },
   async crawl(c) {
@@ -313,6 +350,45 @@ const runners = {
       response: { robots, start, startMs, progress, status, pages, errors },
       doc: { status: status.json?.status, report: status.json, items: pages.items, pageRequests: pages.calls, errors: errors.items, stepCount: pages.items.length + errors.items.length, robots, startMs, progress },
     }
+  },
+  // The Firecrawl crawl status: counts while it scrapes, then every data page through next.
+  async 'fc-crawl'(c) {
+    const start = await call('POST', '/fc/v1/crawl', { url: c.url, ...c.request })
+    const id = start.json?.id
+    if (!id) return { response: start, doc: start.json ?? {} }
+    const polls = []
+    let cancel = null
+    let status
+    for (let i = 0; i < 150; i++) {
+      status = await call('GET', `/fc/v1/crawl/${id}?limit=1`)
+      if (status.json?.status !== 'scraping') break
+      polls.push({ completed: status.json.completed, total: status.json.total, next: typeof status.json.next === 'string' })
+      if (cancel === null && c.cancelAfterCompleted !== undefined && status.json.completed >= c.cancelAfterCompleted) {
+        cancel = await call('POST', `/v1/crawl/${id}/cancel`)
+      }
+      await sleep(2000)
+    }
+    const items = []
+    const pages = []
+    let path = `/fc/v1/crawl/${id}?limit=${c.pageLimit ?? 100}`
+    let last = null
+    for (let i = 0; i < 100 && path !== null; i++) {
+      last = await call('GET', path)
+      pages.push({ httpStatus: last.httpStatus, dataLength: last.json?.data?.length ?? null, next: last.json?.next ?? null })
+      items.push(...(last.json?.data ?? []))
+      path = typeof last.json?.next === 'string' ? `${new URL(last.json.next).pathname}${new URL(last.json.next).search}` : null
+    }
+    const progress = {
+      polls: polls.length,
+      nullTotals: polls.filter((poll) => poll.total === null).length,
+      totalAboveCompleted: polls.filter((poll) => poll.total !== null && poll.total > poll.completed).length,
+      totalBelowCompleted: polls.filter((poll) => poll.total !== null && poll.total < poll.completed).length,
+      nextWhileScraping: polls.every((poll) => poll.next),
+    }
+    const errorPages = items.filter((item) => item.metadata?.error !== undefined).length
+    const final = { status: last?.json?.status ?? null, completed: last?.json?.completed ?? null, total: last?.json?.total ?? null, nextOnLastPage: last !== null && last.json !== null && 'next' in last.json, dataLength: items.length, errorPages, pagesWithoutError: items.length - errorPages }
+    const doc = { status: final.status, items: items.map((item) => ({ ...item, url: item.metadata?.sourceURL })), pageRequests: pages.length, progress, final, cancel: cancel?.json?.status ?? null }
+    return { response: { start, polls, cancel, pages, last }, doc }
   },
   // L04: follow a listing's own pagination links with a batch and count table rows,
   // for c.url and again for c.compareUrl (the same listing at another page size).

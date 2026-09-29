@@ -77,7 +77,7 @@ Branch on `code`; `error` is written for people. `details` appears only with `un
 
 These codes describe the request, not the page. A page that was fetched but blocked or failed is a normal result with its `status` and reason (see [result states](/docs/limits/)); on `/fc` it is HTTP 200 with `success: false`, no `code`, and the reason in `data.metadata.error`.
 
-The SDK throws `W2LError` for every error response. It carries `status`, `code` (when the body had one), `method`, `path` and the parsed `body`; its message is still `<METHOD> <path> failed: <status> <body>`, or `crawl not found: <id>` and `batch not found: <id>` for those lookups. A request that never reached the API throws the underlying `fetch` error, and `waitBatch` / `waitCrawl` throw `WaitTimeoutError` when `timeoutMs` runs out.
+The SDK throws `W2LError` for every error response. It carries `status`, `code` (when the body had one), `method`, `path` and the parsed `body`; its message is still `<METHOD> <path> failed: <status> <body>`, or `crawl not found: <id>` and `batch not found: <id>` for those lookups. A request that never reached the API throws the underlying `fetch` error. `waitBatch` / `waitCrawl` (and `batchAndWait` / `crawlAndWait`) retry a status request that fails with a network error, 408, 429 or 5xx, up to `maxRetries` (default 5) in a row, before throwing its error; they throw other errors at once, and `WaitTimeoutError` (`taskId`, `timeoutMs`, `last`: the last status read or null) when `timeoutMs` runs out.
 
 ```ts
 import { W2LError } from '@w2l/sdk'

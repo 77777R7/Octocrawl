@@ -430,10 +430,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
         compliant &&= observedDelayMs === null || observedDelayMs >= requiredDelayMs
         this.lastRequestAtMsByHost.set(host, navigationAt)
         attemptCount++
-        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount } })
+        // Navigation waits 20 s at most, or until the deadline when the caller chose it (its timeout).
+        const navigationTimeoutMs = remainingTimeout(execution, options.timeout !== undefined && execution.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : 20_000)
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount, timeoutMs: navigationTimeoutMs } })
         const envProxy = proxyFor(navigationUrl, this.networkPolicy)
         if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
-        response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: remainingTimeout(execution, 20_000) })
+        response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
         const status = response?.status() ?? 0
         if (status === 429 || status === 503) {
           const delay = parseRetryAfterMs(response?.headers()['retry-after'] ?? null)

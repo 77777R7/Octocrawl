@@ -323,6 +323,23 @@ describe('resilientFetch execution budget', () => {
     expect(f.calls).toEqual([])
   })
 
+  it('waits for headers and body until a caller-chosen deadline, never past it; the default caps otherwise', async () => {
+    const seen: Array<{ headersTimeoutMs: number; bodyTimeoutMs: number }> = []
+    const fetcher: ResilientFetcher = async (_url, init) => {
+      seen.push({ headersTimeoutMs: init.headersTimeoutMs, bodyTimeoutMs: init.bodyTimeoutMs })
+      return res(200)
+    }
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 60_000 })
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 60_000, capsFollowDeadline: true })
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 2_000, capsFollowDeadline: true })
+    await resilientFetch(U, fetcher, { capsFollowDeadline: true })
+    expect(seen[0]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
+    for (const timeout of [seen[1]!.headersTimeoutMs, seen[1]!.bodyTimeoutMs]) expect(timeout).toBeGreaterThan(55_000)
+    for (const timeout of [seen[1]!.headersTimeoutMs, seen[1]!.bodyTimeoutMs]) expect(timeout).toBeLessThanOrEqual(60_000)
+    for (const timeout of [seen[2]!.headersTimeoutMs, seen[2]!.bodyTimeoutMs]) expect(timeout).toBeLessThanOrEqual(2_000)
+    expect(seen[3]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
+  })
+
   it('retains deadline protection while reading a deferred response body', async () => {
     const out = await resilientFetch(U, async () => ({ ...res(200), bodyText: async () => new Promise<string>(() => {}) }), { deadlineAt: Date.now() + 40 })
     await expect(out.bodyText()).rejects.toMatchObject({ name: 'TimeoutError' })

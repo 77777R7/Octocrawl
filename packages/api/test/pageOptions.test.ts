@@ -58,6 +58,8 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
   async function setup(browser: BrowserStub, options: Partial<ApiEngineOptions> = {}) {
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      // /slow sends its headers after 12 s, past the HTTP lane's default 10 s wait for them (undici's timers run up to 1 s late).
+      if (req.url === '/slow') { setTimeout(() => { if (!res.destroyed) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGES['/chrome']) }, 12_000); return }
       const page = PAGES[req.url ?? '']
       if (page !== undefined) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page)
       // Any other path (/hang) never answers.
@@ -115,6 +117,20 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     const shim = await post('/fc/v1/scrape', { url: `${origin}/hang`, timeout: 1_000 })
     expect(shim).toMatchObject({ status: 200, body: { success: false, error: 'failed: timeout' } })
   })
+
+  it('a timeout longer than the lanes\' default waits gives a server slow to send its headers that time', async () => {
+    const withTimeout = await setup(hangingBrowser)
+    const withoutTimeout = await setup(hangingBrowser)
+    const [waited, capped] = await Promise.all([
+      withTimeout.post('/v1/scrape', { url: `${withTimeout.origin}/slow`, timeout: 16_000 }),
+      withoutTimeout.post('/v1/scrape', { url: `${withoutTimeout.origin}/slow` }),
+    ])
+    expect(waited).toMatchObject({ status: 200, body: { status: 'success', lane: 'http', failureReason: null } })
+    expect(waited.body.markdown).toContain('Hourly survey')
+    // Without a timeout the HTTP lane keeps its 10 s wait for headers.
+    expect(capped).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'timeout', lane: 'http' } })
+    expect(capped.body.usage.deadlineExceeded).not.toBe(true)
+  }, 30_000)
 
   it('waitFor starts at the browser rung with the options, and says so when there is no browser rung', async () => {
     const seen: Seen[] = []

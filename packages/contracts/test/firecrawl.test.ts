@@ -8,6 +8,7 @@ import {
   RequestError,
   wrapCrawlAccepted,
   wrapCrawlStatus,
+  firecrawlCrawlCounts,
   wrapScrape,
 } from '../src/index.js'
 
@@ -265,14 +266,24 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
         updatedAt: '2026-09-18T00:00:00.000Z',
       },
     ]
-    const status = wrapCrawlStatus(report, steps)
+    const status = wrapCrawlStatus(report, steps, { completed: 1, total: 2 })
     expect(status.status).toBe('completed')
-    expect(status.total).toBe(1)
+    expect(status.total).toBe(2)
     expect(status.completed).toBe(1)
     // No credits and no expiry exist in W2L: unknown is null, never an invented value.
     expect(status.creditsUsed).toBeNull()
     expect(status.expiresAt).toBeNull()
-    expect(status.next).toBeNull()
+    // No further page: `next` is left out, as Firecrawl does; a v1 client follows it while the key is there.
+    expect(status).not.toHaveProperty('next')
     expect(status.data[0]?.markdown).toBe('MAIN')
+    const next = 'http://127.0.0.1:8787/fc/v1/crawl/task-1?cursor=abc'
+    expect(wrapCrawlStatus(report, steps, { completed: 1, total: null, next })).toMatchObject({ total: null, next })
+    const statuses = (['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'] as const).map((taskStatus) => wrapCrawlStatus({ ...report, status: taskStatus }, [], { completed: 0, total: null }).status)
+    expect(statuses).toEqual(['scraping', 'scraping', 'scraping', 'completed', 'failed', 'cancelled'])
+    // completed: success and partial pages; total: every step, plus the pages ahead while the crawl runs here, else unknown.
+    const counts = { success: 2, partial: 1, failed: 1, duplicate: 1 }
+    expect(firecrawlCrawlCounts('running', counts, 3)).toEqual({ completed: 3, total: 8 })
+    expect(firecrawlCrawlCounts('paused', counts, null)).toEqual({ completed: 3, total: null })
+    expect(firecrawlCrawlCounts('cancelled', counts, 3)).toEqual({ completed: 3, total: 5 })
   })
 })

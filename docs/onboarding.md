@@ -202,20 +202,17 @@ SDK `request.signal` cancels the client's HTTP request; synchronous `scrape` and
 
 ```bash
 node --import tsx --input-type=module <<'JS'
-import { setTimeout } from 'node:timers/promises'
 import { W2L } from '@w2l/sdk'
 const client = new W2L({ baseUrl: process.env.W2L_API_URL ?? 'http://127.0.0.1:8787', token: process.env.W2L_API_TOKEN })
 const { taskId } = await client.crawl('http://127.0.0.1:8790/product', { maxPages: 1 })
-let report = await client.getCrawl(taskId)
-while (report.status === 'pending' || report.status === 'running') {
-  await setTimeout(250)
-  report = await client.getCrawl(taskId)
-}
+const report = await client.waitCrawl(taskId, { pollIntervalMs: 250, timeoutMs: 60_000 })
 console.log(report)
 for await (const page of client.listCrawlPages(taskId, { limit: 10 })) console.log(page)
 console.log(await client.getCrawlErrors(taskId, { limit: 10 }))
 JS
 ```
+
+`waitCrawl` polls until the crawl is completed, failed or cancelled and returns its status; `crawlAndWait(url, options, waitOptions)` starts the crawl, waits and returns `{ taskId, report, pages, errors }` in one call (`waitBatch` and `batchAndWait` do the same for a batch). When `timeoutMs` runs out the wait throws `WaitTimeoutError` with `taskId`, `timeoutMs` and `last` (the last status read, or null), and the crawl keeps running. While polling, a network error or an HTTP 408, 429 or 5xx answer is retried with backoff (`maxRetries`, default 5); see the README.
 
 The SDK exports Crawl, Monitor and Delivery contract types. Mutation methods retain the server's error status/body. Optional final `{ signal }` arguments work with reads, mutations and pagination:
 

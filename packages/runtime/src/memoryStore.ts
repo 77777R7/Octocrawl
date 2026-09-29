@@ -1,4 +1,4 @@
-import type { Attempt, StepRecord, Task } from '@w2l/contracts'
+import type { Attempt, StepRecord, StepStatus, Task } from '@w2l/contracts'
 import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore } from './taskStore.js'
 
 /**
@@ -77,6 +77,14 @@ export class MemoryTaskStore implements TaskStore {
     return new Set([...this.steps.values()]
       .filter(step => step.taskId === taskId && step.result !== null)
       .map(step => step.canonicalUrl)).size
+  }
+
+  async countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>> {
+    const counts: Partial<Record<StepStatus, number>> = {}
+    for (const step of this.steps.values()) {
+      if (step.taskId === taskId && (attemptId === undefined || step.attemptId === attemptId)) counts[step.status] = (counts[step.status] ?? 0) + 1
+    }
+    return counts
   }
 
   async listStepsPage(taskId: string, query: StepPageQuery) {

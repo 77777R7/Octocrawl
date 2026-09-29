@@ -34,7 +34,9 @@ import {
   type NetworkPolicy,
   type ScrapeRequest,
   type StepRecord,
+  type StepStatus,
   type Task,
+  type TaskStatus,
   type CrawlPageQuery,
   type ExecutionContext,
   type CompactScrapeResponse,
@@ -52,7 +54,7 @@ import {
   type MonitorRunDetail,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
@@ -63,6 +65,20 @@ import { extractionInput, extractStructured, prepareScrapeResponse, structuredMo
 export interface CrawlWithSteps {
   report: CrawlReport
   steps: readonly StepRecord[]
+}
+
+/** One page of a crawl's latest attempt and what is known about the rest, for its /fc status. */
+export interface CrawlStatusPage {
+  status: TaskStatus
+  /** Up to `limit` of the latest attempt's steps, in the order they were recorded, after `cursor`. */
+  steps: readonly StepRecord[]
+  /** The cursor after the last of `steps`; the query's own when there are none. */
+  cursor: string | null
+  hasMore: boolean
+  /** How many of the latest attempt's steps have each status. */
+  counts: Partial<Record<StepStatus, number>>
+  /** Pages the crawl will still record, when this process runs it; null when it does not. */
+  ahead: number | null
 }
 
 /** The crawl's state does not allow the request (HTTP 409 `conflict`). */
@@ -79,6 +95,8 @@ export interface ApiEngine {
   cancelBatch(taskId: string): Promise<BatchStatusResponse | null>
   getCrawl(taskId: string): Promise<CrawlReport | null>
   getCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null>
+  /** Null when there is no such task; a RequestError for a cursor that does not parse. */
+  getCrawlStatusPage(taskId: string, query: { cursor?: string; limit: number }): Promise<CrawlStatusPage | null>
   getCrawlPages(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   getCrawlErrors(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlError> | null>
   cancelCrawl(taskId: string): Promise<CrawlReport | null>
@@ -162,6 +180,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   let batchStartInProgress = false
   const activeScrapes = new Set<Promise<unknown>>()
   const crawlControllers = new Map<string, AbortController>()
+  const runningCrawls = new Map<string, CrawlOrchestrator>()
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
@@ -304,13 +323,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       useCached: req.useCached,
       taskId: task.id,
     }).then(async () => {
-      inflight.delete(task.id); crawlControllers.delete(task.id)
+      inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await store.close()
     }).catch(async () => {
-      inflight.delete(task.id); crawlControllers.delete(task.id)
+      inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
       await store.close()
     })
+    runningCrawls.set(task.id, orchestrator)
     inflight.set(task.id, job)
   }
 
@@ -463,6 +483,33 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     getCrawlWithSteps: loadCrawlWithSteps,
+
+    async getCrawlStatusPage(taskId, query) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      if (query.cursor !== undefined) {
+        try { decodeStepCursor(query.cursor) } catch { throw new RequestError('cursor is not one this API issued') }
+      }
+      const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+      try {
+        const task = await store.getTask(taskId)
+        if (task === null) return null
+        // Status, counts and one page of steps: no step body beyond that page is read.
+        const attemptId = (await store.listAttempts(taskId)).at(-1)?.id
+        const page = attemptId === undefined ? { steps: [], hasMore: false } : await store.listStepsPage(taskId, { attemptId, cursor: query.cursor, limit: query.limit, kind: 'all' })
+        const counts = attemptId === undefined ? {} : await store.countSteps(taskId, attemptId)
+        const last = page.steps.at(-1)
+        return {
+          status: task.status,
+          steps: page.steps,
+          cursor: last === undefined ? query.cursor ?? null : encodeStepCursor(last.createdAt, last.id),
+          hasMore: page.hasMore,
+          counts,
+          ahead: runningCrawls.get(taskId)?.pagesAhead() ?? null,
+        }
+      } finally {
+        await store.close()
+      }
+    },
 
     async getCrawlPages(taskId, query) {
       const page = await loadCrawlPageList(taskId, query, 'pages')
@@ -622,11 +669,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
-/** What a request or stored task asks each lane to capture; its timeout is a deadline, not a fetch option. */
+/** What a request or stored task asks each lane to capture. Its timeout is the deadline; passed on, it lets the lanes' waits run to it. */
 function fetchOptions(options: PageOptions | undefined): FetchOptions {
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
+    ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
   }
 }
 
