@@ -1,6 +1,6 @@
 # Persistent URL-array scraping
 
-`POST /v1/batches` accepts 1–1000 distinct HTTP(S) URLs and returns a durable `taskId` immediately. URLs that collapse to the same crawl canonical URL are rejected. A batch visits only the supplied URLs; it does not follow links. Omitting `formats` selects Markdown. JSON formats use the same deterministic-first Schema extraction as single-page scrape.
+`POST /v1/batches` accepts 1–1000 distinct HTTP(S) URLs and returns a durable `taskId` immediately. URLs that collapse to the same crawl canonical URL are rejected. A batch visits only the supplied URLs; it does not follow links. Omitting `formats` selects Markdown. Add `links` (or `includeLinks: true`) to get each item's absolute outbound links, as scrape returns them. JSON formats use the same deterministic-first Schema extraction as single-page scrape. An unsupported format or an unknown request field is rejected with HTTP 400 naming it.
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8787/v1/batches \
