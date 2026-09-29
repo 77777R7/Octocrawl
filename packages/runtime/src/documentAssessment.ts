@@ -51,7 +51,9 @@ export function assessFirecrawlIntroduction(result: FetchResult | null): Documen
     const end = headings.find((h) => h.start > heading.start)?.start ?? markdownText.length
     const block = markdownText.slice(heading.end, end)
     const leading = /^\s*/.exec(block)![0].length
-    const first = block.slice(leading).split(/\n\s*\n|\n\s*```|\n\s*~~~/)[0]?.trim() ?? ''
+    // The prose up to the section's first code block. It can be more than one
+    // Markdown paragraph: the page lead and the text after it are two blocks.
+    const first = block.slice(leading).split(/\n\s*```|\n\s*~~~/)[0]?.trim() ?? ''
     if (first.length < 30 || first.startsWith('```') || first.startsWith('<')) return null
     const start = heading.end + leading
     const quote = markdownText.slice(start, start + first.length)
