@@ -132,6 +132,9 @@ export class CrawlOrchestrator {
         seedUrl: task.seedUrl,
         maxDepth: spec.maxDepth,
         allowlistedDomains: spec.allowlistedDomains,
+        // A stored task keeps the path filters it was created with.
+        includePaths: task.crawl?.includePaths ?? spec.includePaths,
+        excludePaths: task.crawl?.excludePaths ?? spec.excludePaths,
         ...this.frontierOptions,
       })
       await this.restoreFrontier(frontier, task, spec)
@@ -333,6 +336,9 @@ export class CrawlOrchestrator {
       return { task, attempt }
     }
 
+    const paths = spec.includePaths?.length || spec.excludePaths?.length
+      ? { crawl: { includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [] } }
+      : {}
     const task: Task = {
       id: this.newId(),
       seedUrl: spec.seedUrl,
@@ -340,6 +346,7 @@ export class CrawlOrchestrator {
       mode: spec.mode,
       status: 'running',
       budget: spec.budget,
+      ...paths,
       createdAt: startedAt,
       updatedAt: startedAt,
     }
@@ -439,6 +446,8 @@ function newAttempt(id: string, taskId: string, startedAt: string, recoveredFrom
   }
 }
 
+// The page keeps its own links (an empty list would claim it has none); the
+// caller does not follow them because a duplicate is not contentful.
 function duplicateResult(url: string, prior: FetchResult, firstCanonicalUrl: string): FetchResult {
   return {
     ...prior,
@@ -448,7 +457,6 @@ function duplicateResult(url: string, prior: FetchResult, firstCanonicalUrl: str
     blockReason: null,
     budgetExceeded: null,
     markdown: null,
-    links: [],
     usage: {
       ...EMPTY_USAGE,
       wallMs: prior.usage.wallMs,

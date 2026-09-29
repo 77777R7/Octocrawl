@@ -87,6 +87,22 @@ describe('MCP tools', () => {
     expect(JSON.stringify(batch?.inputSchema)).toContain('"schema"')
   })
 
+  it('forwards crawl formats and path filters, with no count cap on formats', async () => {
+    let body: unknown = null
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => {
+      body = JSON.parse(String(init?.body))
+      return json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const request = { url: 'https://example.com/', formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'] }
+    await callTool(client, 'crawl', request)
+    expect(body).toEqual(request)
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const formats = (TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, { maxItems?: number }>).formats
+      expect(formats).toBeDefined()
+      expect(formats?.maxItems).toBeUndefined()
+    }
+  })
+
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

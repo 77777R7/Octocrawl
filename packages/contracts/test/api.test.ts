@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseScrapeRequest } from '../src/index.js'
+import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 describe('REST contract: scrape + crawl reuse existing result types', () => {
@@ -47,5 +47,29 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       url: 'https://example.com/product',
       formats: [{ type: 'json', schema: { $ref: 'https://schemas.example/product.json' } }],
     })).toThrow('only supports local $ref')
+  })
+
+  it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
+    const url = 'https://example.com/'
+    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
+      .toThrow('unsupported formats: html, rawHtml (supported: markdown, links, json)')
+    expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'screenshot' }] })).toThrow('unsupported format: screenshot')
+    expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
+    expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
+  })
+
+  it('rejects unknown request keys by name for scrape, batch and crawl', () => {
+    const url = 'https://example.com/'
+    expect(() => parseScrapeRequest({ url, waitFor: 1000, onlyMainContent: true })).toThrow('unsupported parameters: waitFor, onlyMainContent')
+    expect(() => parseBatchStartRequest({ urls: [url], timeout: 5000 })).toThrow('unsupported parameter: timeout')
+    expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
+  })
+
+  it('accepts crawl formats and pathname filters, and rejects an invalid regex', () => {
+    const url = 'https://example.com/'
+    expect(parseCrawlStartRequest({ url, formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] }))
+      .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
+    expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
+    expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
   })
 })

@@ -56,6 +56,14 @@ export interface CrawlStartRequest {
   maxDepth?: number | null
   useCached?: boolean
   allowlistedDomains?: readonly string[]
+  /** Formats for every page, validated as for scrape. Omitted selects Markdown. */
+  formats?: readonly ScrapeFormat[]
+  /** Include each page's outbound links, like a `links` format. */
+  includeLinks?: boolean
+  /** Pathname regexes a discovered link must match. The seed URL is always fetched. */
+  includePaths?: readonly string[]
+  /** Pathname regexes that skip a discovered link; they win over includePaths. */
+  excludePaths?: readonly string[]
 }
 
 export interface CrawlAccepted {
@@ -106,6 +114,18 @@ function asRecord(body: unknown): Record<string, unknown> {
     throw new RequestError('body must be a JSON object')
   }
   return body as Record<string, unknown>
+}
+
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug'] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths'] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks'] as const
+
+/** An option W2L does not know is an error, never silently dropped. */
+function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[]): void {
+  const unknown = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key))
+  if (unknown.length > 0) {
+    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.join(', ')})`)
+  }
 }
 
 function readUrl(value: unknown): string {
@@ -174,9 +194,20 @@ function readSchema(value: unknown): import('./structured.js').JsonSchema {
   return value as import('./structured.js').JsonSchema
 }
 
+const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json']
+
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.length === 0 || value.length > 3) throw new RequestError('formats must contain 1 to 3 entries')
+  if (!Array.isArray(value) || value.length === 0) throw new RequestError('formats must be a non-empty array')
+  // Name every unsupported format (string or {type}) before any other check.
+  const unsupported = new Set<string>()
+  for (const item of value) {
+    const type: unknown = item !== null && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>).type : item
+    if (typeof type === 'string' && !FORMAT_NAMES.includes(type)) unsupported.add(type)
+  }
+  if (unsupported.size > 0) {
+    throw new RequestError(`unsupported ${unsupported.size === 1 ? 'format' : 'formats'}: ${[...unsupported].join(', ')} (supported: ${FORMAT_NAMES.join(', ')})`)
+  }
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const item of value) {
@@ -213,8 +244,26 @@ function readBound(value: unknown, name: string, min: number): number | null | u
   return value
 }
 
+/** Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns of at most 2000 characters. */
+function readPathPatterns(value: unknown, name: string): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 1000 || value.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 2000)) {
+    throw new RequestError(`${name} must be an array of at most 1000 regular expressions of 1 to 2000 characters`)
+  }
+  const patterns = value as string[]
+  for (const pattern of patterns) {
+    try {
+      new RegExp(pattern)
+    } catch {
+      throw new RequestError(`${name} contains an invalid regular expression: ${pattern}`)
+    }
+  }
+  return patterns
+}
+
 export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, SCRAPE_KEYS)
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   return {
@@ -229,10 +278,12 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
 
 export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, CRAWL_KEYS)
   const useCached = rec.useCached
   if (useCached !== undefined && typeof useCached !== 'boolean') {
     throw new RequestError('useCached must be a boolean')
   }
+  if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   return {
     url: readUrl(rec.url),
     mode: readMode(rec.mode),
@@ -240,11 +291,16 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     maxDepth: readBound(rec.maxDepth, 'maxDepth', 0),
     useCached,
     allowlistedDomains: readAllowlist(rec.allowlistedDomains),
+    formats: readFormats(rec.formats),
+    includeLinks: rec.includeLinks as boolean | undefined,
+    includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
+    excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
   }
 }
 
 export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, BATCH_KEYS)
   if (!Array.isArray(rec.urls) || rec.urls.length < 1 || rec.urls.length > 1000) {
     throw new RequestError('urls must contain 1 to 1000 URLs')
   }

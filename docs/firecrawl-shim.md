@@ -24,6 +24,9 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - No fire-engine, proxy pools, `actions`, JSON extract, or screenshots.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
 - Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
+- `maxDepth` counts link hops from the start URL, which Firecrawl calls `maxDiscoveryDepth`; Firecrawl's own `maxDepth` limits URL path depth.
 - Shim crawl start is HTTP 200 `{success,id,url}`. Native crawl start stays 202 `{taskId}`.
 - `creditsUsed` is always 0.
-- Scrape uses only `url`: `formats` and every other option are ignored, and the response always carries markdown and links. Crawl uses only `url`, `limit` and `maxDepth`; `includePaths`, `excludePaths` and `scrapeOptions` are ignored.
+- Scrape maps `url` and `formats`; crawl maps `url`, `limit` (as `maxPages`), `maxDepth`, `includePaths`, `excludePaths` and `scrapeOptions.formats`. The only formats are `markdown` and `links`. `onlyMainContent: true` and `ignoreSitemap: true` are accepted because W2L already works that way, and `origin` (the SDK's client label) is accepted without effect. Any other parameter, format or value, such as `html`, `rawHtml`, `screenshot`, `json`, `actions`, `waitFor`, `timeout`, `proxy` or `onlyMainContent: false`, is rejected with HTTP 400 `{ success: false, error }` naming it.
+- Scrape without `formats` returns markdown and links; Firecrawl returns markdown only. Crawl status pages carry each page's links whatever `scrapeOptions.formats` says.
+- `includePaths` / `excludePaths` are regular expressions matched against the URL path of each discovered link, as in Firecrawl. The start URL is always fetched and an `excludePaths` match wins. W2L follows links anywhere on the start URL's host; Firecrawl's default follows only paths below the start URL, and `crawlEntireDomain` is rejected.

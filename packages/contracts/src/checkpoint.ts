@@ -61,6 +61,8 @@ export interface Task {
   budget: CrawlBudget
   /** Present only for an explicit URL-array batch. Stored with the checkpoint. */
   batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean }
+  /** Crawl output formats and link path filters, stored so a resumed crawl keeps them. */
+  crawl?: { formats?: readonly ScrapeFormat[]; includeLinks?: boolean; includePaths?: readonly string[]; excludePaths?: readonly string[] }
   createdAt: string
   updatedAt: string
 }

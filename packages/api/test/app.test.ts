@@ -157,9 +157,9 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     try {
       const first = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2`)
       expect(first.status).toBe(200)
-      const firstPage = await first.json() as { items: Array<{ markdown: string | null }>; nextCursor: string | null; hasMore: boolean }
+      const firstPage = await first.json() as { items: Array<{ markdown: string | null; links?: string[] }>; nextCursor: string | null; hasMore: boolean }
       expect(firstPage.items).toHaveLength(2)
-      expect(firstPage.items.every((item) => item.markdown !== null)).toBe(true)
+      expect(firstPage.items.every((item) => item.markdown !== null && item.links === undefined)).toBe(true)
       expect(firstPage.hasMore).toBe(true)
 
       const second = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`)
@@ -195,6 +195,42 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       failureReason: 'http_error',
     })
     expect(body.items[0]?.trace).toEqual(expect.any(Array))
+  })
+
+  it('rejects unknown keys and unsupported formats by name', async () => {
+    const app = createApp(engine)
+    const post = async (path: string, body: unknown) => {
+      const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return { status: res.status, error: ((await res.json()) as { error?: string }).error }
+    }
+    const url = `${server.url}/crawl/listing`
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: html, rawHtml (supported: markdown, links, json)' })
+    expect(await post('/v1/scrape', { url, waitFor: 1000 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: waitFor') })
+    expect(await post('/v1/batches', { urls: [url], onlyMainContent: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: onlyMainContent') })
+    expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })
+  })
+
+  it('crawls with formats and pathname filters and returns absolute links on each page', async () => {
+    const app = createApp(engine)
+    const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+    const started = await app.request('/v1/crawl', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, formats: ['markdown', 'links', { type: 'json', schema }], includePaths: ['^/crawl/item/'], excludePaths: ['^/crawl/item/2$'] }),
+    })
+    const { taskId } = (await started.json()) as { taskId: string }
+    await engine.close()
+
+    const restarted = createApiEngine({ taskRoot, channelsFor: httpOnlyChannels })
+    try {
+      const pages = await restarted.getCrawlPages(taskId, { limit: 10 })
+      expect(pages?.items.map((item) => new URL(item.url).pathname).sort()).toEqual(['/crawl/item/1', '/crawl/item/3', '/crawl/listing'])
+      expect(pages?.items.every((item) => item.markdown !== null && (item.links?.length ?? 0) > 0 && item.links!.every((link) => link.startsWith(`${server.url}/`)))).toBe(true)
+      expect(pages?.items.every((item) => item.json?.status === 'complete' && typeof (item.json.data as { title?: unknown }).title === 'string')).toBe(true)
+    } finally {
+      await restarted.close()
+    }
   })
 
   it('cancels a running crawl persistently and preserves completed pages', async () => {
