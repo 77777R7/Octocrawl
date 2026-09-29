@@ -8,7 +8,7 @@ describe('parseListen', () => {
       mode: 'local',
       host: '127.0.0.1',
       port: 8787,
-      token: null,
+      tokens: [],
       defaultMaxPages: null,
     })
     expect(listen.networkPolicy.privateAllowlist.length).toBeGreaterThan(0)
@@ -22,9 +22,17 @@ describe('parseListen', () => {
     const listen = parseListen(['--hosted', '--token', 'secret'], {})
     expect(listen.mode).toBe('hosted')
     expect(listen.host).toBe('0.0.0.0')
-    expect(listen.token).toBe('secret')
+    expect(listen.tokens).toEqual(['secret'])
     expect(listen.defaultMaxPages).toBe(100)
     expect(listen.networkPolicy.privateAllowlist).toEqual([])
+  })
+
+  it('accepts several tokens: repeated --token, or W2L_API_TOKEN with comma-separated W2L_API_TOKENS', () => {
+    expect(parseListen(['--hosted', '--token', 'alpha', '--token=beta'], {}).tokens).toEqual(['alpha', 'beta'])
+    expect(parseListen(['--hosted'], { W2L_API_TOKEN: 'alpha', W2L_API_TOKENS: ' beta, gamma ,,alpha' }).tokens).toEqual(['alpha', 'beta', 'gamma'])
+    // Tokens on the command line replace the environment's, as --token replaced W2L_API_TOKEN before.
+    expect(parseListen(['--token', 'cli'], { W2L_API_TOKEN: 'env', W2L_API_TOKENS: 'more' }).tokens).toEqual(['cli'])
+    expect(() => parseListen(['--hosted'], { W2L_API_TOKENS: ' , ' })).toThrow(/W2L_API_TOKENS/)
   })
 
   it('local mode routes through the environment proxy unless W2L_PROXY=off', () => {
@@ -35,6 +43,13 @@ describe('parseListen', () => {
     expect(local.notices).toEqual([expect.stringContaining('environment proxy 127.0.0.1:7890')])
     expect(parseListen([], { ...env, W2L_PROXY: 'off' }).networkPolicy.egressProxy).toBeUndefined()
     expect(() => parseListen([], { HTTPS_PROXY: 'socks5://127.0.0.1:1080' })).toThrow(/W2L_PROXY=off/)
+  })
+
+  it('declares the operator contact from W2L_CONTACT in both modes, and refuses one it cannot declare', () => {
+    expect(parseListen([], { W2L_CONTACT: 'Jane Doe jane@example.org' }).networkPolicy.contact).toBe('Jane Doe jane@example.org')
+    expect(parseListen(['--hosted', '--token', 'secret'], { W2L_CONTACT: 'https://example.org/contact' }).networkPolicy.contact).toBe('https://example.org/contact')
+    expect(parseListen([], {}).networkPolicy.contact).toBeUndefined()
+    expect(() => parseListen([], { W2L_CONTACT: 'Jürgen' })).toThrow(/W2L_CONTACT/)
   })
 
   it('hosted mode never uses the proxy variables and says once that it ignored them', () => {

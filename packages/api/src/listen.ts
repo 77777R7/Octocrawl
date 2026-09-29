@@ -1,4 +1,4 @@
-import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, localNetworkPolicy, withEnvironmentProxy, type NetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
 
@@ -6,7 +6,8 @@ export interface ListenConfig {
   mode: ApiMode
   host: string
   port: number
-  token: string | null
+  /** Accepted bearer tokens; none leaves a local server open. */
+  tokens: readonly string[]
   networkPolicy: NetworkPolicy
   defaultMaxPages: number | null
   /** Startup lines about the environment proxy, printed once. */
@@ -16,28 +17,28 @@ export interface ListenConfig {
 export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ListenConfig {
   const hosted = argv.includes('--hosted') || env['W2L_API_MODE'] === 'hosted'
   const port = parsePort(argv, env)
-  const token = readFlag(argv, '--token') ?? env['W2L_API_TOKEN'] ?? null
+  const tokens = readTokens(argv, env)
   if (hosted) {
-    if (token === null || token.length === 0) {
-      throw new Error('hosted mode requires --token or W2L_API_TOKEN')
+    if (tokens.length === 0) {
+      throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
     }
     return {
       mode: 'hosted',
       host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '0.0.0.0',
       port,
-      token,
+      tokens,
       // Hosted SSRF guarantees depend on direct, DNS-pinned connections.
-      networkPolicy: tunedPolicy(hostedNetworkPolicy(), env),
+      networkPolicy: withOperatorContact(tunedPolicy(hostedNetworkPolicy(), env), env),
       defaultMaxPages: 100,
       notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
     }
   }
-  const networkPolicy = withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env)
+  const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
   return {
     mode: 'local',
     host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '127.0.0.1',
     port,
-    token,
+    tokens,
     networkPolicy,
     defaultMaxPages: null,
     notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
@@ -57,6 +58,22 @@ export function parsePort(argv: readonly string[], env: NodeJS.ProcessEnv = proc
   const port = Number(raw)
   if (!Number.isFinite(port) || port < 1) throw new Error('--port must be a positive integer')
   return port
+}
+
+/**
+ * Every `--token` on the command line; without one, W2L_API_TOKEN and the
+ * comma-separated W2L_API_TOKENS. Command-line tokens replace the
+ * environment's, as `--token` has always replaced W2L_API_TOKEN.
+ */
+function readTokens(argv: readonly string[], env: NodeJS.ProcessEnv): readonly string[] {
+  const flags: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg.startsWith('--token=')) flags.push(arg.slice('--token='.length))
+    else if (arg === '--token' && argv[i + 1] !== undefined) flags.push(argv[++i]!)
+  }
+  const listed = flags.length > 0 ? flags : [env['W2L_API_TOKEN'] ?? '', ...(env['W2L_API_TOKENS'] ?? '').split(',')]
+  return [...new Set(listed.map((token) => token.trim()).filter((token) => token.length > 0))]
 }
 
 function readFlag(argv: readonly string[], name: string): string | undefined {

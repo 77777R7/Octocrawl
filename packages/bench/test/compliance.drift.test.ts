@@ -47,6 +47,9 @@ describe('compliance structural subsets match the contract', () => {
     }
     const asContract: RobotsDecision = d
     expect(asContract).toBe(d)
+    const unreachable: ComplianceRobotsDecision = { ...d, appliedRules: [], decision: 'disallowed', unreachable: 'timeout' }
+    const unreachableAsContract: RobotsDecision = unreachable
+    expect(unreachableAsContract.unreachable).toBe('timeout')
   })
 
   it('ComplianceSentHeadersFact is assignable to SentHeadersFact', () => {

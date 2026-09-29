@@ -31,16 +31,24 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
-  'creditsUsed is always 0.',
+  'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Formats other than markdown/links and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
+  'metadata has title, description, language, keywords, robots and favicon only when the page declares them; other meta tags (og:*, twitter:* and the rest) are not passed through, and a failed or blocked page has none.',
 ] as const
 
 export interface FirecrawlPage {
   markdown: string | null
   links?: string[]
+  /** Page fields appear only when the page declares them (W2L's `metadata`, null values left out). */
   metadata: {
+    title?: string
+    description?: string
+    language?: string
+    keywords?: string
+    robots?: string
+    favicon?: string
     sourceURL: string
     statusCode: number | null
     error?: string
@@ -65,13 +73,17 @@ export interface FirecrawlCrawlStatus {
   status: FirecrawlCrawlJobStatus
   total: number
   completed: number
-  creditsUsed: number
-  expiresAt: string
+  /** Null: W2L counts no credits, and an unknown count is not zero. */
+  creditsUsed: number | null
+  /** Null: crawl results stay until their task directory is deleted. */
+  expiresAt: string | null
   next: string | null
   data: FirecrawlPage[]
 }
 
 const SHIM_FORMATS: readonly string[] = ['markdown', 'links']
+/** W2L page metadata fields that Firecrawl's `metadata` also has. */
+const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
 const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout'] as const
 
@@ -179,8 +191,8 @@ export function wrapCrawlStatus(report: CrawlReport, steps: readonly StepRecord[
     status: firecrawlCrawlStatus(report.status),
     total: steps.length,
     completed: report.pagesFetched,
-    creditsUsed: 0,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    creditsUsed: null,
+    expiresAt: null,
     next: null,
     data,
   }
@@ -204,10 +216,17 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
           : result.status === 'success' || result.status === 'partial'
             ? undefined
             : result.status
+  // Firecrawl's page fields, only those the page declares.
+  const declared: Partial<Record<(typeof SHIM_PAGE_FIELDS)[number], string>> = {}
+  for (const key of SHIM_PAGE_FIELDS) {
+    const value = result.metadata?.[key]
+    if (value !== undefined && value !== null) declared[key] = value
+  }
   return {
     markdown: result.markdown,
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
     metadata: {
+      ...declared,
       sourceURL: result.requestedUrl,
       statusCode: result.evidence.httpStatus,
       ...(error !== undefined ? { error } : {}),

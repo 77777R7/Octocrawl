@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { verifyLedger, type ProviderDeclaration } from '@w2l/http-core'
 import {
   ProviderSubject,
+  robotsFetcherVia,
   type ProviderResponse,
   type ProviderTransport,
   type RobotsFetcher,
@@ -210,6 +211,52 @@ describe('ProviderSubject robots gate', () => {
     expect(out.status).toBe('success')
     expect(out.compliance!.robots.decision).toBe('no_robots')
     expect(out.compliance!.robots.robotsSha256).toBeNull()
+  })
+
+  it('refuses, without touching the origin, when robots.txt is unreachable, and records why', async () => {
+    const cases: Array<[RobotsFetcher, 'timeout' | 'network_error' | 'server_error']> = [
+      [async () => null, 'network_error'],
+      [async () => ({ unreachable: 'timeout' }), 'timeout'],
+      [async () => ({ text: '', status: 503, contentType: 'text/html' }), 'server_error'],
+    ]
+    for (const [fetcher, unreachable] of cases) {
+      const transport = new CountingTransport()
+      const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(transport.calls).toEqual([])
+      expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', skippedFetch: true, robotsSha256: null, appliedRules: [], unreachable })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'provider_refused', detail: expect.objectContaining({ refusal: 'robots_unreachable' }) }))
+    }
+  })
+
+  it('asks for an unreachable robots.txt again after five minutes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      let calls = 0
+      const fetcher: RobotsFetcher = async () => ++calls === 1 ? null : { text: 'User-agent: *\nAllow: /\n', status: 200, contentType: 'text/plain' }
+      const subject = new ProviderSubject(decl(), new CountingTransport(), 'standard', null, fetcher)
+      expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect(calls).toBe(1)
+      vi.setSystemTime(Date.now() + 5 * 60_000)
+      expect((await subject.fetch('https://shop.example/dp/A')).status).toBe('success')
+      expect(calls).toBe(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('the default robots fetcher reports its own deadline as a timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))))
+      const pending = robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(await pending).toEqual({ unreachable: 'timeout' })
+      vi.stubGlobal('fetch', async () => { throw new TypeError('fetch failed') })
+      expect(await robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
   })
 })
 

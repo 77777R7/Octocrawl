@@ -1,6 +1,6 @@
 import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from './status.js'
 import type { ComplianceRecord } from './compliance.js'
-import type { DocumentExtraction } from './extractor.js'
+import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { StructuredExtractionResult } from './structured.js'
 
 export interface ResourceTimings {
@@ -181,6 +181,13 @@ export interface FetchResult {
   markdown: string | null
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
   document?: DocumentExtraction | null
+  /**
+   * What the page's HTML declares about itself (its `<title>`, description,
+   * language, keywords, robots, icon and canonical URL), present with
+   * `document`. `metadata.title` is the page's `<title>`; `document.title` is
+   * the content's title, usually its first heading.
+   */
+  metadata?: PageMetadata
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
   /**

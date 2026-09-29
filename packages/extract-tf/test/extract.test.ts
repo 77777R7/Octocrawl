@@ -159,6 +159,14 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     }
   })
 
+  it('keeps a page whose only paragraph sits directly in <body>', () => {
+    // example.com's markup as served on 2026-09-29.
+    const html = `<!doctype html><html lang=en><head><title>Example Domain</title></head><body><p>This domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes.</p><a href=https://iana.org/help/example-domains>Learn more</a></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(false)
+    expect(out.mainHtml).toContain('This domain is for use in documentation examples')
+  })
+
   it('keeps a release held in one long <pre> inside nested wrappers', () => {
     const release = Array.from({ length: 12 }, (_, i) =>
       `Line ${i + 1}: Total nonfarm payroll employment increased by 162,000 in August, and the rate held at 4.1 percent.`).join('\n')
@@ -272,6 +280,19 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     const recalled = extractTf.extract(html, { favorRecall: true })
     expect(precise.mainHtml).toContain('dominate precision filtering')
     expect(recalled.mainHtml).toContain('Short observation number one')
+  })
+
+  it('leaves out what a browser capture marked hidden', () => {
+    const menu = 'The collapsed mobile menu repeats every section title of the site in long sentences that no reader of the desktop page sees.'
+    const html = `<!doctype html><html><body>
+<div class="menu" data-w2l-hidden=""><p>${menu}</p><p>${menu}</p><p>${menu}</p></div>
+<div class="report"><p>The survey covers forty villages and three hundred households in the upper valley.</p></div>
+</body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('The survey covers forty villages')
+    expect(out.mainHtml).not.toContain('collapsed mobile menu')
+    // Unmarked HTML (every lane but the browser's) still chooses by text alone.
+    expect(extractTf.extract(html.replace(' data-w2l-hidden=""', '')).mainHtml).toContain('collapsed mobile menu')
   })
 
   it('applies caller prune selectors', () => {

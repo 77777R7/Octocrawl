@@ -28,6 +28,12 @@ export interface ScrapeAtom {
   close(): Promise<void>
 }
 
+/**
+ * What one run of the orchestrator crawls. A new task stores its budget,
+ * maxDepth, allowlistedDomains, includePaths and excludePaths; a resumed
+ * (`resumeFrom`) or existing (`taskId`) task runs with the ones it stored, so
+ * a resume never widens the crawl it continues.
+ */
 export interface CrawlSpec {
   seedUrl: string
   seedUrls?: readonly string[]
@@ -42,7 +48,7 @@ export interface CrawlSpec {
   taskId?: string
   /**
    * Pathname regexes for discovered links (the seed is always fetched); a
-   * match in excludePaths wins. Stored on a new task; a resumed task keeps its own.
+   * match in excludePaths wins.
    */
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
@@ -73,6 +79,8 @@ export interface CrawlPage {
   markdown: string | null
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
+  /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
+  metadata?: FetchResult['metadata']
   json?: import('./structured.js').StructuredExtractionResult | null
   failureReason: string | null
   blockReason: string | null

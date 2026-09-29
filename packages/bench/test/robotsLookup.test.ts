@@ -49,24 +49,46 @@ describe('RobotsOriginCache reliability boundaries', () => {
     expect(bounded?.absent).toBe(false)
   })
 
-  it('fails closed for hosted public requests on robots 5xx and network errors, while 4xx stays unavailable', async () => {
+  it('assumes a complete disallow when robots.txt answers 5xx or fails on the network, while 4xx means no restrictions', async () => {
+    // RFC 9309 §2.3.1.3 and §2.3.1.4, in local and hosted mode alike.
     const url = `${origin}/page`
-    const decision = async (fetcher: () => Promise<Response>, failClosed = true) => {
+    const decision = async (fetcher: () => Promise<Response>) => {
       vi.stubGlobal('fetch', fetcher)
-      const cache = new RobotsOriginCache(undefined, undefined, failClosed)
+      const cache = new RobotsOriginCache()
       try {
         const entry = await cache.lookup(url, 'w2l-test')
         return { entry, result: cache.decision(entry, url, 'w2l-test') }
       } finally { await cache.teardown() }
     }
-    expect((await decision(async () => response('temporarily unavailable', 503))).result.decision).toBe('disallowed')
+    const serverError = await decision(async () => response('temporarily unavailable', 503))
+    expect(serverError.result).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', robotsUrl: `${origin}/robots.txt`, robotsSha256: null, appliedRules: [] })
     const unreachable = await decision(async () => { throw new Error('connection refused') })
     expect(unreachable.entry?.absent).toBe(false)
-    expect(unreachable.result.decision).toBe('disallowed')
+    expect(unreachable.result).toMatchObject({ decision: 'disallowed', unreachable: 'network_error' })
     const absent = await decision(async () => response('not found', 404))
     expect(absent.entry?.absent).toBe(true)
     expect(absent.result.decision).toBe('no_robots')
-    expect((await decision(async () => response('temporarily unavailable', 503), false)).result.decision).toBe('no_robots')
+    expect(absent.result).not.toHaveProperty('unreachable')
+  })
+
+  it('fetches an unreachable robots.txt again after its TTL, and keeps other entries', async () => {
+    const url = `${origin}/page`
+    let calls = 0
+    vi.stubGlobal('fetch', async () => ++calls === 1 ? response('temporarily unavailable', 503) : response('User-agent: *\nDisallow: /private\n'))
+    const cache = new RobotsOriginCache({ ...localNetworkPolicy(), robotsUnreachableTtlMs: 50 })
+    try {
+      expect(cache.decision(await cache.lookup(url, 'w2l-test'), url, 'w2l-test')).toMatchObject({ decision: 'disallowed', unreachable: 'server_error' })
+      expect(cache.decision(await cache.lookup(url, 'w2l-test'), url, 'w2l-test').unreachable).toBe('server_error')
+      expect(calls).toBe(1)
+      await new Promise(resolve => setTimeout(resolve, 80))
+      const retried = cache.decision(await cache.lookup(url, 'w2l-test'), url, 'w2l-test')
+      expect(retried.decision).toBe('allowed')
+      expect(retried).not.toHaveProperty('unreachable')
+      expect(calls).toBe(2)
+      await new Promise(resolve => setTimeout(resolve, 80))
+      await cache.lookup(url, 'w2l-test')
+      expect(calls).toBe(2)
+    } finally { await cache.teardown() }
   })
 
   it('treats a redirected robots 404 as unavailable, not as a redirect failure', async () => {
@@ -74,7 +96,7 @@ describe('RobotsOriginCache reliability boundaries', () => {
       .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: '/different-robots.txt' } }))
       .mockResolvedValueOnce(response('not found', 404))
     vi.stubGlobal('fetch', fetcher)
-    const cache = new RobotsOriginCache(undefined, undefined, true)
+    const cache = new RobotsOriginCache()
     try {
       const entry = await cache.lookup(`${origin}/page`, 'w2l-test')
       expect(entry?.absent).toBe(true)
@@ -83,8 +105,8 @@ describe('RobotsOriginCache reliability boundaries', () => {
   })
 
   it('treats its own deadline as an unreachable robots.txt; only the caller can cancel', async () => {
-    // A robots.txt that never answers must not fail the fetch it guards: the
-    // lookup's own deadline is a network error like any other.
+    // A robots.txt that never answers must not throw out of the fetch it
+    // guards: the lookup's own deadline is a network error like any other.
     const server = createServer(() => { /* never answers */ })
     server.listen(0, '127.0.0.1')
     await once(server, 'listening')
@@ -96,12 +118,8 @@ describe('RobotsOriginCache reliability boundaries', () => {
       const cache = new RobotsOriginCache(policy)
       const entry = await cache.lookup(url, 'w2l-test')
       expect(entry).toMatchObject({ robots: null, absent: false, unreachable: 'timeout' })
-      expect(cache.decision(entry, url, 'w2l-test').decision).toBe('no_robots')
+      expect(cache.decision(entry, url, 'w2l-test')).toMatchObject({ decision: 'disallowed', unreachable: 'timeout' })
       await cache.teardown()
-
-      const closed = new RobotsOriginCache(policy, undefined, true)
-      expect(closed.decision(await closed.lookup(url, 'w2l-test'), url, 'w2l-test').decision).toBe('disallowed')
-      await closed.teardown()
 
       const slow = new RobotsOriginCache({ ...policy, robotsTimeoutMs: 10_000 })
       const controller = new AbortController()

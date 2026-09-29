@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import type { ApiEngine } from './engine.js'
+import { CrawlStateError, type ApiEngine } from './engine.js'
+import { bearerTokenMatcher } from './auth.js'
 import {
   API_ERROR_STATUS,
   type ApiErrorBody,
@@ -25,7 +26,10 @@ import {
 } from '@w2l/contracts'
 
 export interface AppOptions {
+  /** A bearer token requests must present; accepted together with `tokens`. */
   token?: string | null
+  /** Bearer tokens any one of which a request may present, e.g. one per client so each can be revoked. */
+  tokens?: readonly string[]
   /**
    * Return an unexpected error's own message in its 500 response. Only for a
    * local single-user server; otherwise the response says "internal error" and
@@ -42,13 +46,14 @@ function fail(c: Context, code: ApiErrorCode, message: string, details?: ApiErro
 
 export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   const app = new Hono()
-  const token = options.token ?? null
+  const tokens = [...(options.tokens ?? []), ...(options.token ? [options.token] : [])].filter((token) => token.length > 0)
 
-  if (token !== null && token.length > 0) {
+  if (tokens.length > 0) {
+    const accepts = bearerTokenMatcher(tokens)
     app.use('*', async (c, next) => {
       const header = c.req.header('authorization') ?? ''
       const presented = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
-      if (presented.length === 0 || presented !== token) {
+      if (presented.length === 0 || !accepts(presented)) {
         return fail(c, 'unauthorized', 'unauthorized')
       }
       await next()
@@ -130,6 +135,17 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const report = await engine.cancelCrawl(c.req.param('id'))
     if (report === null) return fail(c, 'not_found', 'not found')
     return c.json(report, 200)
+  })
+
+  /** Restart a paused or failed crawl with its stored options; 202 { taskId } like a crawl start. */
+  app.post('/v1/crawl/:id/resume', async (c) => {
+    try {
+      const accepted = await engine.resumeCrawl(c.req.param('id'))
+      return accepted === null ? fail(c, 'not_found', 'not found') : c.json(accepted, 202)
+    } catch (error) {
+      if (error instanceof CrawlStateError) return fail(c, 'conflict', error.message)
+      throw error
+    }
   })
 
   app.post('/v1/monitors/firecrawl-introduction/run', async (c) => {

@@ -8,7 +8,7 @@ import type { W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -126,7 +126,7 @@ export const TOOLS = [
   },
   {
     name: 'get_crawl_pages',
-    description: 'Read a paginated list of crawl page results by task id.',
+    description: 'Read a paginated list of crawl page results by task id. Pages omit the routing audit and trace unless debug is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -134,6 +134,7 @@ export const TOOLS = [
         cursor: { type: 'string' },
         limit: { type: 'number', minimum: 1, maximum: 1000 },
         attemptId: { type: 'string' },
+        debug: { type: 'boolean' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -157,6 +158,16 @@ export const TOOLS = [
   {
     name: 'cancel_crawl',
     description: 'Cancel a crawl task. Completed pages remain queryable.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'resume_crawl',
+    description: 'Restart a paused or failed crawl with the options it was started with. Returns { taskId }; poll get_crawl.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string' } },
@@ -243,11 +254,11 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
     const input = readCrawlQuery(args)
     return name === 'get_crawl_pages' ? client.getCrawlPages(input.id, input.options) : client.getCrawlErrors(input.id, input.options)
   }
-  if (name === 'cancel_crawl') {
+  if (name === 'cancel_crawl' || name === 'resume_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
     if (typeof id !== 'string' || id.length === 0) throw new RequestError('id is required')
-    return client.cancelCrawl(id)
+    return name === 'cancel_crawl' ? client.cancelCrawl(id) : client.resumeCrawl(id)
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
@@ -286,7 +297,7 @@ function required(value: unknown, name: string): string {
 }
 function compactMonitor(view: Awaited<ReturnType<W2L['getMonitor']>>) {
   const latest = view.runs[0]
-  return {monitorId:view.revision.monitorId,url:view.revision.url,enabled:view.enabled,freshness:view.freshness,nextRunAt:view.nextRunAt,baseline:view.baseline ? {id:view.baseline.id,version:view.baseline.version,fields:view.baseline.fields} : null,latestRun:latest ? {id:latest.id,state:latest.state,quality:latest.quality,change:latest.change,error:latest.error} : null,latestEvent:view.events[0] ?? null,pendingEventCount:view.outbox.filter(item=>item.state==='pending').length}
+  return {monitorId:view.revision.monitorId,url:view.revision.url,enabled:view.enabled,freshness:view.freshness,nextRunAt:view.nextRunAt,baseline:view.baseline ? {id:view.baseline.id,version:view.baseline.version,fields:view.baseline.fields} : null,latestRun:latest ? {id:latest.id,state:latest.state,quality:latest.quality,change:latest.change,changeReason:latest.changeReason ?? null,error:latest.error} : null,latestEvent:view.events[0] ?? null,pendingEventCount:view.outbox.filter(item=>item.state==='pending').length}
 }
 function compactDelivery(delivery: Awaited<ReturnType<W2L['retryDelivery']>>) {
   const {payload:_payload,...rest}=delivery

@@ -6,6 +6,10 @@ Use the browser preview or [Codex MCP setup](/docs/connect-mcp/) for a first res
 
 The local API has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The `@w2l/sdk` package is currently a private workspace package, not an independently published npm install.
 
+A server started with tokens (`--token`, which can be repeated, or `W2L_API_TOKEN` and the comma-separated `W2L_API_TOKENS`) accepts a request only with `Authorization: Bearer <token>` naming one of them. Give each client its own token; restarting the server without a token revokes it. Tokens are compared as fixed-length SHA-256 digests in constant time. The SDK sends its `token` option, or `W2L_API_TOKEN` from the environment when no `token` is passed.
+
+Scrape results, batch items and crawl pages carry `metadata`: the page's `<title>`, `<meta name="description">`, language (`<html lang>`, else Content-Language), `<meta name="keywords">`, `<meta name="robots">`, the first `<link rel="icon">` as an absolute URL, and `<link rel="canonical">`. Each is `null` when the page does not declare it. `document.title` is a different value: the content's own title, usually its first heading.
+
 Start the repository API only after reviewing its network and task-store settings. For full request shapes and examples, use the repository's `docs/onboarding.md`, `docs/batch-scrape.md`, and `examples/monitor-workflow.ts` from the **same checkout and commit** as the running service. Mixing a guide from another branch with a local server can change the apparent contract.
 
 ## Errors
@@ -24,9 +28,9 @@ Branch on `code`; `error` is written for people. `details` appears only with `un
 | `invalid_request` | 400 | A value is missing, malformed or out of range. | No `url`, a non-HTTP(S) URL, an invalid `includePaths` pattern, a JSON Schema over its limits. Also, for now, a batch refused because another is still being accepted or the active-batch limit is reached. | Correct what the message names; retry a refused batch later. |
 | `unsupported_parameter` | 400 | The request names a parameter W2L does not support, or a value it cannot honour. Nothing is ignored silently. | A Firecrawl option such as `actions` or `proxy`, `limit` on native crawl (it takes `maxPages`), `ignoreSitemap: false` on `/fc`. | Remove or change what `details.parameters` lists. |
 | `unsupported_format` | 400 | A requested format is not produced. | `html`, `rawHtml` or `screenshot`. | Ask for `markdown`, `links` or `json` (on `/fc`: `markdown`, `links`). |
-| `unauthorized` | 401 | The bearer token is missing or wrong. | A server started with `--token` or `--hosted`. | Send `Authorization: Bearer <token>`. |
+| `unauthorized` | 401 | The bearer token is missing or is not one of the server's tokens. | A server started with `--token`, `W2L_API_TOKEN` or `W2L_API_TOKENS`, which `--hosted` requires. | Send `Authorization: Bearer <token>`; the SDK reads `W2L_API_TOKEN` when no `token` is passed. |
 | `not_found` | 404 | The task, monitor, run, destination, delivery or session does not exist, or no route matches. | A mistyped ID, another task directory, a Firecrawl v2 path on `/fc`. | Check the ID and the path. |
-| `conflict` | 409 | The resource's current state does not allow the request. | A monitor revision out of sequence or on a running monitor; a run queued on a paused, busy or unknown monitor; a retry of a delivery that is not dead-lettered. | Read the resource's state first; the same request fails again. |
+| `conflict` | 409 | The resource's current state does not allow the request. | A monitor revision out of sequence or on a running monitor; a run queued on a paused, busy or unknown monitor; a retry of a delivery that is not dead-lettered; resuming a crawl that is completed, cancelled or still running. | Read the resource's state first; the same request fails again. |
 | `internal_error` | 500 | W2L failed unexpectedly. | A bug or a storage failure. | Retry once, then report it. A local server returns the underlying message; a hosted server (`--hosted`, remote MCP) returns `internal error` and writes the cause to its log. |
 
 These codes describe the request, not the page. A page that was fetched but blocked or failed is a normal result with its `status` and reason (see [result states](/docs/limits/)); on `/fc` it is HTTP 200 with `success: false`, no `code`, and the reason in `data.metadata.error`.

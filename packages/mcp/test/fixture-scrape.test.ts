@@ -48,9 +48,11 @@ describe('MCP scrape against the fixture catalog', () => {
     const result = (await callTool(client, 'scrape', { url: `${fixtures.url}/crawl/listing` })) as {
       status: string
       markdown: string | null
+      metadata?: unknown
     }
     expect(result.status).toBe('success')
     expect(result.markdown).toContain('Harbour lantern catalog')
+    expect(result.metadata).toMatchObject({ title: 'Harbour lantern catalog', language: 'en', favicon: null })
     await engine.close()
   })
 })

@@ -101,6 +101,39 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(shim.data.markdown).toContain('Not Found')
   })
 
+  it('returns the page metadata on full and compact scrapes, /fc, batch items and crawl pages', async () => {
+    const app = createApp(engine)
+    const url = `${server.url}/crawl/listing`
+    const post = async (path: string, body: Record<string, unknown>) => (await app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })).json()
+    const declared = {
+      title: 'Harbour lantern catalog',
+      description: 'Synthetic fixture page for benchmark purposes.',
+      language: 'en',
+      keywords: null,
+      robots: null,
+      favicon: null,
+      canonicalUrl: null,
+    }
+    expect((await post('/v1/scrape', { url })).metadata).toEqual(declared)
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], debug: false })).metadata).toEqual(declared)
+    expect((await post('/fc/v1/scrape', { url })).data.metadata).toEqual({
+      title: 'Harbour lantern catalog',
+      description: 'Synthetic fixture page for benchmark purposes.',
+      language: 'en',
+      sourceURL: url,
+      statusCode: 200,
+    })
+    const batch = await post('/v1/batches', { urls: [url] })
+    const crawl = await post('/v1/crawl', { url, maxPages: 1 })
+    await engine.close()
+    const items = await (await app.request(`/v1/batches/${batch.taskId}/items`)).json()
+    const pages = await (await app.request(`/v1/crawl/${crawl.taskId}/pages`)).json()
+    expect(items.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
+    expect(pages.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
+  })
+
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
     const app = createApp(engine)
     const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }

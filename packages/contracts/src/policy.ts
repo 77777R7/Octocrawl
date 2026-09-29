@@ -32,6 +32,13 @@ export interface NetworkPolicy {
   /** How long one robots.txt lookup may take before the file counts as unreachable. Default 5000. */
   robotsTimeoutMs?: number
   /**
+   * How long an unreachable robots.txt (a 5xx, a network error or a lookup
+   * timeout) stays a complete disallow for its origin before it is fetched
+   * again. Other robots.txt results are kept for the life of the process.
+   * Default 300000 (5 minutes).
+   */
+  robotsUnreachableTtlMs?: number
+  /**
    * The operator's forward proxy, read from the standard environment
    * variables by local-mode entry points (`withEnvironmentProxy`). Hosted
    * policies never carry one. A proxied host is resolved by the proxy, so only
@@ -39,6 +46,11 @@ export interface NetworkPolicy {
    * is 'operator'.
    */
   egressProxy?: EgressProxy | null
+  /**
+   * The operator's contact from `W2L_CONTACT` (`withOperatorContact`), which
+   * research mode declares in its User-Agent. Absent or null declares none.
+   */
+  contact?: string | null
 }
 
 /**

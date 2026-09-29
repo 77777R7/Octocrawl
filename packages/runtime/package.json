@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@w2l/contracts": "*",
+    "@w2l/extract-tf": "*",
     "@w2l/http-core": "*",
     "better-sqlite3": "^12.4.1"
   },

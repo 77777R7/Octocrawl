@@ -9,6 +9,11 @@
  * start new Markdown blocks, the inline content between them forms one
  * paragraph, and whitespace collapses the way a browser collapses it.
  * Tables keep the GFM grid rules the fixture suite already scores.
+ *
+ * Where a browser capture saw the page's CSS lay an element out differently,
+ * its copy of the page carries LAYOUT_MARKERS, and the walk follows them: a
+ * marked inline element is a block, a marked hidden one is skipped with all
+ * it contains. HTML without markers converts by its tags alone.
  */
 
 import { parse } from './dom.js'
@@ -43,6 +48,23 @@ const BLOCK = new Set([
 
 const LIST = new Set(['ul', 'ol', 'menu', 'dir'])
 
+/**
+ * The layout markers a browser capture sets on its own copy of the rendered
+ * page, never on the page it keeps as evidence. They go on elements the walk
+ * would lay out inline: the tags it lays out as blocks keep that layout, and
+ * the tags it skips need none.
+ */
+export const LAYOUT_MARKERS = {
+  /** Set to "block" where the page's CSS lays out an element as a block. */
+  display: 'data-w2l-display',
+  /** Set where the page's CSS hides an element (display: none). */
+  hidden: 'data-w2l-hidden',
+  /** Tags the walk lays out as blocks. */
+  blockTags: [...BLOCK] as readonly string[],
+  /** Tags the walk skips with all they contain. */
+  skipTags: [...SKIP] as readonly string[],
+} as const
+
 /** HTML's collapsible whitespace, plus the no-break space, which becomes a plain space. */
 const WHITESPACE = /[\t\n\f\r \u00a0]+/g
 
@@ -50,6 +72,29 @@ interface Context {
   base: URL | null
   /** containsBlock results, so the walk stays linear in the size of the tree. */
   blockMemo: Map<Element, boolean>
+  /** The HTML carries layout markers. */
+  layout: boolean
+}
+
+/** Never content, or hidden by the page's CSS: skipped together with everything inside. */
+function skipped(el: Element, ctx: Context): boolean {
+  return SKIP.has(el.localName) || (ctx.layout && el.hasAttribute(LAYOUT_MARKERS.hidden))
+}
+
+/** Laid out as a block by the page's CSS, whatever its tag. */
+function cssBlock(el: Element, ctx: Context): boolean {
+  return ctx.layout && el.getAttribute(LAYOUT_MARKERS.display) === 'block'
+}
+
+/** An element's text without the parts the page's CSS hides. */
+function shownText(el: Element, ctx: Context): string {
+  if (!ctx.layout) return el.textContent ?? ''
+  let text = ''
+  for (let node = el.firstChild; node !== null; node = node.nextSibling) {
+    if (node.nodeType === TEXT_NODE) text += (node as Text).data
+    else if (node.nodeType === ELEMENT_NODE && !(node as Element).hasAttribute(LAYOUT_MARKERS.hidden)) text += shownText(node as Element, ctx)
+  }
+  return text
 }
 
 /** One rendered Markdown block, without surrounding blank lines. */
@@ -66,7 +111,7 @@ function normalizeCell(s: string): string {
 }
 
 /** Cell text with <br> and block boundaries as spaces, so separate lines stay separate words. */
-function cellText(cell: Element): string {
+function cellText(cell: Element, ctx: Context): string {
   const parts: string[] = []
   const walk = (parent: Node): void => {
     for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
@@ -74,8 +119,8 @@ function cellText(cell: Element): string {
         parts.push((node as Text).data)
       } else if (node.nodeType === ELEMENT_NODE) {
         const tag = (node as Element).localName
-        if (SKIP.has(tag)) continue
-        const gap = tag === 'br' || BLOCK.has(tag)
+        if (skipped(node as Element, ctx)) continue
+        const gap = tag === 'br' || BLOCK.has(tag) || cssBlock(node as Element, ctx)
         if (gap) parts.push(' ')
         walk(node)
         if (gap) parts.push(' ')
@@ -119,12 +164,12 @@ function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][
   return out.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''))
 }
 
-function tableToGfm(table: Element): string {
+function tableToGfm(table: Element, ctx: Context): string {
   const captionEl = table.querySelector('caption')
-  const caption = captionEl ? normalizeCell(cellText(captionEl)) : null
+  const caption = captionEl ? normalizeCell(cellText(captionEl, ctx)) : null
   const rows = Array.from(table.querySelectorAll('tr')).map((tr) =>
     Array.from(tr.querySelectorAll('th,td')).map((cell) => ({
-      value: normalizeCell(cellText(cell)),
+      value: normalizeCell(cellText(cell, ctx)),
       colspan: Number(cell.getAttribute('colspan') ?? 1) || 1,
       rowspan: Number(cell.getAttribute('rowspan') ?? 1) || 1,
     })),
@@ -289,40 +334,46 @@ function inlineChildren(parent: Node, out: Inline, ctx: Context, marks: Marks): 
 
 function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): void {
   const tag = el.localName
-  if (SKIP.has(tag)) return
+  if (skipped(el, ctx)) return
+  // Blocks met in inline context (a card inside a link, a paragraph inside a
+  // heading, a box the page's CSS lays out as a block) flatten to one line:
+  // their boundaries become spaces.
+  const block = BLOCK.has(tag) || cssBlock(el, ctx)
+  if (block) out.space()
+  let rendered = true
   switch (tag) {
     case 'br':
       out.lineBreak()
-      return
+      break
     case 'img':
       image(el, out, ctx)
-      return
+      break
     case 'code':
-      codeSpan(el, out)
-      return
+      codeSpan(el, out, ctx)
+      break
     case 'a':
-      if (link(el, out, ctx, marks)) return
+      rendered = link(el, out, ctx, marks)
       break
     case 'strong':
     case 'b':
-      if (marks.strong) break
-      emphasis(el, out, ctx, { ...marks, strong: true }, '**')
-      return
+      if (marks.strong) rendered = false
+      else emphasis(el, out, ctx, { ...marks, strong: true }, '**')
+      break
     case 'em':
     case 'i':
-      if (marks.em) break
-      emphasis(el, out, ctx, { ...marks, em: true }, '*')
-      return
+      if (marks.em) rendered = false
+      else emphasis(el, out, ctx, { ...marks, em: true }, '*')
+      break
+    default:
+      rendered = false
   }
-  // Blocks met in inline context (a card inside a link, a paragraph inside a
-  // heading) flatten to one line: their boundaries become spaces. The loop is
-  // written out (not inlineChildren) so deep nesting costs one stack frame
-  // per level.
-  const block = BLOCK.has(tag)
-  if (block) out.space()
-  for (let node = el.firstChild; node !== null; node = node.nextSibling) {
-    if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
-    else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
+  // The loop is written out (not inlineChildren) so deep nesting costs one
+  // stack frame per level.
+  if (!rendered) {
+    for (let node = el.firstChild; node !== null; node = node.nextSibling) {
+      if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
+      else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
+    }
   }
   if (block) out.space()
 }
@@ -333,9 +384,9 @@ function emphasis(el: Element, out: Inline, ctx: Context, marks: Marks, marker: 
   out.wrap(inner.finish(), marker, marker)
 }
 
-function codeSpan(el: Element, out: Inline): void {
+function codeSpan(el: Element, out: Inline, ctx: Context): void {
   const inner = new Inline()
-  inner.text(el.textContent ?? '')
+  inner.text(shownText(el, ctx))
   const result = inner.finish()
   const fence = '`'.repeat(longestBacktickRun(result.text) + 1)
   const pad = result.text.startsWith('`') || result.text.endsWith('`') ? ' ' : ''
@@ -398,8 +449,8 @@ function flowNode(node: Node, flow: Flow): void {
   if (node.nodeType !== ELEMENT_NODE) return
   const el = node as Element
   const tag = el.localName
-  if (SKIP.has(tag)) return
   const ctx = flow.ctx
+  if (skipped(el, ctx)) return
   switch (tag) {
     case 'h1':
     case 'h2':
@@ -410,10 +461,10 @@ function flowNode(node: Node, flow: Flow): void {
       flow.add(heading(el, ctx))
       return
     case 'pre':
-      flow.add(codeBlock(el))
+      flow.add(codeBlock(el, ctx))
       return
     case 'table':
-      flow.add({ text: tableToGfm(el) })
+      flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {
       // An item outside any list still renders with its bullet.
@@ -435,12 +486,17 @@ function flowNode(node: Node, flow: Flow): void {
     flow.add(...list(el, ctx))
     return
   }
-  const block = BLOCK.has(tag)
-  if (!block && !containsBlock(el, ctx)) {
+  const tagBlock = BLOCK.has(tag)
+  const block = tagBlock || cssBlock(el, ctx)
+  if (!tagBlock && !containsBlock(el, ctx)) {
+    // Inline content, in a paragraph of its own when the page's CSS makes
+    // the element a block (a link or emphasis keeps its markup).
+    if (block) flow.flush()
     inlineElement(el, flow.inline, ctx, NO_MARKS)
+    if (block) flow.flush()
     return
   }
-  if (!block && tag === 'a' && el.hasAttribute('href')) {
+  if (!tagBlock && tag === 'a' && el.hasAttribute('href')) {
     // A link around blocks (a card) stays one link, with its text flattened,
     // in a paragraph of its own.
     flow.flush()
@@ -461,8 +517,7 @@ function containsBlock(el: Element, ctx: Context): boolean {
   if (known !== undefined) return known
   let found = false
   for (let child = el.firstElementChild; child !== null && !found; child = child.nextElementSibling) {
-    const tag = child.localName
-    if (!SKIP.has(tag)) found = BLOCK.has(tag) || containsBlock(child, ctx)
+    if (!skipped(child, ctx)) found = BLOCK.has(child.localName) || cssBlock(child, ctx) || containsBlock(child, ctx)
   }
   ctx.blockMemo.set(el, found)
   return found
@@ -493,16 +548,16 @@ function heading(el: Element, ctx: Context): Block | null {
 }
 
 /** Text of a <pre>, exactly, with <br> as a newline. */
-function preText(pre: Element): string {
+function preText(pre: Element, ctx: Context): string {
   const parts: string[] = []
   const walk = (parent: Node): void => {
     for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
       if (node.nodeType === TEXT_NODE) {
         parts.push((node as Text).data)
       } else if (node.nodeType === ELEMENT_NODE) {
-        const tag = (node as Element).localName
-        if (tag === 'br') parts.push('\n')
-        else if (!SKIP.has(tag)) walk(node)
+        if (skipped(node as Element, ctx)) continue
+        if ((node as Element).localName === 'br') parts.push('\n')
+        else walk(node)
       }
     }
   }
@@ -520,8 +575,8 @@ function codeLanguage(pre: Element): string {
   return ''
 }
 
-function codeBlock(pre: Element): Block | null {
-  let text = preText(pre).replace(/\r\n?/g, '\n')
+function codeBlock(pre: Element, ctx: Context): Block | null {
+  let text = preText(pre, ctx).replace(/\r\n?/g, '\n')
   // The HTML parser drops a newline right after <pre>; the last one only ends the last line.
   if (text.startsWith('\n')) text = text.slice(1)
   text = text.replace(/\n$/, '')
@@ -622,7 +677,8 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
   // A whole document may carry its own <base href>; a fragment such as
   // mainHtml is resolved against the base the caller passes.
   const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
-  const markdown = blocksOf(root, { base, blockMemo: new Map() })
+  const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()

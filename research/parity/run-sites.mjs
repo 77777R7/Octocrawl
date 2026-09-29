@@ -25,6 +25,19 @@
 //               no per-request start time on the http lane (trace times are relative there and
 //               compliance is null). record: true prints a check's observed value in the record,
 //               which also lists every failed check with its observed value.
+//
+// Added for the crawl lifecycle (P1 item 10):
+//   crawl       reads /pages with debug=true: since then pages carry their trace and routing
+//               audit only on request. It records doc.startMs (the start call's round trip),
+//               doc.stepCount (pages plus errors) and doc.progress from the status polls while
+//               the crawl runs: {polls, maxPagesFetchedWhileRunning, monotonic, midRunPages},
+//               where midRunPages counts /pages items read once, at the first running poll that
+//               reports a fetched page.
+//   checks      field min / max (a number at least / at most the value); crawlDelay: every
+//               fetched page (pages and errors, robots-denied ones excepted) has a crawl_delay
+//               trace event, and per host its recorded starts are at least the robots.txt
+//               Crawl-delay the runner read (doc.robots) apart, which each page after the
+//               first also names as robotsCrawlDelayMs.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -69,12 +82,12 @@ async function call(method, path, body) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Every item of a paged list, following nextCursor.
-async function readAll(path, limit) {
+async function readAll(path, limit, query = '') {
   const items = []
   let cursor = null
   let calls = 0
   do {
-    const page = await call('GET', `${path}?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+    const page = await call('GET', `${path}?limit=${limit}${query}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
     calls++
     items.push(...(page.json?.pages ?? page.json?.items ?? []))
     cursor = page.json?.hasMore ? page.json.nextCursor : null
@@ -152,20 +165,30 @@ const runners = {
   },
   async crawl(c) {
     const robots = c.robots ? await readRobots(c.url) : undefined
+    const startedAt = Date.now()
     const start = await call('POST', '/v1/crawl', { url: c.url, ...c.request })
+    const startMs = Date.now() - startedAt
     const taskId = start.json?.taskId
     if (!taskId) return { response: start, doc: start.json ?? {} }
     let status
+    const polls = []
+    let midRunPages = null
     for (let i = 0; i < 150; i++) {
       status = await call('GET', `/v1/crawl/${taskId}`)
       if (!['pending', 'running'].includes(status.json?.status)) break
+      polls.push({ status: status.json.status, pagesFetched: status.json.pagesFetched ?? null })
+      if (midRunPages === null && status.json.status === 'running' && status.json.pagesFetched > 0) {
+        midRunPages = (await call('GET', `/v1/crawl/${taskId}/pages?limit=100`)).json?.items?.length ?? null
+      }
       await sleep(2000)
     }
-    const pages = await readAll(`/v1/crawl/${taskId}/pages`, c.pageSize ?? 100)
+    const counts = polls.filter((poll) => poll.status === 'running').map((poll) => poll.pagesFetched).filter(Number.isFinite)
+    const progress = { polls: polls.length, maxPagesFetchedWhileRunning: counts.length === 0 ? null : Math.max(...counts), monotonic: counts.every((n, i) => i === 0 || n >= counts[i - 1]), midRunPages }
+    const pages = await readAll(`/v1/crawl/${taskId}/pages`, c.pageSize ?? 100, '&debug=true')
     const errors = await readAll(`/v1/crawl/${taskId}/errors`, 100)
     return {
-      response: { robots, start, status, pages, errors },
-      doc: { status: status.json?.status, report: status.json, items: pages.items, pageRequests: pages.calls, errors: errors.items, robots },
+      response: { robots, start, startMs, progress, status, pages, errors },
+      doc: { status: status.json?.status, report: status.json, items: pages.items, pageRequests: pages.calls, errors: errors.items, stepCount: pages.items.length + errors.items.length, robots, startMs, progress },
     }
   },
   // L04: follow a listing's own pagination links with a batch and count table rows,
@@ -221,6 +244,7 @@ function check(doc, spec, response) {
       if ('present' in spec) return { pass: (actual !== undefined && actual !== null && actual !== '') === spec.present, actual: actual === undefined ? 'undefined' : typeof actual }
       if ('includes' in spec) return { pass: typeof actual === 'string' && actual.includes(spec.includes), actual }
       if ('equalsPath' in spec) return { pass: actual !== undefined && actual === get(doc, spec.equalsPath), actual: `${actual} vs ${get(doc, spec.equalsPath)}` }
+      if ('min' in spec || 'max' in spec) return { pass: typeof actual === 'number' && actual >= (spec.min ?? -Infinity) && actual <= (spec.max ?? Infinity), actual }
       if (typeof spec.equals === 'object' && spec.equals !== null) return { pass: JSON.stringify(actual) === JSON.stringify(spec.equals), actual: JSON.stringify(actual) }
       return { pass: actual === spec.equals, actual }
     }
@@ -271,6 +295,28 @@ function check(doc, spec, response) {
       const required = Math.max(spec.minMs ?? 0, spec.robotsCrawlDelay ? doc.robots?.crawlDelayMs ?? 0 : 0)
       const smallest = gaps.length === 0 ? null : Math.min(...gaps)
       return { pass: smallest === null || smallest >= required - 50, actual: `${starts.length} fetches, smallest gap ${smallest === null ? 'n/a' : `${Math.round(smallest)} ms`}, required ${required} ms${spec.robotsCrawlDelay ? `; robots.txt ${doc.robots?.error ?? `HTTP ${doc.robots?.httpStatus}, Crawl-delay ${doc.robots?.crawlDelayMs ?? 'none'}, seed ${doc.robots?.seedAllowed ? 'allowed' : 'disallowed'}`}` : ''}` }
+    }
+    case 'crawlDelay': {
+      // The politeness W2L records on each fetched page (debug trace event crawl_delay), checked
+      // against the robots.txt Crawl-delay the runner read itself: per host, consecutive recorded
+      // starts are at least that far apart, and every page after a host's first names it.
+      const required = doc.robots?.crawlDelayMs ?? null
+      const fetched = [...(doc.items ?? []), ...(doc.errors ?? [])].filter((step) => step.failureReason !== 'policy_denied')
+      const events = fetched.map((step) => (step.trace ?? []).find((event) => event.event === 'crawl_delay')?.detail)
+      const byHost = new Map()
+      for (const event of events.filter(Boolean)) byHost.set(event.host, [...(byHost.get(event.host) ?? []), event])
+      const gaps = []
+      let unnamed = 0
+      for (const hostEvents of byHost.values()) {
+        hostEvents.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+        for (let i = 1; i < hostEvents.length; i++) {
+          gaps.push(Date.parse(hostEvents[i].startedAt) - Date.parse(hostEvents[i - 1].startedAt))
+          if (hostEvents[i].robotsCrawlDelayMs !== required) unnamed++
+        }
+      }
+      const missing = events.filter((event) => event === undefined).length
+      const smallest = gaps.length === 0 ? null : Math.min(...gaps)
+      return { pass: required !== null && missing === 0 && unnamed === 0 && smallest !== null && smallest >= required, actual: `${events.length} fetches, ${missing} without a crawl_delay event, smallest recorded gap ${smallest === null ? 'n/a' : `${smallest} ms`}, robots.txt Crawl-delay ${required ?? 'none'}, ${unnamed} later pages not naming it` }
     }
     case 'markdownIncludes':
       return { pass: markdown.includes(spec.text), actual: markdown.length === 0 ? 'no markdown' : undefined }

@@ -198,6 +198,9 @@ describe('hosted network policy on the HTTP arm', () => {
     expect(out.status).toBe('failed')
     expect(out.failureReason).toBe('policy_denied')
     expect(out.usage.requestCount).toBe(0)
+    // The address policy is the reason, not the robots.txt it also blocks.
+    expect(out.trace.some(event => event.event === 'ssrf_denied')).toBe(true)
+    expect(out.trace.some(event => event.event === 'robots_disallowed')).toBe(false)
   })
 })
 

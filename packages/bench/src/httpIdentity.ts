@@ -21,8 +21,8 @@ export interface PreparedHttpIdentity {
   sentHeaders: SentHeadersFact
 }
 
-export function prepareHttpIdentity(mode: CrawlMode = 'standard'): PreparedHttpIdentity {
-  const identity = modeIdentity(mode)
+export function prepareHttpIdentity(mode: CrawlMode = 'standard', contact: string | null = null): PreparedHttpIdentity {
+  const identity = modeIdentity(mode, undefined, contact)
   const headers = headersFromIdentity(identityBundleFrom(identity))
   const sentHeaders: SentHeadersFact = {
     headers: Object.entries(headers)

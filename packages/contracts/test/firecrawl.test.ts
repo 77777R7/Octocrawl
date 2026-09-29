@@ -206,6 +206,34 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     })
   })
 
+  it('maps the page metadata into data.metadata and leaves out what the page did not declare', () => {
+    const wrapped = wrapScrape(
+      page({
+        requestedUrl: 'https://example.com/',
+        status: 'success',
+        markdown: 'Example Domain',
+        metadata: {
+          title: 'Example Domain',
+          description: null,
+          language: 'en',
+          keywords: 'example, domain',
+          robots: 'noindex',
+          favicon: 'https://example.com/favicon.ico',
+          canonicalUrl: 'https://example.com/',
+        },
+      }),
+    )
+    expect(wrapped.data.metadata).toEqual({
+      title: 'Example Domain',
+      language: 'en',
+      keywords: 'example, domain',
+      robots: 'noindex',
+      favicon: 'https://example.com/favicon.ico',
+      sourceURL: 'https://example.com/',
+      statusCode: 200,
+    })
+  })
+
   it('projects crawl steps into Firecrawl status data without inventing credits', () => {
     const report: CrawlReport = {
       taskId: 'task-1',
@@ -241,7 +269,9 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(status.status).toBe('completed')
     expect(status.total).toBe(1)
     expect(status.completed).toBe(1)
-    expect(status.creditsUsed).toBe(0)
+    // No credits and no expiry exist in W2L: unknown is null, never an invented value.
+    expect(status.creditsUsed).toBeNull()
+    expect(status.expiresAt).toBeNull()
     expect(status.next).toBeNull()
     expect(status.data[0]?.markdown).toBe('MAIN')
   })

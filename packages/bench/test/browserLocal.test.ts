@@ -1,6 +1,10 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { AccessConfigError, verifyLedger } from '@w2l/http-core'
+import { localNetworkPolicy } from '@w2l/contracts'
+import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 
 /**
@@ -56,6 +60,17 @@ beforeAll(async () => {
           '<main><article><h1>Main story</h1><p>The main story is long enough for the extraction cascade to select it as the ' +
           'content of the page, while the header, the navigation and the footer around it are page chrome.</p></article></main>' +
           '<footer><p>Footer notice text</p></footer><script>document.title = "script text never shows"</script></body></html>',
+      )
+    } else if (req.url === '/css-layout') {
+      // S05 and S09 in miniature: the page's CSS, not its tags, puts the quote
+      // and its author on separate lines and hides two of three platform names.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><style>.quote span.text { display: block } .platform-linux, .platform-windows { display: none }</style></head>' +
+          '<body><main><script>document.write("<div class=\'quote\'><span class=\'text\'>“The world as we have created it is a process of our thinking.”</span>' +
+          '<span>by <small>Albert Einstein</small></span></div>")</script><ol><li><p>Open <span class="platform-mac">Terminal</span>' +
+          '<span class="platform-linux">Terminal</span><span class="platform-windows">Git Bash</span>.</p></li><li><p>Set a Git username.</p></li></ol>' +
+          '</main></body></html>',
       )
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
@@ -158,6 +173,19 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('declares the operator contact in research mode and signs the User-Agent that carried it', async () => {
+    const subject = new BrowserLocalSubject('research', null, false, { ...localNetworkPolicy(), contact: 'Jane Doe jane@example.org' })
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out.status).toBe('success')
+      const sent = out.compliance!.sentHeaders.headers.find((h) => h.name === 'user-agent')
+      expect(sent?.value).toMatch(/w2l-research.*; contact: Jane Doe jane@example\.org\)$/)
+      expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('refuses a robots-disallowed path and still mints a record proving it', async () => {
     const subject = new BrowserLocalSubject()
     const before = privateHits
@@ -176,8 +204,34 @@ describe('BrowserLocalSubject transport', () => {
       // The rule that did it is cited, so the publisher can check the verdict
       // against their own robots.txt rather than take our word for it.
       expect(record.robots.appliedRules.map((r) => r.pattern)).toContain('/private')
+      expect(record.robots).not.toHaveProperty('unreachable')
     } finally {
       await subject.teardown()
+    }
+  })
+
+  it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
+    let pageHits = 0
+    const failing = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(503).end('temporarily unavailable'); return }
+      pageHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><article><h1>Must not fetch</h1></article></body></html>')
+    })
+    await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve))
+    const address = failing.address()
+    if (address === null || typeof address === 'string') throw new Error('no address')
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(pageHits).toBe(0)
+      // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
+      expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      expect(verifyLedger(subject.ledger()).valid).toBe(true)
+    } finally {
+      await subject.teardown()
+      await new Promise<void>((resolve) => failing.close(() => resolve()))
     }
   })
 
@@ -297,6 +351,30 @@ describe('BrowserLocalSubject transport', () => {
       expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
     } finally {
       await subject.teardown()
+    }
+  })
+
+  it('converts with the layout the page CSS gives, and keeps the evidence unannotated', async () => {
+    const previous = process.env.W2L_CAPTURE_RAW_DIR
+    const root = await mkdtemp(join(tmpdir(), 'w2l-layout-'))
+    process.env.W2L_CAPTURE_RAW_DIR = root
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`${url}/css-layout`)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('“The world as we have created it is a process of our thinking.”\n\nby Albert Einstein')
+      expect(out.markdown).toContain('1. Open Terminal.\n2. Set a Git username.')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'layout', detail: expect.objectContaining({ outcome: 'annotated', blocks: 1, hidden: 2 }) }))
+      // The evidence is the page as rendered, without W2L's markers.
+      const raw = await readFile(out.evidence.artifacts[0]!, 'utf8')
+      expect(raw).toContain('Git Bash')
+      expect(raw).not.toContain('data-w2l')
+      expect(sha256Utf8(raw)).toBe(out.evidence.rawBodySha256)
+    } finally {
+      await subject.teardown()
+      if (previous === undefined) delete process.env.W2L_CAPTURE_RAW_DIR
+      else process.env.W2L_CAPTURE_RAW_DIR = previous
+      await rm(root, { recursive: true, force: true })
     }
   })
 

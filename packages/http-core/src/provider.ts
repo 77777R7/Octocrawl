@@ -85,6 +85,8 @@ export type ProviderRefusal =
   | 'refused_capability'
   /** The target's robots.txt bans the UA the provider sends. */
   | 'robots_disallowed'
+  /** The target's robots.txt could not be fetched, which is a complete disallow. */
+  | 'robots_unreachable'
 
 export interface ProviderGateVerdict {
   allowed: boolean
@@ -105,16 +107,17 @@ export interface ProviderGateVerdict {
  * Decide whether `provider` may fetch `path` on this target.
  *
  * `robots` is the target's parsed robots.txt, or null when the site published
- * none. Null is a full allow per RFC 9309 §2.3.1.3 — but note this function
- * cannot tell "no robots.txt" from "we failed to fetch it", so the caller must
- * not pass null for a fetch error. That distinction is load-bearing: treating
- * a network failure as permission is how a crawler quietly starts ignoring
- * rules it never read.
+ * none. Null is a full allow per RFC 9309 §2.3.1.3 — but null cannot tell
+ * "no robots.txt" from "we failed to fetch it", so a fetch failure is passed
+ * as `unreachable` instead: a complete disallow per §2.3.1.4. That
+ * distinction is load-bearing: treating a network failure as permission is
+ * how a crawler quietly starts ignoring rules it never read.
  */
 export function evaluateProviderGate(
   provider: ProviderDeclaration,
   robots: RobotsTxt | null,
   path: string,
+  unreachable: 'server_error' | 'network_error' | 'timeout' | null = null,
 ): ProviderGateVerdict {
   const base = {
     evaluatedUserAgent: provider.declaredUserAgent,
@@ -151,6 +154,17 @@ export function evaluateProviderGate(
         `Provider ${provider.id} does not declare the User-Agent it sends, so its ` +
         "requests cannot be evaluated against the target's robots.txt. An " +
         'unverifiable claim is not a basis for a compliance record.',
+    }
+  }
+
+  if (unreachable !== null) {
+    return {
+      ...base,
+      allowed: false,
+      refusal: 'robots_unreachable',
+      reason:
+        `The target's robots.txt could not be fetched (${unreachable}). RFC 9309 requires ` +
+        'assuming a complete disallow until it can be read.',
     }
   }
 

@@ -20,8 +20,9 @@ import {
   type ProviderGateVerdict,
   type RobotsTxt,
 } from '@w2l/http-core'
-import { DEFAULT_NETWORK_POLICY, type CrawlMode } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '@w2l/contracts'
 import type { SubjectAdapter } from '../subject.js'
+import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
@@ -105,12 +106,14 @@ export interface ProviderResponse {
 /**
  * How to obtain the target's robots.txt. Defaults to a plain fetch under the
  * PROVIDER's UA — the identity whose permissions we are actually asking about.
+ * Null means the request failed (a network error); `{ unreachable: 'timeout' }`
+ * means the fetcher's own deadline passed. Either is a complete disallow.
  */
 export type RobotsFetcher = (
   robotsUrl: string,
   userAgent: string,
   execution?: ExecutionContext,
-) => Promise<{ text: string; status: number; contentType: string | null } | null>
+) => Promise<{ text: string; status: number; contentType: string | null } | { unreachable: 'timeout' } | null>
 
 /** The default fetcher; `dispatcherFor` sends it through the operator's egress routes (local mode's environment proxy). */
 export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): RobotsFetcher {
@@ -130,7 +133,7 @@ export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): R
       }
     } catch {
       throwIfExecutionStopped(execution)
-      return null
+      return scope.signal.aborted ? { unreachable: 'timeout' } : null
     } finally { scope.dispose() }
   }
 }
@@ -143,6 +146,9 @@ interface CachedRobots {
   sha256: string | null
   /** True when the server said there are no rules (4xx) — a real full allow. */
   absent: boolean
+  /** Why robots.txt could not be fetched; set only then, and kept until `expiresAt`. */
+  unreachable?: RobotsUnreachable
+  expiresAt?: number
 }
 
 function isPlainText(contentType: string | null): boolean {
@@ -211,7 +217,7 @@ export class ProviderSubject implements SubjectAdapter {
     const ua = this.provider.declaredUserAgent!
     const cached = await this.robotsFor(url, ua, execution)
     const path = this.pathOf(url)
-    const verdict = evaluateProviderGate(this.provider, cached?.robots ?? null, path)
+    const verdict = evaluateProviderGate(this.provider, cached?.robots ?? null, path, cached?.unreachable ?? null)
     trace.push({
       at: Date.now() - start,
       lane: 'provider',
@@ -230,12 +236,15 @@ export class ProviderSubject implements SubjectAdapter {
       matchedUserAgentGroup: verdict.matchedUserAgentGroup,
       appliedRules: verdict.appliedRules,
       decision:
-        cached === null || cached.robots === null
-          ? 'no_robots'
-          : verdict.allowed
-            ? 'allowed'
-            : 'disallowed',
+        cached?.unreachable !== undefined
+          ? 'disallowed'
+          : cached === null || cached.robots === null
+            ? 'no_robots'
+            : verdict.allowed
+              ? 'allowed'
+              : 'disallowed',
       skippedFetch: !verdict.allowed,
+      ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
     }
 
     if (!verdict.allowed) {
@@ -547,6 +556,7 @@ export class ProviderSubject implements SubjectAdapter {
       escalations: [],
       markdown,
       links,
+      metadata: extracted.metadata,
       document: {
         title: extracted.title,
         pageType: extracted.pageType,
@@ -666,14 +676,19 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     const cached = this.robotsByOrigin.get(origin)
-    if (cached) return cached
+    if (cached && (cached.expiresAt === undefined || Date.now() < cached.expiresAt)) return cached
 
     const res = await raceWithSignal(this.robotsFetcher(robotsUrl, userAgent, execution), execution.signal)
     let entry: CachedRobots
-    if (res === null) {
-      // Fetch failure. NOT the same as "no robots.txt": absent stays false, so
-      // a network error can never be read back as the publisher's permission.
-      entry = { robotsUrl, robots: null, sha256: null, absent: false }
+    if (res === null || 'unreachable' in res || res.status >= 500) {
+      // Fetch failure or a 5xx. NOT the same as "no robots.txt": it is a
+      // complete disallow (RFC 9309 §2.3.1.4), so a network error can never
+      // be read back as the publisher's permission. Asked again after the TTL.
+      entry = {
+        robotsUrl, robots: null, sha256: null, absent: false,
+        unreachable: res === null ? 'network_error' : 'unreachable' in res ? res.unreachable : 'server_error',
+        expiresAt: Date.now() + ROBOTS_UNREACHABLE_TTL_MS,
+      }
     } else if (res.status >= 400) {
       entry = { robotsUrl, robots: null, sha256: null, absent: true }
     } else if (!isPlainText(res.contentType)) {

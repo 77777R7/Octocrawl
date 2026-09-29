@@ -65,6 +65,11 @@ export interface CrawlWithSteps {
   steps: readonly StepRecord[]
 }
 
+/** The crawl's state does not allow the request (HTTP 409 `conflict`). */
+export class CrawlStateError extends Error {
+  override readonly name = 'CrawlStateError'
+}
+
 export interface ApiEngine {
   scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
   startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
@@ -77,6 +82,12 @@ export interface ApiEngine {
   getCrawlPages(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   getCrawlErrors(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlError> | null>
   cancelCrawl(taskId: string): Promise<CrawlReport | null>
+  /**
+   * Restart a paused or failed crawl, or one no process is running, with the
+   * options it was started with. Null when there is no such task; a
+   * CrawlStateError when it is completed, cancelled, running or a batch.
+   */
+  resumeCrawl(taskId: string): Promise<CrawlAccepted | null>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -305,13 +316,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   // A running batch has a durable URL list and per-URL checkpoints. Reopen it
   // after a process crash; completed steps are skipped by restoreFrontier.
+  // A crawl paused by shutdown or left running by a crash resumes the same
+  // way, with the options stored at its start; one stored before they were
+  // kept stays as it is rather than run with guessed limits.
   for (const name of existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
     void store.getTask(name).then(task => {
-      if (task?.batch && ['pending', 'running', 'paused'].includes(task.status)) {
+      const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
+      if (unfinished && task.batch) {
         launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(task.batch.urls.map(url => new URL(url).hostname))], useCached: false, resume: true })
+      } else if (unfinished && crawlOptionsStored(task)) {
+        launchTask(task, store, crawlRunOptions(task, true))
       } else void store.close()
     }).catch(() => { void store.close() })
   }
@@ -371,13 +388,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           includeLinks: req.includeLinks === true,
           includePaths: req.includePaths ?? [],
           excludePaths: req.excludePaths ?? [],
+          maxDepth: req.maxDepth ?? null,
+          allowlistedDomains: req.allowlistedDomains ?? [],
+          useCached: req.useCached === true,
           ...pageOptions(req),
         },
         createdAt: now,
         updatedAt: now,
       }
       await store.putTask(task)
-      launchTask(task, store, { maxDepth: req.maxDepth ?? null, allowlistedDomains: req.allowlistedDomains ?? [], useCached: req.useCached === true, resume: false })
+      launchTask(task, store, crawlRunOptions(task, false))
       return { taskId }
     },
 
@@ -444,7 +464,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     getCrawlWithSteps: loadCrawlWithSteps,
 
-    getCrawlPages: (taskId, query) => loadCrawlPageList(taskId, query, 'pages'),
+    async getCrawlPages(taskId, query) {
+      const page = await loadCrawlPageList(taskId, query, 'pages')
+      // Like batch items: the routing audit and trace only with debug=true.
+      if (page === null || query?.debug === true) return page
+      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+    },
 
     getCrawlErrors: async (taskId, query) => {
       const page = await loadCrawlPageList(taskId, query, 'errors')
@@ -470,6 +495,27 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         await store.close()
       }
       return (await loadCrawlWithSteps(taskId))?.report ?? null
+    },
+
+    async resumeCrawl(taskId) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      const store = SqliteTaskStore.open(join(taskRoot, taskId))
+      let launched = false
+      try {
+        const task = await store.getTask(taskId)
+        if (task === null) return null
+        const refusal = resumeRefusal(task, inflight.has(taskId))
+        if (refusal !== null) throw new CrawlStateError(refusal)
+        // Pending until the orchestrator opens its new attempt, never still "paused".
+        const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
+        await store.putTask(pending)
+        try { launchTask(pending, store, crawlRunOptions(pending, true)) }
+        catch (error) { await store.putTask(task); throw error }
+        launched = true
+        return { taskId }
+      } finally {
+        if (!launched) await store.close()
+      }
     },
 
     async runFirecrawlMonitor(triggerKey, context) {
@@ -589,6 +635,25 @@ function pageOptions(req: PageOptions): PageOptions {
   return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }) }
 }
 
+/** A crawl stored with every option it needs to resume (older tasks lack maxDepth and hosts). */
+function crawlOptionsStored(task: Task): boolean {
+  return task.batch === undefined && task.crawl?.maxDepth !== undefined
+}
+
+/** The run options a crawl task was stored with. */
+function crawlRunOptions(task: Task, resume: boolean): { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean } {
+  return { maxDepth: task.crawl?.maxDepth ?? null, allowlistedDomains: task.crawl?.allowlistedDomains ?? [], useCached: task.crawl?.useCached === true, resume }
+}
+
+/** Why a crawl cannot be resumed now, or null when it can. */
+function resumeRefusal(task: Task, running: boolean): string | null {
+  if (task.batch !== undefined) return `task ${task.id} is a batch; a batch resumes when the service starts`
+  if (task.status === 'completed' || task.status === 'cancelled') return `crawl ${task.id} is ${task.status}; start a new crawl instead`
+  if (running) return `crawl ${task.id} is already running`
+  if (!crawlOptionsStored(task)) return `crawl ${task.id} was started before its options were stored; start a new crawl instead`
+  return null
+}
+
 /** Batch and crawl tasks return links when their formats or includeLinks asked for them. */
 function linksRequested(task: Task): boolean {
   const options = task.batch ?? task.crawl
@@ -606,6 +671,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean): CrawlPage {
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
+    ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
