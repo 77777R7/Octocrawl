@@ -25,6 +25,8 @@ a { color: inherit; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 ::selection { background: #fd966c; color: #071b4f; }
 :focus-visible { outline: 3px solid #fa935f; outline-offset: 3px; }
+/* The light sections need a darker ring: #fa935f is 2.1:1 on #f7f8fb, #b8461d is 5:1. */
+.runs-section :focus-visible, .how-section :focus-visible { outline-color: #b8461d; }
 
 .page-shell { overflow: clip; }
 
@@ -34,15 +36,34 @@ a { color: inherit; }
 .kicker-square { display: inline-block; width: 7px; height: 7px; background: #fb7b4c; }
 
 /* Hero */
-/* clip, not just hidden: the offset static octopus must never become a programmatic scroll area. */
-.hero { position: relative; isolation: isolate; overflow: hidden; overflow: clip; color: #f7fbff; background: var(--navy); }
+/* clip, not just hidden: the offset static octopus must never become a programmatic scroll area. clip sits in
+   @supports because the CSS minifier keeps only the last of two overflow values, dropping the fallback.
+   The hero fills the first screen and grows only when its content needs more room. */
+.hero { --hero-reach: min(max(16px, (100vw - 1200px) / 2), 240px); --hero-edge: clamp(40px, 6.25vw - 42px, 48px); position: relative; isolation: isolate; display: flex; flex-direction: column; min-height: 100vh; min-height: 100svh; overflow: hidden; color: #f7fbff; background: var(--navy); }
+@supports (overflow: clip) { .hero { overflow: clip; } }
+/* With a classic scrollbar 100vw is wider than the page, so measure the side layers against the hero where the browser can. */
+@supports (width: 1cqw) { .hero { container-type: inline-size; --hero-reach: min(max(16px, (100cqw - 1200px) / 2), 240px); --hero-edge: clamp(40px, 6.25cqw - 42px, 48px); } }
 .hero-backdrop,
 .hero-shade { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .hero-backdrop { z-index: -3; background: url('/assets/mountain-hero.webp') center 58% / cover no-repeat; }
-.hero-octopus-static { display: none; position: absolute; z-index: -2; top: 2%; right: -3%; width: min(70vw, 880px); height: 96%; pointer-events: none; background: url('/assets/octopus-original.webp') center / auto 140% no-repeat; mix-blend-mode: screen; opacity: .16; -webkit-mask-image: radial-gradient(ellipse 68% 71% at center, #000 47%, transparent 100%); mask-image: radial-gradient(ellipse 68% 71% at center, #000 47%, transparent 100%); }
+/* The single column's faint octopus, centred on the headline group: the column's top padding puts that group's
+   middle at 47% of the screen, and at least 347 px down (319 px on phones). Its two cream eyes are painted over with the source's
+   ground (they sit at .447/.548 × .447 of the source, drawn at 140% of the box height): as specks they would land
+   beside the headline. */
+.hero-octopus-static { --ghost: min(96vh, 640px); display: none; position: absolute; z-index: -2; top: calc(max(347px, 47vh) - var(--ghost) / 2); right: -3%; width: min(70vw, 880px); height: var(--ghost); pointer-events: none; background: linear-gradient(#011758 0 0) calc(50% - .0742 * var(--ghost)) calc(.4138 * var(--ghost)) / calc(.024 * var(--ghost)) calc(.024 * var(--ghost)) no-repeat, linear-gradient(#011758 0 0) calc(50% + .0676 * var(--ghost)) calc(.4138 * var(--ghost)) / calc(.024 * var(--ghost)) calc(.024 * var(--ghost)) no-repeat, url('/assets/octopus-original.webp') center / auto 140% no-repeat; mix-blend-mode: screen; opacity: .16; -webkit-mask-image: radial-gradient(ellipse 68% 71% at center, #000 47%, transparent 100%); mask-image: radial-gradient(ellipse 68% 71% at center, #000 47%, transparent 100%); }
+/* A declaration with var() is only checked when it is used, so an svh one would replace its vh fallback even where
+   svh is unknown and then fail: declarations with both take svh inside @supports instead. */
+@supports (height: 1svh) { .hero-octopus-static { top: calc(max(347px, 47svh) - var(--ghost) / 2); } }
 .hero-shade { z-index: -1; background: linear-gradient(180deg, rgba(3, 14, 45, .38) 0%, rgba(3, 14, 45, .16) 40%, rgba(3, 14, 45, .3) 72%, rgba(3, 14, 45, .72) 100%); }
+/* The artwork's lit glyphs (heroGlyphs.ts) sit on the artwork and under its shade, like the painted ones. */
+.hero-glyphs { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
+.hero-glyphs-canvas { position: absolute; top: 0; left: 0; }
 .hero-click-spark { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-.hero .band { position: relative; z-index: 2; }
+.hero .band { position: relative; z-index: 2; flex: none; }
+/* The top offset comes from the viewport, not the content, so a message under the card only grows downward. It puts
+   the middle of the cells and the card at 48% of the screen (the cells are 46% of it, 340 to 500 px) and keeps at
+   least 16 px under the header. */
+.hero > main { display: flex; flex: 1 0 auto; flex-direction: column; padding: max(16px, 25vh - 174px, 48vh - 424px) 0 clamp(12px, 3vh, 32px); padding: max(16px, 25svh - 174px, 48svh - 424px) 0 clamp(12px, 3svh, 32px); }
 
 .site-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 88px; padding-inline: 24px; }
 .brand { display: inline-flex; align-items: center; gap: 8px; justify-self: start; color: #fff; text-decoration: none; }
@@ -57,24 +78,110 @@ a { color: inherit; }
 .github-link:hover { border-color: #ffae86; background: rgba(255, 255, 255, .14); }
 .github-link svg { width: 17px; height: 17px; flex: none; }
 
-.hero-cells { display: grid; grid-template-columns: 1fr 2fr 1fr; min-height: 380px; }
+.hero-cells { position: relative; display: grid; min-height: clamp(340px, 46vh, 500px); min-height: clamp(340px, 46svh, 500px); }
 .hero-copy { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 32px; text-align: center; }
 .hero-copy::before { content: ''; position: absolute; z-index: -1; inset: 8% 4%; pointer-events: none; background: radial-gradient(ellipse 74% 78% at center, rgba(3, 16, 52, .42), rgba(3, 16, 52, .18) 55%, transparent 86%); }
 .hero h1 { margin: 0; font-size: clamp(44px, 4.4vw, 64px); line-height: 1.14; font-weight: 400; letter-spacing: -.046em; text-shadow: 0 5px 32px rgba(1, 16, 55, .35); }
 .hero h1 em { font-style: normal; color: inherit; }
 .hero-description { max-width: 470px; margin: 24px 0 0; color: #e0eafb; font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; text-shadow: 0 2px 18px rgba(1, 16, 55, .7); }
 
-/* Right hero cell: the animated octopus when it runs, the static artwork otherwise,
-   including while the renderer loads or if WebGL fails (no .w2l-ascii-filter yet). */
-.hero-octopus-cell { position: relative; }
-.hero-octopus-cell:not(.is-animated)::before,
-.hero-octopus-cell.is-animated:not(:has(.w2l-ascii-filter))::before { content: ''; position: absolute; inset: 8% calc(-1 * max(16px, (100vw - 1200px) / 2)) 8% 4%; background: url('/assets/octopus-original.webp') center / contain no-repeat; mix-blend-mode: screen; opacity: .5; -webkit-mask-image: radial-gradient(ellipse 62% 62% at center, #000 55%, transparent 100%); mask-image: radial-gradient(ellipse 62% 62% at center, #000 55%, transparent 100%); }
+/* The octopus lies behind the headline, centred on it and larger than the text, its eyes in the gap between the
+   headline and the description: they sit 43% down the silhouette, 7% of its height (.057 of the box) above its
+   centre, and the gap is (h1 − description) / 2 below the text's centre. The static octopus shows in the same box
+   until the animated one arrives and whenever that cannot run, at its size and ink: the renderer contain-fits the
+   octopus at --octopus-fit and inks it at --octopus-ink, and the silhouette is .79 of the source's width at 1.15:1,
+   so the source is fit × 126.3% of the box's width. A silhouette mask made from the source (the animated veil's
+   blurred ink, holes filled) keeps the source's navy ground on the octopus itself, so it never leaves an edge in the
+   artwork. The renderer quiets its ink behind the text named in data-calm. */
+.hero-octopus-cell { --octopus-fit: .94; --octopus-ink: 1; --octopus-size: clamp(400px, 34vw, 640px); --octopus-drop: calc(1.14 * clamp(44px, 4.4vw, 64px) - 1.6 * clamp(16px, 1.4vw, 18px) + .057 * var(--octopus-size)); position: absolute; inset: 0; pointer-events: none; }
+.hero-octopus-cell::before, .hero-ascii-layer { position: absolute; left: 50%; top: calc(50% + var(--octopus-drop)); width: var(--octopus-size); height: calc(var(--octopus-size) / 1.05); translate: -50% -50%; }
+.hero-octopus-cell::before { content: ''; background: url('/assets/octopus-original.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; opacity: calc(.42 * var(--octopus-ink)); -webkit-mask: url('/assets/octopus-silhouette.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; mask: url('/assets/octopus-silhouette.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; }
+/* The glyphs decode over it from the octopus's centre while it fades. */
+.hero-octopus-cell.is-arrived::before { opacity: 0; transition: opacity 1.2s ease-in; }
 .hero-copy { z-index: 1; }
-/* The octopus uses the free space right of the headline, out to the hero's edge. No opacity,
-   mask or filter here: any of them would stop the glyph veil from blurring the artwork. */
-.hero-ascii-layer { position: absolute; inset: 0 calc(-1 * max(16px, (100vw - 1200px) / 2)) 0 0; pointer-events: none; overflow: hidden; }
+/* No opacity, mask or filter on the layer or its cell (a translate is fine): any of them would stop the glyph veil
+   from blurring the artwork. */
+.hero-ascii-layer { overflow: hidden; }
+/* The octopus recedes while the visitor works with the form: its glyphs dim and its veil lightens, so it is never
+   left as a dark shape on the sky. Opacity on the veil itself keeps its blur working; the canvas is not its veil's
+   ancestor. */
+.hero-ascii-layer .w2l-ascii-motif, .hero-ascii-layer .w2l-ascii-veil { transition: opacity .4s ease; }
+.hero.is-yielding .hero-ascii-layer .w2l-ascii-motif { opacity: .42; }
+.hero.is-yielding .hero-ascii-layer .w2l-ascii-veil { opacity: .55; }
+/* How it works: a replay of recorded runs, drawn in the artwork's glyph language, shows the steps beside it
+   happening. Never put opacity, filter or mask on .session or its ancestors: the veil's backdrop-filter would stop
+   blurring the artwork under it. */
+.session { --row: 1.66em; position: relative; width: min(100%, 34em); color: #b7c8e6; font: 500 clamp(11.5px, .98vw, 14px)/1.66 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: none; }
+/* A feathered veil, not a card: it softens the artwork's glyphs under the text only. Its feather scales with the
+   type (30 by 34 px at 14 px), so a small window never sits in a large dark halo. */
+.session-veil { position: absolute; inset: -2.15em -2.45em; background: rgba(4, 16, 50, .36); -webkit-backdrop-filter: blur(3px) brightness(.72); backdrop-filter: blur(3px) brightness(.72); -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); mask-composite: intersect; }
+.session-window { position: relative; padding: 10px 12px 12px; }
+.session-window::before, .session-window::after { content: ''; position: absolute; left: 8px; right: 8px; height: 3px; background: radial-gradient(circle, rgba(176, 200, 240, .55) 1px, transparent 1.45px) 0 50% / 8px 3px repeat-x; }
+.session-window::before { top: -1px; }
+.session-window::after { bottom: -1px; }
+.s-corner { position: absolute; width: 9px; height: 9px; color: rgba(214, 228, 255, .78); background: linear-gradient(45deg, transparent 42%, currentColor 42% 58%, transparent 58%), linear-gradient(-45deg, transparent 42%, currentColor 42% 58%, transparent 58%); }
+.s-corner.is-tl { top: -5px; left: -5px; }
+.s-corner.is-tr { top: -5px; right: -5px; }
+.s-corner.is-bl { bottom: -5px; left: -5px; }
+.s-corner.is-br { bottom: -5px; right: -5px; }
+.session-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 2px 0 9px; color: #a9bfe6; font-size: 10px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
+.session-head .kicker-square { width: 6px; height: 6px; }
+.session-tag { margin-left: auto; color: #9aafd4; }
+/* Text changes never resize the rows, so layout and paint stay inside the body. */
+.session-body { contain: layout paint; }
+.s-row { display: grid; grid-template-columns: 2ch 17ch minmax(0, 1fr); height: var(--row); margin: 0; line-height: var(--row); white-space: pre; }
+.session-body > .s-row:nth-child(2), .session-body > .s-row:nth-child(7) { height: calc(3 * var(--row) - 3.32em); }
+.s-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.s-mark { color: #7fdcad; }
+.s-detail { color: #9db2d6; }
+.s-glitch { color: #94b1e4; }
+.s-row.is-prompt .s-mark { color: #fb7b4c; }
+.s-row.is-prompt .s-label, .s-row.is-out .s-label, .s-row.is-active .s-label { grid-column: 2 / 4; }
+.s-row.is-prompt .s-detail, .s-row.is-out .s-detail, .s-row.is-active .s-detail { display: none; }
+.s-row.is-prompt .s-label { color: #f4f8ff; }
+.s-row.is-sent .s-label { color: #d3e0f6; }
+/* A solid caret while the address is typed: editors stop blinking while keys arrive. */
+.s-row.is-typing .s-label::after { content: ''; display: inline-block; width: .6em; height: 1.15em; margin-left: 1px; vertical-align: -.24em; background: #fb7b4c; }
+.s-row.is-out .s-label { color: #e6eefc; }
+.s-row.is-field { grid-template-columns: 2ch 9ch minmax(0, 1fr); }
+.s-row.is-field .s-label { color: #9db2d6; }
+.s-row.is-field .s-detail { color: #e6eefc; }
+.s-row:last-child { height: calc(var(--row) + 3px); margin-top: 4px; padding-top: 3px; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 0 / 8px 3px repeat-x; }
+.s-row.is-result { grid-template-columns: 2ch minmax(0, 1fr) auto; column-gap: 1.5ch; }
+.s-row.is-result .s-label, .s-row.is-result .s-detail { color: #eef4ff; }
+.s-row.is-result .s-detail { text-align: right; }
+.s-row.is-new { animation: s-arrive .32s ease-out both; }
+/* Cursor-style shimmer on the step in progress; stepped so it repaints about 24 times a second. */
+.s-row.is-active .s-label { color: transparent; background: linear-gradient(90deg, #8ea5cc 40%, #f4f8ff 50%, #8ea5cc 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; animation: s-shimmer 1.25s steps(30) infinite; }
+/* Pending mark: the artwork's light marks (dot, colon, four dots), drawn so it never depends on fonts. */
+.s-mark[data-g]::before { content: ''; display: inline-block; width: 8px; height: 8px; vertical-align: -.5px; color: #a8bfe8; }
+.s-mark[data-g="1"]::before { background: radial-gradient(circle, currentColor 1.1px, transparent 1.6px); }
+.s-mark[data-g="2"]::before { background: radial-gradient(circle at 50% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 50% 80%, currentColor 1.1px, transparent 1.6px); }
+.s-mark[data-g="3"]::before { background: radial-gradient(circle at 20% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 80% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 20% 80%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 80% 80%, currentColor 1.1px, transparent 1.6px); }
+@keyframes s-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes s-arrive { from { opacity: 0; } }
+/* A quiet cue to the next section, only where the screen has room for it. */
+.hero-scroll { position: relative; z-index: 2; display: none; align-self: center; align-items: center; gap: 10px; min-height: 44px; margin-top: auto; padding: 0 14px; color: #c3d3ec; font: 650 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; text-decoration: none; }
+.hero-scroll:hover { color: #ffae86; }
+.hero-scroll-glyph { width: 6px; height: 17px; background: radial-gradient(circle, currentColor 1.1px, transparent 1.6px) 50% 0 / 6px 6px repeat-y; -webkit-mask-image: linear-gradient(#000 20%, transparent); mask-image: linear-gradient(#000 20%, transparent); }
+@media (min-height: 760px) { .hero-scroll { display: inline-flex; } }
+/* Pauses or restarts motion: the hero's, on the cue's line at the frame's right edge, and the replay's, in its
+   backdrop's corner. Shown only where the motion runs. */
+.motion-toggle { position: absolute; z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; color: #d3e0f6; background: transparent; }
+.motion-toggle::before { content: ''; position: absolute; inset: 6px; border: 1px solid rgba(214, 228, 255, .32); border-radius: 50%; background: rgba(7, 27, 79, .4); }
+.motion-toggle:hover { color: #ffae86; }
+.motion-toggle:hover::before { border-color: rgba(255, 174, 134, .6); }
+.motion-toggle-icon { position: relative; width: 10px; height: 11px; border-inline: 3px solid currentColor; }
+.motion-toggle.is-paused .motion-toggle-icon { width: 0; height: 0; margin-left: 3px; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
+.hero-motion { right: calc((100% - min(1200px, 100% - 32px)) / 2 + 24px); bottom: clamp(12px, 3vh, 32px); bottom: clamp(12px, 3svh, 32px); }
+.replay-toggle { right: 8px; bottom: 8px; }
+/* Forced colours would paint the play triangle's transparent borders solid (a stop square): the icon opts out
+   and takes the system button text colour itself. */
+@media (forced-colors: active) { .motion-toggle-icon { forced-color-adjust: none; color: ButtonText; } }
 
-.hero-form-row { padding: 40px 24px 44px; }
+/* A short bottom padding: the hero's own padding and free space already sit below the form, and that free
+   space lets a message and a hint appear under the card without pushing the cue off the first screen. */
+.hero-form-row { padding: 40px 24px 12px; }
 .url-form { width: min(760px, 100%); margin: 0 auto; text-align: left; }
 .url-card { overflow: hidden; border: 1px solid rgba(255, 255, 255, .85); border-radius: 16px; background: #fff; box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 6px rgba(244, 249, 255, .13); }
 .url-card:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 159, 111, .4); }
@@ -193,14 +300,22 @@ a { color: inherit; }
 .guidance-link { color: #1d64ac; font-size: 13px; font-weight: 700; text-underline-offset: 3px; }
 .content-note { color: #966342; font-size: 13px; }
 
-/* How it works */
-.how-head { padding: 72px 32px 36px; }
-.how-head h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.6vw, 48px); line-height: 1.15; letter-spacing: -.055em; }
-.how-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 0 32px 72px; }
-.how-step { padding: 28px 28px 32px; border: 1px solid #dbe3ee; border-radius: 14px; background: #fff; }
-.step-number { color: #b8461d; font: 680 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.how-step h3 { margin: 18px 0 0; font-size: 18px; letter-spacing: -.02em; }
-.how-step p { max-width: 340px; margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+/* How it works: three ruled steps beside a replay of recorded runs that shows them happening. */
+.how-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: end; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
+.how-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
+.how-list { margin: 34px 0 0; padding: 0; list-style: none; }
+.how-step { display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 17px 0 18px; border-top: 1px solid #e0e8f2; }
+.how-step:last-child { border-bottom: 1px solid #e0e8f2; }
+.step-number { padding-top: 4px; color: #b8461d; font: 680 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.how-step h3 { margin: 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
+.how-step p { margin: 5px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.how-links { display: flex; flex-wrap: wrap; gap: 0 24px; margin: 18px 0 0; }
+.how-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #1d64ac; font-size: 14px; font-weight: 650; text-underline-offset: 3px; }
+.how-links a:hover { color: #b8461d; }
+.how-specimen { min-width: 0; margin: 0; }
+/* The replay sits on a crop of the hero artwork, like a product shot on its backdrop. */
+.how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px) 52px; border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
+.how-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
 /* Footer */
 .site-footer { color: #d8e5f6; background: var(--navy-deep); }
@@ -224,11 +339,26 @@ a { color: inherit; }
 .footer-col a:hover, .footer-card:hover { color: #ffae86; }
 
 @media (max-width: 1049px) {
+  /* One column: the headline and the card centre at about 47% of the screen. */
+  .hero > main { padding-top: max(0px, 47vh - 347px); padding-top: max(0px, 47svh - 347px); }
   .hero-cells { grid-template-columns: 1fr; min-height: 0; }
-  .hero-cell-side { display: none; }
+  .hero-octopus-cell { display: none; }
   .hero-copy { padding: 64px 24px 40px; }
   .hero-octopus-static { display: block; }
   .runs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Short desktop windows (a 720 px laptop screen under the browser's bars): a lower header and tighter gaps keep the
+   card's actions on the first screen. */
+@media (min-width: 1050px) and (max-height: 640px) {
+  .site-header { min-height: 72px; }
+  .hero > main { padding-top: 0; }
+  .hero-form-row { padding-top: 28px; }
+}
+
+/* Below 1000 px the two-column specimen would squeeze the JSON pane under its 26-character lines. */
+@media (max-width: 999px) {
+  .how-grid { grid-template-columns: minmax(0, 1fr); gap: 48px; padding: 72px 32px 80px; }
 }
 
 @media (max-width: 800px) {
@@ -237,7 +367,6 @@ a { color: inherit; }
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .product-field:not(:nth-child(3n + 1)) { padding-left: 0; border-left: 0; }
   .product-field:nth-child(2n) { padding-left: 20px; border-left: 1px solid #e6edf5; }
-  .how-steps { grid-template-columns: 1fr; }
   .footer-top { grid-template-columns: 1fr; }
   .footer-cards { padding-top: 0; }
   .footer-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -246,7 +375,8 @@ a { color: inherit; }
 @media (max-width: 600px) {
   .hero-backdrop { background-position: 54% center; filter: brightness(.68); }
   .hero-shade { background: linear-gradient(180deg, rgba(3, 14, 45, .43), rgba(3, 14, 45, .4) 49%, rgba(3, 14, 45, .58) 67%, rgba(3, 14, 45, .79)); }
-  .hero-octopus-static { width: 630px; height: 630px; top: 8%; right: -120px; background-size: auto 112%; opacity: .14; }
+  .hero > main { padding-top: max(0px, 47vh - 319px); padding-top: max(0px, 47svh - 319px); }
+  .hero-octopus-static { width: 630px; height: 630px; top: calc(max(319px, 47vh) - 315px); top: calc(max(319px, 47svh) - 315px); right: -120px; background-position: 271.6px 271.6px, 343px 271.6px, center; background-size: 12px 12px, 12px 12px, auto 112%; opacity: .14; }
   .site-header { grid-template-columns: auto 1fr auto; min-height: 72px; padding-inline: 10px; }
   .site-nav { justify-self: end; }
   .brand { gap: 2px; }
@@ -284,9 +414,8 @@ a { color: inherit; }
   .product-field, .product-field:nth-child(2n) { min-height: 75px; padding: 15px 0; border-left: 0; }
   .copy-button { font-size: 11px; padding: 9px 11px; }
   .readable-content { font-size: 14px; }
-  .how-head { padding: 52px 18px 24px; }
-  .how-steps { padding: 0 18px 52px; gap: 12px; }
-  .how-step { padding: 22px 18px 24px; }
+  .how-grid { gap: 40px; padding: 56px 18px 64px; }
+  .how-replay { min-height: 0; padding: 32px 14px 56px; border-radius: 16px; }
   .footer-brand-cell { padding: 32px 18px; }
   .footer-tagline { font-size: 21px; }
   .footer-cards { padding: 0 18px 32px; }
