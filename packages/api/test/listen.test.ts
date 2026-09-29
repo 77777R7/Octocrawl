@@ -35,6 +35,17 @@ describe('parseListen', () => {
     expect(() => parseListen(['--hosted'], { W2L_API_TOKENS: ' , ' })).toThrow(/W2L_API_TOKENS/)
   })
 
+  it('refuses a --token without a value, followed by another flag or last, and never repeats a token', () => {
+    const cases = [['--token', '--hosted'], ['--hosted', '--token', 'secret-alpha', '--token'], ['--token', '--port', '9000'], ['--token='], ['--token', ' ']]
+    for (const argv of cases) {
+      let message = ''
+      try { parseListen(argv, { W2L_API_TOKEN: 'secret-env' }) } catch (error) { message = (error as Error).message }
+      expect(message, argv.join(' ')).toBe('--token needs a value: use --token <token> or --token=<token>, or set W2L_API_TOKEN')
+      expect(message).not.toMatch(/secret|--hosted|--port/)
+    }
+    expect(parseListen(['--token', '-starts-with-dash'], {}).tokens).toEqual(['-starts-with-dash'])
+  })
+
   it('local mode routes through the environment proxy unless W2L_PROXY=off', () => {
     const env = { HTTPS_PROXY: 'http://127.0.0.1:7890', HTTP_PROXY: 'http://127.0.0.1:7890', NO_PROXY: 'localhost,127.0.0.1,::1,.local' }
     const local = parseListen([], env)
