@@ -10,7 +10,9 @@ import {
   parseCrawlStartRequest,
   parseBatchStartRequest,
   parseCrawlPageQuery,
+  firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
+  parseFirecrawlCrawlStatusQuery,
   parseFirecrawlScrapeRequest,
   parseScrapeRequest,
   RequestError,
@@ -306,11 +308,20 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     return c.json(wrapCrawlAccepted(accepted, req.url), 200)
   })
 
+  /** One page of the latest attempt's steps; `next` carries the native cursor to the following one. */
   app.get('/fc/v1/crawl/:id', async (c) => {
-    const id = c.req.param('id')
-    const detail = await engine.getCrawlWithSteps(id)
-    if (detail === null) return fail(c, 'not_found', 'not found')
-    return c.json(wrapCrawlStatus(detail.report, detail.steps), 200)
+    const query = parseFirecrawlCrawlStatusQuery(c.req.query())
+    const page = await engine.getCrawlStatusPage(c.req.param('id'), query)
+    if (page === null) return fail(c, 'not_found', 'not found')
+    const counts = firecrawlCrawlCounts(page.status, page.counts, page.ahead)
+    const finished = page.status === 'completed' || page.status === 'failed' || page.status === 'cancelled'
+    let next: string | undefined
+    if (page.hasMore || !finished) {
+      const url = new URL(c.req.url)
+      if (page.cursor !== null) url.searchParams.set('cursor', page.cursor)
+      next = url.href
+    }
+    return c.json(wrapCrawlStatus({ status: page.status }, page.steps, { ...counts, ...(next === undefined ? {} : { next }) }), 200)
   })
 
   app.notFound((c) => fail(c, 'not_found', `no route for ${c.req.method} ${c.req.path}`))

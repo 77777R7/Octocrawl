@@ -165,8 +165,9 @@ export class Frontier {
     this.visited.add(canonicalUrl)
   }
 
-  pendingCount(): number {
-    return this.pending.length
+  /** Queued pages, or those of them `where` accepts. */
+  pendingCount(where?: (item: FrontierItem) => boolean): number {
+    return where === undefined ? this.pending.length : this.pending.filter(where).length
   }
 
   inFlightCount(host?: string): number {
