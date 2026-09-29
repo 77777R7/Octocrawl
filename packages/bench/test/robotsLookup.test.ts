@@ -82,6 +82,40 @@ describe('RobotsOriginCache reliability boundaries', () => {
     } finally { await cache.teardown() }
   })
 
+  it('treats its own deadline as an unreachable robots.txt; only the caller can cancel', async () => {
+    // A robots.txt that never answers must not fail the fetch it guards: the
+    // lookup's own deadline is a network error like any other.
+    const server = createServer(() => { /* never answers */ })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+    const url = `http://127.0.0.1:${address.port}/page`
+    const policy = { ...localNetworkPolicy(), robotsTimeoutMs: 50 }
+    try {
+      const cache = new RobotsOriginCache(policy)
+      const entry = await cache.lookup(url, 'w2l-test')
+      expect(entry).toMatchObject({ robots: null, absent: false, unreachable: 'timeout' })
+      expect(cache.decision(entry, url, 'w2l-test').decision).toBe('no_robots')
+      await cache.teardown()
+
+      const closed = new RobotsOriginCache(policy, undefined, true)
+      expect(closed.decision(await closed.lookup(url, 'w2l-test'), url, 'w2l-test').decision).toBe('disallowed')
+      await closed.teardown()
+
+      const slow = new RobotsOriginCache({ ...policy, robotsTimeoutMs: 10_000 })
+      const controller = new AbortController()
+      const cancelled = slow.lookup(url, 'w2l-test', { signal: controller.signal })
+      controller.abort(new DOMException('caller left', 'AbortError'))
+      await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(slow.lookup(url, 'w2l-test', { deadlineAt: Date.now() + 50 })).rejects.toMatchObject({ name: 'TimeoutError' })
+      await slow.teardown()
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('uses the guarded connector for a real robots request', async () => {
     const server = createServer((_req, res) => {
       res.setHeader('content-type', 'text/plain')

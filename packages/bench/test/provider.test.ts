@@ -276,6 +276,23 @@ describe('ProviderSubject result mapping', () => {
     const out = await subject.fetch('https://shop.example/dp/B0TEST')
     expect(out.status).toBe('blocked')
     expect(out.blockReason).toBe('cloudflare_challenge')
+    expect(out.markdown).toContain('Just a moment...')
+  })
+
+  it('keeps an origin error page as evidence and judges any 2xx page from its content', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const missing = await new ProviderSubject(decl(), new CountingTransport({
+      status: 404,
+      headers: { 'content-type': 'text/html' },
+      body: '<!doctype html><html><body><h1>404 Not Found</h1><p>No such product.</p></body></html>',
+    }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0MISSING')
+    expect(missing).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+    expect(missing.evidence.httpStatus).toBe(404)
+    expect(missing.markdown).toContain('404 Not Found')
+    expect(missing.usage.contentTokens).toBeNull()
+    const created = await new ProviderSubject(decl(), new CountingTransport({ status: 201 }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(created.status).toBe('success')
+    expect(created.markdown).toContain('Cobalt ash kettle')
   })
 
   it('offers no further lane when a detection gate holds at the provider', async () => {

@@ -25,7 +25,7 @@ export interface ScrapeRequest {
   debug?: boolean
 }
 
-export type ScrapeResponse = FetchResult & LadderRunAudit
+export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot'] }
 
 export interface CompactScrapeResponse {
   requestedUrl: string

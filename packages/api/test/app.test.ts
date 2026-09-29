@@ -83,6 +83,24 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
   })
 
+  it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {
+    const app = createApp(engine)
+    const post = async (path: string, body: Record<string, unknown>) => (await app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/error/404`, ...body }),
+    })).json()
+    const snapshot = { httpStatus: 404, rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) }
+    const full = await post('/v1/scrape', { formats: ['markdown'] })
+    expect(full).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { httpStatus: 404 }, snapshot })
+    expect(full.markdown).toContain('Not Found')
+    const compact = await post('/v1/scrape', { formats: ['markdown'], debug: false })
+    expect(compact).toMatchObject({ status: 'failed', failureReason: 'http_error', snapshot })
+    expect(compact.markdown).toContain('Not Found')
+    const shim = await post('/fc/v1/scrape', {})
+    expect(shim).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { statusCode: 404, error: 'http_error' } } })
+    expect(shim.data.markdown).toContain('Not Found')
+  })
+
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
     const app = createApp(engine)
     const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
@@ -277,7 +295,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
-  it('GET /v1/crawl/:id is failed when scrape throws, not left running', async () => {
+  it('records a page whose scrape throws as a failed item, not a failed or running crawl', async () => {
     const throwingRoot = await mkdtemp(join(tmpdir(), 'w2l-api-fail-'))
     const throwing = createApiEngine({
       taskRoot: throwingRoot,
@@ -305,8 +323,13 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(got.status).toBe(200)
       const report = await got.json()
       expect(report.taskId).toBe(taskId)
-      expect(report.status).toBe('failed')
+      expect(report.status).toBe('completed')
+      expect(report.pagesFetched).toBe(1)
       expect(report.loopDetected).toBe(false)
+      const errors = await (await app.request(`/v1/crawl/${taskId}/errors?limit=10`)).json()
+      expect(errors.items).toHaveLength(1)
+      expect(errors.items[0]).toMatchObject({ status: 'failed', failureReason: 'internal_error' })
+      expect(JSON.stringify(errors.items[0].trace)).toContain('scrape exploded')
     } finally {
       await throwing.close()
       await rm(throwingRoot, { recursive: true, force: true })

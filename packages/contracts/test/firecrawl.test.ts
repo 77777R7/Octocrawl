@@ -126,6 +126,35 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(wrapped.data.metadata.error).toBe('cloudflare_challenge')
   })
 
+  it('keeps an error-status page success: false while returning its markdown and status code', () => {
+    const wrapped = wrapScrape(
+      page({
+        requestedUrl: 'https://example.com/missing',
+        status: 'failed',
+        failureReason: 'http_error',
+        markdown: '# 404 Not Found',
+        links: [],
+        evidence: {
+          finalUrl: 'https://example.com/missing',
+          httpStatus: 404,
+          redirectChain: [],
+          contentType: 'text/html',
+          rawBodySha256: 'a'.repeat(64),
+          artifacts: [],
+        },
+      }),
+    )
+    expect(wrapped).toEqual({
+      success: false,
+      error: 'failed: http_error',
+      data: {
+        markdown: '# 404 Not Found',
+        links: [],
+        metadata: { sourceURL: 'https://example.com/missing', statusCode: 404, error: 'http_error' },
+      },
+    })
+  })
+
   it('wraps a contentful scrape and a crawl start onto the Firecrawl envelope', () => {
     const scrape = wrapScrape(
       page({

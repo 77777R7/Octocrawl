@@ -25,7 +25,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 
 ## What's Different
 
-1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties
+1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success
 2. **Five false-success checks** — challenge text, wrong-page content, missing facts, truncation, yield-below-floor
 3. **Execution ladder** — HTTP → browser → user auth → proxy, with automatic routing, per-attempt trace, and task-level cost accounting
 4. **Ground-truth benchmark** — 30 adversarial fixtures (soft 404s, challenge pages, SPAs, timeouts, zip bombs) with verified false-success rates

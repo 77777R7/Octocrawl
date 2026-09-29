@@ -1,9 +1,11 @@
 /**
  * Origin-cached robots.txt lookup shared by the HTTP and browser arms.
  *
- * A 4xx or a non-text/plain body is "no robots.txt". A 5xx or network
- * failure is recorded as unreachable (`absent: false`), so hosted public
- * callers can fail closed without changing the local product's legacy policy.
+ * A 4xx or a non-text/plain body is "no robots.txt". A 5xx, a network
+ * failure or the lookup's own deadline is recorded as unreachable
+ * (`absent: false`), so hosted public callers can fail closed without
+ * changing the local product's legacy policy. Only the caller's own
+ * cancellation or deadline aborts a lookup.
  */
 
 import { type NetworkPolicy, type ExecutionContext } from '@w2l/contracts'
@@ -29,7 +31,11 @@ export interface CachedRobots {
   robots: ReturnType<typeof parseRobotsTxt> | null
   sha256: string | null
   absent: boolean
+  /** Why robots.txt was unreachable; set only when it was. */
+  unreachable?: 'timeout' | 'server_error' | 'network_error'
 }
+
+const ROBOTS_TIMEOUT_MS = 5_000
 
 export class RobotsOriginCache {
   private readonly byOrigin = new Map<string, CachedRobots>()
@@ -67,7 +73,7 @@ export class RobotsOriginCache {
     if (pending === undefined) {
       const controller = new AbortController()
       const request = (async (): Promise<CachedRobots | null> => {
-      const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + 5_000 })
+      const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + (this.networkPolicy.robotsTimeoutMs ?? ROBOTS_TIMEOUT_MS) })
       let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false }
       try {
       await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
@@ -92,7 +98,7 @@ export class RobotsOriginCache {
         }
       if (res.status >= 500) {
         await res.body?.cancel()
-        entry = { robotsUrl, robots: null, sha256: null, absent: false }
+        entry = { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'server_error' }
       } else if (res.status >= 400) {
         await res.body?.cancel()
         entry = { robotsUrl, robots: null, sha256: null, absent: true }
@@ -125,11 +131,14 @@ export class RobotsOriginCache {
       break
       }
     } catch {
-      throwIfExecutionStopped(scope)
-      entry = { robotsUrl, robots: null, sha256: null, absent: false }
+      // Only the waiters leaving cancels the lookup. Its own deadline is an
+      // unreachable robots.txt like any network error, never a thrown timeout
+      // that would fail the fetch this lookup guards.
+      controller.signal.throwIfAborted()
+      entry = { robotsUrl, robots: null, sha256: null, absent: false, unreachable: scope.signal.aborted ? 'timeout' : 'network_error' }
     } finally { scope.dispose() }
 
-      throwIfExecutionStopped(scope)
+      controller.signal.throwIfAborted()
       this.byOrigin.set(origin, entry)
       return entry
     })()

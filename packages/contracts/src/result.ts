@@ -159,7 +159,11 @@ export interface FetchResult {
    * Shape is vendor-specific; it is a credential-free continuation token.
    */
   resumeContext?: unknown | null
-  /** Extracted main content as Markdown. Null unless status is contentful. */
+  /**
+   * Extracted main content as Markdown. Null unless status is contentful,
+   * except on a failed or blocked result answered with an error status: there
+   * it is that page, kept as evidence of what the server said, never content.
+   */
   markdown: string | null
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
   document?: DocumentExtraction | null

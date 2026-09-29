@@ -135,6 +135,26 @@ describe('formatScrapeReport', () => {
     expect(report).toContain('# Example Domain')
   })
 
+  it('labels an error page as evidence, not as extracted content', () => {
+    const report = formatScrapeReport({
+      mode: 'standard',
+      identity: identityBundleFrom(modeIdentity('standard', 128)),
+      url: 'https://example.com/missing',
+      channels: 'http → browser_local',
+      tried: ['http'],
+      status: 'failed',
+      blockReason: null,
+      failureReason: 'http_error',
+      lane: 'http',
+      tokens: null,
+      wallMs: 40,
+      markdown: '# 404 Not Found',
+    })
+    expect(report).toContain('outcome     : status=failed failure=http_error lane=http')
+    expect(report).toContain('--- error page (evidence, not content) ---\n# 404 Not Found')
+    expect(report).not.toContain('--- extracted ---')
+  })
+
   it('research mode names the declared bot, not Chrome', () => {
     const report = formatScrapeReport({
       mode: 'research',

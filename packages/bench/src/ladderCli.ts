@@ -502,7 +502,9 @@ export function formatScrapeReport(input: {
     `wallMs      : ${input.wallMs}`,
   ]
   if (input.markdown !== null && input.markdown !== '') {
-    lines.push('', '--- extracted ---', input.markdown.slice(0, 1500))
+    // A failed or blocked result's Markdown is the page an error status carried.
+    const label = input.status === 'success' || input.status === 'partial' ? '--- extracted ---' : '--- error page (evidence, not content) ---'
+    lines.push('', label, input.markdown.slice(0, 1500))
   }
   return lines.join('\n')
 }

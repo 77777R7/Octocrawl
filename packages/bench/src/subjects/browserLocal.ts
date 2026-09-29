@@ -24,6 +24,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -235,6 +236,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
+          ...(cachedRobots?.unreachable === undefined ? {} : { unreachable: cachedRobots.unreachable }),
         },
       })
 
@@ -567,6 +569,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
         header: (name) => response?.headers()[name.toLowerCase()] ?? null,
         body,
       })
+      // An error status is never content, but its page is what the server
+      // said: the failed or blocked result keeps it as evidence.
+      const errorPage = errorPageEvidence(status, response?.headers()['content-type'] ?? null, body, finalUrl)
+      const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
       const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
         const next = escalationForBlock(verdict.reason, 'browser_local')
         trace.push({
@@ -583,7 +589,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: next === null ? [] : [{ ...next, improved: null }],
-          markdown: null,
+          ...errorPageFields,
         }
       }
 
@@ -591,11 +597,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (nonOk && gate !== null) {
         return blocked(gate)
       }
-      if (nonOk) {
+      if (nonOk && !isSuccessStatus(status)) {
         return {
           ...base,
           status: 'failed',
           failureReason: 'http_error',
+          blockReason: null,
+          budgetExceeded: null,
+          lane: 'browser_local',
+          escalations: [],
+          ...errorPageFields,
+        }
+      }
+      if (isNoContentStatus(status)) {
+        return {
+          ...base,
+          status: 'empty_verified',
+          failureReason: null,
           blockReason: null,
           budgetExceeded: null,
           lane: 'browser_local',

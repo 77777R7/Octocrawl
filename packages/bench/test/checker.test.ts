@@ -60,6 +60,29 @@ function check4(r: FetchResult, t: GroundTruth) {
   return checkFalseSuccess(r, t).find((c) => c.check === 'wrong_page_content')!
 }
 
+describe('error-page evidence on a non-contentful result', () => {
+  const CHALLENGE = '# Access denied\n\nJust a moment...'
+
+  it('is not judged as content, so a blocked or failed page is never a false success', () => {
+    const t = truth({ mustContain: ['A required fact.'], mustNotContain: ['Just a moment'], expectedMainTokens: { min: 1, max: 100 }, expectedStatus: 'blocked' })
+    for (const status of ['blocked', 'failed'] as const) {
+      const r = result({ status, blockReason: status === 'blocked' ? 'bot_detected_generic' : null, failureReason: status === 'failed' ? 'http_error' : null, markdown: CHALLENGE, usage: { ...result().usage, contentTokens: null } })
+      const checks = checkFalseSuccess(r, t)
+      // Same outcomes as a result with no Markdown at all.
+      expect(checks).toEqual(checkFalseSuccess({ ...r, markdown: null }, t))
+      expect(checks.find((c) => c.check === 'challenge_text_returned')?.outcome).toBe('pass')
+      expect(isFalseSuccess(r, checks)).toBe(false)
+    }
+  })
+
+  it('still fails the same page returned as success', () => {
+    const r = result({ markdown: CHALLENGE })
+    const checks = checkFalseSuccess(r, truth())
+    expect(checks.find((c) => c.check === 'challenge_text_returned')?.outcome).toBe('fail')
+    expect(isFalseSuccess(r, checks)).toBe(true)
+  })
+})
+
 describe('check 4: wrong_page_content (content-aware redirect)', () => {
   it('passes a followed redirect whose content carries every required fact', () => {
     const t = truth({ mustContain: ['Arrived after three hops.'] })

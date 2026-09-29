@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { localNetworkPolicy } from '@w2l/contracts'
 import { ALL_BOILERPLATE, NAV_MARKER, startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 
@@ -70,6 +71,34 @@ describe('ResilientHttpSubject robots', () => {
       expect(pageHits).toBe(0)
     } finally {
       await subject.teardown()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  it('fetches the page when robots.txt never answers, and records robots as unreachable', async () => {
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') return // never answers
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Slow robots</h1><p>The origin serves this page normally, but its robots.txt never answers within the lookup deadline, so the robots decision is unreachable rather than a reason to fail the fetch.</p></article></body></html>')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const policy = { ...localNetworkPolicy(), robotsTimeoutMs: 100 }
+    const open = new ResilientHttpSubject('standard', policy)
+    const closed = new ResilientHttpSubject('standard', policy, undefined, true)
+    try {
+      const out = await open.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Slow robots')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'no_robots', unreachable: 'timeout' }) }))
+      // Failing closed on an unreachable robots.txt stays the caller's policy.
+      const denied = await closed.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(denied.failureReason).toBe('policy_denied')
+    } finally {
+      await open.teardown()
+      await closed.teardown()
+      server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
   })

@@ -298,17 +298,30 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(cached?.result?.markdown).toContain('MAIN')
   })
 
-  it('writes failed when scrape throws and does not leave the task running', async () => {
-    const atom = new FakeAtom(new Map())
-    const { store, go } = runWith(atom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
-    await expect(go()).rejects.toThrow(/fake atom has no page/)
-    const tasks = await store.listTasks()
-    expect(tasks).toHaveLength(1)
-    expect(tasks[0]?.status).toBe('failed')
-    const attempts = await store.listAttempts(tasks[0]!.id)
-    expect(attempts).toHaveLength(1)
-    expect(attempts[0]?.status).toBe('failed')
-    expect(attempts[0]?.endedAt).not.toBeNull()
+  it('records a URL whose scrape throws as its own failed item and finishes the rest', async () => {
+    // ITEM_A has no page, so the fake atom throws for it; ITEM_B throws a
+    // timeout of its own. Neither may stop the crawl or leave it running.
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])]])
+    const atom: ScrapeAtom = {
+      async scrape(url) {
+        if (url === ITEM_B) throw new DOMException('Execution deadline exceeded', 'TimeoutError')
+        const hit = pages.get(url)
+        if (hit === undefined) throw new Error(`fake atom has no page for ${url}`)
+        return hit
+      },
+      async close() {},
+    }
+    const store = new MemoryTaskStore()
+    const report = await new CrawlOrchestrator({ store, atom, clock: new FakeClock() }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+    expect(report.status).toBe('completed')
+    expect(report.pagesFetched).toBe(3)
+    expect((await store.listAttempts(report.taskId))[0]?.status).toBe('completed')
+    const steps = await store.listSteps(report.taskId, report.attemptId)
+    const failedA = steps.find((s) => s.canonicalUrl === ITEM_A)
+    expect(failedA?.status).toBe('failed')
+    expect(failedA?.result).toMatchObject({ status: 'failed', failureReason: 'internal_error', markdown: null })
+    expect(failedA?.result?.trace).toContainEqual(expect.objectContaining({ event: 'scrape_error', detail: expect.objectContaining({ error: expect.stringMatching(/fake atom has no page/) }) }))
+    expect(steps.find((s) => s.canonicalUrl === ITEM_B)?.result).toMatchObject({ status: 'failed', failureReason: 'timeout' })
   })
 
   it('runs bounded workers instead of awaiting every page serially', async () => {

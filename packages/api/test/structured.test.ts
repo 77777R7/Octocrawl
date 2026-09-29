@@ -259,4 +259,19 @@ describe('structured JSON extraction', () => {
     const canonical = await extractStructured({ ...result, status: 'failed', failureReason: 'identity_compromised', markdown: null })
     expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [] }, issues: [{ code: 'page_unsuccessful' }] })
   })
+
+  it('keeps a failed page as evidence Markdown and never hands it to model fallback', async () => {
+    const failed = {
+      ...result, status: 'failed', failureReason: 'http_error', markdown: '# 404 Not Found', document: undefined,
+      evidence: { ...result.evidence, httpStatus: 404 }, channelsTried: ['http'], ladderTrace: [], summary: { attempts: [], totalMs: 1 },
+    } as unknown as ScrapeResponse
+    let calls = 0
+    const out = await prepareScrapeResponse(failed, { url: failed.requestedUrl, formats: ['markdown', format({ modelFallback: true })], debug: false }, {}, {
+      baseUrl: 'https://model.example', model: 'extractor',
+      fetch: (async () => { calls++; return new Response('{}') }) as typeof fetch,
+    }, performance.now())
+    expect(out.markdown).toBe('# 404 Not Found')
+    expect(calls).toBe(0)
+    expect(out.json).toMatchObject({ status: 'incomplete', data: null, issues: [{ code: 'page_unsuccessful' }] })
+  })
 })

@@ -62,7 +62,7 @@ export interface GroundTruth {
   evaluationSet?: 'development' | 'holdout'
   /** Substrings that MUST appear in the extracted markdown. */
   mustContain: readonly string[]
-  /** Substrings that MUST NOT appear (nav, footer, cookie banner, ads). */
+  /** Substrings that MUST NOT appear in delivered content (nav, footer, cookie banner, ads). */
   mustNotContain: readonly string[]
   /**
    * Structural table assertion, evaluated by check `missing_required_content`

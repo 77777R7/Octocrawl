@@ -264,7 +264,7 @@ describe('classifyGate — generic bot gate thresholds', () => {
 
   it('does NOT classify a 202 that actually carries a substantive page — multi-signal rule', () => {
     // A site may answer 202 and still stream a real document. Without an
-    // empty body or another gate signal, this is a plain http_error upstream.
+    // empty body or another gate signal, upstream judges it from its content.
     expect(classifyGate(res({ status: 202, body: ARTICLE.repeat(20) }))).toBeNull()
   })
 })

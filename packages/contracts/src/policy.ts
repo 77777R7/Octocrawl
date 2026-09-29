@@ -29,6 +29,8 @@ export interface NetworkPolicy {
   /** Minimum delay between requests to the same host. */
   perHostMinDelayMs: number
   respectRobotsTxt: boolean
+  /** How long one robots.txt lookup may take before the file counts as unreachable. Default 5000. */
+  robotsTimeoutMs?: number
 }
 
 export const DEFAULT_NETWORK_POLICY: NetworkPolicy = {
