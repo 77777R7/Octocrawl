@@ -101,9 +101,51 @@ export function defaultApiMode(mode: CrawlMode | undefined): ApiCrawlMode {
   return mode === 'research' || mode === 'authed' ? mode : 'standard'
 }
 
+/**
+ * The one set of request-error codes, shared by the REST API, /fc, the SDK and
+ * MCP. A request error means W2L refused or failed the request itself; what
+ * happened to a fetched page is its result status (blocked, failed, ...), not
+ * one of these.
+ */
+export const API_ERROR_CODES = ['invalid_json', 'invalid_request', 'unsupported_parameter', 'unsupported_format', 'unauthorized', 'not_found', 'conflict', 'internal_error'] as const
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
+
+/** The HTTP status each code is returned with. */
+export const API_ERROR_STATUS: Readonly<Record<ApiErrorCode, 400 | 401 | 404 | 409 | 500>> = {
+  invalid_json: 400,
+  invalid_request: 400,
+  unsupported_parameter: 400,
+  unsupported_format: 400,
+  unauthorized: 401,
+  not_found: 404,
+  conflict: 409,
+  internal_error: 500,
+}
+
+export function isApiErrorCode(value: unknown): value is ApiErrorCode {
+  return (API_ERROR_CODES as readonly unknown[]).includes(value)
+}
+
+/** What a request named that W2L cannot honour, as sent (for example `scrapeOptions.actions`). */
+export interface ApiErrorDetails {
+  parameters?: readonly string[]
+  formats?: readonly string[]
+}
+
+/** Native error body. /fc sends the same fields after `success: false`. */
+export interface ApiErrorBody {
+  error: string
+  code: ApiErrorCode
+  details?: ApiErrorDetails
+}
+
 export class RequestError extends Error {
   readonly status = 400
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: 'invalid_request' | 'unsupported_parameter' | 'unsupported_format' = 'invalid_request',
+    readonly details?: ApiErrorDetails,
+  ) {
     super(message)
     this.name = 'RequestError'
   }
@@ -124,7 +166,7 @@ const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks'] as const
 function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[]): void {
   const unknown = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key))
   if (unknown.length > 0) {
-    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.join(', ')})`)
+    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.join(', ')})`, 'unsupported_parameter', { parameters: unknown })
   }
 }
 
@@ -206,7 +248,7 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
     if (typeof type === 'string' && !FORMAT_NAMES.includes(type)) unsupported.add(type)
   }
   if (unsupported.size > 0) {
-    throw new RequestError(`unsupported ${unsupported.size === 1 ? 'format' : 'formats'}: ${[...unsupported].join(', ')} (supported: ${FORMAT_NAMES.join(', ')})`)
+    throw new RequestError(`unsupported ${unsupported.size === 1 ? 'format' : 'formats'}: ${[...unsupported].join(', ')} (supported: ${FORMAT_NAMES.join(', ')})`, 'unsupported_format', { formats: [...unsupported] })
   }
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()

@@ -145,7 +145,14 @@ function throwShimProblems(problems: ShimProblems): void {
   if (problems.formats.size > 0) {
     parts.push(`unsupported ${problems.formats.size === 1 ? 'format' : 'formats'}: ${[...problems.formats].join(', ')} (the /fc shim supports ${SHIM_FORMATS.join(', ')})`)
   }
-  if (parts.length > 0) throw new RequestError(parts.join('; '))
+  if (parts.length === 0) return
+  // A value problem reads "<name>: <value> is not supported (...)"; its parameter is listed too.
+  const parameters = [...problems.parameters, ...problems.values.map((value) => value.split(':', 1)[0] ?? value)]
+  const formats = [...problems.formats]
+  throw new RequestError(parts.join('; '), parameters.length > 0 ? 'unsupported_parameter' : 'unsupported_format', {
+    ...(parameters.length > 0 ? { parameters } : {}),
+    ...(formats.length > 0 ? { formats } : {}),
+  })
 }
 
 export function wrapScrape(result: FetchResult): FirecrawlScrapeResponse {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
+import { createMcpServer } from '../src/server.js'
 import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
@@ -126,6 +129,27 @@ describe('MCP tools', () => {
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'running', completed: 0, requested: 2, remaining: 2 })) as typeof fetch })
     const state = await callTool(client, 'wait_batch', { id: 'batch-1', timeoutMs: 10 }) as { status: string }
     expect(state.status).toBe('running')
+  })
+
+  it('starts a failed tool call with its error code and leaves results unchanged', async () => {
+    const rejected = { error: 'unsupported format: html (supported: markdown, links, json)', code: 'unsupported_format', details: { formats: ['html'] } }
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input: RequestInfo | URL) =>
+      String(input).endsWith('/v1/batches/batch-1') ? json({ taskId: 'batch-1', status: 'completed' }) : json(rejected, 400)) as typeof fetch })
+    const mcp = new Client({ name: 'w2l-test', version: '1.0.0' })
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
+    try {
+      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })).rejects.toMatchObject({
+        message: expect.stringContaining(`unsupported_format: POST /v1/scrape failed: 400 ${JSON.stringify(rejected)}`),
+        data: { code: 'unsupported_format', status: 400 },
+      })
+      // Rejected by the shared request parser before any API call, with the same code.
+      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: proxy')
+      await expect(mcp.callTool({ name: 'get_batch', arguments: {} })).rejects.toThrow('invalid_request: id is required')
+      expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }] })
+    } finally {
+      await mcp.close()
+    }
   })
 
   it('has no resource or oauth surface', async () => {

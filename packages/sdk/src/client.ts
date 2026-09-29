@@ -25,6 +25,7 @@ import type {
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
+import { isApiErrorCode, type ApiErrorCode } from '@w2l/contracts'
 
 export interface W2LOptions {
   baseUrl: string
@@ -54,6 +55,33 @@ export class WaitTimeoutError<T extends { status: string } = { status: string }>
   constructor(readonly taskId: string, readonly last: T, readonly timeoutMs: number) {
     super(`task ${taskId} still ${last.status} after ${timeoutMs} ms`)
   }
+}
+
+/**
+ * The API answered with an error status. `code` is the API error code when the
+ * body carried one; `body` is the parsed JSON body, or its text if it was not JSON.
+ */
+export class W2LError extends Error {
+  override readonly name = 'W2LError'
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: ApiErrorCode | undefined,
+    readonly method: 'GET' | 'POST',
+    readonly path: string,
+    readonly body: unknown,
+  ) {
+    super(message)
+  }
+}
+
+/** Reads a failed response; the message defaults to `<METHOD> <path> failed: <status> <body>`. */
+async function responseError(method: 'GET' | 'POST', path: string, res: Response, message?: string): Promise<W2LError> {
+  const text = await res.text()
+  let body: unknown = text
+  try { body = JSON.parse(text) } catch {}
+  const code = body !== null && typeof body === 'object' && isApiErrorCode((body as { code?: unknown }).code) ? (body as { code: ApiErrorCode }).code : undefined
+  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body)
 }
 
 const FINISHED = ['completed', 'failed', 'cancelled']
@@ -269,10 +297,7 @@ export class W2L {
       headers: this.headers({ 'content-type': 'application/json' }),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    if (res.status !== ok) {
-      const text = await res.text()
-      throw new Error(`POST ${path} failed: ${res.status} ${text}`)
-    }
+    if (res.status !== ok) throw await responseError('POST', path, res)
     return (await res.json()) as T
   }
 
@@ -288,11 +313,8 @@ export class W2L {
 
   private async get<T>(path: string, request: RequestOptions, notFound?: string): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { headers: this.headers(), signal: request.signal })
-    if (res.status === 404 && notFound !== undefined) throw new Error(notFound)
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`GET ${path} failed: ${res.status} ${text}`)
-    }
+    if (res.status === 404 && notFound !== undefined) throw await responseError('GET', path, res, notFound)
+    if (!res.ok) throw await responseError('GET', path, res)
     return (await res.json()) as T
   }
 }

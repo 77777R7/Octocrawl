@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { W2L, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
+import { W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -179,5 +179,25 @@ describe('W2L SDK', () => {
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"monitor paused"}', { status: 409 })) as typeof fetch })
     await expect(client.getMonitor('catalog')).rejects.toThrow('GET /v1/monitors/catalog failed: 409 {"error":"monitor paused"}')
     await expect(client.runMonitor('catalog')).rejects.toThrow('POST /v1/monitors/catalog/run failed: 409 {"error":"monitor paused"}')
+  })
+
+  it('throws W2LError with status, code, route and parsed body, keeping the message', async () => {
+    const body = { error: 'unsupported format: html (supported: markdown, links, json)', code: 'unsupported_format', details: { formats: ['html'] } }
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input) => String(input).endsWith('/v1/crawl/gone')
+      ? new Response('{"error":"not found","code":"not_found"}', { status: 404 })
+      : new Response(JSON.stringify(body), { status: 400 })) as typeof fetch })
+    const error = await client.scrape('https://example.com/').catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(W2LError)
+    expect(error).toMatchObject({ name: 'W2LError', status: 400, code: 'unsupported_format', method: 'POST', path: '/v1/scrape', body,
+      message: `POST /v1/scrape failed: 400 ${JSON.stringify(body)}` })
+    await expect(client.getCrawl('gone')).rejects.toMatchObject({ message: 'crawl not found: gone', status: 404, code: 'not_found', method: 'GET', path: '/v1/crawl/gone' })
+  })
+
+  it('leaves the code undefined when the error body carries none', async () => {
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('Bad Gateway', { status: 502 })) as typeof fetch })
+    const error = await client.listMonitors().catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(W2LError)
+    expect(error).toMatchObject({ status: 502, method: 'GET', path: '/v1/monitors', body: 'Bad Gateway', message: 'GET /v1/monitors failed: 502 Bad Gateway' })
+    expect((error as W2LError).code).toBeUndefined()
   })
 })
