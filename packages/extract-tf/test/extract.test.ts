@@ -159,6 +159,14 @@ ${item('transport', 'Transport', 'Roads, driving, public transport, shipping')}
     }
   })
 
+  it('keeps a page whose only paragraph sits directly in <body>', () => {
+    // example.com's markup as served on 2026-09-29.
+    const html = `<!doctype html><html lang=en><head><title>Example Domain</title></head><body><p>This domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes.</p><a href=https://iana.org/help/example-domains>Learn more</a></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(false)
+    expect(out.mainHtml).toContain('This domain is for use in documentation examples')
+  })
+
   it('keeps a release held in one long <pre> inside nested wrappers', () => {
     const release = Array.from({ length: 12 }, (_, i) =>
       `Line ${i + 1}: Total nonfarm payroll employment increased by 162,000 in August, and the rate held at 4.1 percent.`).join('\n')

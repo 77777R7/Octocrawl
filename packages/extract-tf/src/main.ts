@@ -62,7 +62,9 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
 
   list.sort((a, b) => b.score - a.score)
   const best = list[0]
-  if (!best) return null
+  // Every block sits directly in <body>, which is never a candidate: the body
+  // is then the container (example.com is one paragraph and a link).
+  if (!best) return longestRun(blocks)
 
   // A container wins when it holds most blocks or most of the text, or when
   // it dominates the best competing region. Its own ancestors and descendants
