@@ -135,6 +135,14 @@ describe('routePage', () => {
     }
   })
 
+  it('does not take a price box on a page declared an article for a buy box', () => {
+    const doc = parse(wrap('<article><h1>Gold hits a record</h1><div class="price-box"><span class="price">$2,410.50</span></div>' +
+      '<p>Gold rose for a fifth day as investors sought safety ahead of the central bank meeting.</p></article>',
+    '<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Gold hits a record"}</script>'))
+    expect(routePage(doc.document).type).not.toBe('product')
+    doc.close()
+  })
+
   it('does not route priceCurrency alone to product', () => {
     const doc = parse(wrap('<main><h1>Teapot</h1><span itemprop="priceCurrency">USD</span></main>'))
     const d = routePage(doc.document)

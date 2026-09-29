@@ -200,6 +200,14 @@ function hasProductSignals(s: PageSignals): boolean {
   return countTokens(s.itempropTokens, PRICE_ITEMPROPS) >= 2
 }
 
+/** Article and its common schema.org subtypes. */
+const ARTICLE_TYPES = ['article', 'newsarticle', 'blogposting', 'report', 'scholarlyarticle', 'techarticle'] as const
+
+/** The publisher declares the page an article: a price on it is not the page's product. */
+function hasArticleSignals(s: PageSignals): boolean {
+  return ARTICLE_TYPES.some((t) => hasToken(s.jsonLdTypes, t) || hasToken(s.itemTypeTokens, t))
+}
+
 function hasOfferCatalogSignals(s: PageSignals): boolean {
   return hasToken(s.jsonLdTypes, 'offercatalog') || hasToken(s.itemTypeTokens, 'offercatalog')
 }
@@ -235,8 +243,9 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   if (hasForumSignals(s)) return { type: 'forum', strategy: 'article' }
 
   // A visible buy box is a product page that declares nothing: the product
-  // strategy anchors on the same heading and price.
-  if (c.buyBox) return { type: 'product', strategy: 'product' }
+  // strategy anchors on the same heading and price. A page its publisher
+  // declares an article (a price box under a news headline) is not one.
+  if (c.buyBox && !hasArticleSignals(s)) return { type: 'product', strategy: 'product' }
 
   // Documentation / reference pages: breadcrumbs and in-page TOC look like
   // lists, but several prose paragraphs under <main> are the payload.
