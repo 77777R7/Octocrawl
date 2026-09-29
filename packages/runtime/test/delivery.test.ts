@@ -348,7 +348,7 @@ describe('durable downstream receipt and projection', () => {
     const received = new Promise<void>(resolve => { arrived = resolve })
     const first = child()
     let stderr = ''; first.stderr?.on('data', chunk => { stderr += String(chunk) })
-    await Promise.race([received, new Promise<never>((_, reject) => { first.once('exit', code => reject(new Error(`worker exited early ${code}: ${stderr}`))) })])
+    await Promise.race([received, new Promise<never>((_, reject) => { first.once('exit', code => { const delivery = store.getDelivery(id); reject(new Error(`worker exited early ${code}: delivery ${JSON.stringify({ state: delivery?.state, attemptCount: delivery?.attemptCount, lastError: delivery?.lastError })}, stderr: ${stderr}`)) }) })])
     const killed = new Promise<void>(resolve => first.once('exit', () => resolve()))
     first.kill('SIGKILL'); await killed
     expect(store.getDelivery(id)?.state).toBe('delivering')
