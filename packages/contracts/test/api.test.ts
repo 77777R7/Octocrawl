@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
@@ -83,6 +84,12 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(API_ERROR_CODES.map((code) => API_ERROR_STATUS[code])).toEqual([400, 400, 400, 400, 401, 404, 409, 500])
     expect(isApiErrorCode('not_found')).toBe(true)
     expect(isApiErrorCode('blocked')).toBe(false)
+  })
+
+  it('documents exactly these codes and statuses in the docs reference table', () => {
+    const reference = readFileSync(new URL('../../../apps/public-web/content/reference.md', import.meta.url), 'utf8')
+    const rows = [...reference.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code, status]) => [code, Number(status)])
+    expect(rows).toEqual(API_ERROR_CODES.map((code) => [code, API_ERROR_STATUS[code]]))
   })
 
   it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
