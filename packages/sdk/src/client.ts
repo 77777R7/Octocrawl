@@ -29,8 +29,23 @@ import { isApiErrorCode, type ApiErrorCode } from '@w2l/contracts'
 
 export interface W2LOptions {
   baseUrl: string
+  /**
+   * Bearer token for a server started with a token. Omitted, the
+   * W2L_API_TOKEN environment variable is used where there is one; '' sends
+   * no token.
+   */
   token?: string
   fetch?: typeof fetch
+}
+
+/** W2L_API_TOKEN from the process environment, when the runtime has one (a browser has none). */
+function environmentToken(): string | undefined {
+  try {
+    const token = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['W2L_API_TOKEN']
+    return token === undefined || token.length === 0 ? undefined : token
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -100,7 +115,7 @@ export class W2L {
 
   constructor(options: W2LOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '')
-    this.token = options.token
+    this.token = options.token ?? environmentToken()
     this.fetchImpl = options.fetch ?? fetch
   }
 
