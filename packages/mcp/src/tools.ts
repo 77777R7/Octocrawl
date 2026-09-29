@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '@w2l/contracts'
+import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '@w2l/contracts'
 import type { RequestOptions, W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -19,6 +19,7 @@ const PAGE_OPTION_PROPERTIES = {
   onlyMainContent: { type: 'boolean', description: 'false returns the whole page (header, navigation and footer kept) instead of the main content. Default true.' },
   waitFor: { type: 'integer', minimum: 0, maximum: 60000, description: 'Milliseconds the browser waits after load before capture. Starts at the browser rung and counts toward timeout. Default 0.' },
   timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in milliseconds for the whole scrape (per page for crawl and batch). When it fires the result is partial with the content so far, or failed/timeout. Default 300000.' },
+  maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file (PDF, CSV, XLSX, ZIP, JSON, text) to download, in bytes, below the server\'s own cap (W2L_MAX_FILE_BYTES, default 50 MiB). A larger file is failed with body_too_large and not saved.' },
 } as const
 const monitorConfigSchema = {type:'object',properties:{preset:{type:'string',enum:['firecrawl-introduction']},monitorId:{type:'string'},revision:{type:'integer',minimum:1},url:{type:'string'},ruleVersion:{type:'string'},intervalMs:{type:'integer',minimum:1},staleAfterMs:{type:'integer',minimum:1},config:{type:'object'},enabled:{type:'boolean'}},additionalProperties:false} as const
 const MONITOR_TOOLS = [
@@ -226,6 +227,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
+      maxFileBytes: req.maxFileBytes,
     }, request)
   }
   if (name === 'crawl') {
@@ -243,6 +245,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
+      maxFileBytes: req.maxFileBytes,
     }, request)
   }
   if (name === 'get_crawl') {
@@ -263,7 +266,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

@@ -80,7 +80,7 @@ The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2
 
 | Item | Accepted when |
 | --- | --- |
-| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified |
+| File download and PDF text (first) | CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser, under a configurable size cap; PDF text becomes Markdown with page numbers, each passage traceable to its page; checked on 10 real reports including the seed user's PDFs; no OCR; PDF tables marked unverified<br>**Status 2026-09-29:** implemented on branch `claude/p2-file-download`, not yet merged. PDF text was checked on all 10 corpus reports ([corpus run](research/pdf-corpus/runs/2026-09-29.md)); through the API, 9 of them (F01–F08, and F11 reached by a crawl), a CSV, ZIP, JSON and XLSX (F09, F10, F15, F16), `/fc`, the browser download and JSON from a PDF are real-site cases: 15 of 16 passed in the [recorded run](research/parity/runs/2026-09-29-file-download.md); F03 failed on a connection timeout before any file was read and passed when run again |
 | `html` / `rawHtml` / `screenshot` formats | Identical in scrape, batch and crawl |
 | Sitemap mode, subdomains, `map` endpoint | URL list from `sitemap.xml` and home-page links, with include / exclude patterns |
 | Tables → CSV | One CSV per `<table>` with `tableIndex`, caption and source URL; 10 real table pages checked with no misaligned cells |
@@ -135,15 +135,15 @@ Every result from every lane carries the same record. It is the product's identi
 
 | Field | Meaning | Today |
 | --- | --- | --- |
-| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | In `evidenceRecord` in one form for every lane; browser and provider lanes observe only the endpoints and say so (`complete: false`) |
+| `requestedUrl` / `finalUrl` / `redirectChain` | Requested URL, final URL, redirects | In `evidenceRecord` in one form for every lane; the browser lane lists every hop Chromium followed, and a lane that observes only the endpoints (provider) says so (`complete: false`) |
 | `fetchedAt` | UTC ISO timestamp | In `evidenceRecord`, from each lane's `evidence.fetchedAt`; Monitor observations keep `observedAt` |
 | `httpStatus` / `status` / `reason` | Transport status and W2L's verdict | Exists; `evidenceRecord.reason` is the failure, block or budget reason in one field |
 | `lane` | `http` / `browser_local` / `my_browser` / `vendor` | In `evidenceRecord` on every default response (lane names as today: `http`, `browser_local`, `provider`, …) |
 | `robotsDecision` | The robots.txt verdict, including a recorded user override | Recorded in `evidenceRecord` (decision, robots.txt URL and hash, unreachable reason, crawl delay); `userOverride` is always false, as no override exists yet |
 | `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | In `evidenceRecord`: the body each lane read, the delivered Markdown and `json.data` as canonical JSON |
-| `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf`, `EXTRACTOR_VERSION`, and the commit when `W2L_SOURCE_COMMIT` is set |
-| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; `pdf` reserved |
-| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256: the raw snapshot when `W2L_CAPTURE_RAW_DIR` is set; no screenshot; not yet a request option |
+| `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf` and `EXTRACTOR_VERSION` for a page, `pdf-text/1` or `file-text/1` for a file, and the commit when `W2L_SOURCE_COMMIT` is set |
+| `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; a PDF's `Label: value` lines as `pdf` with `page N "label"` |
+| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256: a downloaded file (`kind: "file"`, with size and type), the raw snapshot when `W2L_CAPTURE_RAW_DIR` is set; no screenshot; not yet a request option |
 
 ### Free core and Pro
 

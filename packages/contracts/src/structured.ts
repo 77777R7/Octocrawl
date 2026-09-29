@@ -66,8 +66,11 @@ export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string
-  /** `fetch`: the value is the fetch's own (`finalUrl`, `requestedUrl`), not read from the page. */
-  source: ProductFactSource | 'hydration' | 'fetch'
+  /**
+   * `fetch`: the value is the fetch's own (`finalUrl`, `requestedUrl`), not read from the page.
+   * `pdf`: a `Label: value` line of a PDF's text; its evidencePath is `page N "label"`.
+   */
+  source: ProductFactSource | 'hydration' | 'fetch' | 'pdf'
   evidencePath?: string
 }
 

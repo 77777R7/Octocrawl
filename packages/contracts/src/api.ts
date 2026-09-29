@@ -12,6 +12,7 @@ import type { FetchResult, LadderRunAudit } from './result.js'
 import type { DocumentExtraction } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
+import { MAX_FILE_BYTES_CEILING } from './file.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
 export type ApiCrawlMode = (typeof CRAWL_MODES)[number]
@@ -71,6 +72,8 @@ export interface CompactScrapeResponse {
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   metadata?: FetchResult['metadata']
   json?: StructuredExtractionResult | null
+  /** The file the response was, as on the full response; absent for a web page. */
+  file?: FetchResult['file']
   truncated: boolean
   truncatedAt: number | null
   usage: FetchResult['usage'] & { totalMs: number }
@@ -186,7 +189,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', ...PAGE_KEYS] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', ...PAGE_KEYS] as const
@@ -469,13 +472,18 @@ function readMilliseconds(value: unknown, name: string, min: number, max: number
   return value
 }
 
-/** onlyMainContent, waitFor and timeout, shared by scrape, batch and crawl. */
+/** onlyMainContent, waitFor, timeout and maxFileBytes, shared by scrape, batch and crawl. */
 function readPageOptions(rec: Record<string, unknown>): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
+  const maxFileBytes = rec.maxFileBytes
+  if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > MAX_FILE_BYTES_CEILING)) {
+    throw new RequestError(`maxFileBytes must be an integer number of bytes from 1 to ${MAX_FILE_BYTES_CEILING}`)
+  }
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
     timeout: readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS),
+    ...(maxFileBytes === undefined ? {} : { maxFileBytes: maxFileBytes as number }),
   }
 }
 

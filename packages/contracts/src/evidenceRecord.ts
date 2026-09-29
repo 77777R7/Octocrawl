@@ -6,6 +6,13 @@
  * only: the builder (`toEvidenceRecord`) lives in @w2l/runtime.
  *
  * Unknown is null, never zero or a guess. Every field is always present.
+ *
+ * Versioning: `w2l.evidence/1` changes only additively. A later revision of
+ * the schema file accepts every record an earlier one accepted: a field added
+ * later is optional in the schema (EVIDENCE_RECORD_ADDED_KEYS), though W2L
+ * writes it on every record from then on; enums only gain values; no field
+ * changes its meaning. A change that cannot follow this rule gets a new
+ * schemaVersion (`w2l.evidence/2`) and a new schema file.
  */
 
 import type { CrawlMode, RobotsUnreachable } from './compliance.js'
@@ -15,17 +22,16 @@ export const EVIDENCE_SCHEMA_VERSION = 'w2l.evidence/1'
 
 /**
  * Where a JSON field's value was read. `fetch` is the fetch's own value (its
- * final or requested URL), not read from the page. `pdf` is reserved for the
- * PDF text that file download will add (its locator names the page); no lane
- * emits it yet.
+ * final or requested URL), not read from the page. `pdf`: a `Label: value`
+ * line of a PDF's text, whose locator names the page and the label.
  */
 export const FIELD_EVIDENCE_SOURCES = ['jsonld', 'microdata', 'meta', 'hydration', 'dom', 'text', 'inferred', 'model', 'fetch', 'pdf'] as const
 export type FieldEvidenceSource = (typeof FIELD_EVIDENCE_SOURCES)[number]
 
 /**
  * `snapshot` is the page's HTML as W2L read it (`W2L_CAPTURE_RAW_DIR`);
- * `screenshot` and `file` (a downloaded file saved as received) are reserved
- * for the lanes that will produce them.
+ * `file` is a file (PDF, CSV, ...) saved as received; `screenshot` is
+ * reserved for the lane that will produce it.
  */
 export const EVIDENCE_ARTIFACT_KINDS = ['snapshot', 'screenshot', 'file'] as const
 export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]
@@ -70,7 +76,7 @@ export interface EvidenceOutputSha256 {
 
 export interface EvidenceExtractor {
   name: string
-  /** EXTRACTOR_VERSION of @w2l/extract-tf. */
+  /** EXTRACTOR_VERSION of @w2l/extract-tf for a web page; PDF_TEXT_VERSION for a PDF; FILE_TEXT_VERSION for another file. */
   version: string
   /** The source commit of the running W2L (`W2L_SOURCE_COMMIT`); null when not declared. */
   commit: string | null
@@ -78,7 +84,7 @@ export interface EvidenceExtractor {
 
 export interface EvidenceFieldLocation {
   source: FieldEvidenceSource
-  /** JSON-LD path, DOM selector, `table[i] tr[j] "label"`, `h1[0]`, a result field such as `finalUrl`, and later `page N`; null when the source gives none. */
+  /** JSON-LD path, DOM selector, `table[i] tr[j] "label"`, `h1[0]`, a result field such as `finalUrl`, or `page N "label"` for a PDF; null when the source gives none. */
   locator: string | null
 }
 
@@ -87,6 +93,10 @@ export interface EvidenceArtifact {
   kind: EvidenceArtifactKind | null
   path: string
   sha256: string | null
+  /** Size of the saved file in bytes; null when unknown. Added to v1 for files (EVIDENCE_RECORD_ADDED_KEYS). */
+  bytes: number | null
+  /** The Content-Type the file was received with; null when unknown or none was sent. Added to v1 for files. */
+  contentType: string | null
 }
 
 export interface EvidenceIdentity {
@@ -137,6 +147,14 @@ export const EVIDENCE_RECORD_KEYS = {
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
   extractor: keysOf<EvidenceExtractor>()(['name', 'version', 'commit']),
   fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
-  artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256']),
+  artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256', 'bytes', 'contentType']),
   identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact']),
 } as const
+
+/**
+ * Keys added to v1 after it was first published: optional in the schema, so
+ * that records written before them stay valid, though W2L always writes them.
+ */
+export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
+  artifact: ['bytes', 'contentType'],
+}

@@ -22,6 +22,12 @@ export interface NetworkPolicy {
   privateAllowlist: readonly string[]
   maxRedirects: number
   maxBodyBytes: number
+  /**
+   * Cap on a file saved as received (PDF, CSV, XLSX, ZIP, JSON, text), in
+   * place of maxBodyBytes: the operator's `W2L_MAX_FILE_BYTES`. Absent means
+   * DEFAULT_MAX_FILE_BYTES; a request may only lower it (`maxFileBytes`).
+   */
+  maxFileBytes?: number
   /** Cap on post-decompression size, to bound zip bombs. */
   maxDecompressedBytes: number
   /** Per-host concurrent request ceiling. */

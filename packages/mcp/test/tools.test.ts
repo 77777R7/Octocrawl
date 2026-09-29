@@ -109,13 +109,13 @@ describe('MCP tools', () => {
     }
   })
 
-  it('declares and forwards onlyMainContent, waitFor and timeout for scrape, crawl and batch_scrape', async () => {
+  it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
       bodies.push(JSON.parse(String(init?.body)))
       return String(input).endsWith('/v1/scrape') ? json({ status: 'partial' }) : json({ taskId: 'task-1' }, 202)
     }) as typeof fetch })
-    const options = { onlyMainContent: false, waitFor: 1_000, timeout: 15_000 }
+    const options = { onlyMainContent: false, waitFor: 1_000, timeout: 15_000, maxFileBytes: 1_000_000 }
     await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
@@ -129,6 +129,7 @@ describe('MCP tools', () => {
         onlyMainContent: { type: 'boolean' },
         waitFor: { type: 'integer', minimum: 0, maximum: 60_000 },
         timeout: { type: 'integer', minimum: 1_000, maximum: 300_000 },
+        maxFileBytes: { type: 'integer', minimum: 1, maximum: 500 * 1024 * 1024 },
       })
     }
   })

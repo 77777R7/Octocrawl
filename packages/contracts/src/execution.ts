@@ -22,4 +22,10 @@ export interface FetchOptions {
    * deadline instead of stopping at its default caps.
    */
   timeout?: number
+  /**
+   * Bytes a file (PDF, CSV, XLSX, ZIP, JSON, text) may have, below the
+   * operator's cap (`NetworkPolicy.maxFileBytes`); a larger file is failed
+   * with `body_too_large` and not saved. Web pages keep `maxBodyBytes`.
+   */
+  maxFileBytes?: number
 }

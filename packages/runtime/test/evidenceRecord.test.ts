@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
+import { EXTRACTOR_VERSION, FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 import { researchUserAgent, type ComplianceRecord, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { toEvidenceRecord } from '../src/evidenceRecord.js'
@@ -144,9 +144,19 @@ describe('toEvidenceRecord', () => {
   it('names a raw snapshot by its content hash and leaves an unknown file unknown', () => {
     const withFiles = result({ evidence: { ...result().evidence, artifacts: [`/tmp/raw/${RAW}.html`, '/tmp/other/page.png'] } })
     expect(toEvidenceRecord(withFiles, { mode: 'standard' }, {}).artifacts).toEqual([
-      { kind: 'snapshot', path: `/tmp/raw/${RAW}.html`, sha256: RAW },
-      { kind: null, path: '/tmp/other/page.png', sha256: null },
+      { kind: 'snapshot', path: `/tmp/raw/${RAW}.html`, sha256: RAW, bytes: null, contentType: null },
+      { kind: null, path: '/tmp/other/page.png', sha256: null, bytes: null, contentType: null },
     ])
+  })
+
+  it('lists a file saved as received with its size and type, and names the PDF or file text extractor', () => {
+    const path = `/tasks/files/${RAW}.pdf`
+    const file = { kind: 'pdf' as const, detectedBy: 'content_type' as const, contentType: 'application/pdf', declaredBytes: 2048, maxBytes: 4096, bytes: 2048, sha256: RAW, path, markdownFrom: 'pdf_text' as const, encoding: null, warnings: [], pdf: null }
+    const pdf = toEvidenceRecord(result({ file, evidence: { ...result().evidence, artifacts: [path] } }), { mode: 'standard' }, { markdown: '<!-- page 1 -->\n' }, { sourceCommit: null })
+    expect(pdf.artifacts).toEqual([{ kind: 'file', path, sha256: RAW, bytes: 2048, contentType: 'application/pdf' }])
+    expect(pdf.extractor).toEqual({ name: 'pdf-text', version: PDF_TEXT_VERSION, commit: null })
+    const csv = toEvidenceRecord(result({ file: { ...file, kind: 'csv', contentType: 'text/csv', path: null } }), { mode: 'standard' }, {}, { sourceCommit: null })
+    expect(csv).toMatchObject({ artifacts: [], extractor: { name: 'file-text', version: FILE_TEXT_VERSION } })
   })
 
   it('records the environment proxy and the declared source commit', () => {
