@@ -31,6 +31,40 @@ export interface NetworkPolicy {
   respectRobotsTxt: boolean
   /** How long one robots.txt lookup may take before the file counts as unreachable. Default 5000. */
   robotsTimeoutMs?: number
+  /**
+   * The operator's forward proxy, read from the standard environment
+   * variables by local-mode entry points (`withEnvironmentProxy`). Hosted
+   * policies never carry one. A proxied host is resolved by the proxy, so only
+   * the literal host checks apply to it (`proxyFor`). Ignored unless origin
+   * is 'operator'.
+   */
+  egressProxy?: EgressProxy | null
+}
+
+/**
+ * Where outbound requests go when the operator's environment names a proxy:
+ * one proxy per URL scheme, and NO_PROXY entries that go direct. Loopback
+ * always goes direct. `https` and `http` are equal or one of them is null,
+ * because the browser lane can route through only one proxy.
+ */
+export interface EgressProxy {
+  source: 'environment'
+  /** From HTTPS_PROXY / https_proxy. Null sends https: URLs direct. */
+  https: ProxyServer | null
+  /** From HTTP_PROXY / http_proxy. Null sends http: URLs direct. */
+  http: ProxyServer | null
+  /** NO_PROXY / no_proxy entries, lower-cased. */
+  noProxy: readonly string[]
+}
+
+export interface ProxyServer {
+  /** `http://host:port` or `https://host:port`, without credentials. */
+  url: string
+  /** `host:port`: the only form of the proxy that results record. */
+  endpoint: string
+  /** Credentials from the variable's userinfo. Held in memory for the proxy, never recorded or logged. */
+  username?: string
+  password?: string
 }
 
 export const DEFAULT_NETWORK_POLICY: NetworkPolicy = {

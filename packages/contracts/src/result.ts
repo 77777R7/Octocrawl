@@ -77,6 +77,14 @@ export interface Evidence {
   vary?: string | null
   /** A response setting cookies cannot enter the public monitor cache. */
   setsCookie?: boolean
+  /**
+   * `host:port` of the operator's environment proxy (local mode) that the
+   * request for `finalUrl` went through; never its credentials. Null when that
+   * request did not use it (NO_PROXY, loopback). Absent when no environment
+   * proxy was configured, no request was answered, or the lane does not
+   * report its route (the provider lane).
+   */
+  envProxy?: string | null
 }
 
 export interface TraceEvent {

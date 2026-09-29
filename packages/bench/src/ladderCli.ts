@@ -27,15 +27,18 @@ import { pathToFileURL } from 'node:url'
 import type { ExecutionContext, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
   CONTENTFUL_STATUS,
+  describeEgressProxy,
   formatIdentitySummary,
   identityForRoute,
+  withEnvironmentProxy,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
-import { defaultNetworkPolicy } from './egress.js'
+import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
+import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
 import { browserbaseOps } from './vendors/browserbase.js'
 import { steelOps } from './vendors/steel.js'
@@ -288,6 +291,11 @@ export function buildChannels(
 
   const bbKey = opts.keys?.browserbase ?? process.env.BROWSERBASE_API_KEY ?? ''
   const steelKey = opts.keys?.steel ?? process.env.STEEL_API_KEY ?? ''
+  // The vendor's browser fetches the page; robots.txt is the one request this
+  // lane sends from this machine, so it takes the operator's proxy like the HTTP lane.
+  const routedPolicy = opts.robotsFetcher === undefined && opts.networkPolicy?.egressProxy ? opts.networkPolicy : null
+  let providerRoutes: EgressRoutes | null = null
+  const providerRobots = opts.robotsFetcher ?? (routedPolicy === null ? undefined : robotsFetcherVia(url => (providerRoutes ??= new EgressRoutes(routedPolicy)).dispatcherFor(url)))
 
   const vendorChannel = (
     vendorId: string,
@@ -410,7 +418,7 @@ export function buildChannels(
           transport,
           mode,
           null,
-          opts.robotsFetcher ?? undefined,
+          providerRobots,
         )
         return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
       },
@@ -420,6 +428,7 @@ export function buildChannels(
         } else if (pending !== null) {
           await pending.then((c) => c.transport.close()).catch(() => {})
         }
+        await providerRoutes?.close()
       },
     }
   }
@@ -519,8 +528,11 @@ export async function runLadder(args: Args): Promise<number> {
       ...(args.liveView ? ['live_view_handoff'] : []),
     ] as const,
   }
+  // The CLI runs in local mode: outbound requests follow the operator's proxy variables.
+  const networkPolicy = withEnvironmentProxy(defaultNetworkPolicy(), process.env)
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    networkPolicy,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),
   })
   const policy: CrawlPolicy = {
@@ -539,6 +551,7 @@ export async function runLadder(args: Args): Promise<number> {
   console.log(
     `vendor policy: ${vendorPolicy.authorized.length > 0 ? vendorPolicy.authorized.join(', ') : 'default (no persistence, no live view)'}`,
   )
+  if (networkPolicy.egressProxy) console.log(`egress proxy : ${describeEgressProxy(networkPolicy.egressProxy)}`)
   if (sessionStore !== null) console.log(`session store: ${args.sessionStoreFile}`)
   if (args.historyFile !== null) console.log(`history file : ${args.historyFile}`)
 

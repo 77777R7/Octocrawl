@@ -1,13 +1,16 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { LookupFunction } from 'node:net'
-import { Agent } from 'undici'
+import { Agent, Pool, ProxyAgent, type Dispatcher } from 'undici'
 import {
   evaluateResolved,
   evaluateHostname,
   evaluateUrl,
   localNetworkPolicy,
+  parseNoProxyEntry,
+  proxyFor,
   type NetworkPolicy,
+  type ProxyServer,
 } from '@w2l/contracts'
 
 export class SsrfDeniedError extends Error {
@@ -170,15 +173,109 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
   })
 }
 
-export async function assertSafeUrl(url: string, policy: NetworkPolicy): Promise<void> {
+/**
+ * The outbound routes for one policy: the guarded direct connection and, in
+ * local mode, the operator's environment proxy for the URLs it covers
+ * (`proxyFor`). `assertSafeUrl` reads the same policy, so its checks always
+ * match the route a request takes.
+ */
+export class EgressRoutes {
+  private readonly direct: Agent
+  private readonly proxies = new Map<string, ProxyAgent>()
+  private closing: Promise<void> | null = null
+
+  constructor(private readonly policy: NetworkPolicy, resolve: Resolver = lookup) {
+    this.direct = createGuardedDispatcher(policy, resolve)
+    for (const server of [policy.egressProxy?.https, policy.egressProxy?.http]) {
+      if (server != null && !this.proxies.has(server.url)) this.proxies.set(server.url, createProxyDispatcher(server))
+    }
+  }
+
+  /** The environment proxy this URL leaves through, or null when it connects directly. */
+  proxyFor(url: string): ProxyServer | null {
+    return proxyFor(url, this.policy)
+  }
+
+  dispatcherFor(url: string): Dispatcher {
+    const server = this.proxyFor(url)
+    if (server === null) return this.direct
+    const proxy = this.proxies.get(server.url)
+    if (proxy === undefined) throw new Error('no dispatcher for the configured proxy')
+    return proxy
+  }
+
+  close(): Promise<void> {
+    this.closing ??= Promise.all([this.direct.close(), ...[...this.proxies.values()].map(proxy => proxy.close())]).then(() => {})
+    return this.closing
+  }
+}
+
+function createProxyDispatcher(server: ProxyServer): ProxyAgent {
+  return new ProxyAgent({
+    uri: server.url,
+    ...(server.username === undefined ? {} : { token: `Basic ${Buffer.from(`${server.username}:${server.password ?? ''}`).toString('base64')}` }),
+    // Like curl: http: targets are sent in absolute form, https: targets are tunnelled with CONNECT.
+    proxyTunnel: false,
+    keepAliveTimeout: 1_000,
+    keepAliveMaxTimeout: 1_000,
+    maxHeaderSize: MAX_RESPONSE_HEADER_BYTES,
+    // The absolute-form client is built by this factory and does not receive the options above.
+    factory: (origin, options) => new Pool(origin, { keepAliveTimeout: 1_000, keepAliveMaxTimeout: 1_000, ...options, maxHeaderSize: MAX_RESPONSE_HEADER_BYTES }),
+  })
+}
+
+/**
+ * The environment proxy as a Playwright context proxy. Chromium routes a
+ * context through one server, so the bypass list reproduces `proxyFor`: each
+ * NO_PROXY host with its subdomains, IP and CIDR entries, loopback, and the
+ * scheme that has no proxy. Null when the policy sends everything direct.
+ */
+export function browserProxySettings(policy: NetworkPolicy): { proxy: { server: string; bypass: string; username?: string; password?: string }; endpoint: string } | null {
+  const proxy = policy.origin === 'operator' ? policy.egressProxy ?? null : null
+  const server = proxy?.https ?? proxy?.http ?? null
+  if (proxy === null || server === null) return null
+  if (proxy.https !== null && proxy.http !== null && proxy.https.url !== proxy.http.url) throw new Error('the browser lane routes through one proxy; HTTPS_PROXY and HTTP_PROXY differ')
+  // Naming loopback here also stops Playwright from forcing loopback through the proxy.
+  const bypass = ['localhost', '*.localhost', '127.0.0.1', '[::1]']
+  for (const raw of proxy.noProxy) {
+    const entry = parseNoProxyEntry(raw)
+    if (entry === null) continue
+    if (entry.kind === 'all') return null
+    if (entry.kind === 'cidr') { bypass.push(entry.cidr); continue }
+    const port = entry.port === null ? '' : `:${entry.port}`
+    if (entry.kind === 'ip') bypass.push(`${entry.address.includes(':') ? `[${entry.address}]` : entry.address}${port}`)
+    else bypass.push(`${entry.host}${port}`, `.${entry.host}${port}`)
+  }
+  if (proxy.https === null) bypass.push('https://*')
+  if (proxy.http === null) bypass.push('http://*')
+  return {
+    proxy: {
+      server: server.url,
+      bypass: bypass.join(','),
+      ...(server.username === undefined ? {} : { username: server.username }),
+      ...(server.password === undefined ? {} : { password: server.password }),
+    },
+    endpoint: server.endpoint,
+  }
+}
+
+/**
+ * The checks before a request leaves. A URL the policy sends through the
+ * operator's proxy is resolved by that proxy, so local mode trusts the proxy
+ * for resolution: only the checks that need no DNS run (scheme, credentials,
+ * IP literals, metadata names). A direct URL is resolved here and every
+ * address validated; the guarded dispatcher validates again and pins.
+ */
+export async function assertSafeUrl(url: string, policy: NetworkPolicy, resolve: Resolver = lookup): Promise<void> {
   const first = evaluateUrl(url, policy)
   if ('allowed' in first) {
     if (!first.allowed) throw new SsrfDeniedError(url, first.detail ?? first.violation ?? 'denied')
     return
   }
+  if (proxyFor(url, policy) !== null) return
   let records: readonly { address: string }[]
   try {
-    records = await lookup(first.hostname, { all: true })
+    records = await resolve(first.hostname, { all: true })
   } catch (err) {
     throw new DnsLookupError(first.hostname, err)
   }

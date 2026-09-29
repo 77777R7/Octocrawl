@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { hostedNetworkPolicy, localNetworkPolicy } from '@w2l/contracts'
+import { describe, expect, it, vi } from 'vitest'
+import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { request } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
+import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, DnsLookupError, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
 
 async function* chunks(...parts: Uint8Array[]): AsyncIterable<Uint8Array> {
   for (const part of parts) yield part
@@ -21,6 +21,19 @@ describe('assertSafeUrl', () => {
 
   it('rejects credential-bearing URLs before a request', async () => {
     await expect(assertSafeUrl('https://user:pass@example.com/', hostedNetworkPolicy())).rejects.toBeInstanceOf(SsrfDeniedError)
+  })
+
+  it('leaves a proxied name to the proxy but still applies the literal checks', async () => {
+    const proxied = withEnvironmentProxy(localNetworkPolicy(), { HTTPS_PROXY: 'http://127.0.0.1:9', HTTP_PROXY: 'http://127.0.0.1:9', NO_PROXY: 'direct.test' })
+    const notFound = vi.fn(async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }) })
+    await expect(assertSafeUrl('https://en.wikipedia.org/wiki/X', proxied, notFound)).resolves.toBeUndefined()
+    expect(notFound).not.toHaveBeenCalled()
+    for (const url of ['http://169.254.169.254/latest/', 'http://metadata.google.internal/', 'http://[::]/', 'https://user:pass@example.com/']) {
+      await expect(assertSafeUrl(url, proxied, notFound)).rejects.toBeInstanceOf(SsrfDeniedError)
+    }
+    // A NO_PROXY host connects directly, so it is resolved and validated here.
+    await expect(assertSafeUrl('https://direct.test/', proxied, notFound)).rejects.toBeInstanceOf(DnsLookupError)
+    await expect(assertSafeUrl('https://direct.test/', proxied, async () => [{ address: '169.254.169.254', family: 4 }])).rejects.toBeInstanceOf(SsrfDeniedError)
   })
 })
 

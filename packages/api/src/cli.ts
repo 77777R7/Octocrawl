@@ -23,6 +23,7 @@ async function main(): Promise<void> {
     server.close()
     void engine.close({cancelActive: true}).catch((error) => { console.error(error); process.exitCode = 1 })
   })
+  for (const notice of listen.notices) console.log(`w2l-api: ${notice}`)
   console.log(`w2l-api ${listen.mode} listening on http://${listen.host}:${listen.port}`)
 }
 

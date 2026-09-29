@@ -49,6 +49,8 @@ npm run api
 
 The API listens at `http://127.0.0.1:8787`. Keep `W2L_TASK_ROOT` identical for the API, Monitor worker, and delivery worker. The control database is `$W2L_TASK_ROOT/section-b-control.sqlite`; the default without this variable is `.w2l/api/section-b-control.sqlite`. Keep this directory across restarts.
 
+If the machine reaches the web through a proxy, the local API and a `W2L_MONITOR_NETWORK_MODE=local` Monitor worker send captures through `HTTPS_PROXY`/`HTTP_PROXY`, except `NO_PROXY` hosts and loopback (so this guide's local source stays direct). `W2L_PROXY=off` ignores the variables. The delivery worker below does not read them.
+
 Source terminal:
 
 ```bash
