@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { Agent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici'
 import { W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
@@ -171,6 +174,30 @@ describe('W2L SDK', () => {
     expect(ids).toEqual(['page-1', 'page-2'])
     expect(signals).toHaveLength(4)
     expect(signals.every((signal) => signal === controller.signal)).toBe(true)
+  })
+
+  it('waits for a scrape\'s answer until its timeout plus 30 s, past the fetch dispatcher\'s own wait for headers', async () => {
+    // The API answers 1.5 s after each request. The process's dispatcher stops waiting for headers after 1 s,
+    // as Node's own stops after 300 s, which a scrape with the default or largest timeout (300 000 ms) needs.
+    const api = createServer((req, res) => { req.resume(); setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"failed","failureReason":"timeout"}'), 1_500) })
+    await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve))
+    const original = getGlobalDispatcher()
+    const agent = new Agent({ headersTimeout: 1_000 })
+    const waits: Array<number | null | undefined> = []
+    setGlobalDispatcher({ dispatch: (options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) => { waits.push(options.headersTimeout); return agent.dispatch(options, handler) } } as unknown as Dispatcher)
+    try {
+      const client = new W2L({ baseUrl: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, token: '' })
+      expect(await client.scrape('https://example.com/', { timeout: 1_000 })).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+      await client.scrape('https://example.com/')
+      expect(waits).toEqual([31_000, 330_000])
+      // Other requests keep the dispatcher's own wait.
+      await expect(client.getBatch('task-1')).rejects.toThrow(TypeError)
+    } finally {
+      setGlobalDispatcher(original)
+      await agent.close()
+      api.closeAllConnections()
+      await new Promise<void>((resolve) => api.close(() => resolve()))
+    }
   })
 
   it('stops a crawl iterator when cancelled between items', async () => {

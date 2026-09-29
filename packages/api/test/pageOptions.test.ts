@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -173,6 +173,39 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     const refused = await httpOnly.post('/v1/scrape', { url: `${httpOnly.origin}/chrome`, waitFor: 500 })
     expect(refused).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'policy_denied', markdown: null } })
     expect(refused.body.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
+  })
+
+  it('a batch or crawl page\'s timeout also ends its JSON model fallback', async () => {
+    // A model endpoint that answers 15 s after each request, unless the request is aborted first.
+    const modelCalls: Array<{ aborted: boolean }> = []
+    const model = createServer((req, res) => {
+      const call = { aborted: false }
+      modelCalls.push(call)
+      res.once('close', () => { call.aborted = !res.writableFinished })
+      req.resume()
+      setTimeout(() => { if (!res.destroyed) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"sku":"from-model"}' } }] })) }, 15_000)
+    })
+    await new Promise<void>(resolve => model.listen(0, '127.0.0.1', resolve))
+    cleanup.push(async () => { vi.unstubAllEnvs(); model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())) })
+    vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(model.address() as AddressInfo).port}`)
+    vi.stubEnv('W2L_EXTRACT_MODEL', 'slow-model')
+    const { origin, engine } = await setup(unreachableBrowser)
+    // The page has no SKU, so the model is asked for it.
+    const formats = [{ type: 'json' as const, schema: { type: 'object', properties: { sku: { type: 'string' } }, required: ['sku'] }, modelFallback: true }]
+    const batch = { start: () => engine.startBatch({ urls: [`${origin}/chrome`], formats, timeout: 2_000 }), status: (id: string) => engine.getBatch(id), pages: (id: string) => engine.getBatchItems(id) }
+    const crawl = { start: () => engine.startCrawl({ url: `${origin}/chrome`, maxPages: 1, formats, timeout: 2_000 }), status: (id: string) => engine.getCrawl(id), pages: (id: string) => engine.getCrawlPages(id) }
+    for (const task of [batch, crawl]) {
+      const startedAt = Date.now()
+      const { taskId } = await task.start()
+      expect(await finished(() => task.status(taskId))).toMatchObject({ status: 'completed' })
+      expect(Date.now() - startedAt).toBeLessThan(6_000)
+      const [page] = (await task.pages(taskId))!.items
+      expect(page).toMatchObject({ status: 'success', json: { status: 'incomplete' } })
+      expect(page!.json!.issues.map(issue => issue.code)).toContain('model_timeout')
+      // The model server sees the aborted request's socket close a moment after the task completes.
+      await expect.poll(() => modelCalls.at(-1)).toEqual({ aborted: true })
+    }
+    expect(modelCalls).toHaveLength(2)
   })
 
   it('batch and crawl apply the options to every page', async () => {

@@ -108,6 +108,14 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | T03 | SDK: `batchAndWait` on 5 Wikipedia articles, its first two status requests answered with a 502 and a network error | The wait retries through both; 5 successful items with Markdown | crawl-batch.batch-wait |
 | T04 | `/fc` crawl of docs.python.org/3/ (`limit` 30), status polled every 2 s, data read 10 at a time | While scraping, `total` known, never below `completed`, above it at some poll, `next` present; at the end `completed`, `total` data entries with unique URLs, `completed` of them without an error, no `next` on the last page | crawl-batch.crawl-status |
 | T05 | `/fc` crawl of books.toscrape.com (`limit` 40), cancelled after 3 completed pages | Status `cancelled`; `total` equals the data entries; no `next` on the last page | crawl-batch.crawl-status |
+| T06 | MCP over the local HTTP service (`W2L_LOCAL_MCP_URL`): scrapes of httpbin.org/delay/10 (`timeout: 60000`), 2 s in cancelled by another client's session, by the calling client, and dropped by closing their requests, then a probe scrape of httpbin.org/delay/1 | Each client gets its own session id; the other client's cancel leaves the call to answer `success`; its own is answered `Request cancelled` within 3 s; the probe answers within 6 s, not behind the two dropped scrapes | scrape-execution.timeout |
+
+T06 was added on 2026-09-29 for MCP cancellation over Streamable HTTP. It drives the local MCP service, not the REST API: start the service with its own port and task root, and give the runner its `/mcp` URL in `W2L_LOCAL_MCP_URL`. Without that variable the case is skipped.
+
+```bash
+W2L_LOCAL_MCP_PORT=8921 W2L_TASK_ROOT=.w2l/local-mcp npm run local:mcp   # terminal 4
+W2L_LOCAL_MCP_URL=http://127.0.0.1:8921/mcp node research/parity/run-sites.mjs --only T06
+```
 
 J01–J03 were added on 2026-09-29 for the JSON extraction gaps of [core-status-2026-09-29.md](core-status-2026-09-29.md): schemas as Pydantic and Zod write them, the evidence of every value, and the prompt-only half of the audit's check, which W2L refuses.
 
