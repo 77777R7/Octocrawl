@@ -304,6 +304,7 @@ describe('@w2l/runtime public surface', () => {
       'assessConfiguredDocument',
       'assessFirecrawlIntroduction',
       'canonicalizeUrl',
+      'compilePathFilter',
       'crawlReportFromStore',
       'createHttpsWebhookTransport',
       'decodeStepCursor',

@@ -103,6 +103,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     }
     const invalid: Array<[unknown, string]> = [
       [object({ upc: { type: 'string', pattern: '(' } }), 'pattern'],
+      [object({ upc: { type: 'string', pattern: '^(a+)+$' } }), 'pattern can take too long to match'],
       [object({ price: { type: 'number', minimum: '0' } }), 'minimum'],
       [object({ tags: { type: 'array', items: [{ type: 'string' }] } }), 'items'],
       [object({ author: { $ref: '#/$defs/Missing' } }), '#/$defs/Missing'],

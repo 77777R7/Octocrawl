@@ -351,6 +351,8 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
       } catch {
         invalid(where, `pattern is not a valid regular expression: ${rec.pattern as string}`)
       }
+      const unsafe = unsafeRegexReason(rec.pattern as string)
+      if (unsafe !== null) invalid(where, `pattern can take too long to match (${unsafe}): ${rec.pattern as string}`)
     }
     for (const key of ['title', 'description', '$comment', 'format']) if (rec[key] !== undefined && typeof rec[key] !== 'string') invalid(where, `${key} must be a string`)
     for (const key of ['uniqueItems', 'deprecated', 'readOnly', 'writeOnly']) if (rec[key] !== undefined && typeof rec[key] !== 'boolean') invalid(where, `${key} must be a boolean`)

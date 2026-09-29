@@ -1,5 +1,5 @@
 import Ajv from 'ajv'
-import type { ErrorObject, ValidateFunction } from 'ajv'
+import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
   CompactScrapeResponse,
   ExecutionContext,
@@ -20,7 +20,7 @@ import type {
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
 import { CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
-import { toEvidenceRecord } from '@w2l/runtime'
+import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
 import { pdfLabelledValues } from './pdfFields.js'
 
 export interface StructuredModelConfig {
@@ -393,12 +393,27 @@ function requiredMissing(root: JsonSchema, schemaInput: JsonSchema, value: JsonV
   return missing
 }
 
+// A schema's pattern is matched against page text, like a crawl path filter:
+// in linear time where V8 can, otherwise only on text of at most
+// REGEX_SUBJECT_MAX_LENGTH characters and within a time limit. Text the
+// pattern cannot decide counts as not matching it. The request already
+// refused patterns that can backtrack catastrophically. V8's linear engine
+// does not take the u flag; a pattern without \p, \P, \u{…} or astral
+// characters means the same without it on text without astral characters.
+type RegExpEngine = NonNullable<CodeOptions['regExp']>
+const ASTRAL = /[\uD800-\uDFFF]/
+const schemaRegExp: RegExpEngine = Object.assign((pattern: string, flags: string) => {
+  const exact = compilePathFilter(pattern, flags)
+  const bmp = flags === 'u' && !/\\[pP]|\\u\{/.test(pattern) && !ASTRAL.test(pattern) ? compilePathFilter(pattern) : null
+  return { test: (text: string) => (bmp !== null && !ASTRAL.test(text) ? bmp : exact).test(text) === true, toString: () => `/${pattern}/${flags}` }
+}, { code: 'schemaRegExp' })
+
 function compile(schema: JsonSchema): ValidateFunction {
-  const AjvConstructor = Ajv as unknown as new (options: { allErrors: boolean; strict: boolean; validateFormats: boolean }) => { compile(schema: object): ValidateFunction }
+  const AjvConstructor = Ajv as unknown as new (options: { allErrors: boolean; strict: boolean; validateFormats: boolean; code: { regExp: RegExpEngine } }) => { compile(schema: object): ValidateFunction }
   // format is an annotation W2L does not check. $schema and $id only name the
   // dialect and the schema: W2L's subset means the same under draft-07,
   // 2019-09 and 2020-12, and every $ref is local.
-  const ajv = new AjvConstructor({ allErrors: true, strict: false, validateFormats: false })
+  const ajv = new AjvConstructor({ allErrors: true, strict: false, validateFormats: false, code: { regExp: schemaRegExp } })
   const { $schema: _dialect, $id: _id, ...rest } = schema
   return ajv.compile(rest as object)
 }

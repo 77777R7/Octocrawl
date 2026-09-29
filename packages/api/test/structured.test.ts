@@ -425,6 +425,20 @@ describe('structured JSON extraction', () => {
     expect(out.issues[1]?.message).toBe('/upc must match pattern "^[0-9]+$"')
   })
 
+  it('matches a schema pattern the linear engine cannot run only on text of at most 2048 characters', async () => {
+    // A lookahead runs on the backtracking engine: longer page text is not matched and counts as breaking the pattern.
+    const named = (value: string): FetchResult => ({ ...result, document: { ...result.document!, product: { ...product, name: { value, source: 'dom', path: '#productTitle' } } } })
+    const schema = json({ name: { type: 'string', pattern: '^(?=S)[A-Za-z ]+$' } }, ['name'])
+    expect(await extractStructured(named('Subject headphones'), schema, {}, null)).toMatchObject({ status: 'complete' })
+    const long = await extractStructured(named(`S${'a'.repeat(2048)}`), schema, {}, null)
+    expect(long.status).toBe('incomplete')
+    expect(long.issues).toEqual([{ code: 'field_unavailable', message: '/name must match pattern "^(?=S)[A-Za-z ]+$"' }])
+    // The linear engine matches a pattern without lookaround on text of any length.
+    expect(await extractStructured(named(`S${'a'.repeat(5000)}`), json({ name: { type: 'string', pattern: '^S[a-z]+$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
+    // It keeps the u flag's meaning: one astral character is one character.
+    expect(await extractStructured(named('\u{1F3A7}'), json({ name: { type: 'string', pattern: '^.$' } }, ['name']), {}, null)).toMatchObject({ status: 'complete' })
+  })
+
   it('maps a recursive schema without descending forever', async () => {
     const schema: JsonFormatRequest = { type: 'json', schema: {
       type: 'object', properties: { title: { type: 'string' }, category: { $ref: '#/$defs/Category' } }, required: ['title'],

@@ -34,7 +34,7 @@ export interface PathFilter {
 
 let linearEngine: boolean | undefined
 
-function linearRegExp(pattern: string): RegExp | null {
+function linearRegExp(pattern: string, flags: string): RegExp | null {
   if (linearEngine === undefined) {
     try { setFlagsFromString('--enable-experimental-regexp-engine') } catch { /* checked below */ }
     try {
@@ -45,18 +45,22 @@ function linearRegExp(pattern: string): RegExp | null {
     }
   }
   if (!linearEngine) return null
-  try { return new RegExp(pattern, 'l') } catch { return null }
+  try { return new RegExp(pattern, `${flags}l`) } catch { return null }
 }
 
 // The time limit interrupts a match only inside a vm script.
 const sandbox = createContext({ re: null as RegExp | null, path: '' })
 const testInSandbox = new Script('re.test(path)')
 
-/** A path filter for `pattern`. Throws for a pattern that is not a regular expression. */
-export function compilePathFilter(pattern: string): PathFilter {
-  const linear = linearRegExp(pattern)
+/**
+ * A path filter for `pattern`. Throws for a pattern that is not a regular
+ * expression. JSON Schema `pattern` uses it too, with the `u` flag: its text
+ * comes from the page as well.
+ */
+export function compilePathFilter(pattern: string, flags = ''): PathFilter {
+  const linear = linearRegExp(pattern, flags)
   if (linear !== null) return { test: path => linear.test(path) }
-  const backtracking = new RegExp(pattern)
+  const backtracking = new RegExp(pattern, flags)
   let timedOut = false
   return {
     test(path) {
