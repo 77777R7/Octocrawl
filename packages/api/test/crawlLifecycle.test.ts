@@ -173,6 +173,25 @@ describe('crawl lifecycle', () => {
     expect((await app.request('/v1/crawl/no-such-task/resume', { method: 'POST' })).status).toBe(404)
   })
 
+  it('crawlAndWait keeps waiting through a 503 and a dropped connection while it polls, then lists every page', async () => {
+    const s = await site()
+    const app = createApp(s.engine())
+    const faults = ['503', 'network']
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== 'POST' && /^\/v1\/crawl\/[^/]+$/.test(new URL(String(input)).pathname)) {
+        const fault = faults.shift()
+        if (fault === '503') return new Response('restarting', { status: 503 })
+        if (fault === 'network') throw new TypeError('fetch failed')
+      }
+      return app.request(String(input), init)
+    }) as typeof fetch })
+    const result = await client.crawlAndWait(`${s.origin}/`, { maxPages: 3 }, { pollIntervalMs: 25, timeoutMs: 20_000 })
+    expect(faults).toEqual([])
+    expect(result.report).toMatchObject({ status: 'completed', pagesFetched: 3 })
+    expect(result.pages.map((page) => new URL(page.url).pathname)).toHaveLength(3)
+    expect(result.errors).toEqual([])
+  })
+
   it('waits the robots.txt Crawl-delay between page starts and records the delay it applied', async () => {
     const s = await site({ robots: 'User-agent: *\nCrawl-delay: 0.5\n' })
     const engine = s.engine()
