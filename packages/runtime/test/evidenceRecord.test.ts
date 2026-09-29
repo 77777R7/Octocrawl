@@ -72,6 +72,14 @@ describe('toEvidenceRecord', () => {
     expect(record.outputSha256).toEqual({ markdown: null, json: null })
   })
 
+  it('says a browser chain is complete when the lane observed every hop', () => {
+    const middle = 'https://source.example/middle'
+    const observed = result({ lane: 'browser_local', evidence: { ...result().evidence, redirectChain: [url, middle, final], redirectChainComplete: true } })
+    expect(toEvidenceRecord(observed, { mode: 'standard' }, {}).redirectChain).toEqual({ urls: [url, middle, final], complete: true })
+    const unobserved = result({ lane: 'browser_local', evidence: { ...result().evidence, redirectChainComplete: false } })
+    expect(toEvidenceRecord(unobserved, { mode: 'standard' }, {}).redirectChain.complete).toBe(false)
+  })
+
   it('lists the requested URL alone when nothing redirected', () => {
     const plain = result({ evidence: { ...result().evidence, finalUrl: url, redirectChain: [] } })
     expect(toEvidenceRecord(plain, { mode: 'standard' }, {}).redirectChain).toEqual({ urls: [url], complete: true })

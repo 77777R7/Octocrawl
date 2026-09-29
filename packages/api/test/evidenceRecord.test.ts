@@ -187,12 +187,13 @@ describe('Evidence Record: browser lane', () => {
   let browser: ApiEngine
   beforeAll(() => { browser = engineWith({ channelPolicy: () => 'browser_only' }) })
 
-  it('records what a real Chromium observed, and that it sees only the redirect endpoints', async () => {
+  it('records what a real Chromium observed, every redirect hop included', async () => {
     const moved = await scrape(browser, { url: `${origin}/moved` })
     const record = valid(moved.evidenceRecord)
+    expect(moved.evidence).toMatchObject({ contentType: 'text/html; charset=utf-8' })
     expect(record).toMatchObject({
       finalUrl: `${origin}/article`,
-      redirectChain: { urls: [`${origin}/moved`, `${origin}/article`], complete: false },
+      redirectChain: { urls: [`${origin}/moved`, `${origin}/article`], complete: true },
       httpStatus: 200, status: 'success', lane: 'browser_local',
       robotsDecision: { ...robotsAllowed, robotsUrl: `${origin}/robots.txt` },
       rawSha256: (moved.evidence as { rawBodySha256: string }).rawBodySha256,

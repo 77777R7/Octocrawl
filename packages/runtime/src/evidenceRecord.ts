@@ -38,7 +38,10 @@ export interface EvidenceRecordOptions {
   sourceCommit?: string | null
 }
 
-/** Lanes that request every redirect hop themselves, and so can list each. */
+/**
+ * Lanes that request every redirect hop themselves, and so list each; the
+ * browser lane says so on its evidence (`redirectChainComplete`).
+ */
 const EVERY_HOP_LANES: ReadonlySet<Lane> = new Set<Lane>(['http'])
 
 export function toEvidenceRecord(
@@ -61,7 +64,7 @@ export function toEvidenceRecord(
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     requestedUrl: result.requestedUrl,
     finalUrl,
-    redirectChain: { urls, complete: EVERY_HOP_LANES.has(result.lane) },
+    redirectChain: { urls, complete: evidence.redirectChainComplete ?? EVERY_HOP_LANES.has(result.lane) },
     fetchedAt: evidence.fetchedAt ?? null,
     httpStatus,
     status: result.status,

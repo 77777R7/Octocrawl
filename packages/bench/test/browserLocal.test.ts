@@ -72,6 +72,13 @@ beforeAll(async () => {
           '<span class="platform-linux">Terminal</span><span class="platform-windows">Git Bash</span>.</p></li><li><p>Set a Git username.</p></li></ol>' +
           '</main></body></html>',
       )
+    } else if (req.url === '/hop/1' || req.url === '/hop/2') {
+      // Two server redirects before the page: every hop is a request Chromium makes.
+      res.writeHead(req.url === '/hop/1' ? 302 : 301, { location: req.url === '/hop/1' ? '/hop/2' : '/landing' })
+      res.end()
+    } else if (req.url === '/landing') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=iso-8859-1' })
+      res.end('<!doctype html><html><body><article><h1>Landing</h1><p>The page two redirects lead to, served with a content type the evidence must repeat as sent.</p></article></body></html>')
     } else if (req.url === '/nav-only') {
       // Navigation and a footer, no main block: the extractor finds no content.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -375,6 +382,25 @@ describe('BrowserLocalSubject transport', () => {
       expect(full.usage.contentTokens).toBeGreaterThan(0)
       expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
       expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports the response content type and every redirect hop of the navigation', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const moved = await subject.fetch(`${url}/hop/1`)
+      expect(moved.status).toBe('success')
+      expect(moved.evidence).toMatchObject({
+        finalUrl: `${url}/landing`,
+        httpStatus: 200,
+        contentType: 'text/html; charset=iso-8859-1',
+        redirectChain: [`${url}/hop/1`, `${url}/hop/2`, `${url}/landing`],
+        redirectChainComplete: true,
+      })
+      const direct = await subject.fetch(`${url}/landing`)
+      expect(direct.evidence).toMatchObject({ finalUrl: `${url}/landing`, redirectChain: [], redirectChainComplete: true, contentType: 'text/html; charset=iso-8859-1' })
     } finally {
       await subject.teardown()
     }
