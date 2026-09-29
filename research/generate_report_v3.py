@@ -21,7 +21,7 @@ from generate_report import (
 )
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 BASE_LEDGER = ROOT / "research" / "evidence_ledger.csv"
 ADD_LEDGER = ROOT / "research" / "evidence_additions_v3.csv"
 OUT = ROOT / "output" / "pdf" / "AI爬虫与批量增长自动化SaaS_Chrome深度验证版.pdf"
