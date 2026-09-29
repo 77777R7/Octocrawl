@@ -1034,6 +1034,69 @@
         { "item": "crawl-batch.batch-start-async", "type": "field", "path": "report.remaining", "equals": 0 },
         { "item": "crawl-batch.batch-start-async", "type": "hostSpacing", "minHosts": 3, "record": true }
       ]
+    },
+    {
+      "id": "J01",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": { "formats": [{ "type": "json", "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "description": "A book on its catalogue page.", "properties": { "title": { "minLength": 1, "title": "Title", "type": "string" }, "price": { "minimum": 0, "title": "Price", "type": "number" }, "availability": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "title": "Availability" }, "upc": { "anyOf": [{ "pattern": "^[0-9a-f]{16}$", "type": "string" }, { "type": "null" }], "default": null, "title": "Upc" }, "numberOfReviews": { "anyOf": [{ "minimum": 0, "type": "integer" }, { "type": "null" }], "default": null, "title": "Numberofreviews" }, "isbn": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null, "description": "Not on the page", "title": "Isbn" }, "url": { "format": "uri", "maxLength": 2083, "minLength": 1, "title": "Url", "type": "string" } }, "required": ["title", "price", "url"], "title": "Book", "type": "object" } }] },
+      "note": "Added 2026-09-29 for the JSON extraction gaps. The schema half of the feature matrix check for scrape-formats.json with a Pydantic v2 model_json_schema() schema: title on every node, $schema (2020-12), anyOf [X, null] with default null for the optional fields, minimum, minLength, maxLength, pattern and format. Before, title, $schema and anyOf were each a 400. On 2026-09-29 the page showed £51.77, UPC a897fe39b1053632, 'In stock (22 available)' and 0 reviews in its Product Information table, and no ISBN: isbn must be null with an issue, and every other value must name where it was read.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.title", "equals": "A Light in the Attic" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.price", "equals": 51.77 },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.upc", "equals": "a897fe39b1053632" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.availability", "includes": "In stock (22 available)" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.numberOfReviews", "equals": 0 },
+        { "item": "1", "type": "field", "path": "json.data.isbn", "equals": null },
+        { "item": "1", "type": "jsonIssue", "includes": "/isbn" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./title", "equals": { "source": "dom", "locator": "h1[0]" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price", "equals": { "source": "text", "locator": "p.price_color" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./upc.locator", "equals": "table[0] tr[0] \"UPC\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./url", "equals": { "source": "fetch", "locator": "finalUrl" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./isbn", "present": false }
+      ]
+    },
+    {
+      "id": "J02",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://catalog.data.gov/dataset/electric-vehicle-population-data",
+      "request": { "formats": [{ "type": "json", "schema": { "$ref": "#/definitions/Dataset", "definitions": { "Dataset": { "type": "object", "properties": { "title": { "type": "string", "description": "The dataset's name" }, "identifier": { "type": "string", "format": "uri" }, "accessLevel": { "type": "string", "enum": ["public", "restricted public", "non-public"] }, "issued": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }, "modified": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }, "license": { "type": ["string", "null"], "format": "uri" }, "spatial": { "type": ["string", "null"] }, "url": { "type": "string", "format": "uri" } }, "required": ["title", "identifier", "accessLevel", "issued", "modified", "license", "spatial", "url"], "additionalProperties": false } }, "$schema": "http://json-schema.org/draft-07/schema#" } }] },
+      "note": "Added 2026-09-29 for the JSON extraction gaps. A dataset page with a zod-to-json-schema schema: $schema (draft-07), a root $ref into definitions, additionalProperties false, nullable type lists, enum, pattern and format. The page's metadata table (DCAT fields) gives the values; spatial is not on it, so it must be null with an issue. On 2026-09-29: identifier https://data.wa.gov/api/views/f6w7-q2d2, accessLevel public, issued 2023-10-19, modified 2026-09-15 (the catalogue updates it; checked as present, and the schema's pattern holds it to a date), licence http://opendatacommons.org/licenses/odbl/1.0/.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.title", "equals": "Electric Vehicle Population Data" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.identifier", "equals": "https://data.wa.gov/api/views/f6w7-q2d2" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.accessLevel", "equals": "public" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.issued", "equals": "2023-10-19" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.modified", "present": true },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.license", "equals": "http://opendatacommons.org/licenses/odbl/1.0/" },
+        { "item": "1", "type": "field", "path": "json.data.spatial", "equals": null },
+        { "item": "1", "type": "jsonIssue", "includes": "/spatial" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./title", "equals": { "source": "dom", "locator": "h1[0]" } },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./identifier.locator", "includes": "\"identifier\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./license.locator", "includes": "\"license\"" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./url", "equals": { "source": "fetch", "locator": "finalUrl" } }
+      ]
+    },
+    {
+      "id": "J03",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": { "formats": [{ "type": "json", "prompt": "extract the book title and price" }] },
+      "note": "Added 2026-09-29. The prompt-only half of the feature matrix check for scrape-formats.json. W2L does not extract JSON without a schema: that would need a model for every page (LLM extraction is maintained, not extended: ROADMAP.md Paused). The documented result is a 400 invalid_request, never an answer that ignored the prompt.",
+      "checks": [
+        { "item": "scrape-formats.json", "type": "apiStatus", "equals": 400 },
+        { "item": "scrape-formats.json", "type": "field", "path": "code", "equals": "invalid_request" },
+        { "item": "scrape-formats.json", "type": "field", "path": "error", "includes": "schema" }
+      ]
     }
   ]
 }

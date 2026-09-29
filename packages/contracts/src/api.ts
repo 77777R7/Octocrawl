@@ -225,39 +225,168 @@ function readAllowlist(value: unknown): readonly string[] | undefined {
   return value.filter((item) => item.length > 0)
 }
 
-const SCHEMA_KEYS = new Set(['$ref', 'type', 'properties', 'required', 'items', 'enum', 'description', 'additionalProperties', '$defs'])
+/** What extraction maps values by. */
+const SCHEMA_STRUCTURE = ['type', 'properties', 'required', 'items', 'additionalProperties', 'enum', 'const', '$ref', '$defs', 'definitions', 'anyOf', 'oneOf']
+/** Assertions checked on the result, never used to fill a value in. */
+const SCHEMA_NUMBERS = ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf']
+const SCHEMA_COUNTS = ['minLength', 'maxLength', 'minItems', 'maxItems']
+/** Accepted and not acted on: `default` is never filled in and `format` is not checked. */
+const SCHEMA_ANNOTATIONS = ['title', 'description', '$comment', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly', 'format']
+/** Accepted at the root only. */
+const SCHEMA_ROOT = ['$schema', '$id']
+const SCHEMA_KEYS = new Set([...SCHEMA_STRUCTURE, ...SCHEMA_NUMBERS, ...SCHEMA_COUNTS, 'pattern', 'uniqueItems', ...SCHEMA_ANNOTATIONS])
 const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
+const PRIMITIVE_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'null'])
+/** The dialects whose meaning of these keywords W2L follows. */
+const SCHEMA_DIALECTS = /^https?:\/\/json-schema\.org\/(?:draft-07\/schema|draft\/2019-09\/schema|draft\/2020-12\/schema)#?$/
 
-function readSchema(value: unknown): import('./structured.js').JsonSchema {
+function isSchemaObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function schemaTypeList(value: unknown): readonly unknown[] {
+  return value === undefined ? [] : Array.isArray(value) ? value : [value]
+}
+
+/** The keys of a node other than annotations, root keywords and definitions: what it asserts. */
+function assertingKeys(rec: Record<string, unknown>): string[] {
+  return Object.keys(rec).filter(key => !SCHEMA_ANNOTATIONS.includes(key) && !SCHEMA_ROOT.includes(key) && key !== '$defs' && key !== 'definitions')
+}
+
+/** `{ type: 'null' }`, with annotations at most. */
+function isNullSchema(value: unknown): boolean {
+  if (!isSchemaObject(value)) return false
+  const types = schemaTypeList(value.type)
+  return types.length === 1 && types[0] === 'null' && assertingKeys(value).every(key => key === 'type')
+}
+
+/** A schema for one or more primitive types or constants: no object, array, reference or union. */
+function isPrimitiveSchema(value: unknown): boolean {
+  if (!isSchemaObject(value)) return false
+  if (['$ref', 'anyOf', 'oneOf', 'properties', 'items', 'additionalProperties', 'required'].some(key => value[key] !== undefined)) return false
+  const types = schemaTypeList(value.type)
+  return types.length > 0 ? types.every(type => typeof type === 'string' && PRIMITIVE_TYPES.has(type)) : value.const !== undefined || value.enum !== undefined
+}
+
+/** The node a local `$ref` names, or undefined. */
+function localTarget(root: unknown, ref: string): unknown {
+  let value = root
+  for (const part of ref === '#' ? [] : ref.slice(2).split('/')) {
+    if (!isSchemaObject(value)) return undefined
+    let key: string
+    try {
+      key = decodeURIComponent(part).replace(/~1/g, '/').replace(/~0/g, '~')
+    } catch {
+      return undefined
+    }
+    value = value[key]
+  }
+  return value
+}
+
+/**
+ * The JSON Schema subset W2L extraction honours (JsonSchema in structured.ts),
+ * bounded to 64 KiB, 8 levels and 100 properties. A keyword outside it is
+ * refused as unsupported_parameter, named with its place in the request
+ * (`at`, such as `formats[1].schema`); a malformed value as invalid_request.
+ */
+function readSchema(value: unknown, at = 'schema'): import('./structured.js').JsonSchema {
   const bytes = new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength
   if (bytes > 64 * 1024) throw new RequestError('json schema must be at most 64 KiB')
   let properties = 0
-  const visit = (node: unknown, depth: number): void => {
-    if (depth > 8) throw new RequestError('json schema must be at most 8 levels deep')
-    if (node === null || typeof node !== 'object' || Array.isArray(node)) throw new RequestError('json schema nodes must be objects')
-    const rec = node as Record<string, unknown>
-    for (const key of Object.keys(rec)) if (!SCHEMA_KEYS.has(key)) throw new RequestError(`unsupported json schema keyword: ${key}`)
-    if (rec.$ref !== undefined && (typeof rec.$ref !== 'string' || !rec.$ref.startsWith('#/'))) throw new RequestError('json schema only supports local $ref')
-    if (rec.type !== undefined) {
-      const types = Array.isArray(rec.type) ? rec.type : [rec.type]
-      if (types.some(type => typeof type !== 'string' || !SCHEMA_TYPES.has(type))) throw new RequestError('json schema contains an unsupported type')
+  const refs: Array<[string, string]> = []
+  const unsupported = (where: string, key: string, why: string): never => {
+    throw new RequestError(`unsupported json schema keyword: ${key} at ${where} (${why})`, 'unsupported_parameter', { parameters: [`${where}.${key}`] })
+  }
+  const invalid = (where: string, message: string): never => {
+    throw new RequestError(`json schema ${message} (at ${where})`)
+  }
+  const visit = (node: unknown, depth: number, where: string): void => {
+    if (depth > 8) invalid(where, 'must be at most 8 levels deep')
+    if (!isSchemaObject(node)) return invalid(where, 'nodes must be objects')
+    const rec = node
+    for (const key of Object.keys(rec)) {
+      if (SCHEMA_ROOT.includes(key)) {
+        if (depth > 0) unsupported(where, key, 'only the root may declare it')
+      } else if (!SCHEMA_KEYS.has(key)) {
+        unsupported(where, key, 'W2L extraction does not support it')
+      }
     }
-    if (rec.required !== undefined && (!Array.isArray(rec.required) || rec.required.some(item => typeof item !== 'string'))) throw new RequestError('json schema required must be an array of strings')
-    if (rec.enum !== undefined && !Array.isArray(rec.enum)) throw new RequestError('json schema enum must be an array')
-    if (rec.description !== undefined && typeof rec.description !== 'string') throw new RequestError('json schema description must be a string')
+    if (rec.$schema !== undefined && (typeof rec.$schema !== 'string' || !SCHEMA_DIALECTS.test(rec.$schema))) {
+      unsupported(where, '$schema', `W2L follows JSON Schema draft-07, 2019-09 and 2020-12, not ${JSON.stringify(rec.$schema)}`)
+    }
+    if (rec.$id !== undefined && typeof rec.$id !== 'string') invalid(where, '$id must be a string')
+    if (rec.$ref !== undefined) {
+      if (typeof rec.$ref !== 'string' || (rec.$ref !== '#' && !rec.$ref.startsWith('#/'))) invalid(where, 'only supports local $ref')
+      const beside = assertingKeys(rec).find(key => key !== '$ref')
+      if (beside !== undefined) unsupported(where, beside, 'beside $ref, which may carry only annotations')
+      refs.push([rec.$ref as string, where])
+    }
+    if (rec.type !== undefined) {
+      const types = schemaTypeList(rec.type)
+      if (types.length === 0 || types.some(type => typeof type !== 'string' || !SCHEMA_TYPES.has(type))) invalid(where, 'contains an unsupported type')
+    }
+    if (rec.required !== undefined && (!Array.isArray(rec.required) || rec.required.some(item => typeof item !== 'string'))) invalid(where, 'required must be an array of strings')
+    if (rec.enum !== undefined && !Array.isArray(rec.enum)) invalid(where, 'enum must be an array')
+    for (const key of SCHEMA_NUMBERS) {
+      const number = rec[key]
+      if (number !== undefined && (typeof number !== 'number' || !Number.isFinite(number) || (key === 'multipleOf' && number <= 0))) invalid(where, `${key} must be a ${key === 'multipleOf' ? 'positive ' : ''}number`)
+    }
+    for (const key of SCHEMA_COUNTS) {
+      const count = rec[key]
+      if (count !== undefined && (typeof count !== 'number' || !Number.isInteger(count) || count < 0)) invalid(where, `${key} must be a non-negative integer`)
+    }
+    if (rec.pattern !== undefined) {
+      if (typeof rec.pattern !== 'string' || rec.pattern.length > 2000) invalid(where, 'pattern must be a regular expression of at most 2000 characters')
+      try {
+        new RegExp(rec.pattern as string, 'u')
+      } catch {
+        invalid(where, `pattern is not a valid regular expression: ${rec.pattern as string}`)
+      }
+    }
+    for (const key of ['title', 'description', '$comment', 'format']) if (rec[key] !== undefined && typeof rec[key] !== 'string') invalid(where, `${key} must be a string`)
+    for (const key of ['uniqueItems', 'deprecated', 'readOnly', 'writeOnly']) if (rec[key] !== undefined && typeof rec[key] !== 'boolean') invalid(where, `${key} must be a boolean`)
+    if (rec.examples !== undefined && !Array.isArray(rec.examples)) invalid(where, 'examples must be an array')
     if (rec.properties !== undefined) {
-      if (rec.properties === null || typeof rec.properties !== 'object' || Array.isArray(rec.properties)) throw new RequestError('json schema properties must be an object')
-      for (const child of Object.values(rec.properties as Record<string, unknown>)) { properties++; visit(child, depth + 1) }
+      if (!isSchemaObject(rec.properties)) invalid(where, 'properties must be an object')
+      for (const [name, child] of Object.entries(rec.properties as Record<string, unknown>)) { properties++; visit(child, depth + 1, `${where}.properties.${name}`) }
     }
     if (properties > 100) throw new RequestError('json schema must contain at most 100 properties')
-    if (rec.items !== undefined) visit(rec.items, depth + 1)
-    if (typeof rec.additionalProperties === 'object' && rec.additionalProperties !== null) visit(rec.additionalProperties, depth + 1)
-    if (rec.$defs !== undefined) {
-      if (rec.$defs === null || typeof rec.$defs !== 'object' || Array.isArray(rec.$defs)) throw new RequestError('json schema $defs must be an object')
-      for (const child of Object.values(rec.$defs as Record<string, unknown>)) visit(child, depth + 1)
+    if (rec.items !== undefined) {
+      if (!isSchemaObject(rec.items)) invalid(where, 'items must be one schema')
+      visit(rec.items, depth + 1, `${where}.items`)
+    }
+    if (rec.additionalProperties !== undefined && typeof rec.additionalProperties !== 'boolean') visit(rec.additionalProperties, depth + 1, `${where}.additionalProperties`)
+    for (const key of ['$defs', 'definitions']) {
+      if (rec[key] === undefined) continue
+      if (!isSchemaObject(rec[key])) invalid(where, `${key} must be an object`)
+      for (const [name, child] of Object.entries(rec[key] as Record<string, unknown>)) visit(child, depth + 1, `${where}.${key}.${name}`)
+    }
+    for (const key of ['anyOf', 'oneOf']) {
+      const branches = rec[key]
+      if (branches === undefined) continue
+      if (!Array.isArray(branches) || branches.length === 0) invalid(where, `${key} must be a non-empty array of schemas`)
+      const beside = assertingKeys(rec).find(other => other !== key)
+      if (beside !== undefined) unsupported(where, beside, `beside ${key}, which may carry only annotations`)
+      // Extraction maps a value by one schema: a schema or null, or primitive types.
+      const union = branches as unknown[]
+      const nullable = union.length === 2 && union.some(isNullSchema)
+      if (!nullable && !union.every(isPrimitiveSchema)) unsupported(where, key, 'W2L maps a schema-or-null union or a union of primitive types, not a union of objects, arrays or references')
+      union.forEach((branch, index) => visit(branch, depth + 1, `${where}.${key}[${index}]`))
     }
   }
-  visit(value, 0)
+  visit(value, 0, at)
+  for (const [ref, where] of refs) {
+    // A reference may name another reference, but must end at a schema.
+    let target = localTarget(value, ref)
+    const seen = new Set<unknown>()
+    while (isSchemaObject(target) && typeof target.$ref === 'string') {
+      if (seen.has(target)) invalid(where, `$ref ${ref} leads only to itself`)
+      seen.add(target)
+      target = localTarget(value, target.$ref)
+    }
+    if (!isSchemaObject(target)) invalid(where, `$ref does not resolve: ${ref}`)
+  }
   return value as import('./structured.js').JsonSchema
 }
 
@@ -277,7 +406,7 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   }
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
-  for (const item of value) {
+  for (const [index, item] of value.entries()) {
     if (item === 'markdown' || item === 'links' || item === 'json') {
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
@@ -294,7 +423,7 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
     logical.add('json')
     formats.push({
       type: 'json' as const,
-      schema: readSchema(rec.schema),
+      schema: readSchema(rec.schema, `formats[${index}].schema`),
       ...(rec.prompt === undefined ? {} : { prompt: rec.prompt }),
       ...(rec.modelFallback === undefined ? {} : { modelFallback: rec.modelFallback }),
     })

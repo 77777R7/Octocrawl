@@ -104,6 +104,14 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
 | A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
 
+J01–J03 were added on 2026-09-29 for the JSON extraction gaps of [core-status-2026-09-29.md](core-status-2026-09-29.md): schemas as Pydantic and Zod write them, the evidence of every value, and the prompt-only half of the audit's check, which W2L refuses.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| J01 | Scrape of the L01 book page with a Pydantic v2 `model_json_schema()` schema (`$schema`, `title`, nullable `anyOf`, `default`, `pattern`, `format`) | Accepted; title, price, UPC, availability and reviews read from the page, each with its evidence (`h1[0]`, `p.price_color`, the table row, `fetch` for the URL); the missing ISBN is `null` with an issue | scrape-formats.json |
+| J02 | Scrape of a catalog.data.gov dataset page with a zod-to-json-schema schema (draft-07 `$schema`, root `$ref` into `definitions`, nullable type lists, `enum`, `pattern`) | Accepted; the DCAT fields from the page's metadata table with their rows as evidence; the missing `spatial` is `null` with an issue | scrape-formats.json |
+| J03 | Scrape of the L01 book page with a `json` format that has a prompt and no schema | HTTP 400 `invalid_request`, as documented: W2L does not extract JSON without a schema | scrape-formats.json |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

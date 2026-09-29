@@ -65,7 +65,7 @@
       "$ref": "#/$defs/extractor"
     },
     "fieldEvidence": {
-      "description": "For a JSON request: a JSON Pointer into json.data mapped to where that value was read. A value read from the page, or given by the model fallback, has an entry; a value W2L took from the fetch itself (the URL) or from the content title has none, and neither has a field that is absent or null. An empty object when no value has one; null when JSON was not requested.",
+      "description": "For a JSON request: a JSON Pointer into json.data mapped to where that value was read. Every value has an entry: one read from the page (the content title included), one W2L took from the fetch itself (the URL), the page type W2L inferred, and one given by the model fallback. A field that is absent or null has none. An empty object when no value has one; null when JSON was not requested.",
       "anyOf": [
         {
           "type": "object",
@@ -205,11 +205,11 @@
       "required": ["source", "locator"],
       "properties": {
         "source": {
-          "description": "What the value was read from: jsonld, microdata, meta (a meta tag), hydration (the page's embedded application state), dom (the page's markup, including its own label/value rows), text (visible prose), inferred (derived from context, such as a currency from the domain) or model (the configured model fallback). pdf is reserved for text read from a PDF, whose locator will name the page; no lane emits it yet.",
-          "enum": ["jsonld", "microdata", "meta", "hydration", "dom", "text", "inferred", "model", "pdf"]
+          "description": "What the value was read from: jsonld, microdata, meta (a meta tag), hydration (the page's embedded application state), dom (the page's markup, including its own label/value rows, its first main-content heading and its <title>), text (visible prose), inferred (derived from context, such as a currency from the domain or the page type W2L classified), model (the configured model fallback) or fetch (the fetch itself, not the page: its final or requested URL). pdf is reserved for text read from a PDF, whose locator will name the page; no lane emits it yet.",
+          "enum": ["jsonld", "microdata", "meta", "hydration", "dom", "text", "inferred", "model", "fetch", "pdf"]
         },
         "locator": {
-          "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector, or table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content, zero-based in document order; for pdf, the page. Null when the source gives no location: model, and for now JSON-LD, microdata and meta values outside the Amazon adapter, whose extraction does not record where it read them.",
+          "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector (title for the page's <title>), table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content and h1[0] for its first heading, zero-based in document order; for fetch, the result field (finalUrl, requestedUrl); for inferred, the result field holding W2L's inference (document.pageType, document.product.kind); for pdf, the page. Null when the source gives no location: model, and for now JSON-LD, microdata and meta values outside the Amazon adapter, whose extraction does not record where it read them.",
           "type": ["string", "null"]
         }
       }

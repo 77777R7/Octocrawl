@@ -55,6 +55,69 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     })).toThrow('only supports local $ref')
   })
 
+  it('accepts Pydantic and zod-to-json-schema output: annotations, assertions, nullable anyOf and definitions', () => {
+    const url = 'https://example.com/product'
+    const pydantic = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema', title: 'Book', description: 'A catalogue page.', type: 'object',
+      properties: {
+        title: { title: 'Title', type: 'string', minLength: 1, maxLength: 300 },
+        price: { title: 'Price', anyOf: [{ type: 'number', minimum: 0, exclusiveMaximum: 1e6 }, { type: 'null' }], default: null, examples: [51.77] },
+        upc: { title: 'Upc', type: 'string', pattern: '^[0-9a-f]{16}$' },
+        format: { title: 'Format', const: 'paperback' },
+        url: { title: 'Url', type: 'string', format: 'uri', readOnly: true },
+        rating: { title: 'Rating', oneOf: [{ type: 'integer', maximum: 5 }, { type: 'string', enum: ['One', 'Two'] }] },
+        tags: { title: 'Tags', type: 'array', items: { type: 'string' }, maxItems: 10, uniqueItems: true },
+        author: { anyOf: [{ $ref: '#/$defs/Author' }, { type: 'null' }], default: null },
+      },
+      required: ['title', 'price'],
+      $defs: { Author: { title: 'Author', type: 'object', properties: { name: { type: 'string', description: 'Full name' }, parent: { $ref: '#/$defs/Author', description: 'Recursive' } }, required: ['name'] } },
+    }
+    const zod = {
+      $ref: '#/definitions/Book', $schema: 'http://json-schema.org/draft-07/schema#',
+      definitions: { Book: { type: 'object', properties: { title: { type: 'string' }, subtitle: { type: ['string', 'null'] }, related: { $ref: '#' } }, required: ['title'], additionalProperties: false } },
+    }
+    for (const schema of [pydantic, zod]) {
+      const req = parseScrapeRequest({ url, formats: ['markdown', { type: 'json', schema }] })
+      expect(req.formats?.[1]).toEqual({ type: 'json', schema })
+    }
+  })
+
+  it('refuses JSON Schema keywords W2L cannot honour by name and location, and malformed ones as invalid', () => {
+    const url = 'https://example.com/product'
+    const refused = (schema: unknown) => thrown(() => parseScrapeRequest({ url, formats: ['links', { type: 'json', schema }] }))
+    const object = (properties: Record<string, unknown>) => ({ type: 'object', properties })
+    const unsupported: Array<[unknown, string]> = [
+      [object({ author: { allOf: [{ type: 'object' }] } }), 'formats[1].schema.properties.author.allOf'],
+      [object({ price: { not: { type: 'null' } } }), 'formats[1].schema.properties.price.not'],
+      [{ ...object({}), patternProperties: { '^x': { type: 'string' } } }, 'formats[1].schema.patternProperties'],
+      [object({ price: { type: 'number', nullable: true } }), 'formats[1].schema.properties.price.nullable'],
+      [object({ pet: { anyOf: [object({ bark: { type: 'string' } }), object({ purr: { type: 'string' } })] } }), 'formats[1].schema.properties.pet.anyOf'],
+      [object({ author: { $ref: '#/$defs/A', type: 'object' } }), 'formats[1].schema.properties.author.type'],
+      [object({ author: { $id: 'https://example.com/author', type: 'object' } }), 'formats[1].schema.properties.author.$id'],
+      [{ $schema: 'http://json-schema.org/draft-04/schema#', ...object({}) }, 'formats[1].schema.$schema'],
+    ]
+    for (const [schema, parameter] of unsupported) {
+      const error = refused(schema)
+      expect(error, parameter).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: [parameter] } })
+      expect((error as Error).message).toContain(parameter.split('.').pop())
+    }
+    const invalid: Array<[unknown, string]> = [
+      [object({ upc: { type: 'string', pattern: '(' } }), 'pattern'],
+      [object({ price: { type: 'number', minimum: '0' } }), 'minimum'],
+      [object({ tags: { type: 'array', items: [{ type: 'string' }] } }), 'items'],
+      [object({ author: { $ref: '#/$defs/Missing' } }), '#/$defs/Missing'],
+      [{ ...object({ author: { $ref: '#/$defs/A' } }), $defs: { A: { $ref: '#/$defs/B' }, B: { $ref: '#/$defs/A' } } }, 'leads only to itself'],
+    ]
+    for (const [schema, keyword] of invalid) {
+      const error = refused(schema)
+      expect(error, keyword).toMatchObject({ status: 400, code: 'invalid_request' })
+      expect((error as Error).message).toContain(keyword)
+    }
+    let deep: Record<string, unknown> = { type: 'string' }
+    for (let level = 0; level < 5; level++) deep = object({ child: { anyOf: [deep, { type: 'null' }] } })
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'json', schema: deep }] })).toThrow('json schema must be at most 8 levels deep')
+  })
+
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
     expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
