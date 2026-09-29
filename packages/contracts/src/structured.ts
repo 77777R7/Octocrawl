@@ -7,17 +7,50 @@ import type {
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
-/** The deliberately small JSON Schema subset accepted by scrape. */
+/**
+ * The JSON Schema subset accepted by scrape (`readSchema` in api.ts checks
+ * it): the structure extraction maps, the assertions it checks on the result
+ * and annotations it ignores. `default` is never filled in and `format` is
+ * not checked.
+ */
 export interface JsonSchema {
+  /** Root only: draft-07, 2019-09 or 2020-12. */
+  $schema?: string
+  /** Root only. */
+  $id?: string
   $ref?: string
   type?: 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null' | readonly ('object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null')[]
   properties?: Readonly<Record<string, JsonSchema>>
   required?: readonly string[]
   items?: JsonSchema
   enum?: readonly JsonValue[]
-  description?: string
+  const?: JsonValue
+  /** A schema and `{ type: 'null' }`, or primitive types only. */
+  anyOf?: readonly JsonSchema[]
+  oneOf?: readonly JsonSchema[]
   additionalProperties?: boolean | JsonSchema
   $defs?: Readonly<Record<string, JsonSchema>>
+  definitions?: Readonly<Record<string, JsonSchema>>
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  exclusiveMaximum?: number
+  multipleOf?: number
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+  minItems?: number
+  maxItems?: number
+  uniqueItems?: boolean
+  title?: string
+  description?: string
+  $comment?: string
+  default?: JsonValue
+  examples?: readonly JsonValue[]
+  deprecated?: boolean
+  readOnly?: boolean
+  writeOnly?: boolean
+  format?: string
 }
 
 export interface JsonFormatRequest {
@@ -33,7 +66,8 @@ export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string
-  source: ProductFactSource | 'hydration'
+  /** `fetch`: the value is the fetch's own (`finalUrl`, `requestedUrl`), not read from the page. */
+  source: ProductFactSource | 'hydration' | 'fetch'
   evidencePath?: string
 }
 
@@ -67,6 +101,13 @@ export interface StructuredModelUsage {
   outputTokens: number | null
   /** Unknown provider pricing stays unknown. */
   externalCostUsd: number | null
+  /**
+   * True when the request used strict structured outputs with a strict-safe
+   * schema W2L derived from the caller's; false when it sent the caller's
+   * schema without strict mode, which cannot express it (`strictReason`).
+   */
+  strict?: boolean
+  strictReason?: string
 }
 
 export interface CanonicalStructuredData {

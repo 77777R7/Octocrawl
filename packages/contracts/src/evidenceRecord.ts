@@ -14,11 +14,12 @@ import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from 
 export const EVIDENCE_SCHEMA_VERSION = 'w2l.evidence/1'
 
 /**
- * Where a JSON field's value was read. `pdf` is reserved for the PDF text
- * that file download will add (its locator names the page); no lane emits it
- * yet.
+ * Where a JSON field's value was read. `fetch` is the fetch's own value (its
+ * final or requested URL), not read from the page. `pdf` is reserved for the
+ * PDF text that file download will add (its locator names the page); no lane
+ * emits it yet.
  */
-export const FIELD_EVIDENCE_SOURCES = ['jsonld', 'microdata', 'meta', 'hydration', 'dom', 'text', 'inferred', 'model', 'pdf'] as const
+export const FIELD_EVIDENCE_SOURCES = ['jsonld', 'microdata', 'meta', 'hydration', 'dom', 'text', 'inferred', 'model', 'fetch', 'pdf'] as const
 export type FieldEvidenceSource = (typeof FIELD_EVIDENCE_SOURCES)[number]
 
 /**
@@ -74,7 +75,7 @@ export interface EvidenceExtractor {
 
 export interface EvidenceFieldLocation {
   source: FieldEvidenceSource
-  /** JSON-LD path, DOM selector, `table[i] tr[j] "label"`, and later `page N`; null when the source gives none. */
+  /** JSON-LD path, DOM selector, `table[i] tr[j] "label"`, `h1[0]`, a result field such as `finalUrl`, and later `page N`; null when the source gives none. */
   locator: string | null
 }
 
