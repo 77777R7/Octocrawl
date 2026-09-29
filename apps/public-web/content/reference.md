@@ -8,6 +8,44 @@ The local API has `POST /v1/scrape` for one URL, `POST /v1/batches` for an expli
 
 Start the repository API only after reviewing its network and task-store settings. For full request shapes and examples, use the repository's `docs/onboarding.md`, `docs/batch-scrape.md`, and `examples/monitor-workflow.ts` from the **same checkout and commit** as the running service. Mixing a guide from another branch with a local server can change the apparent contract.
 
+## Errors
+
+When the API refuses or fails a request, it returns an error body instead of a result:
+
+```json
+{ "error": "unsupported format: html (supported: markdown, links, json)", "code": "unsupported_format", "details": { "formats": ["html"] } }
+```
+
+Branch on `code`; `error` is written for people. `details` appears only with `unsupported_parameter` and `unsupported_format` and lists the rejected names as sent, in `parameters` and `formats`. The Firecrawl shim (`/fc`) returns the same fields after `"success": false`.
+
+| Code | HTTP | Meaning | Typical cause | What to do |
+| --- | --- | --- | --- | --- |
+| `invalid_json` | 400 | The body is not valid JSON. | A truncated or hand-edited body. | Send one JSON object. |
+| `invalid_request` | 400 | A value is missing, malformed or out of range. | No `url`, a non-HTTP(S) URL, an invalid `includePaths` pattern, a JSON Schema over its limits. Also, for now, a batch refused because another is still being accepted or the active-batch limit is reached. | Correct what the message names; retry a refused batch later. |
+| `unsupported_parameter` | 400 | The request names a parameter W2L does not support, or a value it cannot honour. Nothing is ignored silently. | A Firecrawl option such as `actions` or `proxy`, `limit` on native crawl (it takes `maxPages`), `ignoreSitemap: false` on `/fc`. | Remove or change what `details.parameters` lists. |
+| `unsupported_format` | 400 | A requested format is not produced. | `html`, `rawHtml` or `screenshot`. | Ask for `markdown`, `links` or `json` (on `/fc`: `markdown`, `links`). |
+| `unauthorized` | 401 | The bearer token is missing or wrong. | A server started with `--token` or `--hosted`. | Send `Authorization: Bearer <token>`. |
+| `not_found` | 404 | The task, monitor, run, destination, delivery or session does not exist, or no route matches. | A mistyped ID, another task directory, a Firecrawl v2 path on `/fc`. | Check the ID and the path. |
+| `conflict` | 409 | The resource's current state does not allow the request. | A monitor revision out of sequence or on a running monitor; a run queued on a paused, busy or unknown monitor; a retry of a delivery that is not dead-lettered. | Read the resource's state first; the same request fails again. |
+| `internal_error` | 500 | W2L failed unexpectedly. | A bug or a storage failure. | Retry once, then report it. A local server returns the underlying message; a hosted server (`--hosted`, remote MCP) returns `internal error` and writes the cause to its log. |
+
+These codes describe the request, not the page. A page that was fetched but blocked or failed is a normal result with its `status` and reason (see [result states](/docs/limits/)); on `/fc` it is HTTP 200 with `success: false`, no `code`, and the reason in `data.metadata.error`.
+
+The SDK throws `W2LError` for every error response. It carries `status`, `code` (when the body had one), `method`, `path` and the parsed `body`; its message is still `<METHOD> <path> failed: <status> <body>`, or `crawl not found: <id>` and `batch not found: <id>` for those lookups. A request that never reached the API throws the underlying `fetch` error, and `waitBatch` / `waitCrawl` throw `WaitTimeoutError` when `timeoutMs` runs out.
+
+```ts
+import { W2LError } from '@w2l/sdk'
+
+try {
+  await w2l.getCrawl(taskId)
+} catch (error) {
+  if (!(error instanceof W2LError) || error.code !== 'not_found') throw error
+  // The ID is wrong or belongs to another task directory.
+}
+```
+
+MCP tool errors start with the same code, for example `unsupported_format: POST /v1/scrape failed: 400 {"error":...}`, and their JSON-RPC error `data` is `{ "code": "unsupported_format", "status": 400 }`. Successful tool results are unchanged.
+
 ## Self-hosted operation
 
 The local managed MCP service starts the API, scheduler, and delivery worker together; task state is SQLite-backed. Keep its task directory across restarts. The anonymous page preview is a separate request-based service and does not run persistent Monitor or Delivery tasks. A remote owner-only MCP implementation exists, but its WorkOS login, public URL, and hosted restart acceptance have not been completed.

@@ -68,6 +68,17 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: true, origin: 'js-sdk@1.29.3' })).toEqual({
       url: 'https://example.com/',
       formats: ['markdown', 'links'],
+      onlyMainContent: true,
+    })
+    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', onlyMainContent: false, waitFor: 2000, timeout: 15000 })).toMatchObject({
+      onlyMainContent: false,
+      waitFor: 2000,
+      timeout: 15000,
+    })
+    expect(parseFirecrawlCrawlRequest({ url: 'https://example.com/', scrapeOptions: { onlyMainContent: false, waitFor: 500, timeout: 8000 } })).toMatchObject({
+      onlyMainContent: false,
+      waitFor: 500,
+      timeout: 8000,
     })
     expect(
       parseFirecrawlCrawlRequest({
@@ -93,11 +104,27 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html'] })).toThrow('unsupported format: html (the /fc shim supports markdown, links)')
-    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], waitFor: 500, timeout: 5000 })).toThrow('unsupported parameters: actions, waitFor, timeout')
-    expect(() => parseFirecrawlScrapeRequest({ url, onlyMainContent: false })).toThrow('onlyMainContent: false is not supported')
-    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['html'], waitFor: 1 } }))
-      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.waitFor; unsupported format: html')
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], mobile: true, waitFor: 500 })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['html'], headers: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.headers; unsupported format: html')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
+  })
+
+  it('gives shim rejections a code and names what was rejected in details', () => {
+    const url = 'https://example.com/'
+    const thrown = (fn: () => unknown): unknown => {
+      try { fn() } catch (error) { return error }
+      return undefined
+    }
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html', 'screenshot'] })))
+      .toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    // Parameters and formats together: the parameter code wins and details keep both lists.
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['html'], actions: [] } })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['html'] } })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreSitemap'] } })
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url: 'ftp://example.com/' }))).toMatchObject({ code: 'invalid_request' })
   })
 
   it('rejects a missing url the same way the native parser does', () => {

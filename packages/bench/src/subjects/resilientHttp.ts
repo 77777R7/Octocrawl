@@ -4,14 +4,15 @@ import {
   QUALITY_ESCALATION_MAX_TOKENS,
   type CrawlMode,
   type ExecutionContext,
+  type FetchOptions,
   type FetchResult,
   type NetworkPolicy,
   type TraceEvent,
 } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
-import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
+import { ProxyAgent, request, type Dispatcher } from 'undici'
+import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -37,11 +38,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private readonly prepared: ReturnType<typeof prepareHttpIdentity>
-  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
-  private readonly dispatcher: Agent
+  private readonly egress: EgressRoutes
   private readonly localPreviewProxy: ProxyAgent | null
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
@@ -53,13 +54,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.dispatcher = createGuardedDispatcher(this.networkPolicy)
+    this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed)
     const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait) => async (url, init) => {
+    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
+      const envProxy = this.envProxyFor(url)
+      if (envProxy !== null) onEnvProxy?.(url, envProxy)
       const response = await request(url, {
         dispatcher: this.dispatcherFor(url),
         method: 'GET',
@@ -68,7 +71,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         // Validators are bound to one representation; never forward on redirects.
         headers: { ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}) },
         signal: init.signal ?? signal,
-      })
+      }).catch((error: unknown) => { throw proxyRefusal(error) ?? error })
       const responseHeaders = response.headers
       let body: string | undefined
       return {
@@ -92,37 +95,44 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private dispatcherFor(url: string): Dispatcher {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.dispatcher
+    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.egress.dispatcherFor(url)
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  /** `host:port` of the environment proxy a request to this URL goes through; null when it does not. */
+  private envProxyFor(url: string): string | null {
+    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? null : this.egress.proxyFor(url)?.endpoint ?? null
+  }
+
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
     const origin = new URL(url).origin
+    const deadlinePassed = () => scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs
+    // A timeout the deadline caused says so in usage. budgetExceeded stays
+    // null: the contract reserves it for status budget_exceeded.
+    const markDeadline = (result: FetchResult): FetchResult =>
+      result.failureReason === 'timeout' && deadlinePassed() ? { ...result, usage: { ...result.usage, deadlineExceeded: true } } : result
     let permit: OriginPermit | undefined
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs)
-      return scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs
-        ? { ...result, budgetExceeded: 'time' }
-        : result
+      return markDeadline(await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const retryAt = this.scheduler.retryAt(origin)
       const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
-      return scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs ? { ...timed, budgetExceeded: 'time' } : timed
+      return markDeadline(timed)
     } finally {
       scope.dispose()
       permit?.release()
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions): Promise<FetchResult> {
     const { signal, deadlineAt, onRetryAfter } = execution
     const start = Date.now()
     let robotsMs = 0
@@ -214,6 +224,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
+    }, (target, proxy) => {
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
     }), {
       signal,
       deadlineAt,
@@ -290,6 +302,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         cacheControl: out.headers?.get('cache-control') ?? null,
         vary: out.headers?.get('vary') ?? null,
         setsCookie: out.headers?.get('set-cookie') != null,
+        ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}),
       },
       usage: {
         wallMs,
@@ -340,7 +353,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     })
     // An error status is never content, but its page is what the server
     // said: the failed or blocked result keeps it as evidence.
-    const errorPage = errorPageEvidence(out.status, base.evidence.contentType, body, out.finalUrl)
+    const errorPage = errorPageEvidence(out.status, base.evidence.contentType, body, out.finalUrl, options)
     const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
       const next = escalationForBlock(verdict.reason, 'http')
@@ -414,6 +427,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         confidence: extracted.confidence,
         escalate: extracted.escalate,
         linkCount: links.length,
+        ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
       },
     })
 
@@ -442,32 +456,42 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     const formatStart = performance.now()
-    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    const mainMarkdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    // onlyMainContent: false emits the whole page (header, navigation and
+    // footer kept) through the same converter and base URL. The quality
+    // signal below still reads the main content, so the mode never changes
+    // which lane answers.
+    const markdown = options.onlyMainContent === false ? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
     formatMs = performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
+    const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
 
     // Quality signal: a success whose content is thin AND low-confidence is
     // a success worth offering to a higher lane. So is a page whose tables
-    // are empty shells: their rows arrive by script, so this HTML cannot hold
-    // the data however confident the extraction looks. The status stays
+    // are empty shells, or that declares data its scripts will fetch: that
+    // content arrives by script, so this HTML cannot hold it however
+    // confident the extraction looks. The status stays
     // success — this is not a rewritten verdict — but the ladder reads this
     // event as "the HTTP answer is below the quality bar, try the browser".
     const emptyTableShells = extracted.emptyTableShells ?? 0
+    const fetchPreloads = extracted.fetchPreloads ?? 0
     if (
-      (contentTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
+      (mainTokens <= QUALITY_ESCALATION_MAX_TOKENS &&
         extracted.confidence <= QUALITY_ESCALATION_MAX_CONFIDENCE) ||
-      emptyTableShells > 0
+      emptyTableShells > 0 ||
+      fetchPreloads > 0
     ) {
       trace.push({
         at: wallMs,
         lane: 'http',
         event: 'quality_low_yield',
         detail: {
-          contentTokens,
+          contentTokens: mainTokens,
           confidence: extracted.confidence,
           pageType: extracted.pageType,
           strategy: extracted.strategy,
           emptyTableShells,
+          fetchPreloads,
         },
       })
     }
@@ -491,6 +515,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         adapter: extracted.adapter,
         entities: extracted.entities,
         adapterValidation: extracted.adapterValidation,
+        labelledValues: extracted.labelledValues,
       },
       usage: { ...base.usage, contentTokens },
     })
@@ -533,7 +558,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   async teardown(): Promise<void> {
-    this.teardownPromise ??= Promise.all([this.dispatcher.close(), this.localPreviewProxy?.close()]).then(() => {})
+    this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close()]).then(() => {})
     await this.teardownPromise
   }
+}
+
+/**
+ * Undici reports a proxy that refuses the CONNECT tunnel as an AbortError,
+ * which would read as our own timeout. It is a connection failure.
+ */
+function proxyRefusal(error: unknown): Error | null {
+  if (!(error instanceof Error) || (error as { code?: unknown }).code !== 'UND_ERR_ABORTED' || !error.message.startsWith('Proxy response (')) return null
+  const refusal = new Error(error.message, { cause: error })
+  refusal.name = 'ProxyConnectError'
+  return refusal
 }

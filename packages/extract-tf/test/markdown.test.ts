@@ -21,6 +21,13 @@ describe('htmlToMarkdown', () => {
     expect(md).toContain('| 1 | 2 |')
   })
 
+  it('keeps an empty corner header cell empty instead of inventing its text', () => {
+    const md = htmlToMarkdown(
+      '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',
+    )
+    expect(md).toBe('|  | 2023 | 2024 |\n| --- | --- | --- |\n| Exports | 12 | 14 |')
+  })
+
   it('keeps required facts after extract-tf on the article fixture', () => {
     const html = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>

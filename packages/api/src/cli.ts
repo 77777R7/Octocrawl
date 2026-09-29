@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
   })
-  const app = createApp(engine, { token: listen.token })
+  const app = createApp(engine, { token: listen.token, exposeInternalErrors: listen.mode === 'local' })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
   let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => {
@@ -23,6 +23,7 @@ async function main(): Promise<void> {
     server.close()
     void engine.close({cancelActive: true}).catch((error) => { console.error(error); process.exitCode = 1 })
   })
+  for (const notice of listen.notices) console.log(`w2l-api: ${notice}`)
   console.log(`w2l-api ${listen.mode} listening on http://${listen.host}:${listen.port}`)
 }
 

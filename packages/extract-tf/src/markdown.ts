@@ -131,8 +131,9 @@ function tableToGfm(table: Element): string {
   )
   if (rows.every((row) => row.length === 0)) return ''
   const grid = expandGrid(rows)
+  // An empty corner cell stays empty: GFM allows it, and any text put there
+  // would not be on the page.
   const header = grid[0]!
-  if (header[0] === '') header[0] = '(header)'
   const lines: string[] = []
   if (caption) lines.push(caption)
   lines.push(`| ${header.join(' | ')} |`)

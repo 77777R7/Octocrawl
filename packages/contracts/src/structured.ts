@@ -41,14 +41,18 @@ export type StructuredIssueCode =
   | 'adapter_unavailable'
   | 'subject_unverified'
   | 'field_unavailable'
+  /** Page labels matching the field state different values, so none was chosen. */
+  | 'field_ambiguous'
   | 'missing_required'
   | 'schema_invalid'
   | 'model_unavailable'
   | 'model_provider_error'
   | 'model_output_invalid'
   | 'model_timeout'
-  /** The page status is not `success`, so no fields were read from it. */
+  /** The page status is neither `success` nor `partial`, so no fields were read from it. */
   | 'page_unsuccessful'
+  /** The page is `partial` (a timeout ended the scrape): fields come from the content fetched so far, never a complete result. */
+  | 'page_partial'
 
 export interface StructuredExtractionIssue {
   code: StructuredIssueCode

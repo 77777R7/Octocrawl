@@ -53,6 +53,12 @@ export interface ResourceUsage {
   externalCostUsd: number | null
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
+  /**
+   * True when the caller's deadline (a scrape's `timeout`) ended this fetch
+   * before it finished: the result is then `partial` with the content
+   * fetched so far, or `failed` with `timeout`. Absent otherwise.
+   */
+  deadlineExceeded?: boolean
 }
 
 export interface Meter {
@@ -77,6 +83,14 @@ export interface Evidence {
   vary?: string | null
   /** A response setting cookies cannot enter the public monitor cache. */
   setsCookie?: boolean
+  /**
+   * `host:port` of the operator's environment proxy (local mode) that the
+   * request for `finalUrl` went through; never its credentials. Null when that
+   * request did not use it (NO_PROXY, loopback). Absent when no environment
+   * proxy was configured, no request was answered, or the lane does not
+   * report its route (the provider lane).
+   */
+  envProxy?: string | null
 }
 
 export interface TraceEvent {

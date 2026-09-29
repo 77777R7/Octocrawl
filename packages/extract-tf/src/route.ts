@@ -15,7 +15,8 @@
  */
 
 import type { PageType } from '@w2l/contracts'
-import { commonAncestor, qsa } from './dom.js'
+import { commonAncestor, qsa, tagOf } from './dom.js'
+import { visiblePrices } from './product.js'
 
 interface RouterCounts {
   li: number
@@ -29,12 +30,34 @@ interface RouterCounts {
   headings: number
   /** Links per 100 chars of visible text — div-based listings have high density. */
   linkDensity: number
+  /** A visible buy box (see hasVisibleBuyBox). */
+  buyBox: boolean
+}
+
+/**
+ * A product page that declares nothing machine-readable (books.toscrape.com):
+ * the page's one h1, then its one visible price in the h1's own section, with
+ * no other heading between them and not inside a list item. A price under
+ * another heading, or in a list item, belongs to a listed item, and several
+ * prices make a listing.
+ */
+function hasVisibleBuyBox(doc: Document): boolean {
+  const h1s = qsa(doc, 'h1')
+  const prices = visiblePrices(doc)
+  if (h1s.length !== 1 || prices.length !== 1 || prices[0]!.closest('li') !== null) return false
+  let heading: Element | null = null
+  for (const el of qsa(doc, '*')) {
+    if (el === prices[0]) break
+    if (/^h[1-6]$/.test(tagOf(el))) heading = el
+  }
+  return heading === h1s[0]
 }
 
 function countAll(doc: Document): RouterCounts {
   const textChars = (doc.body?.textContent ?? '').replace(/\s+/g, ' ').trim().length
   const a = qsa(doc, 'a').length
   return {
+    buyBox: hasVisibleBuyBox(doc),
     li: qsa(doc, 'li').length,
     a,
     table: qsa(doc, 'table').length,
@@ -177,6 +200,14 @@ function hasProductSignals(s: PageSignals): boolean {
   return countTokens(s.itempropTokens, PRICE_ITEMPROPS) >= 2
 }
 
+/** Article and its common schema.org subtypes. */
+const ARTICLE_TYPES = ['article', 'newsarticle', 'blogposting', 'report', 'scholarlyarticle', 'techarticle'] as const
+
+/** The publisher declares the page an article: a price on it is not the page's product. */
+function hasArticleSignals(s: PageSignals): boolean {
+  return ARTICLE_TYPES.some((t) => hasToken(s.jsonLdTypes, t) || hasToken(s.itemTypeTokens, t))
+}
+
 function hasOfferCatalogSignals(s: PageSignals): boolean {
   return hasToken(s.jsonLdTypes, 'offercatalog') || hasToken(s.itemTypeTokens, 'offercatalog')
 }
@@ -210,6 +241,11 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Semantic forum signals (multiple posts, DiscussionForumPosting).
   // Still extracted by the article cascade.
   if (hasForumSignals(s)) return { type: 'forum', strategy: 'article' }
+
+  // A visible buy box is a product page that declares nothing: the product
+  // strategy anchors on the same heading and price. A page its publisher
+  // declares an article (a price box under a news headline) is not one.
+  if (c.buyBox && !hasArticleSignals(s)) return { type: 'product', strategy: 'product' }
 
   // Documentation / reference pages: breadcrumbs and in-page TOC look like
   // lists, but several prose paragraphs under <main> are the payload.
@@ -319,6 +355,67 @@ export function selectList(doc: Document): Element | null {
     }
   }
   return bestDiv
+}
+
+/** Text of a node outside any link. */
+function textOutsideLinks(node: Node): string {
+  let text = ''
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === 3) text += child.textContent ?? ''
+    else if (child.nodeType === 1 && (child as Element).tagName.toLowerCase() !== 'a') text += ` ${textOutsideLinks(child)}`
+  }
+  return text
+}
+
+/**
+ * A listing card: an item carrying a link and text of its own besides the
+ * link (a price, a date, a description). A menu or breadcrumb item is only
+ * its link and never qualifies.
+ */
+function isCard(item: Element): boolean {
+  if (qsa(item, 'a[href]').length === 0) return false
+  return (textOutsideLinks(item).match(/[\p{L}\p{N}]/gu) ?? []).length >= 3
+}
+
+/**
+ * Last resort when no strategy found a region: a listing of cards, which the
+ * article cascade cannot see. Each card's text is mostly its title link, and
+ * the rest (a price, a date, a short description) is too short to be prose,
+ * so a sparse listing yields no text block at all. A listing here is at
+ * least three sibling cards of one template (same tag and class) after the
+ * page's lone h1 and outside any header. The region widens to the container
+ * the cards share with the h1, so the heading and its introduction stay.
+ * Null otherwise: a page whose only structure is navigation, or an
+ * application shell, still has no content and escalates.
+ */
+export function selectCardList(doc: Document): Element | null {
+  const h1s = qsa(doc, 'h1')
+  if (h1s.length !== 1) return null
+  const h1 = h1s[0]!
+  // Document order by index: linkedom's compareDocumentPosition is unreliable
+  // across subtrees.
+  const all = qsa(doc, '*')
+  const h1At = all.indexOf(h1)
+  let best: Element | null = null
+  let bestCards = 0
+  for (const [at, el] of all.entries()) {
+    if (at <= h1At || el.children.length < 3 || h1.contains(el) || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
+    if (el.closest('header') !== null) continue
+    const templates = new Map<string, number>()
+    for (const kid of Array.from(el.children)) {
+      if (!isCard(kid)) continue
+      const template = `${kid.tagName} ${kid.getAttribute('class') ?? ''}`
+      templates.set(template, (templates.get(template) ?? 0) + 1)
+    }
+    const cards = Math.max(0, ...templates.values())
+    if (cards >= 3 && cards > bestCards) {
+      bestCards = cards
+      best = el
+    }
+  }
+  if (best === null) return null
+  const shared = commonAncestor(best, h1)
+  return shared !== null && shared !== doc.body && shared !== doc.documentElement ? shared : best
 }
 
 /**

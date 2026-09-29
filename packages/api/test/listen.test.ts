@@ -26,4 +26,21 @@ describe('parseListen', () => {
     expect(listen.defaultMaxPages).toBe(100)
     expect(listen.networkPolicy.privateAllowlist).toEqual([])
   })
+
+  it('local mode routes through the environment proxy unless W2L_PROXY=off', () => {
+    const env = { HTTPS_PROXY: 'http://127.0.0.1:7890', HTTP_PROXY: 'http://127.0.0.1:7890', NO_PROXY: 'localhost,127.0.0.1,::1,.local' }
+    const local = parseListen([], env)
+    expect(local.networkPolicy.egressProxy?.https?.endpoint).toBe('127.0.0.1:7890')
+    expect(local.networkPolicy.egressProxy?.noProxy).toEqual(['localhost', '127.0.0.1', '::1', '.local'])
+    expect(local.notices).toEqual([expect.stringContaining('environment proxy 127.0.0.1:7890')])
+    expect(parseListen([], { ...env, W2L_PROXY: 'off' }).networkPolicy.egressProxy).toBeUndefined()
+    expect(() => parseListen([], { HTTPS_PROXY: 'socks5://127.0.0.1:1080' })).toThrow(/W2L_PROXY=off/)
+  })
+
+  it('hosted mode never uses the proxy variables and says once that it ignored them', () => {
+    const hosted = parseListen(['--hosted', '--token', 'secret'], { HTTPS_PROXY: 'socks5://127.0.0.1:1080', NO_PROXY: 'localhost' })
+    expect(hosted.networkPolicy.egressProxy).toBeUndefined()
+    expect(hosted.notices).toEqual(['hosted mode ignores HTTPS_PROXY, NO_PROXY: outbound connections stay direct to validated addresses.'])
+    expect(parseListen(['--hosted', '--token', 'secret'], {}).notices).toEqual([])
+  })
 })

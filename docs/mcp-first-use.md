@@ -28,6 +28,12 @@ public URL or WorkOS login on this local path. Keep this checkout in place
 while the LaunchAgent points at it. On a non-macOS system, run
 `npm run local:mcp` in one terminal instead.
 
+If this Mac reaches the web through a proxy, add `HTTPS_PROXY=...`,
+`HTTP_PROXY=...` and `NO_PROXY=...` lines to `.w2l/local-mcp.env` (the
+LaunchAgent does not inherit your shell) and restart the service. Captures
+then follow them as described in the README; `W2L_PROXY=off` ignores them.
+The hosted process below never uses these variables.
+
 For a signed HTTPS receiver on the **same Mac**, install the separate
 LaunchAgent and explicitly allow the local delivery worker to reach its
 verified loopback certificate:

@@ -56,13 +56,24 @@ const book = `<html><head><title>A Light in the Attic | Books to Scrape - Sandbo
 <table class="table table-striped"><tr><th>UPC</th><td>a897fe39b1053632</td></tr><tr><th>Number of reviews</th><td>0</td></tr></table></article></body></html>`
 const lamp = `<html><head><title>Harbour lamp | Shop</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Harbour lamp","sku":"HL-1","offers":{"@type":"Offer","price":"19.00","priceCurrency":"GBP"}}</script></head>
 <body><main><h1>Harbour lamp</h1><p>A brass harbour lamp with a frosted glass shade, sized for a desk or a bedside table and wired for a standard bulb.</p></main></body></html>`
+/** The L01 book page: a visible price and the "Product Information" table. */
+const bookInformation = `<html><head><title>A Light in the Attic | Books to Scrape - Sandbox</title></head><body>
+<ul class="breadcrumb"><li><a href="../../index.html">Home</a></li><li><a href="../category/books_1/index.html">Books</a></li><li><a href="../category/books/poetry_23/index.html">Poetry</a></li><li class="active">A Light in the Attic</li></ul>
+<article class="product_page"><div class="row"><div class="col-sm-6 product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p>
+<p class="instock availability">In stock (22 available)</p></div></div>
+<div class="sub-header"><h2>Product Description</h2></div>
+<p>It's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings celebrates its 20th anniversary with this special edition.</p>
+<div class="sub-header"><h2>Product Information</h2></div>
+<table class="table table-striped"><tr><th>UPC</th><td>a897fe39b1053632</td></tr><tr><th>Product Type</th><td>Books</td></tr>
+<tr><th>Price (excl. tax)</th><td>£51.77</td></tr><tr><th>Price (incl. tax)</th><td>£51.77</td></tr><tr><th>Tax</th><td>£0.00</td></tr>
+<tr><th>Availability</th><td>In stock (22 available)</td></tr><tr><th>Number of reviews</th><td>0</td></tr></table></article></body></html>`
 
 /** A FetchResult for inline HTML, with the document the HTTP lane attaches. */
 function page(html: string, url = 'https://books.example/catalogue/a-light-in-the-attic_1000/index.html'): FetchResult {
   const out = extractTf.extract(html, { url })
   return {
     ...result, requestedUrl: url, markdown: 'page', evidence: { ...result.evidence, finalUrl: url },
-    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation },
+    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation, labelledValues: out.labelledValues },
   }
 }
 const json = (properties: Record<string, JsonSchema>, required: string[], modelFallback = false): JsonFormatRequest => ({
@@ -221,6 +232,33 @@ describe('structured JSON extraction', () => {
     expect(observed).toMatchObject({ status: 'complete', data: { images: ['https://images.example/subject.jpg'], variants: [] }, issues: [] })
   })
 
+  it('maps page labels and the visible price to top-level keys and says where each came from', async () => {
+    const schema = json({ title: { type: 'string' }, price: { type: 'number' }, availability: { type: 'string' }, upc: { type: 'string' }, isbn: { type: 'string' }, numberOfReviews: { type: 'integer' } }, ['title', 'price', 'availability', 'upc', 'isbn'])
+    const out = await extractStructured(page(bookInformation), schema, {}, null)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ title: 'A Light in the Attic', price: 51.77, availability: 'In stock (22 available)', upc: 'a897fe39b1053632', numberOfReviews: 0 })
+    expect(out.issues).toEqual([{ code: 'missing_required', path: '/isbn', message: 'required field unavailable: /isbn' }])
+    expect(out.evidence).toEqual([
+      { path: '/price', source: 'text', evidencePath: 'p.price_color' },
+      { path: '/availability', source: 'dom', evidencePath: 'table[0] tr[5] "Availability"' },
+      { path: '/upc', source: 'dom', evidencePath: 'table[0] tr[0] "UPC"' },
+      { path: '/numberOfReviews', source: 'dom', evidencePath: 'table[0] tr[6] "Number of reviews"' },
+    ])
+  })
+
+  it('reports a field that page labels state differently as ambiguous instead of choosing one', async () => {
+    const html = `<html><head><title>Harbour lamp</title></head><body><main><h1>Harbour lamp</h1>
+<p>A brass harbour lamp with a frosted glass shade, wired for a standard bulb.</p>
+<table><tr><th>Price (excl. tax)</th><td>£40.00</td></tr><tr><th>Price (incl. tax)</th><td>£48.00</td></tr><tr><th>Stock</th><td>In stock (22 available)</td></tr></table></main></body></html>`
+    const out = await extractStructured(page(html, 'https://shop.example/lamp'), json({ price: { type: 'number' }, priceInclTax: { type: 'number' }, stock: { type: 'number' } }, ['price']), {}, null)
+    expect(out.status).toBe('incomplete')
+    // The exact label is not ambiguous; stock text is not one number, so it is not read as 22.
+    expect(out.data).toEqual({ priceInclTax: 48 })
+    expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/price'], ['missing_required', '/price']])
+    expect(out.issues[0]?.message).toContain('"Price (excl. tax)" = "£40.00"')
+    expect(out.issues[0]?.message).toContain('"Price (incl. tax)" = "£48.00"')
+  })
+
   it('does not fill a nested field from a page-level value that shares its key', async () => {
     const schema = json({ title: { type: 'string' }, author: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }, ['title', 'author'])
     const out = await extractStructured(page(book), schema, {}, null)
@@ -258,6 +296,21 @@ describe('structured JSON extraction', () => {
     // The canonical adapter envelope does not publish entities from such a page either.
     const canonical = await extractStructured({ ...result, status: 'failed', failureReason: 'identity_compromised', markdown: null })
     expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [] }, issues: [{ code: 'page_unsuccessful' }] })
+  })
+
+  it('reads fields from a partial page but never reports it complete and never calls the model', async () => {
+    const partial: FetchResult = { ...page(book), status: 'partial', usage: { ...result.usage, deadlineExceeded: true } }
+    let calls = 0
+    const custom = await extractStructured(partial, json({ title: { type: 'string' }, reviews: { type: 'array', items: { type: 'string' } } }, ['title', 'reviews'], true), {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: (async () => { calls++; return new Response('{}') }) as typeof fetch,
+    })
+    expect(calls).toBe(0)
+    expect(custom).toMatchObject({ status: 'incomplete', data: { title: 'A Light in the Attic' } })
+    expect(custom.issues.map(issue => issue.code)).toEqual(['page_partial', 'missing_required'])
+    const whole = await extractStructured(partial, json({ title: { type: 'string' } }, ['title']))
+    expect(whole).toMatchObject({ status: 'incomplete', data: { title: 'A Light in the Attic' }, issues: [{ code: 'page_partial' }] })
+    const canonical = await extractStructured({ ...result, status: 'partial' })
+    expect(canonical).toMatchObject({ status: 'incomplete', data: { entities: [{ id: 'B012345678' }] }, issues: [{ code: 'page_partial' }] })
   })
 
   it('keeps a failed page as evidence Markdown and never hands it to model fallback', async () => {

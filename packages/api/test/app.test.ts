@@ -224,8 +224,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const url = `${server.url}/crawl/listing`
     expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
       .toEqual({ status: 400, error: 'unsupported formats: html, rawHtml (supported: markdown, links, json)' })
-    expect(await post('/v1/scrape', { url, waitFor: 1000 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: waitFor') })
-    expect(await post('/v1/batches', { urls: [url], onlyMainContent: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: onlyMainContent') })
+    expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
+    expect(await post('/v1/batches', { urls: [url], mobile: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: mobile') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })
   })
 

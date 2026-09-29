@@ -7,6 +7,7 @@ import type {
   JsonFormatRequest,
   JsonSchema,
   JsonValue,
+  LabelledValue,
   ProductFact,
   ProductFacts,
   ScrapeFormat,
@@ -45,7 +46,73 @@ function numeric(value: string, integer = false): number | string {
   return Number.isFinite(parsed) ? (integer ? Math.trunc(parsed) : parsed) : value
 }
 
-function candidates(result: FetchResult): Map<string, Candidate> {
+/** A key or page label reduced to its letters and digits: "Number of reviews" matches numberOfReviews. */
+function labelKey(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+/** The same without bracketed qualifiers: "Price (excl. tax)" matches price. */
+function baseLabelKey(text: string): string {
+  return labelKey(text.replace(/\([^)]*\)|\[[^\]]*\]/g, ' '))
+}
+
+const CURRENCY = '(?:[$£€¥₹₽₩฿]|USD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|CHF|HKD|SGD|INR|KRW|BRL|MXN|SEK|NOK|DKK|PLN|TRY|ZAR)'
+/** Sign, currency, sign, whole part (thousands in groups of three), decimals, currency. */
+const AMOUNT_RE = new RegExp(`^([-−]?)(?:${CURRENCY}\\s?)?([-−]?)(\\d{1,3}(?:,\\d{3})+|\\d+)(\\.\\d+)?(?:\\s?${CURRENCY})?$`, 'u')
+
+/**
+ * Label text as the schema type, or undefined when it is not cleanly that
+ * type. A number is one amount, with a currency or thousands separators at
+ * most: "In stock (22 available)", "4.7 out of 5" and "18,50" are not.
+ */
+function labelValue(text: string, schema: JsonSchema): JsonValue | undefined {
+  const types = schemaTypes(schema)
+  if (types.length === 0 || types.includes('string')) return text
+  if (types.includes('number') || types.includes('integer')) {
+    const m = AMOUNT_RE.exec(text.trim())
+    if (m === null || (m[1] !== '' && m[2] !== '')) return undefined
+    const value = Number(`${m[1] || m[2] ? '-' : ''}${m[3]!.replace(/,/g, '')}${m[4] ?? ''}`)
+    return types.includes('number') || Number.isInteger(value) ? value : undefined
+  }
+  if (types.includes('boolean')) return /^(true|yes)$/i.test(text) ? true : /^(false|no)$/i.test(text) ? false : undefined
+  return undefined
+}
+
+/**
+ * Candidates from the page's own labels, for top-level keys no subject fact
+ * covers. A label equal to the key wins over one that only matches without
+ * its bracketed qualifier. When the matching labels state different values,
+ * or one of them is not of the key's type, nothing is chosen: the field stays
+ * absent and an issue names the labels.
+ */
+function addLabelCandidates(
+  map: Map<string, Candidate>,
+  root: JsonSchema,
+  labels: readonly LabelledValue[],
+  issues: StructuredExtractionIssue[],
+): void {
+  for (const [name, child] of Object.entries(resolveRef(root, root).properties ?? {})) {
+    const key = labelKey(name)
+    if (key.length === 0 || map.has(name.toLowerCase())) continue
+    const exact = labels.filter(item => labelKey(item.label) === key)
+    const matched = exact.length > 0 ? exact : labels.filter(item => baseLabelKey(item.label) === key)
+    if (matched.length === 0) continue
+    const values = matched.map(item => labelValue(item.value, resolveRef(root, child)))
+    if (values.every(value => value === undefined)) continue
+    if (values.some(value => value === undefined || JSON.stringify(value) !== JSON.stringify(values[0]))) {
+      issues.push({
+        code: 'field_ambiguous',
+        path: `/${name}`,
+        message: `page labels state different values for /${name}: ${matched.map(item => `${JSON.stringify(item.label)} = ${JSON.stringify(item.value)} (${item.path})`).join(', ')}`,
+      })
+      continue
+    }
+    const first = matched[0]!
+    map.set(name.toLowerCase(), { value: values[0]!, fact: { value: first.value, source: 'dom', path: `${first.path} ${JSON.stringify(first.label)}` } })
+  }
+}
+
+function candidates(result: FetchResult, schema?: JsonSchema, issues: StructuredExtractionIssue[] = []): Map<string, Candidate> {
   const map = new Map<string, Candidate>()
   const product = result.document?.product ?? null
   const put = (keys: readonly string[], fact: ProductFact | null | undefined, value?: JsonValue): void => {
@@ -61,6 +128,7 @@ function candidates(result: FetchResult): Map<string, Candidate> {
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType })
   if (product !== null) addProductCandidates(map, product, put)
+  if (schema !== undefined) addLabelCandidates(map, schema, result.document?.labelledValues ?? [], issues)
   return map
 }
 
@@ -242,10 +310,10 @@ function validationMessage(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? []).map(error => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`).join('; ') || 'model output did not match the schema'
 }
 
-/** Fields are read only from a successful page: a 404, block or failed
- * identity check is not the subject, whatever its document says. */
+/** Fields are read only from a successful or partial page: a 404, block or
+ * failed identity check is not the subject, whatever its document says. */
 function unsuccessfulPage(result: FetchResult): StructuredExtractionIssue | null {
-  if (result.status === 'success') return null
+  if (result.status === 'success' || result.status === 'partial') return null
   const httpStatus = result.evidence.httpStatus
   const detail = [result.failureReason ?? result.blockReason ?? result.budgetExceeded, typeof httpStatus === 'number' ? `HTTP ${httpStatus}` : null]
     .filter((part): part is string => typeof part === 'string')
@@ -255,9 +323,22 @@ function unsuccessfulPage(result: FetchResult): StructuredExtractionIssue | null
   }
 }
 
+/**
+ * A partial page (the scrape's timeout ended it) still gives fields with
+ * their evidence, but its JSON is never complete and no model call runs:
+ * the time the caller allowed is over.
+ */
+function partialPage(result: FetchResult): StructuredExtractionIssue[] {
+  return result.status !== 'partial' ? [] : [{
+    code: 'page_partial',
+    message: 'page status is partial: the scrape timeout ended it early, so fields come only from the content fetched so far and the result cannot be complete',
+  }]
+}
+
 function canonicalStructured(result: FetchResult): StructuredExtractionResult {
   const document = result.document
   const pageIssue = unsuccessfulPage(result)
+  const partial = partialPage(result)
   if (pageIssue !== null) {
     return {
       status: 'incomplete',
@@ -272,7 +353,7 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
       status: 'incomplete',
       data: { adapter: document.adapter, pageType: document.pageType, entities: [] },
       evidence: [],
-      issues: document.adapterValidation.issues.map(message => ({ code: 'subject_unverified', message })),
+      issues: [...partial, ...document.adapterValidation.issues.map(message => ({ code: 'subject_unverified' as const, message }))],
       modelUsage: null,
     }
   }
@@ -285,7 +366,7 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
         entities: [],
       },
       evidence: [],
-      issues: [{ code: 'adapter_unavailable', message: 'no normalized entity was confirmed from the public page' }],
+      issues: [...partial, { code: 'adapter_unavailable', message: 'no normalized entity was confirmed from the public page' }],
       modelUsage: null,
     }
   }
@@ -296,10 +377,10 @@ function canonicalStructured(result: FetchResult): StructuredExtractionResult {
     }
   }
   return {
-    status: 'complete',
+    status: partial.length > 0 ? 'incomplete' : 'complete',
     data: { adapter: document.adapter, pageType: document.pageType, entities: document.entities },
     evidence,
-    issues: [],
+    issues: partial,
     modelUsage: null,
   }
 }
@@ -377,18 +458,21 @@ export async function extractStructured(
   const schemaSha256 = sha256Utf8(JSON.stringify(format.schema))
   const pageIssue = unsuccessfulPage(result)
   if (pageIssue !== null) return { status: 'incomplete', data: null, schemaSha256, evidence: [], issues: [pageIssue], modelUsage: null }
+  const partial = partialPage(result)
   if (result.document?.adapterValidation?.valid === false) {
     return {
       status: 'incomplete',
       data: null,
       schemaSha256,
       evidence: [],
-      issues: result.document.adapterValidation.issues.map(message => ({ code: 'subject_unverified', message })),
+      issues: [...partial, ...result.document.adapterValidation.issues.map(message => ({ code: 'subject_unverified' as const, message }))],
       modelUsage: null,
     }
   }
   const evidence: StructuredFieldEvidence[] = []
-  let data = fillNullableMissing(format.schema, format.schema, mapSchema(format.schema, format.schema, candidates(result), '', evidence)) ?? null
+  // Fields whose page labels disagree: reported with every result that carries data.
+  const labelIssues: StructuredExtractionIssue[] = []
+  let data = fillNullableMissing(format.schema, format.schema, mapSchema(format.schema, format.schema, candidates(result, format.schema, labelIssues), '', evidence)) ?? null
   let validate: ValidateFunction
   try {
     validate = compile(format.schema)
@@ -405,10 +489,11 @@ export async function extractStructured(
   let missing = requiredMissing(format.schema, format.schema, data)
   const deterministicValid = validate(data)
   if (missing.length === 0 && deterministicValid) {
-    return { status: 'complete', data, schemaSha256, evidence, issues: nullableMissingIssues(format.schema,format.schema,data), modelUsage: null }
+    const unavailable = nullableMissingIssues(format.schema, format.schema, data).filter(issue => !labelIssues.some(label => label.path === issue.path))
+    return { status: partial.length > 0 ? 'incomplete' : 'complete', data, schemaSha256, evidence, issues: [...partial, ...labelIssues, ...unavailable], modelUsage: null }
   }
-  const issues: StructuredExtractionIssue[] = []
-  if (format.modelFallback !== true) {
+  const issues: StructuredExtractionIssue[] = [...partial, ...labelIssues]
+  if (format.modelFallback !== true || partial.length > 0) {
     for (const path of missing) issues.push({ code: 'missing_required', path, message: `required field unavailable: ${path}` })
     if (!deterministicValid && missing.length === 0) issues.push({ code: 'field_unavailable', message: validationMessage(validate.errors) })
     return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
@@ -443,12 +528,12 @@ export async function extractStructured(
           }
         }
         const modelUsage: StructuredModelUsage = { model: modelConfig.model, attempts, inputTokens: tokensKnown ? inputTokens : null, outputTokens: tokensKnown ? outputTokens : null, externalCostUsd: null }
-        return { status: 'complete', data, schemaSha256, evidence, issues: [], modelUsage }
+        return { status: 'complete', data, schemaSha256, evidence, issues: labelIssues, modelUsage }
       }
       repair = validationMessage(validate.errors)
       if (attempts === 2) {
         const modelUsage: StructuredModelUsage = { model: modelConfig.model, attempts, inputTokens: tokensKnown ? inputTokens : null, outputTokens: tokensKnown ? outputTokens : null, externalCostUsd: null }
-        return { status: 'invalid', data, schemaSha256, evidence, issues: [{ code: 'model_output_invalid', message: repair }], modelUsage }
+        return { status: 'invalid', data, schemaSha256, evidence, issues: [...labelIssues, { code: 'model_output_invalid', message: repair }], modelUsage }
       }
     } catch (error) {
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
@@ -458,7 +543,7 @@ export async function extractStructured(
         data,
         schemaSha256,
         evidence,
-        issues: [{ code: aborted ? 'model_timeout' : 'model_provider_error', message: aborted ? 'model extraction was cancelled or exceeded the deadline' : error instanceof Error ? error.message : 'model provider failed' }],
+        issues: [...labelIssues, { code: aborted ? 'model_timeout' : 'model_provider_error', message: aborted ? 'model extraction was cancelled or exceeded the deadline' : error instanceof Error ? error.message : 'model provider failed' }],
         modelUsage,
       }
     }
@@ -469,7 +554,7 @@ export async function extractStructured(
     data,
     schemaSha256,
     evidence,
-    issues: missing.map(path => ({ code: 'missing_required', path, message: `required field unavailable: ${path}` })),
+    issues: [...labelIssues, ...missing.map(path => ({ code: 'missing_required' as const, path, message: `required field unavailable: ${path}` }))],
     modelUsage: null,
   }
 }

@@ -1,6 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, defaultApiMode, isApiCrawlMode, isApiErrorCode, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
+
+const thrown = (fn: () => unknown): unknown => {
+  try { fn() } catch (error) { return error }
+  return undefined
+}
 
 describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('accepts the CLI modes and not proxy', () => {
@@ -60,9 +66,21 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, waitFor: 1000, onlyMainContent: true })).toThrow('unsupported parameters: waitFor, onlyMainContent')
-    expect(() => parseBatchStartRequest({ urls: [url], timeout: 5000 })).toThrow('unsupported parameter: timeout')
+    expect(() => parseScrapeRequest({ url, actions: [], mobile: true })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
+  })
+
+  it('accepts onlyMainContent, waitFor and timeout on scrape, batch and crawl within their bounds', () => {
+    const url = 'https://example.com/'
+    const options = { onlyMainContent: false, waitFor: 60_000, timeout: 1_000 }
+    expect(parseScrapeRequest({ url, ...options })).toMatchObject(options)
+    expect(parseBatchStartRequest({ urls: [url], ...options })).toMatchObject(options)
+    expect(parseCrawlStartRequest({ url, ...options })).toMatchObject(options)
+    expect(parseScrapeRequest({ url, waitFor: 0, timeout: 300_000 })).toMatchObject({ waitFor: 0, timeout: 300_000 })
+    expect(() => parseScrapeRequest({ url, onlyMainContent: 'false' })).toThrow('onlyMainContent must be a boolean')
+    for (const waitFor of [-1, 60_001, 1.5, '500']) expect(() => parseBatchStartRequest({ urls: [url], waitFor })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
+    for (const timeout of [999, 300_001, null]) expect(() => parseCrawlStartRequest({ url, timeout })).toThrow('timeout must be an integer number of milliseconds from 1000 to 300000')
   })
 
   it('accepts crawl formats and pathname filters, and rejects an invalid regex', () => {
@@ -71,5 +89,28 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('has one request-error code set, each code with its HTTP status', () => {
+    expect([...API_ERROR_CODES]).toEqual(['invalid_json', 'invalid_request', 'unsupported_parameter', 'unsupported_format', 'unauthorized', 'not_found', 'conflict', 'internal_error'])
+    expect(API_ERROR_CODES.map((code) => API_ERROR_STATUS[code])).toEqual([400, 400, 400, 400, 401, 404, 409, 500])
+    expect(isApiErrorCode('not_found')).toBe(true)
+    expect(isApiErrorCode('blocked')).toBe(false)
+  })
+
+  it('documents exactly these codes and statuses in the docs reference table', () => {
+    const reference = readFileSync(new URL('../../../apps/public-web/content/reference.md', import.meta.url), 'utf8')
+    const rows = [...reference.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code, status]) => [code, Number(status)])
+    expect(rows).toEqual(API_ERROR_CODES.map((code) => [code, API_ERROR_STATUS[code]]))
+  })
+
+  it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
+    const url = 'https://example.com/'
+    expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
+    expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'html', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
+    expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
+    expect((invalid as { details?: unknown }).details).toBeUndefined()
   })
 })

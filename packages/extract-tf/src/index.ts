@@ -14,11 +14,12 @@ export {
   microdataProductScope,
   selectProduct,
 } from './product.js'
-export { routePage, pageSignalsFor, selectList, selectTable, selectMinimal } from './route.js'
+export { routePage, pageSignalsFor, selectCardList, selectList, selectTable, selectMinimal } from './route.js'
 export type { RouteDecision } from './route.js'
 export { htmlToMarkdown } from './markdown.js'
 export type { MarkdownOptions } from './markdown.js'
 export { collectLinks } from './links.js'
+export { collectLabelledValues } from './labels.js'
 export { amazonAsin, inferAmazonCurrency, isAmazonProductPage, collectAmazonProductFacts, selectAmazonProduct } from './amazon.js'
 export { adapterFor, BUILT_IN_ADAPTERS, BUILT_IN_PAGE_ADAPTERS } from './adapters.js'
 export type { AdapterMatch, PageAdapterContext, PublicPageAdapter } from './adapters.js'

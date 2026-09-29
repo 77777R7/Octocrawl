@@ -69,7 +69,12 @@ describe('Firecrawl /scrape /crawl shim', () => {
     const url = `${server.url}/crawl/listing`
     expect(await post('/fc/v1/scrape', { url, formats: ['markdown', 'html'], proxy: 'auto' })).toEqual({
       status: 400,
-      body: { success: false, error: 'unsupported parameter: proxy; unsupported format: html (the /fc shim supports markdown, links)' },
+      body: {
+        success: false,
+        error: 'unsupported parameter: proxy; unsupported format: html (the /fc shim supports markdown, links)',
+        code: 'unsupported_parameter',
+        details: { parameters: ['proxy'], formats: ['html'] },
+      },
     })
     expect(await post('/fc/v1/scrape', { url, actions: [{ type: 'wait', milliseconds: 500 }] })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('actions') } })
     expect(await post('/fc/v1/crawl', { url, webhook: 'https://example.com/hook' })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('webhook') } })

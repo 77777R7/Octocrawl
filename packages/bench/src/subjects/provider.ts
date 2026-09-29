@@ -1,4 +1,4 @@
-import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   createExecutionScope,
@@ -25,6 +25,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { identityCompromised } from '../routing/identity.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
+import type { Dispatcher } from 'undici'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -111,24 +112,30 @@ export type RobotsFetcher = (
   execution?: ExecutionContext,
 ) => Promise<{ text: string; status: number; contentType: string | null } | null>
 
-const defaultRobotsFetcher: RobotsFetcher = async (robotsUrl, userAgent, execution = {}) => {
-  const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
-  try {
-    throwIfExecutionStopped(scope)
-    const res = await fetch(robotsUrl, {
-      headers: { 'user-agent': userAgent },
-      signal: scope.signal,
-    })
-    return {
-      text: res.status >= 400 ? '' : await res.text(),
-      status: res.status,
-      contentType: res.headers.get('content-type'),
-    }
-  } catch {
-    throwIfExecutionStopped(execution)
-    return null
-  } finally { scope.dispose() }
+/** The default fetcher; `dispatcherFor` sends it through the operator's egress routes (local mode's environment proxy). */
+export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): RobotsFetcher {
+  return async (robotsUrl, userAgent, execution = {}) => {
+    const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
+    try {
+      throwIfExecutionStopped(scope)
+      const res = await fetch(robotsUrl, {
+        headers: { 'user-agent': userAgent },
+        signal: scope.signal,
+        ...(dispatcherFor === undefined ? {} : { dispatcher: dispatcherFor(robotsUrl) }),
+      } as RequestInit)
+      return {
+        text: res.status >= 400 ? '' : await res.text(),
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+      }
+    } catch {
+      throwIfExecutionStopped(execution)
+      return null
+    } finally { scope.dispose() }
+  }
 }
+
+const defaultRobotsFetcher: RobotsFetcher = robotsFetcherVia()
 
 interface CachedRobots {
   robotsUrl: string
@@ -174,12 +181,12 @@ export class ProviderSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
-    try { return await this.fetchWithinBudget(url, scope) } finally { scope.dispose() }
+    try { return await this.fetchWithinBudget(url, scope, options) } finally { scope.dispose() }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, options: FetchOptions): Promise<FetchResult> {
     throwIfExecutionStopped(execution)
     const start = Date.now()
     const trace: TraceEvent[] = [
@@ -260,8 +267,9 @@ export class ProviderSubject implements SubjectAdapter {
         requestedUrl: url,
         status: 'failed',
         // The provider broke, not the target. Reporting this as http_error
-        // would blame the publisher for our vendor's outage.
-        failureReason: execution.signal?.aborted ? 'timeout' : 'provider_error',
+        // would blame the publisher for our vendor's outage. A target name
+        // the vendor's browser could not resolve is a DNS fact, not a fault.
+        failureReason: execution.signal?.aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',
@@ -395,7 +403,7 @@ export class ProviderSubject implements SubjectAdapter {
     })
     // An error status is never content, but its page is what the origin
     // said: the failed or blocked result keeps it as evidence.
-    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl)
+    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl, options)
     const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (v: NonNullable<typeof gate>): FetchResult => {
       trace.push({
@@ -478,6 +486,7 @@ export class ProviderSubject implements SubjectAdapter {
         confidence: extracted.confidence,
         escalate: extracted.escalate,
         linkCount: links.length,
+        ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
       },
     })
 
@@ -503,7 +512,10 @@ export class ProviderSubject implements SubjectAdapter {
     })
     if (decisive !== null) return blocked(decisive)
 
-    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    // onlyMainContent: false emits the whole page through the same converter and base URL.
+    const markdown = options.onlyMainContent === false
+      ? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+      : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
     // RoutingHistory all follow it): a fetch whose wire identity was
@@ -544,6 +556,7 @@ export class ProviderSubject implements SubjectAdapter {
         adapter: extracted.adapter,
         entities: extracted.entities,
         adapterValidation: extracted.adapterValidation,
+        labelledValues: extracted.labelledValues,
       },
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
     }

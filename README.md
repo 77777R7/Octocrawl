@@ -97,6 +97,8 @@ npm run mcp
 
 `npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and defaults crawl `maxPages` to 100.
 
+Behind a proxy, local mode (`npm run api`, the local MCP service, `npm run scrape`/`crawl`) sends its outbound requests, including robots.txt and the local browser, through `HTTPS_PROXY` for https: URLs and `HTTP_PROXY` for http: URLs (lower-case names too), with curl's rules: `NO_PROXY` hosts and their subdomains, `host:port`, IP and CIDR entries go direct, `*` disables the proxy, and loopback is always direct. The proxy must be `http://` or `https://`, and both variables must name the same one. The proxy resolves the names it fetches, so for proxied requests W2L trusts it for resolution and checks only the URL itself (scheme, credentials, IP literals, metadata names); direct requests are still resolved, validated and pinned. Results name the proxy's `host:port` in `evidence.envProxy` and an `egress_proxy` trace event, never its credentials. `W2L_PROXY=off` ignores the variables; hosted mode never uses them. The macOS LaunchAgent does not inherit your shell, so put these variables in `.w2l/local-mcp.env`.
+
 The unified local MCP covers scrape, Crawl, persistent URL-array batches, and
 Monitor/Delivery without separate worker terminals. A unified service also
 implements authenticated Streamable HTTP for the reviewed public-document
@@ -126,6 +128,12 @@ For many known URLs, use `batch_scrape` in MCP, then `get_batch`, `get_batch_ite
 
 A crawl (`POST /v1/crawl`, MCP `crawl`) takes the same `formats` and `includeLinks` as scrape, plus `includePaths` / `excludePaths`: regular expressions matched against the URL path of each discovered link. The start URL is always fetched and an `excludePaths` match wins. Scrape, batch and crawl reject an unknown field or an unsupported format with HTTP 400 naming it.
 
+Scrape, batch and crawl also take three page options; batch and crawl apply them to every page:
+
+- `onlyMainContent` (default `true`). `false` returns the Markdown of the whole page: the document body with scripts, styles, form controls and embedded media left out, and the header, navigation and footer kept, through the same converter and base URL. The evidence (hashes, status) is the same in both modes, lane routing still reads the main content, and the `extract` trace event records `onlyMainContent: false`. `links` always come from the whole page.
+- `waitFor` (milliseconds, an integer from 0 to 60 000, default 0). The browser rung waits this long after the page has loaded and settled, then captures it. The HTTP rung cannot run scripts, so a request with `waitFor` starts at the browser rung, and the ladder audit records the skipped rung (`ladder_channel_skipped`). Where no browser rung is configured, the result is `failed` with `policy_denied` and a `wait_for_unavailable` trace event, never an answer that ignored the wait.
+- `timeout` (milliseconds, an integer from 1 000 to 300 000, default 300 000). The deadline for the whole scrape, `waitFor` included. When it fires, the API still answers HTTP 200: `partial` with the best content a rung produced so far (for example the HTTP content while the browser rung was still loading), or `failed` with `failureReason: "timeout"` when nothing usable exists. Both carry `usage.deadlineExceeded: true` and a `deadline_exceeded` trace event. When a `waitFor` would run past the deadline, the browser stops waiting about one second before it and captures the page as it is then: `partial` when that page has content, otherwise `failed`/`timeout`. A client that disconnects still cancels the scrape. JSON extraction reads fields from a `partial` page but reports it `incomplete` with a `page_partial` issue, and never calls the model for it.
+
 Request deterministic structured data with a JSON Schema alongside, or instead of, Markdown:
 
 ```ts
@@ -149,7 +157,7 @@ const product = await w2l.scrape('https://www.amazon.com/dp/B08KT2Z93D', {
 })
 ```
 
-W2L maps supported product fields directly from subject-bound HTML, JSON-LD, metadata and DOM evidence. A missing nullable field is `null` with a `field_unavailable` issue. Model fallback is opt-in with `modelFallback: true`; configure an OpenAI-compatible endpoint through `W2L_EXTRACT_BASE_URL`, `W2L_EXTRACT_MODEL` and optional `W2L_EXTRACT_API_KEY`. Without those variables, page content is never sent to a model and the JSON result reports `model_unavailable`.
+W2L maps supported product fields directly from subject-bound HTML, JSON-LD, metadata and DOM evidence. A top-level key that no such fact covers is matched to the page's own labels, two-cell `th`/`td` table rows and `dt`/`dd` pairs in the main content, compared without case, spaces or punctuation (`Number of reviews` fills `numberOfReviews`; `Price (excl. tax)` fills `price` when no label is exactly `Price`), and its `evidence` names the table or list, the row and the label. A number is read only from a single amount such as `£51.77`; labels that state different values leave the field out with a `field_ambiguous` issue. A missing nullable field is `null` with a `field_unavailable` issue. Model fallback is opt-in with `modelFallback: true`; configure an OpenAI-compatible endpoint through `W2L_EXTRACT_BASE_URL`, `W2L_EXTRACT_MODEL` and optional `W2L_EXTRACT_API_KEY`. Without those variables, page content is never sent to a model and the JSON result reports `model_unavailable`.
 
 Run the fixed 10-product, three-round Amazon MCP baseline with:
 
@@ -163,9 +171,9 @@ npm run baseline:amazon -- --concurrency 4
 
 The setup uses an anonymous Singapore public delivery preference for this benchmark only. Round 1 pins the observed context; later unobserved or mismatched region/currency records remain in the report and do not count as comparable. Reports and raw HTML stay under ignored `.w2l/amazon-baseline/`; the URL manifest and schema are versioned. The [signed ten-product result](docs/evidence/amazon-adapter-integration-2026-09-23.md) passed at limited concurrency, but Amazon remains beta pending the 100/1000 promotion gates. The [older baseline](research/amazon-product-baseline-2026-09-22.md) is historical.
 The concurrency-1 command can exit nonzero because its ten-page median exceeds 20 seconds; inspect its report for comparability and blocking before continuing to 2. The signed run had 37.93 seconds at 1, 19.92 at 2, and 12.39 at 4.
-This signed Amazon slice is currently on the local `codex/amazon-adapter-integration` branch, not the released `main` or `v0.4.0-rc.1` source.
+This signed Amazon slice was merged into `main` by [PR #52](https://github.com/77777R7/w2l/pull/52), after the `v0.4.0-rc.1` source prerelease, so that prerelease does not contain it.
 
-Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim maps `url` and the `markdown` and `links` formats; the crawl shim maps `url`, `limit`, `maxDepth`, `includePaths`, `excludePaths` and `scrapeOptions.formats`. Any other parameter or format is rejected with HTTP 400 and `success: false`, naming it. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
+Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim maps `url`, the `markdown` and `links` formats, `onlyMainContent`, `waitFor` and `timeout`; the crawl shim maps `url`, `limit`, `maxDepth`, `includePaths`, `excludePaths` and the same four `scrapeOptions` (`formats`, `onlyMainContent`, `waitFor`, `timeout`). Any other parameter or format is rejected with HTTP 400 and `success: false`, naming it. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
 
 ## Continuous Monitors and event delivery
 

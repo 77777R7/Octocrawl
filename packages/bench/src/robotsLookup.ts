@@ -19,7 +19,7 @@ import {
   sha256Hex,
   type ComplianceRobotsDecision,
 } from '@w2l/http-core'
-import { assertSafeUrl, createGuardedDispatcher, defaultNetworkPolicy } from './egress.js'
+import { assertSafeUrl, defaultNetworkPolicy, EgressRoutes } from './egress.js'
 
 function isPlainText(contentType: string | null): boolean {
   if (contentType === null) return true
@@ -41,18 +41,16 @@ export class RobotsOriginCache {
   private readonly byOrigin = new Map<string, CachedRobots>()
   private readonly pending = new Map<string, { promise: Promise<CachedRobots | null>; controller: AbortController; users: number }>()
   private readonly dispatcher: Dispatcher | ((url: string) => Dispatcher)
-  private readonly ownsDispatcher: boolean
-  private teardownPromise: Promise<void> | null = null
+  /** Without a caller's dispatcher, robots.txt takes the policy's own routes (direct or environment proxy). */
+  private readonly ownRoutes: EgressRoutes | null
   constructor(private readonly networkPolicy: NetworkPolicy = defaultNetworkPolicy(), dispatcher?: Dispatcher | ((url: string) => Dispatcher), private readonly failClosedOnUnreachable = false) {
-    this.ownsDispatcher = dispatcher === undefined
-    this.dispatcher = dispatcher ?? createGuardedDispatcher(networkPolicy)
+    const routes = dispatcher === undefined ? new EgressRoutes(networkPolicy) : null
+    this.ownRoutes = routes
+    this.dispatcher = dispatcher ?? (url => routes!.dispatcherFor(url))
   }
 
   async teardown(): Promise<void> {
-    if (this.ownsDispatcher) {
-      this.teardownPromise ??= (this.dispatcher as Dispatcher).close()
-      await this.teardownPromise
-    }
+    await this.ownRoutes?.close()
   }
 
   async lookup(url: string, userAgent: string, execution: ExecutionContext = {}): Promise<CachedRobots | null> {

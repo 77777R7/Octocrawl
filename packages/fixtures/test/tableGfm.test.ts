@@ -79,6 +79,17 @@ describe('toGfmTable', () => {
     ])
   })
 
+  it('keeps an empty corner cell empty', () => {
+    const md = toGfmTable(
+      '<table><tr><th></th><th>2023</th></tr><tr><th>Exports</th><td>12</td></tr></table>',
+    )
+    expect(md).not.toContain('(header)')
+    expect(gridOf(md)).toEqual([
+      ['', '2023'],
+      ['Exports', '12'],
+    ])
+  })
+
   it('preserves a caption', () => {
     const md = toGfmTable(
       '<table><caption>Table 1: readings</caption><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>',

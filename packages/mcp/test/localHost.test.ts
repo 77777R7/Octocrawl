@@ -22,6 +22,12 @@ it('only opts the local delivery worker into loopback egress explicitly',()=>{
   expect(evaluateHostname('169.254.169.254',policy)?.allowed).toBe(false)
 })
 
+it('routes local capture through the environment proxy the service starts with',()=>{
+  expect(localConfigFromEnv({}).networkPolicy).toBeUndefined()
+  expect(localConfigFromEnv({HTTPS_PROXY:'http://127.0.0.1:7890'}).networkPolicy?.egressProxy?.https?.endpoint).toBe('127.0.0.1:7890')
+  expect(localConfigFromEnv({HTTPS_PROXY:'http://127.0.0.1:7890',W2L_PROXY:'off'}).networkPolicy).toBeUndefined()
+})
+
 it('serves all tools on loopback and preserves Monitor state across MCP connections',async()=>{
   const probe=createServer()
   probe.listen(0,'127.0.0.1');await once(probe,'listening')

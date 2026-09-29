@@ -233,6 +233,46 @@
       ]
     },
     {
+      "id": "A07",
+      "batch": "api",
+      "url": "https://quotes.toscrape.com/",
+      "request": { "formats": ["markdown"], "onlyMainContent": false },
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "6", "type": "markdownIncludes", "text": "[Login](https://quotes.toscrape.com/login)" },
+        { "item": "6", "type": "markdownIncludes", "text": "Quotes by: [GoodReads.com](https://www.goodreads.com/quotes)" },
+        { "item": "6", "type": "markdownIncludes", "text": "by Albert Einstein" },
+        { "item": "4", "type": "markdownLinksAbsolute" }
+      ]
+    },
+    {
+      "id": "A08",
+      "batch": "api",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": 12000, "timeout": 5000 },
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "status", "equals": "partial" }, { "type": "field", "path": "usage.deadlineExceeded", "equals": true }, { "type": "markdownExcludes", "text": "The world as we have created it is a process of our thinking." }],
+          [{ "type": "field", "path": "status", "equals": "failed" }, { "type": "field", "path": "failureReason", "equals": "timeout" }, { "type": "field", "path": "usage.deadlineExceeded", "equals": true }]
+        ] }
+      ]
+    },
+    {
+      "id": "A09",
+      "batch": "api",
+      "endpoint": "fc-scrape",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": { "formats": ["markdown"], "waitFor": 12000, "timeout": 5000 },
+      "checks": [
+        { "item": "6", "type": "apiStatus", "equals": 200 },
+        { "item": "6", "type": "anyOf", "checks": [
+          [{ "type": "field", "path": "success", "equals": true }, { "type": "field", "path": "data.markdown", "present": true }],
+          [{ "type": "field", "path": "success", "equals": false }, { "type": "field", "path": "error", "equals": "failed: timeout" }]
+        ] }
+      ]
+    },
+    {
       "id": "L01",
       "batch": "L",
       "feature": "scrape-formats.json",
