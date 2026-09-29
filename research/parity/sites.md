@@ -130,6 +130,14 @@ M01–M08 were added on 2026-09-29 for the remaining gaps of three core features
 | M07 | Compact scrape (`debug: false`) of http://github.com | `snapshot.httpStatus` and `snapshot.contentType`; the hop in the Evidence Record | scrape-formats.metadata-response-status |
 | M08 | `/fc/v1/scrape` of http://github.com | `data.metadata` with `sourceURL`, the final `url`, `statusCode` and `contentType` | scrape-formats.metadata-response-status |
 
+M09–M11 were added on 2026-09-29 for the client-side navigation gap of `scrape-formats.metadata-response-status` in [core-status-2026-09-29-p1-wave5.md](core-status-2026-09-29-p1-wave5.md): a page that moves on by itself after it answered, by a script or a meta refresh. Each starts at the browser rung (`waitFor`). The first page of M09 and M10 is W2L's own HTML, served by httpbin.org's `/base64` endpoint, which answers the HTML its URL encodes; the page it goes to is the S03 404 page. M11's pages are the site's own.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M09 | Scrape of a page (httpbin.org `/base64`) whose script goes to the S03 404 page | `failed`/`http_error` with the 404 page's final URL, status and content type; both URLs in the redirect chain, `complete: true` | scrape-formats.metadata-response-status |
+| M10 | `/fc/v1/scrape` of a page (httpbin.org `/base64`) whose zero-second meta refresh goes to the S03 404 page | `success: false`, `http_error`, the 404 page's `url`, `statusCode` and `contentType`, not a `connection_error` | scrape-formats.metadata-response-status |
+| M11 | Scrape of the spa-github-pages demo's /example, a 404 whose script goes to /?/example, a 200 app that sets its URL back with `history.replaceState` | `success` with the app, final URL /?/example (the last URL requested) with its 200, both URLs in the chain, the URL the page set in the trace | scrape-formats.metadata-response-status |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |
