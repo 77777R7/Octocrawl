@@ -1728,6 +1728,29 @@
       ]
     },
     {
+      "id": "T06",
+      "batch": "api",
+      "feature": "scrape-execution.timeout",
+      "endpoint": "mcp-cancel",
+      "requiresEnv": "W2L_LOCAL_MCP_URL",
+      "url": "https://httpbin.org/delay/10",
+      "probeUrl": "https://httpbin.org/delay/1",
+      "request": { "timeout": 60000 },
+      "cancelAfterMs": 2000,
+      "note": "Added 2026-09-29 for MCP cancellation over Streamable HTTP. It runs against the local MCP service (npm run local:mcp; W2L_LOCAL_MCP_URL is its /mcp URL), not the REST API. httpbin.org/delay/10 answers after 10 s, about 11.5 s through the scoring machine's proxy. Two MCP clients initialize, and each must get its own Mcp-Session-Id. 2 s into a scrape of the page, another client's notifications/cancelled for the same request id must not stop it: the call answers success after at least 9 s. 2 s into a second scrape, the calling client's own notifications/cancelled must stop it: the call is answered with the JSON-RPC error Request cancelled within 3 s of the cancellation, long before the page answers. Then two scrapes of the page are dropped 2 s in by closing their requests. The service lets two requests at a time reach one host (perHostConcurrency 2), so a probe scrape of httpbin.org/delay/1 answers success within 6 s only if the dropped scrapes stopped; while they hold both slots it would wait about 8 s more. httpbin.org has occasional 5xx outages (row 38).",
+      "checks": [
+        { "item": "6", "type": "field", "path": "sessions.distinct", "equals": true },
+        { "item": "6", "type": "field", "path": "foreign.cancelStatus", "equals": 202 },
+        { "item": "6", "type": "field", "path": "foreign.status", "equals": "success" },
+        { "item": "6", "type": "field", "path": "foreign.elapsedMs", "min": 9000, "record": true },
+        { "item": "6", "type": "field", "path": "own.cancelStatus", "equals": 202 },
+        { "item": "6", "type": "field", "path": "own.error.message", "equals": "Request cancelled" },
+        { "item": "6", "type": "field", "path": "own.answeredAfterCancelMs", "max": 3000, "record": true },
+        { "item": "6", "type": "field", "path": "probe.status", "equals": "success" },
+        { "item": "6", "type": "field", "path": "probe.elapsedMs", "max": 6000, "record": true }
+      ]
+    },
+    {
       "id": "M09",
       "batch": "api",
       "feature": "scrape-formats.metadata-response-status",
