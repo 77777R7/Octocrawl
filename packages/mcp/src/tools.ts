@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '@w2l/contracts'
+import { parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '@w2l/contracts'
 import type { W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -184,14 +184,14 @@ export const TOOLS = [
 export async function callTool(client: W2L, name: string, args: unknown): Promise<unknown> {
   if (name === 'scrape_product') {
     const input=readRecord(args)
-    if (Object.keys(input).some(key=>!['url','debug'].includes(key)) || (input.debug !== undefined && typeof input.debug !== 'boolean')) throw new Error('invalid scrape_product options')
+    if (Object.keys(input).some(key=>!['url','debug'].includes(key)) || (input.debug !== undefined && typeof input.debug !== 'boolean')) throw new RequestError('invalid scrape_product options')
     return client.scrape(hostedAmazonUrl(input.url),{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],debug:input.debug === true})
   }
   if (name === 'batch_products') {
     const input=readRecord(args)
-    if (Object.keys(input).some(key=>key!=='urls') || !Array.isArray(input.urls) || input.urls.length<1 || input.urls.length>1000) throw new Error('batch_products requires 1..1000 URLs')
+    if (Object.keys(input).some(key=>key!=='urls') || !Array.isArray(input.urls) || input.urls.length<1 || input.urls.length>1000) throw new RequestError('batch_products requires 1..1000 URLs')
     const urls=input.urls.map(hostedAmazonUrl)
-    if(new Set(urls).size!==urls.length)throw new Error('batch_products URLs must be unique by ASIN')
+    if(new Set(urls).size!==urls.length)throw new RequestError('batch_products URLs must be unique by ASIN')
     return client.batchScrape(urls,{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],includeLinks:false})
   }
   if (name === 'scrape') {
@@ -221,7 +221,7 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
   if (name === 'get_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
-    if (typeof id !== 'string' || id.length === 0) throw new Error('id is required')
+    if (typeof id !== 'string' || id.length === 0) throw new RequestError('id is required')
     return client.getCrawl(id)
   }
   if (name === 'get_crawl_pages' || name === 'get_crawl_errors') {
@@ -231,7 +231,7 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
   if (name === 'cancel_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
-    if (typeof id !== 'string' || id.length === 0) throw new Error('id is required')
+    if (typeof id !== 'string' || id.length === 0) throw new RequestError('id is required')
     return client.cancelCrawl(id)
   }
   if (name === 'batch_scrape') {
@@ -244,11 +244,11 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
   }
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null
-    if (typeof rec?.id !== 'string' || !rec.id) throw new Error('id is required')
+    if (typeof rec?.id !== 'string' || !rec.id) throw new RequestError('id is required')
     if (name === 'get_batch') return client.getBatch(rec.id)
     if (name === 'cancel_batch') return client.cancelBatch(rec.id)
     const timeoutMs = rec.timeoutMs ?? 30_000
-    if (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) throw new Error('timeoutMs must be an integer between 1 and 300000')
+    if (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) throw new RequestError('timeoutMs must be an integer between 1 and 300000')
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(new DOMException('wait_batch timeout', 'TimeoutError')), timeoutMs)
     try { return await client.waitBatch(rec.id, { signal: controller.signal }) }
@@ -258,15 +258,15 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
     } finally { clearTimeout(timer) }
   }
   if ((TOOL_NAMES as readonly string[]).includes(name)) return callMonitorTool(client,name,readRecord(args))
-  throw new Error(`unknown tool: ${name}`)
+  throw new RequestError(`unknown tool: ${name}`)
 }
 
 function readRecord(args: unknown): Record<string, unknown> {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('tool arguments must be an object')
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new RequestError('tool arguments must be an object')
   return args as Record<string, unknown>
 }
 function required(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`)
+  if (typeof value !== 'string' || !value.trim()) throw new RequestError(`${name} is required`)
   return value
 }
 function compactMonitor(view: Awaited<ReturnType<W2L['getMonitor']>>) {
@@ -307,14 +307,14 @@ async function callMonitorTool(client: W2L, name: string, rec: Record<string, un
   }
   if (name === 'get_delivery') {const detail=await client.getDelivery(id());return debug ? detail : {delivery:compactDelivery(detail.delivery),attempts:detail.attempts}}
   if (name === 'retry_dead_letter') return compactDelivery(await client.retryDelivery(id()))
-  throw new Error(`unknown tool: ${name}`)
+  throw new RequestError(`unknown tool: ${name}`)
 }
 
 function readCrawlQuery(args: unknown): { id: string; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean } } {
   const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
-  if (typeof rec?.id !== 'string' || rec.id.length === 0) throw new Error('id is required')
-  if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit))) throw new Error('limit must be an integer')
-  if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new Error('debug must be a boolean')
+  if (typeof rec?.id !== 'string' || rec.id.length === 0) throw new RequestError('id is required')
+  if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit))) throw new RequestError('limit must be an integer')
+  if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   return {
     id: rec.id,
     options: {
