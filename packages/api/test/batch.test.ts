@@ -68,6 +68,33 @@ describe('persistent URL-array batch', () => {
     expect(await events.text()).toContain('event: complete')
   })
 
+  it('finishes every URL when one origin never answers its robots.txt', async () => {
+    const f = await fixture()
+    const silent = createServer((req, res) => {
+      if (req.url === '/robots.txt') return // never answers
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end('<html><body><main><article><h1>Silent robots</h1><p>This origin never answers its robots.txt, so the lookup deadline must count as an unreachable robots.txt instead of failing the batch that contains it.</p></article></main></body></html>')
+    })
+    await new Promise<void>(resolve => silent.listen(0, '127.0.0.1', resolve))
+    cleanup.push(async () => { silent.closeAllConnections(); await new Promise<void>(resolve => silent.close(() => resolve())) })
+    const silentUrl = `http://127.0.0.1:${(silent.address() as AddressInfo).port}/page`
+    const engine = createApiEngine({ taskRoot: f.root, networkPolicy: { ...localNetworkPolicy(), perHostMinDelayMs: 0, robotsTimeoutMs: 100 }, workerCount: 2 })
+    cleanup.push(() => engine.close())
+    const urls = [silentUrl, `${f.origin}/item/1`, `${f.origin}/item/2`]
+    const { taskId } = await engine.startBatch({ urls })
+    let report = await engine.getBatch(taskId)
+    for (let i = 0; i < 200 && (report === null || ['pending', 'running'].includes(report.status)); i++) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+      report = await engine.getBatch(taskId)
+    }
+    expect(report).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
+    const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items
+    expect(items.map(item => item.status)).toEqual(['success', 'success', 'success'])
+    const silentItem = items.find(item => item.url === silentUrl)!
+    expect(silentItem.markdown).toContain('Silent robots')
+    expect(silentItem.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ unreachable: 'timeout' }) }))
+  })
+
   it('recovers an interrupted URL without refetching completed items', async () => {
     const f = await fixture()
     f.setSlow(true)

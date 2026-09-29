@@ -235,6 +235,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
+          ...(cachedRobots?.unreachable === undefined ? {} : { unreachable: cachedRobots.unreachable }),
         },
       })
 
