@@ -8,7 +8,7 @@
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CONTENTFUL_STATUS, identityForRoute } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, describeEgressProxy, identityForRoute, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { CHECKPOINT_FILENAME, CrawlOrchestrator, SqliteTaskStore } from '@w2l/runtime'
 import type { CrawlPolicy } from '@w2l/http-core'
 import { LadderRunner } from './routing/ladder.js'
@@ -132,7 +132,9 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     }
     if (seedUrl === null) throw new Error(CRAWL_USAGE)
 
-    const channels = buildChannels(args.mode, { headed: args.headed })
+    // Local mode: outbound requests follow the operator's proxy variables.
+    const networkPolicy = withEnvironmentProxy(localNetworkPolicy(), process.env)
+    const channels = buildChannels(args.mode, { headed: args.headed, networkPolicy })
     const policy: CrawlPolicy = {
       mode: args.mode,
       ...(args.allowlistedDomains.length > 0 ? { allowlistedDomains: args.allowlistedDomains } : {}),
@@ -148,6 +150,7 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     console.log(`task dir    : ${taskDir}`)
     console.log(`checkpoint  : ${taskDir}/${CHECKPOINT_FILENAME}`)
     console.log(`headed      : ${args.headed ? 'yes (browser arm only)' : 'no (CI default)'}`)
+    if (networkPolicy.egressProxy) console.log(`proxy       : ${describeEgressProxy(networkPolicy.egressProxy)}`)
     if (args.resume) console.log(`resume      : ${resumeFrom}`)
     if (args.useCached) console.log('cache       : --use-cached')
 

@@ -270,6 +270,17 @@ describe('resilientFetch: transport errors', () => {
     expect(out.kind).toBe('failure')
     expect(out.failureReason).toBe('policy_denied')
   })
+
+  it('reports a name that does not resolve as dns_error, at the guard or at connect', async () => {
+    const notFound = () => Object.assign(new Error('getaddrinfo ENOTFOUND x.test'), { name: 'DnsLookupError' })
+    const guarded = scripted([res(200)])
+    const atGuard = await resilientFetch(U, guarded, { assertUrl: async () => { throw notFound() } })
+    expect(atGuard).toMatchObject({ kind: 'failure', failureReason: 'dns_error', requestCount: 0 })
+    expect(guarded.calls).toEqual([])
+    expect(atGuard.trace.map((t) => t.event)).toEqual(['dns_failed'])
+    const atConnect = await resilientFetch(U, scripted([new Error('socket failed', { cause: notFound() })]))
+    expect(atConnect.failureReason).toBe('dns_error')
+  })
 })
 
 describe('resilientFetch: defaults', () => {

@@ -97,6 +97,8 @@ npm run mcp
 
 `npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and defaults crawl `maxPages` to 100.
 
+Behind a proxy, local mode (`npm run api`, the local MCP service, `npm run scrape`/`crawl`) sends its outbound requests, including robots.txt and the local browser, through `HTTPS_PROXY` for https: URLs and `HTTP_PROXY` for http: URLs (lower-case names too), with curl's rules: `NO_PROXY` hosts and their subdomains, `host:port`, IP and CIDR entries go direct, `*` disables the proxy, and loopback is always direct. The proxy must be `http://` or `https://`, and both variables must name the same one. The proxy resolves the names it fetches, so for proxied requests W2L trusts it for resolution and checks only the URL itself (scheme, credentials, IP literals, metadata names); direct requests are still resolved, validated and pinned. Results name the proxy's `host:port` in `evidence.envProxy` and an `egress_proxy` trace event, never its credentials. `W2L_PROXY=off` ignores the variables; hosted mode never uses them. The macOS LaunchAgent does not inherit your shell, so put these variables in `.w2l/local-mcp.env`.
+
 The unified local MCP covers scrape, Crawl, persistent URL-array batches, and
 Monitor/Delivery without separate worker terminals. A unified service also
 implements authenticated Streamable HTTP for the reviewed public-document

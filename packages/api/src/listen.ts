@@ -1,4 +1,4 @@
-import { hostedNetworkPolicy, localNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, localNetworkPolicy, withEnvironmentProxy, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
 
@@ -9,6 +9,8 @@ export interface ListenConfig {
   token: string | null
   networkPolicy: NetworkPolicy
   defaultMaxPages: number | null
+  /** Startup lines about the environment proxy, printed once. */
+  notices: readonly string[]
 }
 
 export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ListenConfig {
@@ -24,17 +26,21 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '0.0.0.0',
       port,
       token,
+      // Hosted SSRF guarantees depend on direct, DNS-pinned connections.
       networkPolicy: tunedPolicy(hostedNetworkPolicy(), env),
       defaultMaxPages: 100,
+      notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
     }
   }
+  const networkPolicy = withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env)
   return {
     mode: 'local',
     host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '127.0.0.1',
     port,
     token,
-    networkPolicy: tunedPolicy(localNetworkPolicy(), env),
+    networkPolicy,
     defaultMaxPages: null,
+    notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
   }
 }
 

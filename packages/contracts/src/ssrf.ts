@@ -66,6 +66,16 @@ export function classifyIp(address: string): PolicyViolation | null {
   return 'malformed_url'
 }
 
+/** True for an IPv4 or IPv6 literal (brackets allowed). */
+export function isIpAddress(text: string): boolean {
+  return parseV4(stripBrackets(text)) !== null || parseV6(text) !== null
+}
+
+/** Whether an IP literal lies in a CIDR block such as `10.0.0.0/8` or `::1/128`. */
+export function ipInCidr(address: string, cidr: string): boolean {
+  return cidrContains(cidr, stripBrackets(address))
+}
+
 export function evaluateHostname(hostname: string, policy: NetworkPolicy): PolicyDecision | null {
   const host = stripBrackets(hostname).toLowerCase()
   if (host.length === 0) {

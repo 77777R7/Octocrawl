@@ -25,6 +25,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { identityCompromised } from '../routing/identity.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
+import type { Dispatcher } from 'undici'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -111,24 +112,30 @@ export type RobotsFetcher = (
   execution?: ExecutionContext,
 ) => Promise<{ text: string; status: number; contentType: string | null } | null>
 
-const defaultRobotsFetcher: RobotsFetcher = async (robotsUrl, userAgent, execution = {}) => {
-  const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
-  try {
-    throwIfExecutionStopped(scope)
-    const res = await fetch(robotsUrl, {
-      headers: { 'user-agent': userAgent },
-      signal: scope.signal,
-    })
-    return {
-      text: res.status >= 400 ? '' : await res.text(),
-      status: res.status,
-      contentType: res.headers.get('content-type'),
-    }
-  } catch {
-    throwIfExecutionStopped(execution)
-    return null
-  } finally { scope.dispose() }
+/** The default fetcher; `dispatcherFor` sends it through the operator's egress routes (local mode's environment proxy). */
+export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): RobotsFetcher {
+  return async (robotsUrl, userAgent, execution = {}) => {
+    const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
+    try {
+      throwIfExecutionStopped(scope)
+      const res = await fetch(robotsUrl, {
+        headers: { 'user-agent': userAgent },
+        signal: scope.signal,
+        ...(dispatcherFor === undefined ? {} : { dispatcher: dispatcherFor(robotsUrl) }),
+      } as RequestInit)
+      return {
+        text: res.status >= 400 ? '' : await res.text(),
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+      }
+    } catch {
+      throwIfExecutionStopped(execution)
+      return null
+    } finally { scope.dispose() }
+  }
 }
+
+const defaultRobotsFetcher: RobotsFetcher = robotsFetcherVia()
 
 interface CachedRobots {
   robotsUrl: string
@@ -260,8 +267,9 @@ export class ProviderSubject implements SubjectAdapter {
         requestedUrl: url,
         status: 'failed',
         // The provider broke, not the target. Reporting this as http_error
-        // would blame the publisher for our vendor's outage.
-        failureReason: execution.signal?.aborted ? 'timeout' : 'provider_error',
+        // would blame the publisher for our vendor's outage. A target name
+        // the vendor's browser could not resolve is a DNS fact, not a fault.
+        failureReason: execution.signal?.aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',

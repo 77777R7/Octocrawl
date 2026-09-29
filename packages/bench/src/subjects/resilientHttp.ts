@@ -11,8 +11,8 @@ import {
 } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
-import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
+import { ProxyAgent, request, type Dispatcher } from 'undici'
+import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -38,11 +38,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private readonly prepared: ReturnType<typeof prepareHttpIdentity>
-  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
-  private readonly dispatcher: Agent
+  private readonly egress: EgressRoutes
   private readonly localPreviewProxy: ProxyAgent | null
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
@@ -54,13 +54,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.dispatcher = createGuardedDispatcher(this.networkPolicy)
+    this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed)
     const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait) => async (url, init) => {
+    this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait, onEnvProxy) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
+      const envProxy = this.envProxyFor(url)
+      if (envProxy !== null) onEnvProxy?.(url, envProxy)
       const response = await request(url, {
         dispatcher: this.dispatcherFor(url),
         method: 'GET',
@@ -69,7 +71,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         // Validators are bound to one representation; never forward on redirects.
         headers: { ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}) },
         signal: init.signal ?? signal,
-      })
+      }).catch((error: unknown) => { throw proxyRefusal(error) ?? error })
       const responseHeaders = response.headers
       let body: string | undefined
       return {
@@ -93,7 +95,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private dispatcherFor(url: string): Dispatcher {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.dispatcher
+    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.egress.dispatcherFor(url)
+  }
+
+  /** `host:port` of the environment proxy a request to this URL goes through; null when it does not. */
+  private envProxyFor(url: string): string | null {
+    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? null : this.egress.proxyFor(url)?.endpoint ?? null
   }
 
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
@@ -217,6 +224,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
+    }, (target, proxy) => {
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
     }), {
       signal,
       deadlineAt,
@@ -293,6 +302,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         cacheControl: out.headers?.get('cache-control') ?? null,
         vary: out.headers?.get('vary') ?? null,
         setsCookie: out.headers?.get('set-cookie') != null,
+        ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}),
       },
       usage: {
         wallMs,
@@ -543,7 +553,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   async teardown(): Promise<void> {
-    this.teardownPromise ??= Promise.all([this.dispatcher.close(), this.localPreviewProxy?.close()]).then(() => {})
+    this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close()]).then(() => {})
     await this.teardownPromise
   }
+}
+
+/**
+ * Undici reports a proxy that refuses the CONNECT tunnel as an AbortError,
+ * which would read as our own timeout. It is a connection failure.
+ */
+function proxyRefusal(error: unknown): Error | null {
+  if (!(error instanceof Error) || (error as { code?: unknown }).code !== 'UND_ERR_ABORTED' || !error.message.startsWith('Proxy response (')) return null
+  const refusal = new Error(error.message, { cause: error })
+  refusal.name = 'ProxyConnectError'
+  return refusal
 }

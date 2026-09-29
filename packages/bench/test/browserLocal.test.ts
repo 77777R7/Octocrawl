@@ -375,6 +375,16 @@ describe('BrowserLocalSubject transport', () => {
       await subject.teardown()
     }
   })
+
+  it('reports a host that does not resolve as dns_error, not policy_denied', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch('http://w2l-dns-failure.invalid/page')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+    } finally {
+      await subject.teardown()
+    }
+  })
 })
 
 describe('BrowserLocalSubject user-owned access', () => {

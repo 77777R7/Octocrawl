@@ -1,4 +1,4 @@
-import { estimateTokens, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -19,7 +19,7 @@ import {
   type ComplianceSentHeader,
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -113,6 +113,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * It is never written to a record, a trace, or a log line.
    */
   private readonly accessConfig: AccessConfigInput | null
+  /** The operator's environment proxy for every context this subject opens (local mode). */
+  private readonly envProxy: ReturnType<typeof browserProxySettings>
 
   constructor(
     private readonly mode: CrawlMode = 'standard',
@@ -137,7 +139,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.chain = new ComplianceChain(crypto.randomUUID(), mode)
     this.access = normalizeAccessConfig(access)
     this.accessConfig = access ?? null
-    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
+    const policy = networkPolicy ?? defaultNetworkPolicy()
+    // A user's own proxy and hosted host pinning each fix the route already;
+    // everywhere else the browser follows the operator's environment proxy.
+    this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
+    this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, undefined, robotsFailClosed)
   }
@@ -340,7 +346,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
                   : { password: this.accessConfig.proxy.password }),
               },
             }
-          : {}),
+          : this.envProxy === null ? {} : { proxy: this.envProxy.proxy }),
       })
       void pendingContext.then(created => { if (signal?.aborted && created !== this.managedContext) void created.close().catch(() => {}) }, () => {})
       context = await raceWithSignal(pendingContext, signal)
@@ -424,6 +430,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         this.lastRequestAtMsByHost.set(host, navigationAt)
         attemptCount++
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount } })
+        const envProxy = proxyFor(navigationUrl, this.networkPolicy)
+        if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
         response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: remainingTimeout(execution, 20_000) })
         const status = response?.status() ?? 0
         if (status === 429 || status === 503) {
@@ -563,6 +571,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           contentType: 'text/html; rendered',
           rawBodySha256,
           artifacts: rawArtifacts,
+          ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },
         usage: {
           wallMs,
@@ -715,7 +724,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // Playwright surfaces deadline misses as TimeoutError; map them to the
       // contract's timeout reason so the timeout fixtures match, and leave
       // every other navigation failure as connection_error.
-      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout' : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied' : 'connection_error'
+      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
+        : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
+          : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
+            : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -773,11 +785,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       ? 'timeout'
       : err instanceof Error && err.name === 'BodyTooLargeError'
         ? 'body_too_large'
-        : failureReason
+        : err instanceof Error && err.name === 'DnsLookupError'
+          ? 'dns_error'
+          : failureReason
     trace.push({
       at: wallMs,
       lane: 'browser_local',
-      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : 'ssrf_denied',
+      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : reason === 'dns_error' ? 'dns_failed' : 'ssrf_denied',
       detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
     })
     return {
@@ -859,7 +873,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     throwIfExecutionStopped(execution)
     if (this.managedContext !== null) return this.managedContext
     if (this.managedContextPromise === null) {
-      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000 })
+      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...(this.envProxy === null ? {} : { proxy: this.envProxy.proxy }) })
         .then(async context => {
           if (this.activeExecutions === 0) {
             if (this.managedContextPromise === pending) this.managedContextPromise = null

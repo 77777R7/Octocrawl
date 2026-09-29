@@ -193,6 +193,18 @@ function markdownTargets(markdown) {
 }
 const isAbsolute = (target) => /^(https?:|mailto:|tel:|data:)/i.test(target) || target.startsWith('#')
 
+// The proxy endpoints a saved response records in evidence.envProxy: the API's own statement of its route.
+function envProxies(value, found = new Set()) {
+  if (Array.isArray(value)) for (const item of value) envProxies(item, found)
+  else if (value !== null && typeof value === 'object') {
+    for (const [key, inner] of Object.entries(value)) {
+      if (key === 'envProxy' && typeof inner === 'string') found.add(inner)
+      else envProxies(inner, found)
+    }
+  }
+  return found
+}
+
 function get(object, path) {
   return path.split('.').reduce((value, key) => (value == null ? undefined : value[key]), object)
 }
@@ -319,7 +331,7 @@ for (const c of cases) {
   await writeFile(join(outDir, `${c.id}.json`), JSON.stringify(outcome.response, null, 2))
   const checks = c.checks.map((spec) => ({ ...spec, ...check(outcome.doc, spec, outcome.response.start ?? outcome.response) }))
   const passed = checks.filter((result) => result.pass).length
-  results.push({ id: c.id, url: c.url ?? c.urls?.join(' '), endpoint: c.endpoint ?? 'scrape', seconds: Math.round((Date.now() - began) / 100) / 10, passed, total: checks.length, checks })
+  results.push({ id: c.id, url: c.url ?? c.urls?.join(' '), endpoint: c.endpoint ?? 'scrape', seconds: Math.round((Date.now() - began) / 100) / 10, passed, total: checks.length, envProxies: [...envProxies(outcome.response)], checks })
   console.log(`${c.id} ${passed}/${checks.length} ${c.url ?? c.urls?.[0]}`)
   for (const result of checks.filter((r) => !r.pass)) console.log(`   ✗ [${/^[1-8]$/.test(result.item) ? `P1-${result.item}` : result.item}] ${result.type} ${result.text ?? result.pattern ?? result.path ?? result.url ?? ''} ${result.actual ?? ''}`)
 }
@@ -341,14 +353,16 @@ const summary = {
 }
 await writeFile(join(outDir, 'results.json'), JSON.stringify(summary, null, 2))
 
-const proxyVars = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'].filter((name) => process.env[name])
+const proxyVars = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy'].filter((name) => process.env[name])
+const proxiedCases = results.filter((r) => r.envProxies.length > 0).length
+const proxyEndpoints = [...new Set(results.flatMap((r) => r.envProxies))]
 const lines = [
   `# Real-site run ${startedAt.slice(0, 10)}`,
   '',
   `Command: \`${command}\``,
   `Source commit: \`${commit ?? 'unknown'}\`${dirty ? ' (working tree had uncommitted changes)' : ''}`,
   `Run: ${startedAt} → ${summary.finishedAt} against ${api}`,
-  `Network: ${proxyVars.length === 0 ? 'no proxy variables set' : `${proxyVars.join(', ')} set in the runner's environment; W2L does not read them, so a site reachable only through that proxy fails`}.`,
+  `Network: ${proxyVars.length === 0 ? 'no proxy variables set in the runner' : `${proxyVars.join(', ')} set in the runner's environment`}; ${proxiedCases} of ${results.length} cases' responses record an environment proxy in evidence.envProxy${proxyEndpoints.length === 0 ? '' : ` (${proxyEndpoints.join(', ')})`}.`,
   '',
   `Cases fully passing: ${summary.casesPassed}/${summary.cases}; checks passing: ${summary.checksPassed}/${summary.checks}.`,
   '',

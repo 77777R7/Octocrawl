@@ -30,6 +30,8 @@ The process shares one origin scheduler across local HTTP, browser, and Monitor 
 
 Set `W2L_PER_HOST_CONCURRENCY=1|2|3|4` and `W2L_PER_HOST_MIN_DELAY_MS` (1–60000, default 250) on the API process to tune the shared origin gate. These are operator settings, not batch-request parameters.
 
+A local-mode API also follows the operator's `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (curl semantics, loopback always direct) for every item, and each item's `evidence.envProxy` names the proxy it went through. `W2L_PROXY=off` ignores them; hosted mode never uses them. See the README's proxy paragraph.
+
 The [real 10-URL Amazon comparison](evidence/amazon-batch-concurrency.json) used the same URLs, JSON Schema, and 250 ms interval. Both 1 and 2 completed 10/10 pages with complete JSON and correct ASINs. Client batch time was 44.5 seconds at 1 and 23.5 seconds at 2. This raw difference is **not** a fully controlled speed claim: four pages in each arm lacked an observed delivery region. The other six kept the same observed region, currency, and route. Real concurrency 4 was withheld; the local controlled 4-arm experiment remains separate evidence. The [earlier run](evidence/amazon-batch-concurrency-before-transport-pacing.json) is retained because the implementation subsequently added pacing at the actual transport start.
 
 Public Monitor 304 caching is a different path. A response with `Set-Cookie`, `Cache-Control: no-cache`, and no ETag/Last-Modified is not saved as a reusable public representation by the current cache. The controlled cache test confirms two full 200 fetches with no validator; it does not claim a cache speedup for Amazon.
