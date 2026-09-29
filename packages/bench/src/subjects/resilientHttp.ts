@@ -254,6 +254,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
         onRetryAfter?.(target, retryAt)
       },
       maxRedirects: this.networkPolicy.maxRedirects,
+      // A caller's timeout is how long it will wait: headers and body may take until its deadline.
+      capsFollowDeadline: options.timeout !== undefined,
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
         await assertSafeUrl(target, this.networkPolicy)

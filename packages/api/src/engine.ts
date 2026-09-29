@@ -622,11 +622,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
-/** What a request or stored task asks each lane to capture; its timeout is a deadline, not a fetch option. */
+/** What a request or stored task asks each lane to capture. Its timeout is the deadline; passed on, it lets the lanes' waits run to it. */
 function fetchOptions(options: PageOptions | undefined): FetchOptions {
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
+    ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
   }
 }
 

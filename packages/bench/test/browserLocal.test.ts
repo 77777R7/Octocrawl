@@ -389,6 +389,25 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('gives navigation until a caller-chosen deadline, never past it, and 20 s without one', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const navigationTimeout = async (deadlineAt?: number, timeout?: number): Promise<unknown> => {
+        const out = await subject.fetch(`${url}/spa`, deadlineAt, undefined, undefined, timeout === undefined ? {} : { timeout })
+        expect(out.status).toBe('success')
+        return out.trace.find((event) => event.event === 'navigate')?.detail?.timeoutMs
+      }
+      expect(await navigationTimeout()).toBe(20_000)
+      expect(await navigationTimeout(Date.now() + 60_000)).toBe(20_000)
+      const followed = await navigationTimeout(Date.now() + 60_000, 60_000)
+      expect(followed).toBeGreaterThan(50_000)
+      expect(followed).toBeLessThanOrEqual(60_000)
+      expect(await navigationTimeout(Date.now() + 8_000, 8_000)).toBeLessThanOrEqual(8_000)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('retries a 503 once and succeeds on the second attempt', async () => {
     flakyHits = 0
     const subject = new BrowserLocalSubject()
