@@ -291,11 +291,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       async scrape(url, context) {
         // `timeout` is each page's own deadline, inside the task's.
         const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) })
-        const outcome = await ladder.scrape(url, page).finally(() => page.dispose())
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
         const custom = formats.find(format => typeof format === 'object')
-        const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
+        // JSON extraction, its model fallback included, runs within the page's deadline too.
+        const { outcome, json } = await (async () => {
+          const outcome = await ladder.scrape(url, page)
+          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
+          return { outcome, json }
+        })().finally(() => page.dispose())
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
