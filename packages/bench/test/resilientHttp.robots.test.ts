@@ -3,6 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { ALL_BOILERPLATE, NAV_MARKER, startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { buildChannels } from '../src/ladderCli.js'
+import { LadderRunner } from '../src/routing/ladder.js'
+import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
+import { LadderScrapeAtom } from '../src/scrapeAtom.js'
 
 let robotsServer: Server
 let robotsUrl: string
@@ -119,6 +123,35 @@ describe('ResilientHttpSubject robots', () => {
     const out = await subject.fetch(`${robotsUrl}/private/ok`)
     expect(out.status).toBe('success')
     expect(out.markdown).toContain('Private area')
+  })
+
+  it('reports robots.txt Crawl-delay on robots_checked, and the scrape atom hands it to the crawl', async () => {
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nCrawl-delay: 2.5\nDisallow: /private\n')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Polite page</h1><p>This origin asks crawlers to wait two and a half seconds between requests, and the HTTP lane must pass that request on to the crawl frontier instead of dropping it.</p><p>The page itself is ordinary prose, long enough for the extraction cascade to accept it as the main content of an article.</p></article></body></html>')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const url = `http://127.0.0.1:${address.port}/page`
+    const subject = new ResilientHttpSubject()
+    const channels = buildChannels('standard', { localSubjects: { browser_local: { fetch: async () => { throw new Error('HTTP only: the browser arm was reached') } } } })
+    try {
+      const out = await subject.fetch(url)
+      expect(out.status).toBe('success')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'allowed', crawlDelayMs: 2500 }) }))
+      const atom = new LadderScrapeAtom(new LadderRunner(channels, { mode: 'standard' }, new MemoryRoutingHistory()))
+      expect((await atom.scrape(url)).crawlDelayMs).toBe(2500)
+    } finally {
+      await subject.teardown()
+      await Promise.all(channels.map(channel => channel.close?.().catch(() => {})))
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   })
 
   it('rejects a redirect to metadata before any follow-up request', async () => {
