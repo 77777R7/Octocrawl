@@ -136,6 +136,33 @@ A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when
 | --- | --- | --- | --- |
 | A36 | Scrape of an SEC EDGAR filing (IREN Limited, quarter to 31 December 2025) with `mode: "research"` | `success` with HTTP 200 and the filing's text; the Evidence Record's User-Agent is `W2L Research <W2L_CONTACT>` and its contact is `W2L_CONTACT` | FS, ER |
 
+E01–E06 were added on 2026-09-29 for the Evidence Record v1 ([packages/contracts/schemas/evidence-record.v1.json](../../packages/contracts/schemas/evidence-record.v1.json)). Each checks that the record validates against the schema, and the fields below.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| E01 | Scrape of books.toscrape.com | An HTTP-lane success: lane, final URL, robots decision (`no_robots`), hashes | ER |
+| E02 | Scrape of quotes.toscrape.com/js | A browser-lane success: the browser's identity and a complete redirect chain | ER |
+| E03 | Scrape of the S03 404 page | A failure kept as evidence: `http_error`, HTTP 404, the page's hash | ER |
+| E04 | JSON extraction on a books.toscrape.com product | `fieldEvidence` for each field (UPC from the product table, price from `p.price_color`), no Markdown hash | ER |
+| E05 | Batch of three URLs, the 404 included | Every item carries its own record | ER |
+| E06 | Crawl of books.toscrape.com, 3 pages | Every crawl page, and every item under `/errors`, carries its own record | ER |
+
+F01–F16 were added on 2026-09-29 for P2 file download and PDF text. The PDFs are the seed user's (S1–S6) and research PDFs (R1, R2, R4) of [research/pdf-corpus/manifest.v1.json](../pdf-corpus/manifest.v1.json); a PDF case checks the manifest's SHA-256 and size and that each of its phrases is on its page after the `<!-- page N -->` marker, so a publisher that replaces the file fails the case.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| F01–F06 | Scrape of each of the seed user's six PDFs (F02 and F03 through a page that redirects to the PDF) | Read on the HTTP lane alone, saved as received, text by page | scrape-formats.pdf-parser |
+| F07 | Scrape of the IEA's Energy and AI report (R1, 304 pages) | A long PDF: saved as received, text by page | scrape-formats.pdf-parser |
+| F08 | Scrape of Eurostat's Key figures on Europe (R4, 11.1 MB) | A file above the 10 MiB page cap, with pages that have no text layer | scrape-formats.pdf-parser |
+| F09 | Scrape of a Eurostat SDMX CSV | A CSV served as `application/vnd.sdmx.data+csv`: saved, its text as Markdown | file download |
+| F10 | Scrape of a Statistics Canada table ZIP | A ZIP saved as received, no Markdown | file download |
+| F11 | Crawl of an Insee publication page limited to its PDF (R2) | A PDF reached by a crawl becomes a crawl page with its file and Evidence Record | file download |
+| F12 | `/fc/v1/scrape` of the S4 PDF | The shim answers success with the PDF text and page markers | scrape-formats.pdf-parser |
+| F13 | Scrape of the S4 PDF with `waitFor` (browser rung first) | The browser catches the download: the same file and text as the HTTP lane | file download |
+| F14 | JSON extraction from the S5 PDF | Fields only from `Label: value` lines, each with its page; conflicting labels left out as `field_ambiguous` | scrape-formats.json |
+| F15 | Scrape of a World Bank API JSON | A JSON file saved, its text as Markdown | file download |
+| F16 | Scrape of a GOV.UK Energy Trends XLSX | An XLSX saved as received with its hash and size, no Markdown | file download |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.
