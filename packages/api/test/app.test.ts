@@ -241,7 +241,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
-  it('GET /v1/crawl/:id is failed when scrape throws, not left running', async () => {
+  it('records a page whose scrape throws as a failed item, not a failed or running crawl', async () => {
     const throwingRoot = await mkdtemp(join(tmpdir(), 'w2l-api-fail-'))
     const throwing = createApiEngine({
       taskRoot: throwingRoot,
@@ -269,8 +269,13 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(got.status).toBe(200)
       const report = await got.json()
       expect(report.taskId).toBe(taskId)
-      expect(report.status).toBe('failed')
+      expect(report.status).toBe('completed')
+      expect(report.pagesFetched).toBe(1)
       expect(report.loopDetected).toBe(false)
+      const errors = await (await app.request(`/v1/crawl/${taskId}/errors?limit=10`)).json()
+      expect(errors.items).toHaveLength(1)
+      expect(errors.items[0]).toMatchObject({ status: 'failed', failureReason: 'internal_error' })
+      expect(JSON.stringify(errors.items[0].trace)).toContain('scrape exploded')
     } finally {
       await throwing.close()
       await rm(throwingRoot, { recursive: true, force: true })

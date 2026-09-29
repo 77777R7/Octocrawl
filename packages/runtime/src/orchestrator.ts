@@ -21,6 +21,7 @@ import {
   type CrawlSpec,
   type FetchResult,
   type ScrapeAtom,
+  type ScrapeOutcome,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
@@ -202,7 +203,16 @@ export class CrawlOrchestrator {
             if (reusable && cached.result !== null) {
               result = cached.result; links = linksOf(cached.result); audit = cached.audit; cachedPage = true
             } else {
-              const outcome = await raceWithSignal(this.atom.scrape(item.url, scope), scope.signal)
+              const scrapeStartedAt = Date.now()
+              let outcome: ScrapeOutcome
+              try { outcome = await raceWithSignal(this.atom.scrape(item.url, scope), scope.signal) }
+              catch (error) {
+                // Cancellation, shutdown and the crawl's own budget stop the run.
+                // Any other exception belongs to this URL: it becomes the URL's
+                // failed item, and one page never fails a whole batch or crawl.
+                if (stopped()) throw error
+                outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt), links: [] }
+              }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
               frontier.setCrawlDelay(item.host, outcome.crawlDelayMs ?? null)
             }
@@ -436,6 +446,33 @@ function newAttempt(id: string, taskId: string, startedAt: string, recoveredFrom
     contentTokensUnknown: false,
     budgetExceeded: null,
     recoveredFromAttemptId,
+  }
+}
+
+/**
+ * The item for a URL whose scrape threw instead of returning a result. No
+ * response fact is known, so the evidence stays null and the usage meters
+ * stay unknown; the lane is the ladder's first rung, as in its own refusals.
+ */
+function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchResult {
+  const name = error instanceof Error ? error.name : typeof error
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    requestedUrl: url,
+    status: 'failed',
+    failureReason: name === 'TimeoutError' ? 'timeout' : 'internal_error',
+    blockReason: null,
+    budgetExceeded: null,
+    lane: 'http',
+    escalations: [],
+    markdown: null,
+    links: [],
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    usage: { ...EMPTY_USAGE, wallMs, bytesWire: null },
+    trace: [{ at: wallMs, lane: 'http', event: 'scrape_error', detail: { name, error: message.slice(0, 500) } }],
   }
 }
 
