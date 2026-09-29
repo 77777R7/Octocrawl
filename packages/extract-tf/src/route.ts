@@ -16,6 +16,7 @@
 
 import type { PageType } from '@w2l/contracts'
 import { commonAncestor, qsa, tagOf } from './dom.js'
+import { visiblePrices } from './product.js'
 
 interface RouterCounts {
   li: number
@@ -29,12 +30,34 @@ interface RouterCounts {
   headings: number
   /** Links per 100 chars of visible text — div-based listings have high density. */
   linkDensity: number
+  /** A visible buy box (see hasVisibleBuyBox). */
+  buyBox: boolean
+}
+
+/**
+ * A product page that declares nothing machine-readable (books.toscrape.com):
+ * the page's one h1, then its one visible price in the h1's own section, with
+ * no other heading between them and not inside a list item. A price under
+ * another heading, or in a list item, belongs to a listed item, and several
+ * prices make a listing.
+ */
+function hasVisibleBuyBox(doc: Document): boolean {
+  const h1s = qsa(doc, 'h1')
+  const prices = visiblePrices(doc)
+  if (h1s.length !== 1 || prices.length !== 1 || prices[0]!.closest('li') !== null) return false
+  let heading: Element | null = null
+  for (const el of qsa(doc, '*')) {
+    if (el === prices[0]) break
+    if (/^h[1-6]$/.test(tagOf(el))) heading = el
+  }
+  return heading === h1s[0]
 }
 
 function countAll(doc: Document): RouterCounts {
   const textChars = (doc.body?.textContent ?? '').replace(/\s+/g, ' ').trim().length
   const a = qsa(doc, 'a').length
   return {
+    buyBox: hasVisibleBuyBox(doc),
     li: qsa(doc, 'li').length,
     a,
     table: qsa(doc, 'table').length,
@@ -210,6 +233,10 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Semantic forum signals (multiple posts, DiscussionForumPosting).
   // Still extracted by the article cascade.
   if (hasForumSignals(s)) return { type: 'forum', strategy: 'article' }
+
+  // A visible buy box is a product page that declares nothing: the product
+  // strategy anchors on the same heading and price.
+  if (c.buyBox) return { type: 'product', strategy: 'product' }
 
   // Documentation / reference pages: breadcrumbs and in-page TOC look like
   // lists, but several prose paragraphs under <main> are the payload.
