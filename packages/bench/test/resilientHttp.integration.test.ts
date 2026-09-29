@@ -46,6 +46,8 @@ describe('resilient subject on served fixture bytes', () => {
     expect(out.usage.attemptCount).toBe(1)
     // a -> b -> a: the loop is provable after two wire requests
     expect(out.usage.requestCount).toBe(2)
+    // The final URL is b, whose 302 is the last response received.
+    expect(out.evidence).toMatchObject({ finalUrl: `${server.url}/redirect/loop/b`, httpStatus: 302, redirectChain: [`${server.url}/redirect/loop/a`, `${server.url}/redirect/loop/b`] })
   })
 
   it('flaky-once: retries the 503 and succeeds on attempt 2', async () => {

@@ -129,6 +129,16 @@ describe('resilientFetch: redirects', () => {
     expect(out.failureReason).toBe('redirect_loop')
     expect(out.requestCount).toBe(2)
     expect(out.trace.some((t) => t.event === 'redirect_loop')).toBe(true)
+    // The last response received is b's 302: its URL, not the one it points back to, is the final URL.
+    expect(out.status).toBe(302)
+    expect(out.finalUrl).toBe('http://x.test/loop/b')
+    expect(out.redirectChain).toEqual(['http://x.test/loop/a', 'http://x.test/loop/b'])
+    expect(out.headers?.get('location')).toBe('/loop/a')
+  })
+
+  it('names the URL that redirects to itself as the final URL of its loop', async () => {
+    const out = await resilientFetch('http://x.test/self', scripted([res(302, { location: '/self' })]))
+    expect(out).toMatchObject({ kind: 'failure', failureReason: 'redirect_loop', status: 302, finalUrl: 'http://x.test/self', redirectChain: ['http://x.test/self'], requestCount: 1 })
   })
 
   it('stops at maxRedirects with redirect_limit', async () => {

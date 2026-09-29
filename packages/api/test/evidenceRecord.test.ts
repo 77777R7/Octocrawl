@@ -39,6 +39,8 @@ const PRODUCT_SCHEMA = { type: 'object', properties: { name: { type: 'string' },
 const PAGES: Record<string, { status?: number; headers?: Record<string, string>; body: string }> = {
   '/robots.txt': { headers: { 'content-type': 'text/plain' }, body: ROBOTS },
   '/moved': { status: 301, headers: { location: '/article' }, body: '' },
+  '/loop/a': { status: 302, headers: { location: '/loop/b' }, body: '' },
+  '/loop/b': { status: 302, headers: { location: '/loop/a' }, body: '' },
   '/article': { body: ARTICLE },
   '/hub': { body: ARTICLE.replace('<p><a href="/missing">Archive</a></p>', '<p><a href="/article">Report</a> <a href="/missing">Archive</a> <a href="/private">Staff</a></p>') },
   '/missing': { status: 404, body: '<!doctype html><html><head><title>Not found</title></head><body><main><h1>Page not found</h1><p>The page you asked for is not on this server.</p></main></body></html>' },
@@ -130,6 +132,16 @@ describe('Evidence Record: HTTP lane', () => {
     expect(missing.markdown).toContain('Page not found')
     const blocked = await scrape(http, { url: `${origin}/challenge` })
     expect(valid(blocked.evidenceRecord)).toMatchObject({ status: 'blocked', reason: 'cloudflare_challenge', httpStatus: 403, lane: 'http' })
+  })
+
+  it('names the last URL that answered on a redirect loop, with its status', async () => {
+    const loop = await scrape(http, { url: `${origin}/loop/a` })
+    expect(loop.evidence).toMatchObject({ finalUrl: `${origin}/loop/b`, httpStatus: 302, redirectChain: [`${origin}/loop/a`, `${origin}/loop/b`] })
+    expect(valid(loop.evidenceRecord)).toMatchObject({
+      finalUrl: `${origin}/loop/b`,
+      redirectChain: { urls: [`${origin}/loop/a`, `${origin}/loop/b`], complete: true },
+      httpStatus: 302, status: 'failed', reason: 'redirect_loop', lane: 'http',
+    })
   })
 
   it('says no request left for a robots.txt disallow', async () => {
