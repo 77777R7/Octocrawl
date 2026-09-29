@@ -126,6 +126,12 @@ For many known URLs, use `batch_scrape` in MCP, then `get_batch`, `get_batch_ite
 
 A crawl (`POST /v1/crawl`, MCP `crawl`) takes the same `formats` and `includeLinks` as scrape, plus `includePaths` / `excludePaths`: regular expressions matched against the URL path of each discovered link. The start URL is always fetched and an `excludePaths` match wins. Scrape, batch and crawl reject an unknown field or an unsupported format with HTTP 400 naming it.
 
+Scrape, batch and crawl also take three page options; batch and crawl apply them to every page:
+
+- `onlyMainContent` (default `true`). `false` returns the Markdown of the whole page: the document body with scripts, styles, form controls and embedded media left out, and the header, navigation and footer kept, through the same converter and base URL. The evidence (hashes, status) is the same in both modes, lane routing still reads the main content, and the `extract` trace event records `onlyMainContent: false`. `links` always come from the whole page.
+- `waitFor` (milliseconds, an integer from 0 to 60 000, default 0). The browser rung waits this long after the page has loaded and settled, then captures it. The HTTP rung cannot run scripts, so a request with `waitFor` starts at the browser rung, and the ladder audit records the skipped rung (`ladder_channel_skipped`). Where no browser rung is configured, the result is `failed` with `policy_denied` and a `wait_for_unavailable` trace event, never an answer that ignored the wait.
+- `timeout` (milliseconds, an integer from 1 000 to 300 000, default 300 000). The deadline for the whole scrape, `waitFor` included. When it fires, the API still answers HTTP 200: `partial` with the best content a rung produced so far (for example the HTTP content while the browser rung was still loading), or `failed` with `failureReason: "timeout"` when nothing usable exists. Both carry `usage.deadlineExceeded: true` and a `deadline_exceeded` trace event. When a `waitFor` would run past the deadline, the browser stops waiting about one second before it and captures the page as it is then: `partial` when that page has content, otherwise `failed`/`timeout`. A client that disconnects still cancels the scrape. JSON extraction reads fields from a `partial` page but reports it `incomplete` with a `page_partial` issue, and never calls the model for it.
+
 Request deterministic structured data with a JSON Schema alongside, or instead of, Markdown:
 
 ```ts
@@ -165,7 +171,7 @@ The setup uses an anonymous Singapore public delivery preference for this benchm
 The concurrency-1 command can exit nonzero because its ten-page median exceeds 20 seconds; inspect its report for comparability and blocking before continuing to 2. The signed run had 37.93 seconds at 1, 19.92 at 2, and 12.39 at 4.
 This signed Amazon slice is currently on the local `codex/amazon-adapter-integration` branch, not the released `main` or `v0.4.0-rc.1` source.
 
-Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim maps `url` and the `markdown` and `links` formats; the crawl shim maps `url`, `limit`, `maxDepth`, `includePaths`, `excludePaths` and `scrapeOptions.formats`. Any other parameter or format is rejected with HTTP 400 and `success: false`, naming it. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
+Firecrawl v1 clients (partial compatibility): set the base URL to `http://127.0.0.1:8787/fc` so `/v1/scrape` and `/v1/crawl` hit the shim. The scrape shim maps `url`, the `markdown` and `links` formats, `onlyMainContent`, `waitFor` and `timeout`; the crawl shim maps `url`, `limit`, `maxDepth`, `includePaths`, `excludePaths` and the same four `scrapeOptions` (`formats`, `onlyMainContent`, `waitFor`, `timeout`). Any other parameter or format is rejected with HTTP 400 and `success: false`, naming it. Snapshot 2026-09-18; known diffs in [docs/firecrawl-shim.md](docs/firecrawl-shim.md). Firecrawl Search / Interact / Agent / Monitor compatibility is not implemented. W2L's native Monitor and Delivery APIs use their own contracts.
 
 ## Continuous Monitors and event delivery
 
