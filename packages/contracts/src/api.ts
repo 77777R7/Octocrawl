@@ -55,8 +55,10 @@ export interface CompactScrapeResponse {
   finalUrl: string
   /**
    * Small capture identity for field audits; the HTML body remains local.
-   * `httpStatus` and `contentType` are the final response's status and
-   * `content-type` header (`evidence.httpStatus`, `evidence.contentType`).
+   * `httpStatus` and `contentType` are the status and `content-type` header
+   * of the response that answered `finalUrl` (`evidence.httpStatus`,
+   * `evidence.contentType`): in the browser lane, of the document the page
+   * shows after a script or a meta refresh moved it on.
    */
   snapshot: { rawBodySha256: string | null; artifacts: readonly string[]; httpStatus: number | null; contentType: string | null }
   /** The result's Evidence Record v1, the same as on the full response. */

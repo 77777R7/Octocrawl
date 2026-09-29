@@ -53,11 +53,13 @@ export interface FirecrawlPage {
     robots?: string
     favicon?: string
     sourceURL: string
-    /** The final URL, after redirects. */
+    /** The final URL, after redirects (`evidence.finalUrl`). */
     url: string
+    /** The status of the response that answered `url` (`evidence.httpStatus`); null when none did. */
     statusCode: number | null
-    /** The final response's `content-type` header; left out when there was none. */
+    /** That response's `content-type` header; left out when there was none. */
     contentType?: string
+    /** On a page that did not succeed: W2L's failure, block or budget reason code (`http_error`, `cloudflare_challenge`, ...), or its status when it has none (`empty_verified`). */
     error?: string
   }
 }
