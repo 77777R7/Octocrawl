@@ -31,7 +31,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
-  'creditsUsed is always 0.',
+  'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Formats other than markdown/links and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
@@ -65,8 +65,10 @@ export interface FirecrawlCrawlStatus {
   status: FirecrawlCrawlJobStatus
   total: number
   completed: number
-  creditsUsed: number
-  expiresAt: string
+  /** Null: W2L counts no credits, and an unknown count is not zero. */
+  creditsUsed: number | null
+  /** Null: crawl results stay until their task directory is deleted. */
+  expiresAt: string | null
   next: string | null
   data: FirecrawlPage[]
 }
@@ -179,8 +181,8 @@ export function wrapCrawlStatus(report: CrawlReport, steps: readonly StepRecord[
     status: firecrawlCrawlStatus(report.status),
     total: steps.length,
     completed: report.pagesFetched,
-    creditsUsed: 0,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    creditsUsed: null,
+    expiresAt: null,
     next: null,
     data,
   }
