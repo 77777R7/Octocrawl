@@ -96,7 +96,13 @@ a { color: inherit; }
 .hero-octopus-cell { --octopus-fit: .94; --octopus-ink: 1; --octopus-size: clamp(400px, 34vw, 640px); --octopus-drop: calc(1.14 * clamp(44px, 4.4vw, 64px) - 1.6 * clamp(16px, 1.4vw, 18px) + .057 * var(--octopus-size)); position: absolute; inset: 0; pointer-events: none; }
 .hero-octopus-cell::before, .hero-ascii-layer { position: absolute; left: 50%; top: calc(50% + var(--octopus-drop)); width: var(--octopus-size); height: calc(var(--octopus-size) / 1.05); translate: -50% -50%; }
 .hero-octopus-cell::before { content: ''; background: url('/assets/octopus-original.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; opacity: calc(.42 * var(--octopus-ink)); -webkit-mask: url('/assets/octopus-silhouette.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; mask: url('/assets/octopus-silhouette.webp') center / calc(var(--octopus-fit) * 126.3%) auto no-repeat; }
-/* The glyphs decode over it from the octopus's centre while it fades. */
+/* Where the live octopus can run (the same test as ascii.ts) the static one waits dimmer, from the first paint:
+   not started yet. It comes up to its own opacity only if the live one turns out unable to run (.is-static).
+   Otherwise the glyphs decode over it from the octopus's centre while it fades. */
+@media (min-width: 1050px) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .hero-octopus-cell:not(.is-static)::before { opacity: calc(.26 * var(--octopus-ink)); }
+}
+.hero-octopus-cell.is-static::before { transition: opacity 1.2s ease-out; }
 .hero-octopus-cell.is-arrived::before { opacity: 0; transition: opacity 1.2s ease-in; }
 .hero-copy { z-index: 1; }
 /* No opacity, mask or filter on the layer or its cell (a translate is fine): any of them would stop the glyph veil
@@ -165,19 +171,6 @@ a { color: inherit; }
 .hero-scroll:hover { color: #ffae86; }
 .hero-scroll-glyph { width: 6px; height: 17px; background: radial-gradient(circle, currentColor 1.1px, transparent 1.6px) 50% 0 / 6px 6px repeat-y; -webkit-mask-image: linear-gradient(#000 20%, transparent); mask-image: linear-gradient(#000 20%, transparent); }
 @media (min-height: 760px) { .hero-scroll { display: inline-flex; } }
-/* Pauses or restarts motion: the hero's, on the cue's line at the frame's right edge, and the replay's, in its
-   backdrop's corner. Shown only where the motion runs. */
-.motion-toggle { position: absolute; z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; color: #d3e0f6; background: transparent; }
-.motion-toggle::before { content: ''; position: absolute; inset: 6px; border: 1px solid rgba(214, 228, 255, .32); border-radius: 50%; background: rgba(7, 27, 79, .4); }
-.motion-toggle:hover { color: #ffae86; }
-.motion-toggle:hover::before { border-color: rgba(255, 174, 134, .6); }
-.motion-toggle-icon { position: relative; width: 10px; height: 11px; border-inline: 3px solid currentColor; }
-.motion-toggle.is-paused .motion-toggle-icon { width: 0; height: 0; margin-left: 3px; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
-.hero-motion { right: calc((100% - min(1200px, 100% - 32px)) / 2 + 24px); bottom: clamp(12px, 3vh, 32px); bottom: clamp(12px, 3svh, 32px); }
-.replay-toggle { right: 8px; bottom: 8px; }
-/* Forced colours would paint the play triangle's transparent borders solid (a stop square): the icon opts out
-   and takes the system button text colour itself. */
-@media (forced-colors: active) { .motion-toggle-icon { forced-color-adjust: none; color: ButtonText; } }
 
 /* A short bottom padding: the hero's own padding and free space already sit below the form, and that free
    space lets a message and a hint appear under the card without pushing the cue off the first screen. */
@@ -314,7 +307,7 @@ a { color: inherit; }
 .how-links a:hover { color: #b8461d; }
 .how-specimen { min-width: 0; margin: 0; }
 /* The replay sits on a crop of the hero artwork, like a product shot on its backdrop. */
-.how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px) 52px; border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
+.how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px); border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
 .how-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
 /* Footer */
@@ -415,7 +408,7 @@ a { color: inherit; }
   .copy-button { font-size: 11px; padding: 9px 11px; }
   .readable-content { font-size: 14px; }
   .how-grid { gap: 40px; padding: 56px 18px 64px; }
-  .how-replay { min-height: 0; padding: 32px 14px 56px; border-radius: 16px; }
+  .how-replay { min-height: 0; padding: 32px 14px; border-radius: 16px; }
   .footer-brand-cell { padding: 32px 18px; }
   .footer-tagline { font-size: 21px; }
   .footer-cards { padding: 0 18px 32px; }

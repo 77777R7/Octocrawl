@@ -54,7 +54,7 @@ app.innerHTML = `
       <main aria-labelledby="hero-title">
         <div class="band band-dark">
           <div class="frame hero-cells">
-            <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" aria-hidden="true"></div>
+            <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
               <p class="hero-description">Paste a public URL. Get readable content and verifiable fields where supported.</p>
@@ -82,7 +82,6 @@ app.innerHTML = `
           </div>
         </div>
         <a class="hero-scroll" id="hero-scroll" href="#how-it-works"><span class="hero-scroll-glyph" aria-hidden="true"></span><span id="hero-scroll-label">How it works</span></a>
-        <button class="motion-toggle hero-motion" id="hero-motion" type="button" aria-label="Pause motion" title="Pause motion" hidden><span class="motion-toggle-icon" aria-hidden="true"></span></button>
       </main>
     </div>
 
@@ -122,7 +121,6 @@ app.innerHTML = `
           <figure class="how-specimen">
             <div class="how-replay" id="how-replay">
               <div class="how-replay-window" aria-hidden="true" inert>${sessionMarkup()}</div>
-              <button class="motion-toggle replay-toggle" id="replay-toggle" type="button" aria-label="Pause replay" title="Pause replay" hidden><span class="motion-toggle-icon" aria-hidden="true"></span></button>
             </div>
             <figcaption>A replay of two recorded runs, 24–25 Sep 2026: the example page and an Amazon.sg product. Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://docs.firecrawl.dev/introduction passed its robots.txt check and returned success in 2.51 seconds of server time, 11,761 characters of Markdown starting with the heading Introduction. The Amazon.sg product B000NI69YA was matched and verified for Singapore 238823 in SGD at SGD 290.67, sold by Amazon US, in 12.54 seconds in the browser.</span></figcaption>
           </figure>
@@ -164,9 +162,9 @@ try {
   const landing = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null
   if (landing && !hero.contains(landing) && !window.scrollY) landing.scrollIntoView({ behavior: 'instant' })
 } catch { /* A malformed fragment keeps the browser's own handling. */ }
-mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero, document.querySelector<HTMLButtonElement>('#hero-motion')!)
+mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClickSpark(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
-mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!, document.querySelector<HTMLButtonElement>('#replay-toggle')!)
+mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
 const input = document.querySelector<HTMLInputElement>('#url-input')!
