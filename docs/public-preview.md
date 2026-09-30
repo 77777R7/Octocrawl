@@ -154,6 +154,28 @@ The initial Cloud Run settings are:
 
 The image is built from `Dockerfile.public-preview` and includes Chromium. Do not deploy the existing `render.yaml` managed MCP service as this anonymous page: that service has durable Monitor/Delivery semantics and a different authentication policy. Cloud Run's local files are ephemeral, so they cannot back persistent tasks. [Cloud Run browser support](https://docs.cloud.google.com/run/docs/browser-automation) · [container filesystem](https://docs.cloud.google.com/run/docs/container-contract)
 
+### Public domain
+
+Pages, `robots.txt` and `sitemap.xml` carry the site's absolute address (canonical links, Open Graph cards, sitemap entries). The server writes it in at request time: the host the request reached by default, or `W2L_PUBLIC_ORIGIN` when set.
+
+Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's free plan cannot rewrite the `Host` header, so the domain is served by the Worker in `cloudflare/public-preview-proxy/`. It forwards every request to the `run.app` URL and names the domain in `X-Forwarded-Host`; the server believes that header only when it equals `W2L_PUBLIC_ORIGIN`.
+
+1. Register the domain with Cloudflare Registrar (or add an existing one to Cloudflare as a zone).
+2. In `cloudflare/public-preview-proxy/wrangler.toml`, replace `YOUR_DOMAIN`, then run `npx wrangler login` and `npx wrangler deploy` from that directory. The Worker is attached to the domain as a custom domain; no DNS record for Cloud Run is needed.
+3. Deploy the service with `--update-env-vars=W2L_PUBLIC_ORIGIN=https://DOMAIN`. Until then the domain works but pages name the `run.app` host.
+4. Check `https://DOMAIN/`, `/robots.txt`, `/sitemap.xml`, `/pricing` (404) and a real extraction on the domain, and that `https://…run.app/` now answers 301 to the domain.
+
+With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
+
+### Page events
+
+The page sends first-party events to `POST /api/events` (same origin only; fixed event names and short properties; nothing is sent when the browser signals Do Not Track or Global Privacy Control). Each is one stdout line with `event: "w2l_web_event"`. Every anonymous `/api/preview` answer also logs one `event: "w2l_preview"` line with its state, diagnostic code, the target's host (never its path or query), whether options were used and the server time. Both carry `vid`, a pseudonym that changes every UTC day (an HMAC of the visitor key under `W2L_QUOTA_HASH_KEY`), and `automated`, a user-agent guess for filtering crawlers. Owner-token evaluation runs are not counted. Read them in Cloud Logging:
+
+```sh
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="w2l-public-preview" AND (jsonPayload.event="w2l_web_event" OR jsonPayload.event="w2l_preview") AND jsonPayload.automated=false' \
+  --project="$W2L_PROJECT_ID" --freshness=7d --format=json
+```
+
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.
 
 ## Release checks
