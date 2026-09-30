@@ -1,6 +1,6 @@
 # W2L public preview
 
-The first-use page accepts one public HTTP(S) URL and shows readable content, the final URL, the result state, and elapsed time. Amazon.sg `/dp/{ASIN}` pages also show a fixed product record. It exposes a price only when the selected ASIN, Singapore delivery context, and SGD currency can be verified; otherwise the product record is marked incomplete with explicit issues. Crawl, batches, and Monitor remain separate authenticated/persistent workflows.
+The first-use page accepts one public HTTP(S) URL and shows readable content, the final URL, the result state, and elapsed time; for an ordinary page it also shows the page's links and metadata, and up to 20 fields the visitor names, read from the page without a model. Amazon.sg `/dp/{ASIN}` pages also show a fixed product record. It exposes a price only when the selected ASIN, Singapore delivery context, and SGD currency can be verified; otherwise the product record is marked incomplete with explicit issues. Crawl, batches, and Monitor remain separate authenticated/persistent workflows.
 
 The same static build includes an English `/docs/` site generated from
 `apps/public-web/content/`. It links the first page trial to the locally
@@ -30,6 +30,28 @@ Open the public HTTPS service URL, paste a page address, and choose **Extract pa
 The anonymous allowance is three attempts per browser visitor per UTC day and 100 attempts globally per UTC day. A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
 
 Amazon.sg browser requests also use one Firestore-backed origin lease across the two Cloud Run instances. It preserves spacing and observed Retry-After cooldown, and exhausted visitors are rejected by a read-only quota check before acquiring that lease. This coordination is specific to Amazon.sg; generic public HTTP pages still use per-request scheduling, so this release does not claim shared cross-instance pacing for every domain.
+
+## Request and response
+
+`POST /api/preview` takes a JSON body of at most 8 KiB. Only `url` is required, and the page sends nothing else unless the visitor changes an option:
+
+| Key | Accepted |
+| --- | --- |
+| `url` | One public HTTP(S) URL. |
+| `onlyMainContent` | `true` (the default) or `false` to keep the whole page. |
+| `formats` | 1 to 3 of `"markdown"`, `"links"` and `{"type": "json", "schema": …}`, each once. |
+
+The schema is a flat object of 1 to 20 fields and at most 4096 bytes. Each field has one type besides an optional `null`: `string`, `number`, `integer`, `boolean`, or an `array` of one of those. A field may also have a `title` or `description` of at most 200 characters. Names use letters, digits, spaces, dots, dashes and underscores, up to 64 characters, and `__proto__`, `constructor` and `prototype` are refused. `required` may list the schema's own fields, and `additionalProperties` must be `true` or `false`. `$ref`, `pattern`, nested objects and combinators are refused. The engine's own request check then runs on the accepted formats. Any other key, including `prompt`, `modelFallback`, `waitFor`, `timeout`, `debug` and the bare `"json"` format, returns HTTP 400 with status `invalid_url` and diagnostic `invalid_options`, naming the parameter. So does any option on an Amazon.sg `/dp/{ASIN}` URL, which returns its checked product record. Options are checked before the private-address check and before quota, so a refused request spends no preview.
+
+Fields are read by the engine's deterministic structured extraction with model fallback off and no model configuration, even when `W2L_EXTRACT_*` variables are set. Sources are JSON-LD, microdata, meta tags, table rows, definition lists and a PDF's `Label: value` lines. A field the page does not state is `null`, with an issue that gives the reason.
+
+A readable ordinary page (`success` or `partial` from the generic adapter, not Amazon, X or Reddit) adds these to the response:
+
+- **Links:** `links`, up to 500 deduplicated HTTP(S) links without credentials. Each link is at most 2048 characters and all of them together at most 256 KiB. `linksTotal` gives the number found.
+- **Metadata:** `metadata`, with each value cut to 2048 characters.
+- **Fields:** `json` when fields were asked for, in the order asked. It holds `status`, `data`, `schemaSha256`, `evidence` and `issues`, never model usage. When the data would pass 64 KiB, `data` is `null` with a `too_large` issue.
+
+`formats` narrows what comes back. Markdown and links are returned only when listed; metadata always comes. A file adds `file`: its kind, content type, sizes, SHA-256, PDF page counts and warnings, never where it was saved. Markdown is cut at 1,000,000 characters, with `markdownTruncated: true`. The preview follows at most 3 redirects and reads pages of up to 2 MiB (4 MiB decompressed) and files of up to 5 MiB.
 
 ## Local integration
 

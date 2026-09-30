@@ -7,6 +7,7 @@ import type { PreviewQuota, QuotaDecision } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
+import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -93,14 +94,14 @@ function authorizedEvaluation(req: IncomingMessage, configuredToken: string | un
 
 async function readRequestBody(req: IncomingMessage): Promise<unknown> {
   const type = req.headers['content-type'] ?? ''
-  if (!type.toLowerCase().startsWith('application/json')) throw new Error('Send JSON containing a single url field.')
-  if (Number(req.headers['content-length'] ?? 0) > 4_096) throw new Error('The request is too large.')
+  if (!type.toLowerCase().startsWith('application/json')) throw new Error('Send a JSON object with a url.')
+  if (Number(req.headers['content-length'] ?? 0) > PREVIEW_BODY_BYTES) throw new Error('The request is too large.')
   const chunks: Buffer[] = []
   let length = 0
   for await (const chunk of req) {
     const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     length += next.length
-    if (length > 4_096) throw new Error('The request is too large.')
+    if (length > PREVIEW_BODY_BYTES) throw new Error('The request is too large.')
     chunks.push(next)
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) }
@@ -186,12 +187,22 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     let submitted = ''
     try {
       const body = await readRequestBody(req)
-      if (body === null || typeof body !== 'object' || Array.isArray(body)
-        || Object.keys(body).length !== 1 || typeof (body as Record<string, unknown>).url !== 'string') {
-        throw new Error('The request must contain only one url field.')
+      // Options are checked in full before any network or quota work, so a refused request costs nothing.
+      let request: PreviewRequest
+      try { request = parsePreviewRequest(body) }
+      catch (error) {
+        const url = body !== null && typeof body === 'object' && typeof (body as Record<string, unknown>).url === 'string' ? (body as { url: string }).url : ''
+        if (!res.destroyed) sendJson(res, 400, empty('invalid_url', url, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started),
+          url ? { code: 'invalid_options', stage: 'input', evidence: 'observed' } : undefined))
+        return
       }
-      submitted = (body as { url: string }).url
+      submitted = request.url
       const target = normalizePreviewUrl(submitted)
+      if (target.amazonAsin !== null && hasOptions(request.options)) {
+        sendJson(res, 400, empty('invalid_url', submitted, 'Amazon.sg product pages return the checked product record and take no options.',
+          Math.max(0, performance.now() - started), { code: 'invalid_options', stage: 'input', evidence: 'observed' }))
+        return
+      }
       if (isPreviewTargetStaticallyDenied(target.url)) {
         sendJson(res, 200, empty('blocked', submitted, 'Private or reserved network targets are not available in the public preview.',
           Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
@@ -269,9 +280,9 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
               // The lease stays owned while we persist the observed cooldown.
               // Release repeats the maximum after all notes settle.
               retryNotes.push(permit.noteRetryAfter(retryAt).catch(() => {}))
-            }, options.localPlatformProxyUrl, options.localPlatformRobotsException)
+            }, options.localPlatformProxyUrl, options.localPlatformRobotsException, request.options)
             if (outcome.result.retryAt !== undefined) observedRetryAt = Math.max(observedRetryAt, outcome.result.retryAt)
-            const mapped = mapPreviewResult(submitted, target, outcome, Math.max(0, performance.now() - started))
+            const mapped = mapPreviewResult(submitted, target, outcome, Math.max(0, performance.now() - started), request.options)
             if (evaluation) {
               mapped.evaluation = {
                 rawBodySha256: outcome.result.evidence.rawBodySha256,
