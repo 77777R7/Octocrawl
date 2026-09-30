@@ -1,6 +1,6 @@
 # Seed-user manifest: the Applied Digital release after the table-region fix (2026-09-30)
 
-Single-source check, from the local machine, of the one `sec_filing_html` source the two manifest runs captured: the Applied Digital fiscal Q4 2026 earnings release on `ir.applieddigital.com` (source `S033` in [coos-manifest.v1.json](coos-manifest.v1.json)). In the [baseline](baseline-2026-09-30.md) and the [re-run](rerun-2026-09-30.md) its markdown was the non-GAAP reconciliation table alone (6,881 chars; `extract {pageType: 'collection', strategy: 'table', confidence: 0.2}`), which left 10 observations `not_found`: the capacity figures in MW and the two financing amounts in the release's prose.
+Single-source check, from the local machine, of the one `sec_filing_html` source the two manifest runs captured: the Applied Digital fiscal Q4 2026 earnings release on `ir.applieddigital.com` (source `APLD-FY26` in [coos-manifest.v1.json](coos-manifest.v1.json), 11 numeric observations). In the [baseline](baseline-2026-09-30.md) and the [re-run](rerun-2026-09-30.md) its markdown was the non-GAAP reconciliation table alone (6,881 chars; `extract {pageType: 'collection', strategy: 'table', confidence: 0.2}`), which left 10 observations `not_found`: the capacity figures in MW and the two financing amounts in the release's prose.
 
 ## What changed
 
