@@ -231,22 +231,24 @@ a { color: inherit; }
 .sheet::before, .sheet::after, .code-dialog::before, .code-dialog::after { content: ""; position: absolute; left: 20px; right: 20px; height: 3px; background: var(--sheet-dots) 0 50% / 8px 3px repeat-x; pointer-events: none; }
 .sheet::before, .code-dialog::before { top: 11px; left: 24px; right: 24px; }
 .sheet::after, .code-dialog::after { bottom: 11px; left: 24px; right: 24px; }
-/* Opening: hidden until main.ts has placed it, the panel unfolds row by row from its button's side, like a terminal
-   printing, and its contents and the icons' glyphs come up after it. Closing is at once. */
+/* Opening: hidden until main.ts has placed it, the panel rises from its button's side, then its contents come up in
+   turn and the icons' glyphs light cell by cell. Only transform and opacity move, so the compositor draws every
+   frame; closing is at once. */
 .sheet:popover-open:not(.is-placed) { visibility: hidden; }
-.sheet.is-placed { animation: unfold-down .3s steps(8, end) backwards; }
-.sheet.is-placed[data-side="above"] { animation-name: unfold-up; }
-.sheet.is-placed .sheet-head, .sheet.is-placed .sheet-scroll > *, .sheet.is-placed .format-tile, .sheet.is-placed .field-row { animation: glyph-in .26s steps(4, end) backwards; animation-delay: calc(130ms + min(var(--i, 0), 8) * 40ms); }
-.sheet.is-placed .glyph-icon .on { animation: glyph-in .3s steps(3, end) backwards; animation-delay: calc(230ms + var(--i, 0) * 40ms + var(--d, 0ms)); }
+.sheet.is-placed { transform-origin: 50% 0; animation: sheet-in-down .24s cubic-bezier(.2, .8, .2, 1) backwards; }
+.sheet.is-placed[data-side="above"] { transform-origin: 50% 100%; animation-name: sheet-in-up; }
+.sheet.is-placed .sheet-head, .sheet.is-placed .sheet-scroll > *, .sheet.is-placed .format-tile, .sheet.is-placed .field-row { animation: line-in .28s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(60ms + min(var(--i, 0), 8) * 30ms); }
+.sheet.is-placed .glyph-icon .on { animation: glyph-on .3s ease-out backwards; animation-delay: calc(140ms + var(--i, 0) * 30ms + var(--d, 0ms)); }
 .sheet-scroll > :nth-child(2), .format-tile:nth-child(2) { --i: 1; }
 .sheet-scroll > :nth-child(3), .format-tile:nth-child(3) { --i: 2; }
 .format-tile:nth-child(4) { --i: 3; }
 .format-tile:nth-child(5) { --i: 4; }
-@keyframes unfold-down { from { clip-path: inset(-80px -80px 100% -80px); } to { clip-path: inset(-80px); } }
-@keyframes unfold-up { from { clip-path: inset(100% -80px -80px -80px); } to { clip-path: inset(-80px); } }
-@keyframes unfold-middle { from { clip-path: inset(50% -80px 50% -80px); } to { clip-path: inset(-80px); } }
-@keyframes glyph-in { from { opacity: 0; } 40% { opacity: .5; } 70% { opacity: .2; } to { opacity: 1; } }
-@keyframes backdrop-in { from { background-color: transparent; } }
+@keyframes sheet-in-down { from { opacity: 0; transform: translateY(-8px) scaleY(.96); } }
+@keyframes sheet-in-up { from { opacity: 0; transform: translateY(8px) scaleY(.96); } }
+@keyframes sheet-in-middle { from { opacity: 0; transform: scale(.97); } }
+@keyframes line-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes glyph-on { from { opacity: .12; } }
+@keyframes fade-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .sheet.is-placed, .sheet.is-placed *, .code-dialog[open], .code-dialog[open] *, .code-dialog[open]::backdrop { animation: none !important; }
 }
@@ -334,14 +336,14 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .option-error { margin: 8px 0 0; color: #ff9a86; font-size: 11.5px; line-height: 1.55; }
 .option-error:empty { display: none; }
 
-/* Get code: a session sheet like the panels, over a darkened hero. It unfolds from its middle line, and each listing
+/* Get code: a session sheet like the panels, over a darkened hero. It grows in from its middle, and each listing
    prints line by line, again whenever another tab is chosen. */
 .code-dialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 32px); overflow: hidden; }
-.code-dialog[open] { display: flex; flex-direction: column; animation: unfold-middle .32s steps(8, end) backwards; }
+.code-dialog[open] { display: flex; flex-direction: column; animation: sheet-in-middle .26s cubic-bezier(.2, .8, .2, 1) backwards; }
 .code-dialog::backdrop { background: rgba(3, 14, 45, .62); }
-.code-dialog[open]::backdrop { animation: backdrop-in .3s ease backwards; }
+.code-dialog[open]::backdrop { animation: fade-in .26s ease-out backwards; }
 .code-body { min-height: 0; padding: 4px 24px 26px; overflow: auto; }
-.code-dialog[open] .code-body > * { animation: glyph-in .26s steps(4, end) backwards; animation-delay: 150ms; }
+.code-dialog[open] .code-body > * { animation: line-in .28s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: 80ms; }
 .code-title { margin: 14px 0 0; color: #fff; font: 400 26px/1.2 "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: -.035em; }
 .code-lead { max-width: 62ch; margin: 8px 0 0; color: var(--sheet-muted); font: 13px/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .code-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
@@ -362,7 +364,7 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .code-lines li::before { content: counter(line); padding-right: 2ch; color: #536b98; text-align: right; }
 .code-lines .is-comment { color: #7f95bd; }
 .code-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.code-dialog[open] .code-lines li { animation: glyph-in .2s steps(3, end) backwards; animation-delay: calc(230ms + min(var(--i, 0), 12) * 45ms); }
+.code-dialog[open] .code-lines li { animation: line-in .24s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(160ms + min(var(--i, 0), 12) * 40ms); }
 .code-links { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 16px 0 0; font-size: 12px; }
 .code-links a { color: #fb9b72; text-decoration: underline dotted; text-underline-offset: 4px; }
 .code-links a:hover { color: #ffc2a4; }
