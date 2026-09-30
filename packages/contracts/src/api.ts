@@ -50,7 +50,8 @@ export interface ScrapeRequest extends PageOptions {
    * A recorded decision to fetch this URL although its host's robots.txt
    * disallows it. The reason is required; robots.txt is still read, and the
    * override is reported in the trace, the warnings and, in the browser lane,
-   * the compliance record.
+   * the compliance record. A hosted server refuses the field
+   * (`unsupported_parameter`).
    */
   robotsOverride?: RobotsOverride
 }
@@ -124,7 +125,7 @@ export interface BatchStartRequest extends PageOptions {
   mode?: ApiCrawlMode
   formats?: readonly ScrapeFormat[]
   includeLinks?: boolean
-  /** Recorded robots overrides, each for one URL of `urls`. */
+  /** Recorded robots overrides, each for one URL of `urls`. A hosted server refuses the field (`unsupported_parameter`). */
   robotsOverrides?: readonly RobotsUrlOverride[]
 }
 

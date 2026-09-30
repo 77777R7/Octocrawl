@@ -10,6 +10,12 @@ export interface ListenConfig {
   tokens: readonly string[]
   networkPolicy: NetworkPolicy
   defaultMaxPages: number | null
+  /**
+   * Whether a scrape or batch may carry a recorded robots override. A local
+   * server's user decides that for their own fetches; a hosted server takes
+   * none, whoever holds a token.
+   */
+  allowRobotsOverride: boolean
   /** Startup lines about the environment proxy, printed once. */
   notices: readonly string[]
 }
@@ -30,6 +36,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       // Hosted SSRF guarantees depend on direct, DNS-pinned connections.
       networkPolicy: withOperatorContact(tunedPolicy(hostedNetworkPolicy(), env), env),
       defaultMaxPages: 100,
+      allowRobotsOverride: false,
       notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
     }
   }
@@ -41,6 +48,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     tokens,
     networkPolicy,
     defaultMaxPages: null,
+    allowRobotsOverride: true,
     notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
   }
 }

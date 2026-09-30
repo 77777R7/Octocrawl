@@ -10,6 +10,7 @@ import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { parseListen } from '../src/listen.js'
 
 function httpOnlyChannels(mode: 'standard' | 'research' | 'authed') {
   return buildChannels(mode, {
@@ -214,6 +215,40 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(reportHits).toBe(2)
     } finally {
       await new Promise<void>(resolve => local.close(() => resolve()))
+    }
+  })
+
+  it('a hosted server takes no robots override: scrape and batch refuse the field by name, and nothing is fetched', async () => {
+    const requests: string[] = []
+    const local = createServer((req, res) => {
+      requests.push(req.url ?? '')
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /')
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(local.address() as AddressInfo).port}/report`
+    const hostedRoot = await mkdtemp(join(tmpdir(), 'w2l-api-hosted-'))
+    // The setting `npm run api -- --hosted` gives its engine; the fixture is on loopback, so the network policy stays local.
+    const hosted = createApiEngine({ taskRoot: hostedRoot, channelsFor: httpOnlyChannels, allowRobotsOverride: parseListen(['--hosted', '--token', 'secret'], {}).allowRobotsOverride })
+    try {
+      const app = createApp(hosted)
+      const post = (path: string, body: unknown) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const reason = 'The publisher links this report itself.'
+      const scrape = await post('/v1/scrape', { url, robotsOverride: { reason } })
+      expect(scrape.status).toBe(400)
+      expect(await scrape.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverride '), code: 'unsupported_parameter', details: { parameters: ['robotsOverride'] } })
+      const batch = await post('/v1/batches', { urls: [url], robotsOverrides: [{ url, reason }] })
+      expect(batch.status).toBe(400)
+      expect(await batch.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverrides '), code: 'unsupported_parameter', details: { parameters: ['robotsOverrides'] } })
+      expect(requests).toEqual([])
+      // Without the field the same URL is a scrape like any other, and its rule holds.
+      const plain = await post('/v1/scrape', { url })
+      expect(plain.status).toBe(200)
+      expect(await plain.json()).toMatchObject({ status: 'failed', failureReason: 'policy_denied', evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false } } })
+      expect(requests).toEqual(['/robots.txt'])
+    } finally {
+      await hosted.close()
+      await new Promise<void>(resolve => local.close(() => resolve()))
+      await rm(hostedRoot, { recursive: true, force: true })
     }
   })
 

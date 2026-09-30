@@ -8,7 +8,7 @@ import { localNetworkPolicy } from '@w2l/contracts'
 import { SqliteTaskStore } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
-import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
 
 describe('persistent URL-array batch', () => {
   const cleanup: Array<() => Promise<void>> = []
@@ -34,7 +34,7 @@ describe('persistent URL-array batch', () => {
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    const engine = () => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }, workerCount: 2, ...options })
+    const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }, workerCount: 2, ...options, ...extra })
     cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
     return { origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release() }
   }
@@ -180,6 +180,31 @@ describe('persistent URL-array batch', () => {
     // Fetched again by the restarted process, under the override stored with the task.
     expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(2)
     expect((await client2.getBatchItems(taskId)).items).toMatchObject([{ url, status: 'success', warnings: [{ code: 'robots_overridden' }] }])
+  })
+
+  it('a server that takes no robots override applies none to a stored batch it resumes', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const local = f.engine()
+    const url = `${f.origin}/private/item/2`
+    const { taskId } = await local.startBatch({ urls: [url], robotsOverrides: [{ url, reason: 'The publisher links this item publicly.' }] })
+    await slowStarted
+    await local.close({ cancelActive: true })
+    f.setSlow(false); f.release()
+    // The same task root, now served as `--hosted` serves it.
+    const hosted = f.engine({ allowRobotsOverride: false })
+    cleanup.push(() => hosted.close())
+    const app = createApp(hosted)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    expect(await client.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 1, completed: 1 })
+    const { items } = await client.getBatchItems(taskId)
+    expect(items).toMatchObject([{ url, status: 'failed', failureReason: 'policy_denied', evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false } } }])
+    expect(items[0]).not.toHaveProperty('warnings')
+    // Only the local server's request reached the page.
+    expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(1)
   })
 
   it('keeps the override on a scrape and a batch item whose deadline passes while the overridden request is out', async () => {

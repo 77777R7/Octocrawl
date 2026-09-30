@@ -149,6 +149,14 @@ export interface ApiEngineOptions {
    * is refused. Null (local) leaves crawls unbounded.
    */
   defaultMaxPages?: number | null
+  /**
+   * Whether scrape and batch requests may carry a recorded robots override
+   * (`robotsOverride`, `robotsOverrides`). Absent or true (local): the person
+   * running the server decides that for their own fetches. False (hosted):
+   * the field is refused by name with HTTP 400, so no token holder can make
+   * the operator's service set a publisher's rule aside.
+   */
+  allowRobotsOverride?: boolean
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -189,6 +197,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const checkFileCap = (req: PageOptions): void => {
     if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
       throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes}, this server's file cap (W2L_MAX_FILE_BYTES)`)
+    }
+  }
+  /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
+  const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
+    if (options.allowRobotsOverride === false && value !== undefined) {
+      throw new RequestError(`unsupported parameter: ${parameter} (this server takes no robots override; a recorded override is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
   }
   const originScheduler = new OriginScheduler(networkPolicy)
@@ -289,8 +303,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // keeps the full result.
     const selection = task.batch ?? task.crawl
     // A batch's recorded robots overrides are per URL: only the URL an
-    // override names is fetched past a disallow, never its neighbours.
-    const robotsOverrideFor = task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    // override names is fetched past a disallow, never its neighbours. A
+    // server that takes none applies none, also to a task stored with them.
+    const robotsOverrideFor = options.allowRobotsOverride === false || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
     const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
@@ -384,6 +399,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   return {
     async scrape(req, context = {}) {
       checkFileCap(req)
+      checkRobotsOverride('robotsOverride', req.robotsOverride)
       const overallStart = performance.now()
       // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
       const deadlineAt = req.timeout === undefined
@@ -457,6 +473,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
       checkFileCap(req)
+      checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       batchStartInProgress = true
       try {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
