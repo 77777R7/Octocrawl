@@ -111,18 +111,24 @@ const GLINT_MS = 800;
 const ARRIVAL_MS = 1400;
 const WAVE_MS = 900;
 // Starting up, once per page view: while the ripple spreads the octopus is typed dormant, at DORMANT_INK of its ink
-// and a band lighter, eyes shut. At IGNITE_AT the ripple's warm edge has just left the arm tips (arrive - 0.14 = 1 at
-// 1080 ms) and the whole octopus lights up at once: over IGNITE_RISE_MS its glyphs grow a band heavier and warm, its
-// eyes open and catch the light, and the glow dies away over IGNITE_FALL_MS to its own ink and colours. Under the
-// page's text the glow keeps to LETTER_GLOW of its strength. An octopus that comes back later arrives awake.
+// and a band lighter, eyes shut. At IGNITE_AT the ripple's warm edge has left the arm tips (arrive - 0.14 = 1 at
+// 1080 ms) and the octopus lights up all but at once, from its middle out: each glyph starts IGNITE_SPREAD_MS later
+// the further out it sits, grows a band heavier in its own light over IGNITE_RISE_MS, and lets the glow die away over
+// IGNITE_FALL_MS at the middle and up to IGNITE_TIP_FALL times that at the arm tips, which let go last. The eyes open
+// and catch the light as it begins. Under the page's text the glow keeps to LETTER_GLOW of its strength, below one
+// of its LIT_LEVELS, so the glyphs there take the first level of light at most. An octopus that comes back later
+// arrives awake.
 const DORMANT_INK = 0.5;
 const DORMANT_TONE = 0.8;
-const IGNITE_AT = 1100;
-const IGNITE_RISE_MS = 100;
-const IGNITE_FALL_MS = 760;
+const IGNITE_AT = 1130;
+const IGNITE_SPREAD_MS = 33;
+const IGNITE_RISE_MS = 66;
+const IGNITE_FALL_MS = 570;
+const IGNITE_TIP_FALL = 5 / 3;
 const IGNITE_DECAY = 3.2;
-const LETTER_GLOW = 0.3;
-const STARTUP_MS = IGNITE_AT + IGNITE_RISE_MS + IGNITE_FALL_MS;
+const LETTER_GLOW = 0.19;
+const IGNITE_MS = IGNITE_SPREAD_MS + IGNITE_RISE_MS + IGNITE_FALL_MS * IGNITE_TIP_FALL;
+const STARTUP_MS = IGNITE_AT + IGNITE_MS;
 // An octopus that arrives awake lets the hero know this long after its first frame.
 const REWAKE_MS = 400;
 // The startup has played on this page.
@@ -131,15 +137,17 @@ let ignited = false;
 // already reach behind (the page names the card in data-reach). The arms lift a little, plunge TAKE_REACH_ROWS rows
 // behind the card's edge, grip (the glyphs at the edge turn hot), and draw back while a warm packet climbs each arm
 // along its own curl to the eyes, which catch its light: TAKE_OPEN_MS in all. While the request runs the arms haul
-// hand over hand, one and then the other, HAUL_MS a round, quieter. When the page has been read a packet runs back
-// down the arms to the card, where the result appears, and the octopus brightens for a moment; when it has not, the
-// arms let go, the ink sinks a little and the octopus blinks slowly.
+// hand over hand, one and then the other, HAUL_MS a round, quieter. The page scrolls to the result as soon as it
+// comes, so the ending starts at once and is over within TAKE_END_MS: when the page has been read the octopus lights
+// up (TAKE_FLASH of its startup's light) and its eyes catch the light, a glint that fades with it; either way its arms
+// let go over TAKE_LET_GO_MS, and when the page could not be read it blinks. A result that comes before the take has
+// begun (while it waits for the startup or for TAKE_DELAY_MS) ends it unseen: the arms never lifted.
 // The opening waits TAKE_DELAY_MS for the octopus to come back to full ink from its dimmer, yielding self.
 const TAKE_DELAY_MS = 150;
 const TAKE_LIFT_MS = 140;
 const TAKE_LIFT_ROWS = 0.6;
 const TAKE_PLUNGE_MS = 280;
-const TAKE_REACH_ROWS = 3;
+const TAKE_REACH_ROWS = 2.6;
 const TAKE_GRIP_MS = 200;
 const TAKE_PULL_MS = 700;
 const TAKE_CLIMB_MS = 800;
@@ -161,11 +169,12 @@ const GRIP_CURL = 1.8;
 // The length of arm a packet covers (css px), and how far from the card's edge the grip shows (rows).
 const PACKET = 52;
 const GRIP_ROWS = 3;
-const RELEASE_MS = 420;
 const TAKE_FLASH = 0.45;
-const TAKE_DONE_MS = 700;
-const SIGH_MS = 850;
-const SIGH_INK = 0.78;
+const TAKE_FLASH_RISE_MS = 60;
+const TAKE_LET_GO_MS = 200;
+const TAKE_END_MS = 300;
+// One whole veil (ASCIIText.css: .46 navy over brightness(.68)) takes this share of the ground's light.
+const VEIL_DIM = 1 - (1 - 0.46) * 0.68;
 // The arms' reach fades out over ARM_RAMP rows, ARM_SPAN rows above the card's edge, and ARM_WIDTH columns to
 // either side of each arm.
 const ARM_SPAN = 12;
@@ -393,6 +402,12 @@ class AsciiFilter {
       this.veil.className = 'w2l-ascii-veil';
       this.veil.hidden = true;
       this.domElement.appendChild(this.veil);
+      // A second veil darkens the ground the arms reach into when they take the link: the page shows it only then
+      // (.is-taking), so at rest the silhouette's own veil is all there is.
+      this.reachVeil = document.createElement('div');
+      this.reachVeil.className = 'w2l-ascii-veil w2l-ascii-reach';
+      this.reachVeil.hidden = true;
+      this.domElement.appendChild(this.reachVeil);
       this.output = document.createElement('canvas');
       this.output.className = 'w2l-ascii-motif';
       this.output.setAttribute('aria-hidden', 'true');
@@ -454,9 +469,10 @@ class AsciiFilter {
     // Whether this octopus starts up with the ceremony, and whether it has woken (the flash has begun).
     this.ceremony = false;
     this.awake = false;
-    // The take in progress (see setTake), and how far each arm reaches this frame (rows).
+    // The take in progress (see setTake), how far each arm reaches this frame (rows) and how far its tip curls in.
     this.take = null;
     this.takeReach = [0, 0];
+    this.takeCurl = 0;
     this.nextBlink = 4200;
     this.glintAt = null;
     this.dirty = true;
@@ -557,12 +573,14 @@ class AsciiFilter {
     this.pixelRatio = Math.min(2, window.devicePixelRatio || 1);
     this.output.width = Math.max(1, Math.round(this.width * this.pixelRatio));
     this.output.height = Math.max(1, Math.round(this.height * this.pixelRatio));
-    Object.assign(this.veil.style, {
-      left: `${this.offsetX}px`,
-      top: `${this.offsetY}px`,
-      width: `${this.cols * this.cellW}px`,
-      height: `${this.rows * this.cellH}px`
-    });
+    for (const veil of [this.veil, this.reachVeil]) {
+      Object.assign(veil.style, {
+        left: `${this.offsetX}px`,
+        top: `${this.offsetY}px`,
+        width: `${this.cols * this.cellW}px`,
+        height: `${this.rows * this.cellH}px`
+      });
+    }
     this.sceneColors = null;
     // The first frame waits while the artwork or its thumbnail is on its way (see drawMotif); without them the
     // octopus goes ahead untinted.
@@ -1004,24 +1022,52 @@ class AsciiFilter {
     this.updateVeil();
   }
 
-  /** Soften the artwork's glyphs under the octopus silhouette only (feathered, never a box). */
+  /** Soften the artwork's glyphs under the octopus silhouette only (feathered, never a box), and under the ground its
+   * arms can reach into when they take the link: the silhouette stretched as far as the arms move (down by a reach
+   * and a lift, and across by a curl, fading with the arms), less the silhouette itself, which its own veil covers.
+   * The second veil darkens what the first leaves, so over the silhouette's feathered edge it is a little stronger and
+   * the two together match one veil over the stretched silhouette. */
   updateVeil() {
     if (!this.veil || !this.motifFill) return;
-    const mask = document.createElement('canvas');
-    mask.width = this.cols;
-    mask.height = this.rows;
-    const context = mask.getContext('2d');
-    if (!context) return;
-    const image = context.createImageData(this.cols, this.rows);
-    for (let i = 0; i < this.motifFill.length; i++) {
-      image.data[i * 4 + 3] = Math.round(smoothstep(clamp((this.motifFill[i] - 0.03) / 0.08, 0, 1)) * 235);
-    }
-    context.putImageData(image, 0, 0);
-    const url = `url(${mask.toDataURL()})`;
-    this.veil.style.maskImage = url;
-    this.veil.style.webkitMaskImage = url;
-    // It fades in with the arrival (drawMotif), together with the glyphs.
-    this.veil.hidden = this.arrivalAt === null;
+    const { cols, rows, motifFill: fill, armColumns, armRows } = this;
+    const shade = value => smoothstep(clamp((value - 0.03) / 0.08, 0, 1)) * 235;
+    const paint = (veil, alpha) => {
+      const mask = document.createElement('canvas');
+      mask.width = cols;
+      mask.height = rows;
+      const context = mask.getContext('2d');
+      if (!context) return;
+      const image = context.createImageData(cols, rows);
+      for (let i = 0; i < fill.length; i++) image.data[i * 4 + 3] = Math.round(alpha(i));
+      context.putImageData(image, 0, 0);
+      const url = `url(${mask.toDataURL()})`;
+      veil.style.maskImage = url;
+      veil.style.webkitMaskImage = url;
+      // They fade in with the arrival (drawMotif), together with the glyphs.
+      veil.hidden = this.arrivalAt === null;
+    };
+    paint(this.veil, i => shade(fill[i]));
+    if (!armColumns || !armRows) return;
+    paint(this.reachVeil, i => {
+      const x = i % cols;
+      const y = Math.floor(i / cols);
+      const arm = Math.min(1, armColumns[0][x] + armColumns[1][x]) * armRows[y];
+      if (arm < 0.05) return 0;
+      // The furthest a glyph can come from: a full reach with its column's stagger, and a haul's dip is less.
+      const down = Math.ceil((TAKE_REACH_ROWS + TAKE_LIFT_ROWS) * 1.2 * arm);
+      const across = Math.ceil(GRIP_CURL * arm);
+      let most = 0;
+      for (let k = -1; k <= down; k++) {
+        const sy = y - k;
+        if (sy < 0 || sy >= rows) continue;
+        for (let dx = -across; dx <= across; dx++) {
+          const sx = x + dx;
+          if (sx >= 0 && sx < cols) most = Math.max(most, fill[sx + sy * cols]);
+        }
+      }
+      const own = shade(fill[i]);
+      return Math.max(0, shade(most) - own) / (1 - VEIL_DIM * own / 255);
+    });
   }
 
   render(scene, camera) {
@@ -1193,10 +1239,12 @@ class AsciiFilter {
       // A take asked for before the first frame begins once the octopus is awake.
       if (this.take && this.take.at === null) this.take.at = this.clock + STARTUP_MS;
       this.veil.hidden = false;
+      this.reachVeil.hidden = false;
       this.onFirstFrame?.();
     }
-    // A requested rest begins once the startup and any wave have finished, so nothing freezes half-drawn.
-    this.resting = this.restRequested && !this.take && this.clock - this.arrivalAt >= STARTUP_MS && !this.waves.length;
+    // A requested rest begins once the startup, any wave and any glint have finished, so nothing freezes half-drawn.
+    this.resting = this.restRequested && !this.take && this.clock - this.arrivalAt >= STARTUP_MS && !this.waves.length
+      && (this.glintAt === null || this.clock - this.glintAt >= GLINT_MS);
     const step = this.resting ? 0 : dt;
     this.clock += step;
     const clock = this.clock;
@@ -1210,26 +1258,15 @@ class AsciiFilter {
     const t = (clock - this.arrivalAt) / ARRIVAL_MS;
     const arriving = t < 1;
     const arrive = 0.12 + 1.08 * (1 - (1 - Math.min(1, t)) ** 2);
-    // The startup: the ink's level and weight while dormant, and the glow (0 to 1) once lit.
+    // The startup: how long the octopus has been lit (each glyph works out its own light from it, in the loop), and
+    // whether it still is. From its first lit frame the startup counts as played on this page, so an octopus that
+    // comes back meanwhile arrives awake rather than playing it again.
     const lit = clock - this.arrivalAt - IGNITE_AT;
-    let level = 1;
-    let weight = 1;
-    let flash = 0;
-    if (this.ceremony) {
-      if (lit < 0) {
-        level = DORMANT_INK;
-        weight = DORMANT_TONE;
-      } else if (lit < IGNITE_RISE_MS) {
-        flash = easeOut(lit / IGNITE_RISE_MS);
-        level = mix(DORMANT_INK, 1, flash);
-        weight = mix(DORMANT_TONE, 1, flash);
-      } else if (lit < IGNITE_RISE_MS + IGNITE_FALL_MS) {
-        flash = (Math.exp(-IGNITE_DECAY * (lit - IGNITE_RISE_MS) / IGNITE_FALL_MS) - Math.exp(-IGNITE_DECAY)) / (1 - Math.exp(-IGNITE_DECAY));
-      } else ignited = true;
-    }
-    // The take: how far each arm reaches (rows; a lift is negative), its packets of warm light (where along the
-    // arms, which arm, how warm, and whether they garble the glyphs they pass), the grip at the card's edge, how far
-    // the eyes look down (css px), and the brightening when it ends well or the sigh when it does not.
+    const igniting = this.ceremony && lit < IGNITE_MS;
+    if (this.ceremony && lit >= 0) ignited = true;
+    // The take: how far each arm reaches (rows; a lift is negative) and how far its tip curls in, its packets of warm
+    // light (where along the arms, which arm, how warm, and whether they garble the glyphs they pass), the grip at the
+    // card's edge, how far the eyes look down (css px), and the light when it ends well.
     let reach0 = 0;
     let reach1 = 0;
     let curl = 0;
@@ -1243,35 +1280,22 @@ class AsciiFilter {
       if (take.endAt !== null && clock >= take.endAt) {
         if (!take.ending) {
           take.ending = true;
-          take.from = [this.takeReach[0], this.takeReach[1]];
-          if (take.outcome !== 'success') this.nextBlink = clock + 200;
+          take.from = [this.takeReach[0], this.takeReach[1], this.takeCurl];
+          // Read: the eyes catch the light at once, bright, with the last TAKE_END_MS of a glint, which has gone when
+          // the ending is over. Not read: a blink.
+          if (take.outcome === 'success') this.glintAt = take.endAt + TAKE_END_MS - GLINT_MS;
+          else this.nextBlink = clock + 100;
         }
         const r = clock - take.endAt;
-        const held = 1 - easeOut(r / 300);
+        const held = 1 - easeOut(r / TAKE_LET_GO_MS);
         reach0 = take.from[0] * held;
         reach1 = take.from[1] * held;
-        if (take.outcome === 'success') {
-          // The packet runs from the body back down the arms to the card, and the arms dip as it lands.
-          if (r < RELEASE_MS) packets.push({ centre: this.pathCore * (1 - easeInOut(r / RELEASE_MS)) + PACKET / 2, arm: -1, gain: 1, garble: true });
-          if (r >= 300) {
-            const dip = r < RELEASE_MS ? 1.5 * easeOut((r - 300) / (RELEASE_MS - 300)) : 1.5 * (1 - easeInOut((r - RELEASE_MS) / 200));
-            reach0 += Math.max(0, dip);
-            reach1 += Math.max(0, dip);
-            if (!take.glinted) {
-              take.glinted = true;
-              this.glintAt = clock;
-            }
-            const q = (r - 300) / (TAKE_DONE_MS - 300);
-            landed = TAKE_FLASH * (q < 0.2 ? q / 0.2 : (1 - Math.min(1, (q - 0.2) / 0.8)) ** 2);
-          }
-          if (r >= TAKE_DONE_MS) {
-            this.rewrites += 1;
-            this.take = null;
-          }
-        } else {
-          const bell = r < 250 ? easeOut(r / 250) : 1 - easeInOut((r - 250) / (SIGH_MS - 250));
-          level *= mix(1, SIGH_INK, bell);
-          if (r >= SIGH_MS) this.take = null;
+        curl = take.from[2] * held;
+        if (take.outcome === 'success') landed = TAKE_FLASH * (r < TAKE_FLASH_RISE_MS ? easeOut(r / TAKE_FLASH_RISE_MS) : (1 - clamp((r - TAKE_FLASH_RISE_MS) / (TAKE_END_MS - TAKE_FLASH_RISE_MS), 0, 1)) ** 2);
+        if (r >= TAKE_END_MS) {
+          // A read page leaves the glyphs rewritten, as an answer does.
+          if (take.outcome === 'success') this.rewrites += 1;
+          this.take = null;
         }
       } else if (s < TAKE_OPEN_MS) {
         const both = s < TAKE_LIFT_MS ? -TAKE_LIFT_ROWS * easeOut(s / TAKE_LIFT_MS)
@@ -1316,9 +1340,9 @@ class AsciiFilter {
     }
     this.takeReach[0] = reach0;
     this.takeReach[1] = reach1;
+    this.takeCurl = curl;
     const reaching = reach0 !== 0 || reach1 !== 0;
     const gripReach = GRIP_ROWS * cellH;
-    const glow = Math.max(flash, landed);
     if (!this.awake && clock - this.arrivalAt >= (this.ceremony ? IGNITE_AT : REWAKE_MS)) {
       // Awake: the eyes open and catch the light, and the hero hears of it.
       this.awake = true;
@@ -1394,6 +1418,27 @@ class AsciiFilter {
         }
         const shape = tones[src];
         if (shape < 0.06) continue;
+        // The startup reaches this glyph IGNITE_SPREAD_MS later the further out it sits: dormant until then, it
+        // rises into the light and lets it go, the arm tips last.
+        let level = 1;
+        let weight = 1;
+        let glow = landed;
+        if (igniting) {
+          const outward = clamp(radius[dst], 0, 1);
+          const since = lit - IGNITE_SPREAD_MS * outward;
+          if (since < 0) {
+            level = DORMANT_INK;
+            weight = DORMANT_TONE;
+          } else if (since < IGNITE_RISE_MS) {
+            const rise = easeOut(since / IGNITE_RISE_MS);
+            level = mix(DORMANT_INK, 1, rise);
+            weight = mix(DORMANT_TONE, 1, rise);
+            glow = Math.max(glow, rise);
+          } else {
+            const fall = (since - IGNITE_RISE_MS) / (IGNITE_FALL_MS * mix(1, IGNITE_TIP_FALL, outward));
+            if (fall < 1) glow = Math.max(glow, (Math.exp(-IGNITE_DECAY * fall) - Math.exp(-IGNITE_DECAY)) / (1 - Math.exp(-IGNITE_DECAY)));
+          }
+        }
         const f = src * 4;
         const gray = field ? (0.3 * field[f] + 0.6 * field[f + 1] + 0.1 * field[f + 2]) / 255 : 0.5;
         const tone = clamp(shape * (0.86 + 0.14 * gray) + 0.08 * Math.sin(clock * 0.0008 + cellX * 0.011 - cellY * 0.0072) + dither[dst] - 0.29 * influence, 0, 1) * weight;
@@ -1493,19 +1538,20 @@ class AsciiFilter {
   }
 
   /** A preview's extraction starts ('start') or ends ('success' or 'failure'). A take asked for during the startup
-   * waits for it; an octopus that arrives while a request is already under way (late) goes straight to the haul. A
-   * page that was read lets the opening come to its grip first; one that was not lets go at once. */
+   * waits for it; an octopus that arrives while a request is already under way (late) goes straight to the haul. It
+   * ends as soon as the result comes, wherever it is, since the page scrolls to the result at once; one that has not
+   * begun yet is dropped, its arms never having lifted. */
   setTake(phase, late) {
     if (phase === 'start') {
       // It begins at `at`, never before the octopus is awake; a late one begins `skip` ms into itself, at the haul.
       this.take = { at: this.arrivalAt === null ? null : Math.max(this.clock + (late ? 0 : TAKE_DELAY_MS), this.arrivalAt + STARTUP_MS), skip: late ? TAKE_OPEN_MS : 0, endAt: null, outcome: null, ending: false, from: [0, 0], rounds: [null, null], glinted: false };
     } else if (this.take && this.take.endAt === null) {
-      if (this.take.at === null) {
+      if (this.take.at === null || this.clock < this.take.at) {
         this.take = null;
         return;
       }
       this.take.outcome = phase;
-      this.take.endAt = phase === 'success' ? Math.max(this.clock, this.take.at + Math.max(0, TAKE_PULL_AT - this.take.skip)) : Math.max(this.clock, this.take.at);
+      this.take.endAt = this.clock;
     }
   }
 
@@ -1528,6 +1574,10 @@ class AsciiFilter {
     ignited = true;
     this.take = null;
     this.takeReach = [0, 0];
+    this.takeCurl = 0;
+    // A stopped octopus takes no link: the page may still mark a preview in flight (.is-taking), but the ground its
+    // arms would reach into never darkens.
+    this.reachVeil?.remove();
     this.waves = [];
     this.nextBlink = Infinity;
     this.glintAt = null;
