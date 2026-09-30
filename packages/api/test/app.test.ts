@@ -313,10 +313,16 @@ describe('REST /v1/scrape and /v1/crawl', () => {
 
       const restarted = createApiEngine({ taskRoot, channelsFor: httpOnlyChannels })
       try {
+        // A cancelled crawl stays cancelled across a restart: it is not one of
+        // the interrupted crawls the engine resumes, and nothing is fetched.
+        await new Promise((resolve) => setTimeout(resolve, 200))
         const report = await restarted.getCrawl(taskId)
         expect(report?.status).toBe('cancelled')
+        expect(report?.pagesFetched).toBeLessThanOrEqual(1)
         const pages = await restarted.getCrawlPages(taskId, { limit: 10 })
-        expect(pages?.items.length).toBeGreaterThanOrEqual(0)
+        expect(pages?.items.length).toBeLessThanOrEqual(1)
+        expect(pages?.items.every((item) => item.url === `${server.url}/crawl/listing`)).toBe(true)
+        expect((await restarted.resumeCrawl(taskId).catch((error: unknown) => error))).toMatchObject({ name: 'CrawlStateError', message: 'crawl is cancelled' })
       } finally {
         await restarted.close()
       }

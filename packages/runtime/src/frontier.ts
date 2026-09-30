@@ -194,7 +194,9 @@ export class Frontier {
     if (this.allowlistedDomains.length > 0) {
       return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
     }
-    return host === this.seedHost
+    // A site that answers its apex from `www.` (or the reverse) is one site:
+    // links resolve against the redirected URL, so the twin counts as the seed host.
+    return host === this.seedHost || withoutWww(host) === withoutWww(this.seedHost)
   }
 
   /** The caller's path rules, over pathname + search of the canonical URL. */
@@ -205,6 +207,10 @@ export class Frontier {
     if (this.excludePaths.some((pattern) => pattern.test(path))) return false
     return this.includePaths.length === 0 || this.includePaths.some((pattern) => pattern.test(path))
   }
+}
+
+function withoutWww(host: string): string {
+  return host.startsWith('www.') ? host.slice(4) : host
 }
 
 function resolvedHref(url: string, base?: string): string | null {

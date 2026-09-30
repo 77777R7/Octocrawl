@@ -93,6 +93,34 @@ describe('persistent URL-array batch', () => {
     expect(f.seen.filter(url => url === '/item/2')).toHaveLength(2)
   })
 
+  it('cancels a running batch, stops fetching, and does not resume it after a restart', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const secondStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine1 = f.engine()
+    cleanup.push(() => engine1.close())
+    const app1 = createApp(engine1)
+    const client1 = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app1.request(String(input), init)) as typeof fetch })
+    const accepted = await client1.batchScrape([`${f.origin}/item/1`, `${f.origin}/item/2`, `${f.origin}/item/3`])
+    await secondStarted
+    const cancelled = await client1.cancelBatch(accepted.taskId)
+    expect(cancelled.status).toBe('cancelled')
+    f.release()
+    const settled = await client1.waitBatch(accepted.taskId, { pollIntervalMs: 10, timeoutMs: 5_000 })
+    expect(settled).toMatchObject({ status: 'cancelled', requested: 3 })
+    expect(settled.completed).toBeLessThan(3)
+    expect(f.seen.filter(url => url === '/item/3')).toHaveLength(0)
+    await engine1.close()
+
+    const engine2 = f.engine()
+    cleanup.push(() => engine2.close())
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect((await engine2.getBatch(accepted.taskId))?.status).toBe('cancelled')
+    expect(f.seen.filter(url => url === '/item/3')).toHaveLength(0)
+  })
+
   it('pages a 100-URL durable batch without returning the whole result set at once', async () => {
     const f = await fixture()
     const engine = f.engine()

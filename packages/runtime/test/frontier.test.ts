@@ -57,6 +57,17 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.enqueue('https://fixture.test/p', 1).reason).toBe('host_denied')
   })
 
+  it('treats the www twin of the seed host as the seed host, and nothing else', () => {
+    const frontier = new Frontier({ seedUrl: 'https://example.com/start' })
+    frontier.seed()
+    expect(frontier.enqueue('https://www.example.com/about', 1).reason).toBe('enqueued')
+    expect(frontier.enqueue('https://blog.example.com/post', 1)).toMatchObject({ accepted: false, reason: 'host_denied' })
+    const fromWww = new Frontier({ seedUrl: 'https://www.example.com/start' })
+    fromWww.seed()
+    expect(fromWww.enqueue('https://example.com/about', 1).reason).toBe('enqueued')
+    expect(fromWww.enqueue('https://www.example.org/about', 1)).toMatchObject({ accepted: false, reason: 'host_denied' })
+  })
+
   it('applies includePaths and excludePaths to discovered URLs, never to the seed', () => {
     const frontier = new Frontier({
       seedUrl: 'https://fixture.test/start',

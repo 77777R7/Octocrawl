@@ -1,0 +1,86 @@
+{
+ "scrape-formats.markdown": {
+  "status": "weak",
+  "evidence": "70681ca resolves URLs against the page URL and <base>, drops data: images, separates sibling blocks, keeps strong/em in non-p blocks, renders pre/tables in li, keeps ordered numbering; 17b383f prunes menu lists; tests packages/extract-tf/test/markdown.test.ts. Still open: the table strategy keeps only the largest table (route.ts selectTable), Wikipedia keeps [Edit links] and a legend table (live-batch-1-m1-recheck-2026-09-30.md), includeTags/excludeTags and removeBase64Images are M2 features."
+ },
+ "scrape-formats.links": {
+  "status": "solid",
+  "evidence": "8e0c03c: CrawlPage.links on batch items and crawl pages, asset hrefs (images, css, js, fonts, media) skipped, <base> honoured through markdown/link resolution; tests packages/extract-tf/test/metadata.test.ts (collectLinks), packages/api/test/app.test.ts (crawl pages carry links when asked)."
+ },
+ "scrape-formats.metadata-response-status": {
+  "status": "solid",
+  "evidence": "8e0c03c: metadata {sourceURL,url,statusCode,contentType} on the compact response and /fc page, browser lane records the real content type and redirect chain, any 2xx is served, non-2xx returns the error page as markdown with an http_error warning; tests packages/bench/test/pageOptions.test.ts, packages/api/test/app.test.ts."
+ },
+ "scrape-formats.json": {
+  "status": "weak",
+  "evidence": "1b20f13: required arrays/objects are not invented as present, leaf names match only under subject-shaped parents, url/title/pageType carry evidence, schema annotations and anyOf/oneOf nullables accepted, deep merge with model provenance, strict decoding only for qualifying schemas; tests packages/api/test/structured.test.ts. Still open: prompt-only extraction, arrays are not descended without a model, the page is sent to the model unchunked, no BYO LLM client module."
+ },
+ "crawl-batch.crawl-start-async": {
+  "status": "solid",
+  "evidence": "e831567 persists crawl options on the task and resumes interrupted crawls at startup and through POST /v1/crawl/:id/resume; the www twin of the seed host counts as the seed host (this record's commit, packages/runtime/test/frontier.test.ts); tests packages/api/test/app.test.ts (resume), packages/runtime/test/orchestrator.test.ts. Still missing: a status URL on the native route and the /v2 path."
+ },
+ "crawl-batch.crawl-status": {
+  "status": "solid",
+  "evidence": "e831567: attempt counters written after every page (live GET /v1/crawl/:id), page listings strip trace and audit unless debug, /fc creditsUsed and expiresAt are null; tests packages/runtime/test/orchestrator.test.ts (counters live), packages/api/test/app.test.ts, packages/contracts/test/firecrawl.test.ts."
+ },
+ "crawl-batch.batch-wait": {
+  "status": "solid",
+  "evidence": "2f3d013: waitBatch takes pollIntervalMs and timeoutMs, throws JobTimeoutError with the job id, retries transient server errors while polling and rethrows 4xx; tests packages/sdk/test/client.test.ts, packages/api/test/batch.test.ts."
+ },
+ "crawl-batch.batch-cancel": {
+  "status": "solid",
+  "evidence": "Running-batch cancel test added (this record's commit, packages/api/test/batch.test.ts): status cancelled, fetching stops, not resumed after a restart; the crawl cancel test now asserts the same across a restart."
+ },
+ "scrape-formats.formats-array": {
+  "status": "solid",
+  "evidence": "8e0c03c: no fixed cap beyond one entry per format, markdown-only default, /fc honours markdown/links, unknown request keys rejected with the key named; e831567 adds formats inside crawl scrapeOptions; tests packages/contracts/test/api.test.ts, packages/api/test/app.test.ts. Other Firecrawl formats (html, screenshot, ...) are M2 features."
+ },
+ "scrape-formats.only-main-content": {
+  "status": "solid",
+  "evidence": "8e0c03c: onlyMainContent on REST/SDK/MCP//fc; false returns the cleaned whole page with navigation and footer; 17b383f returns a recovered region instead of failing when no main block is found; tests packages/extract-tf/test/metadata.test.ts, packages/bench/test/pageOptions.test.ts."
+ },
+ "scrape-formats.metadata-page": {
+  "status": "solid",
+  "evidence": "8e0c03c: title, description, language, keywords, robots, canonical, favicon read from the raw head and resolved against <base>; on the compact response, /fc page and document.metadata; tests packages/extract-tf/test/metadata.test.ts, packages/bench/test/pageOptions.test.ts. OpenGraph/Dublin Core are M2 features."
+ },
+ "scrape-execution.timeout": {
+  "status": "solid",
+  "evidence": "8e0c03c timeout (1000..300000 ms) on REST/SDK/MCP//fc; 2f3d013 MCP request cancellation, /fc disconnect cancellation, capture deadline, ladder CLI --timeout; tests packages/contracts/test/api.test.ts, packages/bench/test/ladderCli.test.ts."
+ },
+ "scrape-execution.wait-for": {
+  "status": "solid",
+  "evidence": "8e0c03c: waitFor (0..30000 ms) waits after the browser lane settled and records a wait_for trace event; unknown keys are rejected; tests packages/bench/test/pageOptions.test.ts ('waits the requested time'), packages/contracts/test/api.test.ts."
+ },
+ "crawl-batch.crawl-wait": {
+  "status": "solid",
+  "evidence": "2f3d013: SDK waitCrawl with pollIntervalMs, timeoutMs, JobTimeoutError and transient retry; live counters make polling meaningful (e831567); tests packages/sdk/test/client.test.ts."
+ },
+ "crawl-batch.crawl-scrape-options": {
+  "status": "solid",
+  "evidence": "e831567: scrapeOptions {formats, includeLinks, onlyMainContent, timeout, waitFor} applied to every crawl page, lane chosen per URL under a channel policy; tests packages/api/test/app.test.ts ('honours excludePaths and per-page scrape options'). includeTags/excludeTags, headers, mobile, actions, location, proxy are separate features."
+ },
+ "crawl-batch.include-paths": {
+  "status": "solid",
+  "evidence": "e831567: includePaths regular expressions over pathname+search, seed always passes, persisted for resume, on REST/SDK/MCP//fc; tests packages/runtime/test/frontier.test.ts, packages/runtime/test/orchestrator.test.ts, packages/contracts/test/api.test.ts."
+ },
+ "crawl-batch.exclude-paths": {
+  "status": "solid",
+  "evidence": "e831567: excludePaths, same surfaces and persistence; tests packages/runtime/test/frontier.test.ts, packages/api/test/app.test.ts (excluded item pages never crawled)."
+ },
+ "platform.sdk.waiters": {
+  "status": "solid",
+  "evidence": "2f3d013: waitCrawl and waitBatch with pollIntervalMs, timeoutMs, JobTimeoutError(jobId) and transient retry; tests packages/sdk/test/client.test.ts."
+ },
+ "scrape-execution.error-model": {
+  "status": "solid",
+  "evidence": "2f3d013: machine codes on every API error, internal detail kept out of the body, /fc errors as {success:false,error,code}, SDK W2LError with status/code/body; tests packages/api/test/app.test.ts, packages/api/test/firecrawl.test.ts, packages/sdk/test/client.test.ts. Client-side pre-send validation remains server-side only."
+ },
+ "platform.client.api-key": {
+  "status": "solid",
+  "evidence": "2f3d013: constant-time digest comparison, several comma-separated tokens, SDK reads W2L_API_TOKEN; tests packages/api/test/app.test.ts, packages/sdk/test/client.test.ts. Per-key revocation is not offered."
+ },
+ "crawl-batch.crawl-delay": {
+  "status": "solid",
+  "evidence": "e831567: the HTTP lane reports crawlDelayMs in robots_checked, so the frontier paces by robots Crawl-delay on both lanes; test packages/bench/test/resilientHttp.robots.test.ts. A per-job delay parameter is not offered."
+ }
+}
