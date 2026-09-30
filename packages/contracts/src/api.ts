@@ -40,6 +40,7 @@ export interface CompactScrapeResponse {
   lane: FetchResult['lane']
   formats: readonly ('markdown' | 'links' | 'json')[]
   markdown?: string | null
+  warnings?: FetchResult['warnings']
   links?: readonly string[]
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   json?: StructuredExtractionResult | null

@@ -11,9 +11,10 @@
  * native XPath (bake-off confirmed for jsdom/linkedom/happy-dom).
  */
 
-import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
+import type { ExtractRecovery, Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { outerHtml, parse, textOf } from './dom.js'
 import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree } from './prune.js'
+import { detectRenderSignals, rawSignals } from './render.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
@@ -24,6 +25,18 @@ import { adapterFor } from './adapters.js'
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
   maxLinkDensity: 0.2,
+}
+
+/**
+ * Visible characters a cleaned page must carry before a region is recovered
+ * when no strategy found one. Sits above every empty, shell, soft-404 and
+ * challenge fixture (at most ~110 characters) and below real listing pages
+ * (a category page of product cards is ~500).
+ */
+const RECOVERY_MIN_TEXT = 200
+
+function visibleLength(el: Element | null): number {
+  return el ? textOf(el).replace(/\s+/g, ' ').trim().length : 0
 }
 
 function pickTitle(doc: Document, main: Element | null): string | null {
@@ -103,6 +116,9 @@ export class ExtractTf implements Extractor {
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
+    // Rendering signals live in scripts and fallback markup that cleaning
+    // removes, so they are read from the raw tree as well.
+    const raw = rawSignals(doc.document)
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -156,6 +172,32 @@ export class ExtractTf implements Extractor {
       }
     }
 
+    // No strategy found a main region. A page with real visible text is
+    // still worth returning: the largest linked list (a grid of product
+    // cards whose link density kept them out of the prose cascade), a data
+    // table, or the cleaned body. The result says which region it is, so a
+    // consumer can treat it as a recovered page rather than a confident
+    // main-content read. A shell with no text keeps escalating.
+    let recovery: ExtractRecovery | null = null
+    if (main === null && visibleLength(doc.document.body) >= RECOVERY_MIN_TEXT) {
+      const list = selectList(doc.document)
+      if (list !== null && visibleLength(list) >= RECOVERY_MIN_TEXT / 2) {
+        main = list
+        strategy = 'list'
+        recovery = 'list'
+      } else {
+        const table = selectTable(doc.document)
+        if (table !== null) {
+          main = table
+          strategy = 'table'
+          recovery = 'table'
+        } else if (doc.document.body) {
+          main = doc.document.body
+          recovery = 'body'
+        }
+      }
+    }
+
     // An article region that still carries a menu-sized list of bare links
     // (interlanguage menus, category rails) loses it; on a listing page that
     // list is the content, so only the article cascade prunes it.
@@ -191,9 +233,12 @@ export class ExtractTf implements Extractor {
         favorRecall,
         product,
       ),
-      // Escalate only when a strategy produced nothing at all. Routing to a
-      // non-article strategy is not by itself an escalation reason.
+      // Escalate only when nothing at all could be returned, recovery
+      // included. Routing to a non-article strategy is not by itself an
+      // escalation reason.
       escalate: main === null,
+      recovery,
+      render: detectRenderSignals(raw, doc.document),
       pageType: decision.type,
       strategy,
       product,

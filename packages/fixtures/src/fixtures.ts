@@ -988,6 +988,91 @@ const spaDelayed: Fixture = {
     ),
 }
 
+const SPA_TABLE_STATION = 'Ravine gauge station'
+
+/**
+ * The server HTML is a data page whose grid is filled in by script after
+ * load: prose, headings and a `<table>` with no cells. The HTTP lane
+ * extracts the prose (a real success) but must recognise the table shell
+ * and offer the browser lane, which captures the rendered rows.
+ */
+const spaTableShell: Fixture = {
+  truth: {
+    id: 'spa-table-shell',
+    target: '/spa/table-shell',
+    kind: 'fixture',
+    category: 'spa',
+    mustContain: [SPA_TABLE_STATION, '1.10'],
+    mustNotContain: B,
+    expectedLane: 'browser_local',
+    emptyIsLegit: false,
+    expectedMainTokens: { min: 40, max: 400 },
+    budget: budget(2000, 20_000),
+    expectedStatus: 'success',
+    notes: 'Table shell (no cells) beside scripts: the http lane succeeds on the prose but flags client rendering; the browser lane must return the filled grid.',
+  },
+  respond: () =>
+    html(
+      htmlPage({
+        title: 'Monthly index',
+        bodyHtml: `<main><h1>Monthly index</h1>
+<p>The monthly index is published for every gauge station in the survey area.</p>
+<p>Values are revised when late readings arrive from the field offices.</p>
+<h2>Notes</h2>
+<p>Stations that reported fewer than twenty days in a month are shown without a value.</p>
+<table id="grid"><thead><tr></tr></thead><tbody></tbody></table>
+<script>
+  /* ${'grid loader '.repeat(120)} */
+  setTimeout(function () {
+    document.getElementById('grid').innerHTML =
+      '<tr><th>Station</th><th>Index</th></tr><tr><td>${SPA_TABLE_STATION}</td><td>1.10</td></tr><tr><td>Plinth house station</td><td>1.07</td></tr>'
+  }, 300)
+</script></main>`,
+      }),
+    ),
+}
+
+// ---------------------------------------------------------------------------
+// Listings recovered without a prose block
+// ---------------------------------------------------------------------------
+
+const LISTING_CARD_TITLE = 'Ravine Survey Notebook'
+
+/**
+ * A category page of product cards: every card is a link plus a price, so
+ * the prose cascade finds no block (the breadcrumb "Art" is too short to
+ * count), and no strategy identifies main content. The page still has real
+ * visible text, so the largest linked list is recovered and the result is
+ * `partial` on the http lane, never `failed` with null markdown.
+ */
+const listingCards: Fixture = {
+  truth: {
+    id: 'listing-cards',
+    target: '/listing/cards',
+    kind: 'fixture',
+    category: 'listing',
+    mustContain: [LISTING_CARD_TITLE],
+    mustNotContain: B,
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: { min: 120, max: 900 },
+    budget: budget(2000),
+    expectedStatus: 'partial',
+    notes: 'Cards only, breadcrumb too short for a prose block: the largest linked list is recovered; status is partial with a low_confidence_extraction warning.',
+  },
+  respond: () =>
+    html(
+      htmlPage({
+        title: 'Art | Books',
+        bodyHtml: `<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li class="active">Art</li></ul>
+<h1>Art</h1>
+<ol class="row">${Array.from({ length: 10 }, (_, i) =>
+          `<li><article class="product_pod"><div class="image_container"><a href="/catalogue/book-${i}"><img src="/media/${i}.jpg" alt="${i === 3 ? LISTING_CARD_TITLE : `Book Title ${i}`}"></a></div><h3><a href="/catalogue/book-${i}">${i === 3 ? LISTING_CARD_TITLE : `Book Title ${i}`}</a></h3><div class="product_price"><p class="price_color">£1${i}.50</p><p class="availability">In stock</p></div></article></li>`,
+        ).join('')}</ol>`,
+      }),
+    ),
+}
+
 // ---------------------------------------------------------------------------
 // Emptiness
 // ---------------------------------------------------------------------------
@@ -1764,6 +1849,8 @@ export const FIXTURES: readonly Fixture[] = [
   malformed,
   spaShell,
   spaDelayed,
+  spaTableShell,
+  listingCards,
   emptyLegit,
   emptyBody,
   blockChallenge,

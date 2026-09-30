@@ -535,6 +535,7 @@ export function compactScrapeResponse(
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
+    ...(next.warnings !== undefined && next.warnings.length > 0 ? { warnings: next.warnings } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,

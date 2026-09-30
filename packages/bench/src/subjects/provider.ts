@@ -24,6 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode } from '@w2l/contracts'
 import type { SubjectAdapter } from '../subject.js'
 import { identityCompromised } from '../routing/identity.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
+import { extractionVerdict } from './extractionVerdict.js'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -478,6 +479,7 @@ export class ProviderSubject implements SubjectAdapter {
       }
     }
 
+    if (extracted.recovery && gate !== null) return blocked(gate)
     const decisive = classifyGate({
       status: res.status,
       header: (name) => res.headers[name.toLowerCase()] ?? null,
@@ -486,6 +488,8 @@ export class ProviderSubject implements SubjectAdapter {
     })
     if (decisive !== null) return blocked(decisive)
 
+    const extraction = extractionVerdict(extracted, 'provider', wallMs, { rendered: false })
+    trace.push(...extraction.events)
     const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: res.finalUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
@@ -510,13 +514,14 @@ export class ProviderSubject implements SubjectAdapter {
 
     return {
       ...base,
-      status: 'success',
+      status: extraction.status,
       failureReason: null,
       blockReason: null,
       budgetExceeded: null,
       lane: 'provider',
       escalations: [],
       markdown,
+      ...(extraction.warnings.length > 0 ? { warnings: extraction.warnings } : {}),
       links,
       document: {
         title: extracted.title,

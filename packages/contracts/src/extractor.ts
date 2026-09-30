@@ -159,6 +159,30 @@ export interface DocumentExtraction {
   adapterValidation?: AdapterValidation
 }
 
+/** Region returned when no strategy identified a main content region. */
+export type ExtractRecovery = 'list' | 'table' | 'body'
+
+/**
+ * Evidence that a page fills its data in with JavaScript after load, read
+ * from the server HTML. A shell with an empty app root, a table with no
+ * cells beside kilobytes of script, or an explicit "enable JavaScript"
+ * fallback all mean the HTTP capture is not the page a browser shows.
+ */
+export interface RenderSignals {
+  /** Visible text characters after boilerplate cleaning. */
+  textChars: number
+  /** Characters of inline script in the raw document. */
+  scriptChars: number
+  /** `<table>` elements with no data cells. */
+  emptyTables: number
+  /** Markers found, e.g. `app_root_empty`, `hydration_state`, `noscript_notice`, `js_fallback_marker`, `aria_busy`. */
+  markers: readonly string[]
+  /** True when the signals say the data is most likely rendered client-side. */
+  clientRendered: boolean
+  /** The rule that decided `clientRendered`, null when false. */
+  reason: string | null
+}
+
 export interface ExtractorOutput {
   /** Page title, or null when none could be found. */
   title: string | null
@@ -167,10 +191,18 @@ export interface ExtractorOutput {
   /** 0..1 self-assessed extraction confidence. */
   confidence: number
   /**
-   * True when this page should be routed to a higher tier (LLM/neural).
-   * The escalation target is intentionally unimplemented in v0.
+   * True when no content region could be found at all, so a higher lane
+   * (browser rendering) should try. False when a region was recovered.
    */
   escalate: boolean
+  /**
+   * Set when no strategy found a main region and a broader region (the
+   * largest linked list, a data table, or the cleaned body) is returned
+   * instead. Such output is usable but not a confident main-content read.
+   */
+  recovery?: ExtractRecovery | null
+  /** Client-side rendering signals read from the server HTML. */
+  render?: RenderSignals
   /** Page type the router detected. */
   pageType: PageType
   /**

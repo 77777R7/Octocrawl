@@ -26,6 +26,7 @@ import { waitForRenderedStability } from '../browserSettle.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
+import { extractionVerdict } from './extractionVerdict.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
 import {
   BROWSER_FINGERPRINT,
@@ -445,8 +446,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           continue
         }
-        await raceWithSignal(waitForRenderedStability(page, { maxMs: remainingTimeout(execution, 1_500) }), signal)
+        // Data filled in after load (an XHR-loaded grid, a chart's table tab)
+        // arrives once the page's own requests finish, so wait for the network
+        // to go quiet before sampling for a stable DOM. Pages that never go
+        // quiet (long polling, beacons) are bounded by the cap.
+        const idleStartedAt = Date.now()
+        let networkIdle = true
+        try {
+          await raceWithSignal(page.waitForLoadState('networkidle', { timeout: remainingTimeout(execution, 3_000) }), signal)
+        } catch (err) {
+          if (signal?.aborted) throw err
+          throwIfExecutionStopped(execution)
+          networkIdle = false
+        }
+        await raceWithSignal(waitForRenderedStability(page, { maxMs: remainingTimeout(execution, 2_000) }), signal)
         throwIfExecutionStopped(execution)
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'settled', detail: { networkIdle, settleMs: Date.now() - idleStartedAt } })
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({
             selectedAsin: document.querySelector('input[name="ASIN"]')?.getAttribute('value') ?? null,
@@ -633,6 +648,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
+      if (extracted.recovery && gate !== null) return blocked(gate)
       const decisive = classifyGate({
         status,
         header: (name) => response?.headers()[name.toLowerCase()] ?? null,
@@ -641,16 +657,19 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       if (decisive !== null) return blocked(decisive)
 
+      const verdict = extractionVerdict(extracted, 'browser_local', wallMs, { rendered: true })
+      trace.push(...verdict.events)
       const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: finalUrl })
       return {
         ...base,
-        status: 'success',
+        status: verdict.status,
         failureReason: null,
         blockReason: null,
         budgetExceeded: null,
         lane: 'browser_local',
         escalations: [],
         markdown,
+        ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
         links,
         document: {
           title: extracted.title,

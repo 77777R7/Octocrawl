@@ -132,6 +132,16 @@ export interface HandoffRequest {
 }
 
 /**
+ * A caveat on a contentful result: the content is returned, and the reader
+ * should know what W2L could not vouch for.
+ */
+export interface FetchWarning {
+  /** Machine-readable code, e.g. `low_confidence_extraction`, `client_rendered_suspected`. */
+  code: string
+  message: string
+}
+
+/**
  * A page-level fetch outcome. `status` is the single source of truth
  * (see RESULT_STATUS); the reason fields narrow it.
  */
@@ -161,6 +171,8 @@ export interface FetchResult {
   resumeContext?: unknown | null
   /** Extracted main content as Markdown. Null unless status is contentful. */
   markdown: string | null
+  /** Caveats on a contentful result; absent or empty when there are none. */
+  warnings?: readonly FetchWarning[]
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
   document?: DocumentExtraction | null
   /** Present only when a JSON format was requested. */

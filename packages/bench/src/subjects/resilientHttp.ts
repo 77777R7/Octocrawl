@@ -17,6 +17,7 @@ import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
+import { extractionVerdict } from './extractionVerdict.js'
 
 /**
  * Resilient HTTP subject: the resilient transport engine (redirect following
@@ -413,6 +414,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
       })
     }
 
+    // A recovered region is not a confident main-content read, so the full
+    // gate (weak markers included) applies to it; confident content only
+    // consults decisive challenge evidence.
+    if (extracted.recovery && gate !== null) return blocked(gate)
     const decisive = classifyGate({
       status: out.status,
       header: (name) => out.headers?.get(name) ?? null,
@@ -420,6 +425,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
       contentful: true,
     })
     if (decisive !== null) return blocked(decisive)
+
+    const verdict = extractionVerdict(extracted, 'http', wallMs, { rendered: false })
+    trace.push(...verdict.events)
 
     const formatStart = performance.now()
     const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: out.finalUrl })
@@ -449,13 +457,14 @@ export class ResilientHttpSubject implements SubjectAdapter {
 
     return finish({
       ...base,
-      status: 'success',
+      status: verdict.status,
       failureReason: null,
       blockReason: null,
       budgetExceeded: null,
       lane: 'http',
       escalations: [],
       markdown,
+      ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
       links,
       document: {
         title: extracted.title,

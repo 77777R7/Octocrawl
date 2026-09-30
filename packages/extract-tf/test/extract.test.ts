@@ -142,6 +142,74 @@ describe('extractTf', () => {
     expect(dir.mainHtml).toContain('Language 7')
   })
 
+  it('recovers the linked list on a card listing whose only prose block is too short', () => {
+    const cards = Array.from({ length: 8 }, (_, i) =>
+      `<li><article class="product_pod"><h3><a href="/catalogue/book-${i}">Book Title ${i}</a></h3><p class="price_color">£1${i}.50</p><p class="availability">In stock</p></article></li>`,
+    ).join('')
+    const html = `<!doctype html><html><head><title>Art | Books</title></head><body>
+<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li class="active">Art</li></ul>
+<h1>Art</h1>
+<ol class="row">${cards}</ol>
+</body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(false)
+    expect(out.recovery).toBe('list')
+    expect(out.strategy).toBe('list')
+    expect(out.mainHtml).toContain('Book Title 3')
+    expect(out.mainHtml).toContain('£13.50')
+  })
+
+  it('recovers the cleaned body on a page of short unpunctuated blurbs', () => {
+    const html = `<!doctype html><html><body><main>
+<h1>Find open data</h1>
+<h2>Search 55,000 datasets published by public bodies</h2>
+<div class="card"><h3>Environment</h3><p>Air quality, flood risk and land use datasets</p></div>
+<div class="card"><h3>Transport</h3><p>Road traffic counts and rail usage statistics</p></div>
+<div class="card"><h3>Health</h3><p>Hospital activity and prescribing datasets</p></div>
+<div class="card"><h3>Economy</h3><p>Business counts and regional productivity</p></div>
+</main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(false)
+    expect(out.recovery).toBe('body')
+    expect(out.mainHtml).toContain('Road traffic counts')
+  })
+
+  it('still escalates a script shell and flags it as client-rendered', () => {
+    const html = `<!doctype html><html><body><div id="root">Loading…</div><script>${'x'.repeat(3_000)}</script></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(true)
+    expect(out.recovery ?? null).toBeNull()
+    expect(out.mainHtml).toBe('')
+    expect(out.render?.clientRendered).toBe(true)
+    expect(out.render?.markers).toContain('app_root_empty')
+  })
+
+  it('flags a table shell beside scripts as client-rendered, not a static empty table', () => {
+    const prose = '<p>The table below lists the monthly consumer price index by geography and product group for the reference period.</p>'
+    const shell = `<!doctype html><html><body><main><h1>Table 18-10-0006-01</h1>${prose}<table id="grid"><thead><tr></tr></thead><tbody><tr></tr></tbody></table><script>${'y'.repeat(1_500)}</script></main></body></html>`
+    const rendered = extractTf.extract(shell)
+    expect(rendered.render?.clientRendered).toBe(true)
+    expect(rendered.render?.reason).toBe('empty_table_with_scripts')
+    expect(rendered.render?.emptyTables).toBe(1)
+
+    const stat = `<!doctype html><html><body><article><h1>Empty table</h1>${prose}<table></table><p>Text after the table.</p></article></body></html>`
+    const staticPage = extractTf.extract(stat)
+    expect(staticPage.render?.clientRendered).toBe(false)
+    expect(staticPage.render?.emptyTables).toBe(1)
+  })
+
+  it('flags an explicit JavaScript fallback when script outweighs text', () => {
+    const html = `<!doctype html><html><body><main><h1>Emissions per capita</h1>
+<p>Carbon dioxide emissions per person, measured in tonnes per year across the selected countries.</p>
+<figure class="GrapherWithFallback__fallback"><picture class="js--hide-if-js-enabled"><img src="/fallback.png" alt=""></picture></figure>
+<script>window._OWID_GRAPHER_CONFIG = {${'"k":1,'.repeat(300)}"tab":"table"}</script>
+</main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.render?.clientRendered).toBe(true)
+    expect(out.render?.reason).toBe('js_fallback')
+    expect(out.escalate).toBe(false)
+  })
+
   it('applies caller prune selectors', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Report</h1>

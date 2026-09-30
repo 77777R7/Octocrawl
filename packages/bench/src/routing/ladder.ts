@@ -121,10 +121,19 @@ function summarize(channelsTried: readonly string[], attempts: readonly { channe
  * honours the subject's own ask rather than re-deriving it.
  */
 function resultRequestsEscalation(result: FetchResult): boolean {
-  return (
-    result.escalations.some((e) => e.improved === null) ||
-    result.trace.some((t) => t.event === 'quality_low_yield')
-  )
+  return result.escalations.some((e) => e.improved === null) || qualityEscalationEvent(result) !== null
+}
+
+/**
+ * Quality signals a lane can attach to a contentful result: the content is
+ * thin and low-confidence, or the page looks client-rendered so the HTTP
+ * capture may be a shell. Either is an offer to the next lane, not a
+ * rewritten verdict.
+ */
+const QUALITY_ESCALATION_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
+
+function qualityEscalationEvent(result: FetchResult): string | null {
+  return result.trace.find((t) => QUALITY_ESCALATION_EVENTS.has(t.event))?.event ?? null
 }
 
 /** Content size as the ladder's improvement metric: main-content tokens,
@@ -341,8 +350,8 @@ export class LadderRunner {
         // to the next lane rather than accepted as the answer. The status is
         // NOT rewritten — the record keeps the real success and its real
         // token count; the ladder just isn't done yet.
-        const thinHttp =
-          channel.id === 'http' && result.trace.some((t) => t.event === 'quality_low_yield')
+        const qualityEvent = channel.id === 'http' ? qualityEscalationEvent(result) : null
+        const thinHttp = qualityEvent !== null
 
         // Worse-than-best: a later channel DID answer, but with less content
         // than an earlier one already produced. That is not an improvement —
@@ -355,7 +364,7 @@ export class LadderRunner {
             qualityEscalation = {
               from: 'http',
               to: 'browser_local',
-              trigger: 'quality_low_yield',
+              trigger: qualityEvent,
               improved: null,
             }
           }
@@ -366,7 +375,7 @@ export class LadderRunner {
             detail: {
               vendorId: channel.vendorId ?? null,
               status: result.status,
-              escalate: thinHttp ? 'quality_low_yield' : 'worse_than_best',
+              escalate: thinHttp ? qualityEvent : 'worse_than_best',
             },
           })
           continue
