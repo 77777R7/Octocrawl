@@ -21,7 +21,7 @@ Beta means the adapter has deterministic snapshot and contract coverage but has 
 
 ## MCP formats and subject validation
 
-`scrape.formats` accepts `markdown`, `links`, canonical `json`, or a caller-supplied JSON Schema object (`{type:"json",schema,...}`). `includeLinks` also controls links. With no explicit format, the compact MCP request returns canonical JSON for a verified adapter entity and Markdown for a generic page. `debug` defaults to false. Explicit formats always take precedence.
+`scrape.formats` accepts `markdown`, `links`, `html`, `rawHtml`, canonical `json`, or a caller-supplied JSON Schema object (`{type:"json",schema,...}`). `includeLinks` also controls links. With no explicit format, the compact MCP request returns canonical JSON for a verified adapter entity and Markdown for a generic page. `debug` defaults to false. Explicit formats always take precedence.
 
 Canonical consumers read `json.data.entities[]`, including `type`, `id`, `fields`, and `relationships`. The adapter checks target identity before structured publication: when the requested X status or Reddit post is absent, `json.status` is `incomplete` with `subject_unverified` issues. A URL alone is not page-content proof. Reddit comments must have a parent chain ending at the target post. `debug: true` exposes the full route, attempts, and timing for diagnosis.
 
