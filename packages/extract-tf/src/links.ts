@@ -6,17 +6,41 @@
  * This is not markdown conversion and not main-content extraction.
  */
 
-import { parse, qsa } from './dom.js'
+import { parse, qs, qsa } from './dom.js'
 
-export function collectLinks(html: string, baseUrl: string): readonly string[] {
-  let base: URL
+/**
+ * The document base URL, as HTML defines it: the first `<base href>` resolved
+ * against the page URL, else the page URL. A data: or javascript: base, or one
+ * that does not parse, is ignored. Null when no absolute URL results.
+ */
+export function documentBaseUrl(document: Document, pageUrl?: string | null): string | null {
+  let fallback: URL | null = null
   try {
-    base = new URL(baseUrl)
+    if (pageUrl) fallback = new URL(pageUrl)
   } catch {
+    fallback = null
+  }
+  const href = qs(document, 'base[href]')?.getAttribute('href')?.trim()
+  if (href) {
+    try {
+      const base = new URL(href, fallback ?? undefined)
+      if (base.protocol !== 'data:' && base.protocol !== 'javascript:') return base.href
+    } catch {
+      // fall back to the page URL
+    }
+  }
+  return fallback?.href ?? null
+}
+
+/** Absolute http(s) links of the document, resolved against its base URL (`<base href>` included). */
+export function collectLinks(html: string, baseUrl: string): readonly string[] {
+  const doc = parse(html)
+  const resolvedBase = documentBaseUrl(doc.document, baseUrl)
+  if (resolvedBase === null) {
+    doc.close()
     return []
   }
-
-  const doc = parse(html)
+  const base = new URL(resolvedBase)
   const seen = new Set<string>()
   const links: string[] = []
   for (const a of qsa(doc.document, 'a[href]')) {

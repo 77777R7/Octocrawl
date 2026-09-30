@@ -32,7 +32,7 @@ describe('atomic delivery destination registration', () => {
     const body = JSON.stringify({ id: 'atomic-receiver', monitorId: revision.monitorId, url: 'https://receiver.example/webhook' })
     const failed = await app.request('/v1/delivery/destinations', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
     expect(failed.status).toBe(400)
-    expect(await failed.json()).toEqual({ error: 'injected historical enqueue failure' })
+    expect(await failed.json()).toEqual({ error: 'injected historical enqueue failure', code: 'invalid_request' })
     expect(engine.listDeliveryDestinations()).toHaveLength(0)
     expect(engine.listDeliveries()).toHaveLength(0)
     expect(monitor.view(revision.monitorId, Date.now()).outbox[0]?.state).toBe('pending')

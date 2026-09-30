@@ -1,11 +1,14 @@
 import { createApiEngine } from '../../packages/api/src/engine.js'
 import { abortableSleep } from '@w2l/http-core'
-import { hostedNetworkPolicy, localNetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 const pollMs = Number(process.env.W2L_MONITOR_POLL_MS ?? 1000)
 if (!Number.isSafeInteger(pollMs) || pollMs < 10) throw new Error('W2L_MONITOR_POLL_MS must be at least 10')
 const mode = process.env.W2L_MONITOR_NETWORK_MODE ?? 'public'
 if (!['public', 'local'].includes(mode)) throw new Error('W2L_MONITOR_NETWORK_MODE must be public or local')
-const engine = createApiEngine({taskRoot: process.env.W2L_TASK_ROOT ?? '.w2l/api', networkPolicy: mode === 'local' ? localNetworkPolicy() : hostedNetworkPolicy()})
+// Only a local worker follows the operator's proxy variables; the public-source policy stays direct.
+const networkPolicy = mode === 'local' ? withEnvironmentProxy(localNetworkPolicy(), process.env) : hostedNetworkPolicy()
+if (networkPolicy.egressProxy) console.log(`monitor worker: ${describeEgressProxy(networkPolicy.egressProxy)}`)
+const engine = createApiEngine({taskRoot: process.env.W2L_TASK_ROOT ?? '.w2l/api', networkPolicy})
 const controller = new AbortController()
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => controller.abort(new DOMException('service shutdown', 'ShutdownError')))
 try {

@@ -36,7 +36,14 @@ import type { TextBlock } from './classify.js'
  */
 const CURRENCY_SYMBOLS = '[$£€¥₹₽₩฿]'
 const CURRENCY_CODES = '(?:USD|EUR|GBP|JPY|CNY|RMB|AUD|CAD|CHF|HKD|SGD|INR|KRW|BRL|MXN|SEK|NOK|DKK|PLN|TRY|ZAR)'
-const AMOUNT = '\\d{1,12}(?:[.,]\\d{1,3}){0,4}'
+/**
+ * Thousands grouped by a space of any width or an apostrophe (`1 299,00`,
+ * `1'299.00`) are one amount, starting where a number starts; otherwise
+ * digits with `.` / `,` separators. A text this matches contains a match of
+ * the second form alone, so what counts as price-shaped is unchanged: only the
+ * run read as the price grows from its last group to the whole amount.
+ */
+const AMOUNT = "(?:(?<![\\d.,'’])\\d{1,3}(?:[\\s'’]\\d{3}){1,4}(?:[.,]\\d{1,3})?|\\d{1,12}(?:[.,]\\d{1,3}){0,4})"
 const PRICE_RE = new RegExp(
   `(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})\\s{0,3}${AMOUNT}|${AMOUNT}\\s{0,3}(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})`,
   'u',
@@ -57,10 +64,10 @@ function hasPriceToken(el: Element): boolean {
 // Fact collection
 // ---------------------------------------------------------------------------
 
-function fact(value: string | null | undefined, source: ProductFactSource): ProductFact | null {
+function fact(value: string | null | undefined, source: ProductFactSource, path?: string): ProductFact | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim().replace(/\s+/g, ' ')
-  return trimmed.length > 0 ? { value: trimmed, source } : null
+  return trimmed.length > 0 ? { value: trimmed, source, ...(path === undefined ? {} : { path }) } : null
 }
 
 /** Empty facts: we looked at a product page and every field came back unstated. */
@@ -241,6 +248,30 @@ function factsFromMeta(doc: Document): Partial<ProductFacts> {
   }
 }
 
+/** An element carrying a `price` id/class token and a short, price-shaped text. */
+function isPriceElement(el: Element): boolean {
+  if (!hasPriceToken(el)) return false
+  const text = textOf(el).trim()
+  return text.length > 0 && text.length <= 60 && looksLikePrice(text)
+}
+
+/**
+ * The prices a page shows: price elements that are not inside another one,
+ * so a box holding a "now" and a "was" amount counts once.
+ */
+export function visiblePrices(scope: ParentNode): Element[] {
+  const prices = qsa(scope, '[id],[class]').filter(isPriceElement)
+  return prices.filter((el) => !prices.some((other) => other !== el && other.contains(el)))
+}
+
+/** A selector naming an element by its tag and id, or its tag and classes. */
+function selectorOf(el: Element): string {
+  const ident = (s: string) => s.replace(/[^\w-]/g, (ch) => `\\${ch}`)
+  const id = el.getAttribute('id')
+  if (id) return `${tagOf(el)}#${ident(id)}`
+  return tagOf(el) + (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean).map((c) => `.${ident(c)}`).join('')
+}
+
 /**
  * The visible price element: the deepest element carrying a `price` id/class
  * token whose own text is price-shaped. Deepest wins so a wrapper reporting
@@ -250,9 +281,7 @@ export function findPriceElement(scope: ParentNode): Element | null {
   let best: Element | null = null
   let bestDepth = -1
   for (const el of qsa(scope, '[id],[class]')) {
-    if (!hasPriceToken(el)) continue
-    const text = textOf(el).trim()
-    if (text.length === 0 || text.length > 60 || !looksLikePrice(text)) continue
+    if (!isPriceElement(el)) continue
     let depth = 0
     for (let p = el.parentElement; p; p = p.parentElement) depth++
     if (depth > bestDepth) {
@@ -265,14 +294,15 @@ export function findPriceElement(scope: ParentNode): Element | null {
 
 /**
  * Last-resort price: our reading of rendered text. Weaker than every
- * machine-readable path above, and labelled as such.
+ * machine-readable path above, and labelled as such, with the element it was
+ * read from.
  */
 function factsFromText(doc: Document): Partial<ProductFacts> {
   const el = findPriceElement(doc)
   if (!el) return {}
   const text = textOf(el).trim().replace(/\s+/g, ' ')
   const matched = PRICE_RE.exec(text)?.[0] ?? null
-  return { price: fact(matched, 'text') }
+  return { price: fact(matched, 'text', selectorOf(el)) }
 }
 
 /**
@@ -355,9 +385,11 @@ export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Elem
       const region = lca!
       const prose = blocks.filter((b) => region.contains(b.el))
       if (prose.length > 0) return region
-      // Title + price but no description: widen one level to reach it.
-      const wider = region.parentElement
-      if (!isRootish(doc, wider) && blocks.some((b) => wider!.contains(b.el))) return wider
+      // Title + price but no description: widen to the nearest container
+      // that reaches it, never to the page itself.
+      for (let wider = region.parentElement; !isRootish(doc, wider); wider = wider!.parentElement) {
+        if (blocks.some((b) => wider!.contains(b.el))) return wider
+      }
       return region
     }
   }

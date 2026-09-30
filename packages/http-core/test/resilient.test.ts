@@ -50,6 +50,16 @@ describe('resilientFetch: plain responses', () => {
     expect(out.trace.find((event) => event.event === 'request_complete')?.at).toBeGreaterThanOrEqual(0)
   })
 
+  it('gives the final body as received, or as UTF-8 text when the response offers only text', async () => {
+    const bytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0xff])
+    const raw = await resilientFetch(U, scripted([{ ...res(200), bodyBytes: async () => bytes }]))
+    expect(await raw.bodyBytes()).toBe(bytes)
+    const text = await resilientFetch(U, scripted([res(200, {}, 'café')]))
+    expect(await text.bodyBytes()).toEqual(new TextEncoder().encode('café'))
+    const failed = await resilientFetch(U, scripted([new Error('refused')]))
+    expect(await failed.bodyBytes()).toEqual(new Uint8Array())
+  })
+
   it('records request_complete only after the terminal response body finishes', async () => {
     let release!: (value: string) => void
     const body = new Promise<string>(resolve => { release = resolve })
@@ -119,6 +129,16 @@ describe('resilientFetch: redirects', () => {
     expect(out.failureReason).toBe('redirect_loop')
     expect(out.requestCount).toBe(2)
     expect(out.trace.some((t) => t.event === 'redirect_loop')).toBe(true)
+    // The last response received is b's 302: its URL, not the one it points back to, is the final URL.
+    expect(out.status).toBe(302)
+    expect(out.finalUrl).toBe('http://x.test/loop/b')
+    expect(out.redirectChain).toEqual(['http://x.test/loop/a', 'http://x.test/loop/b'])
+    expect(out.headers?.get('location')).toBe('/loop/a')
+  })
+
+  it('names the URL that redirects to itself as the final URL of its loop', async () => {
+    const out = await resilientFetch('http://x.test/self', scripted([res(302, { location: '/self' })]))
+    expect(out).toMatchObject({ kind: 'failure', failureReason: 'redirect_loop', status: 302, finalUrl: 'http://x.test/self', redirectChain: ['http://x.test/self'], requestCount: 1 })
   })
 
   it('stops at maxRedirects with redirect_limit', async () => {
@@ -255,6 +275,23 @@ describe('resilientFetch: transport errors', () => {
     expect(out.failureReason).toBe('timeout')
   })
 
+  it('says the deadline ended a header or body wait that was set to the time left, not one a lane cap ended', async () => {
+    // Timers run on the event loop's cached clock: a wait set to the time left
+    // can end before Date.now() reaches the deadline, so the outcome says so.
+    const timeout = (name: string) => Object.assign(new Error(name), { name })
+    const bound = await resilientFetch(U, scripted([timeout('HeadersTimeoutError')]), { deadlineAt: Date.now() + 2_000 })
+    expect(bound).toMatchObject({ failureReason: 'timeout', deadlineExceeded: true })
+    const followed = await resilientFetch(U, scripted([timeout('BodyTimeoutError')]), { deadlineAt: Date.now() + 60_000, capsFollowDeadline: true })
+    expect(followed).toMatchObject({ failureReason: 'timeout', deadlineExceeded: true })
+    const capped = await resilientFetch(U, scripted([timeout('HeadersTimeoutError')]), { deadlineAt: Date.now() + 60_000 })
+    expect(capped.failureReason).toBe('timeout')
+    expect(capped.deadlineExceeded).toBeUndefined()
+    const cancelled = new AbortController()
+    const aborted = resilientFetch(U, async (_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason))), { deadlineAt: Date.now() + 2_000, signal: cancelled.signal })
+    cancelled.abort()
+    expect((await aborted).deadlineExceeded).toBeUndefined()
+  })
+
   it('maps other thrown errors to connection_error', async () => {
     const f = scripted([new Error('ECONNREFUSED')])
     const out = await resilientFetch(U, f)
@@ -269,6 +306,17 @@ describe('resilientFetch: transport errors', () => {
     const out = await resilientFetch(U, f)
     expect(out.kind).toBe('failure')
     expect(out.failureReason).toBe('policy_denied')
+  })
+
+  it('reports a name that does not resolve as dns_error, at the guard or at connect', async () => {
+    const notFound = () => Object.assign(new Error('getaddrinfo ENOTFOUND x.test'), { name: 'DnsLookupError' })
+    const guarded = scripted([res(200)])
+    const atGuard = await resilientFetch(U, guarded, { assertUrl: async () => { throw notFound() } })
+    expect(atGuard).toMatchObject({ kind: 'failure', failureReason: 'dns_error', requestCount: 0 })
+    expect(guarded.calls).toEqual([])
+    expect(atGuard.trace.map((t) => t.event)).toEqual(['dns_failed'])
+    const atConnect = await resilientFetch(U, scripted([new Error('socket failed', { cause: notFound() })]))
+    expect(atConnect.failureReason).toBe('dns_error')
   })
 })
 
@@ -310,6 +358,23 @@ describe('resilientFetch execution budget', () => {
     const out = await resilientFetch(U, f, { deadlineAt: Date.now() - 1 })
     expect(out.failureReason).toBe('timeout')
     expect(f.calls).toEqual([])
+  })
+
+  it('waits for headers and body until a caller-chosen deadline, never past it; the default caps otherwise', async () => {
+    const seen: Array<{ headersTimeoutMs: number; bodyTimeoutMs: number }> = []
+    const fetcher: ResilientFetcher = async (_url, init) => {
+      seen.push({ headersTimeoutMs: init.headersTimeoutMs, bodyTimeoutMs: init.bodyTimeoutMs })
+      return res(200)
+    }
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 60_000 })
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 60_000, capsFollowDeadline: true })
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 2_000, capsFollowDeadline: true })
+    await resilientFetch(U, fetcher, { capsFollowDeadline: true })
+    expect(seen[0]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
+    for (const timeout of [seen[1]!.headersTimeoutMs, seen[1]!.bodyTimeoutMs]) expect(timeout).toBeGreaterThan(55_000)
+    for (const timeout of [seen[1]!.headersTimeoutMs, seen[1]!.bodyTimeoutMs]) expect(timeout).toBeLessThanOrEqual(60_000)
+    for (const timeout of [seen[2]!.headersTimeoutMs, seen[2]!.bodyTimeoutMs]) expect(timeout).toBeLessThanOrEqual(2_000)
+    expect(seen[3]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
   })
 
   it('retains deadline protection while reading a deferred response body', async () => {

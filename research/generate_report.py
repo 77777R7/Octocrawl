@@ -35,7 +35,7 @@ from reportlab.platypus import (
 from reportlab.platypus.tableofcontents import TableOfContents
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "research" / "evidence_ledger.csv"
 OUT = ROOT / "output" / "pdf" / "AI爬虫与洞察SaaS创业机会深度验证报告.pdf"
 

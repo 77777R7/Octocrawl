@@ -31,36 +31,46 @@ afterAll(async () => {
   await server.close()
 })
 
-/** The four gates the fixture suite serves, and the reason each must produce. */
+/**
+ * The gates the fixture suite serves, the reason each must produce, and the
+ * page text a block answered with an error status keeps as evidence (null:
+ * a gate served with 200 carries no Markdown).
+ */
 const GATES: ReadonlyArray<{
   readonly path: string
   readonly reason: BlockReason
   readonly why: string
+  readonly evidence: string | null
 }> = [
   {
     path: '/block/challenge',
     reason: 'cloudflare_challenge',
     why: '403 with a cf-mitigated header — vendor named from headers alone',
+    evidence: 'Just a moment...',
   },
   {
     path: '/block/challenge-200',
     reason: 'cloudflare_challenge',
     why: '200 with the interstitial copy — the case status codes cannot catch',
+    evidence: null,
   },
   {
     path: '/block/challenge-200-prose',
     reason: 'cloudflare_challenge',
     why: '200 with extractable prose plus CF challenge-platform plumbing — empty-extract cannot catch this',
+    evidence: null,
   },
   {
     path: '/block/rate-limit',
     reason: 'rate_limit',
     why: '429, decisive from the status',
+    evidence: 'Too Many Requests',
   },
   {
     path: '/block/login-wall',
     reason: 'login_wall',
     why: '200 with a password field behind a sign-in-to-continue heading',
+    evidence: null,
   },
 ]
 
@@ -73,9 +83,12 @@ describe.each([
     expect(out.status, gate.why).toBe('blocked')
     expect(out.blockReason, gate.why).toBe(gate.reason)
     expect(out.failureReason).toBeNull()
-    // A blocked result must never carry content: returning the challenge page
-    // as markdown is the false success this whole classification exists to stop.
-    expect(out.markdown).toBeNull()
+    // Returning the challenge page as content is the false success this
+    // classification exists to stop; the status says blocked. A block that
+    // answered with an error status keeps its page as evidence of what the
+    // server said.
+    if (gate.evidence === null) expect(out.markdown).toBeNull()
+    else expect(out.markdown).toContain(gate.evidence)
   })
 
   it('records the signals that fired, so the claim is auditable', async () => {
@@ -111,6 +124,8 @@ describe.each([
     expect(out.status).toBe('failed')
     expect(out.failureReason).toBe('http_error')
     expect(out.blockReason).toBeNull()
+    expect(out.evidence.httpStatus).toBe(500)
+    expect(out.markdown).toContain('Internal Server Error')
   })
 
   it('still succeeds on an ordinary article', async () => {

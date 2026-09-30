@@ -205,6 +205,31 @@ describe('PDP region selection', () => {
     expect(out.mainHtml).toContain('describes an item at length')
   })
 
+  it('widens a bare buy box to the product that holds its description', () => {
+    // books.toscrape.com: title, price and stock sit in one column, the
+    // description and the Product Information table two levels further up.
+    const html = `<!doctype html><html><head><title>A Light in the Attic | Books to Scrape - Sandbox</title></head><body>
+<header class="header container-fluid"><div class="col-sm-8 h1"><a href="../../index.html">Books to Scrape</a></div></header>
+<div class="page_inner"><ul class="breadcrumb"><li><a href="../../index.html">Home</a></li><li><a href="../category/books_1/index.html">Books</a></li><li><a href="../category/books/poetry_23/index.html">Poetry</a></li><li class="active">A Light in the Attic</li></ul>
+<article class="product_page"><div class="row">
+<div class="col-sm-6"><div id="product_gallery" class="carousel"><img src="../../media/cache/fe/72/fe72f0532301ec28892ae79a629a293c.jpg" alt="A Light in the Attic" /></div></div>
+<div class="col-sm-6 product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p>
+<p class="instock availability"><i class="icon-ok"></i> In stock (22 available)</p><p class="star-rating Three"><i class="icon-star"></i></p></div>
+</div>
+<div id="product_description" class="sub-header"><h2>Product Description</h2></div>
+<p>It's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings from Shel Silverstein celebrates its 20th anniversary with this special edition.</p>
+<div class="sub-header"><h2>Product Information</h2></div>
+<table class="table table-striped"><tr><th>UPC</th><td>a897fe39b1053632</td></tr><tr><th>Price (excl. tax)</th><td>£51.77</td></tr></table>
+</article></div></body></html>`
+    const out = extractTf.extract(html, { url: 'https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html' })
+    expect(out.pageType).toBe('product')
+    expect(out.strategy).toBe('product')
+    expect(out.product?.price).toEqual({ value: '£51.77', source: 'text', path: 'p.price_color' })
+    expect(out.mainHtml).toContain("It's hard to imagine a world without A Light in the Attic.")
+    expect(out.mainHtml).toContain('a897fe39b1053632')
+    expect(out.mainHtml).not.toContain('Books to Scrape')
+  })
+
   it('honours a declared microdata scope as the product boundary', () => {
     const html = `<!doctype html><html><head><title>Scoped</title></head><body>
 <div id="page">
@@ -285,9 +310,24 @@ describe('recommendation pruning: precision guards', () => {
 
 describe('price shape', () => {
   it('matches the currency conventions storefronts actually ship', () => {
-    for (const s of ['$84.00', '£1,299.99', '€18,50', '¥3980', 'USD 84.00', '84.00 EUR', '₹1,49,900']) {
+    for (const s of ['$84.00', '£1,299.99', '€18,50', '¥3980', 'USD 84.00', '84.00 EUR', '₹1,49,900', '1 299,00 €', "CHF 1'299.00"]) {
       expect(looksLikePrice(s)).toBe(true)
     }
+  })
+
+  it('reads a price grouped by spaces or apostrophes as one amount, not its last group', () => {
+    const visible = (text: string): string | undefined => {
+      const doc = parse(`<html><body><h1>Lampe</h1><p class="price">${text}</p></body></html>`)
+      const value = collectProductFacts(doc.document).price?.value
+      doc.close()
+      return value
+    }
+    expect(visible('1 299,00 €')).toBe('1 299,00 €')
+    expect(visible('€ 1 299,00')).toBe('€ 1 299,00')
+    expect(visible("CHF 1'299.00")).toBe("CHF 1'299.00")
+    expect(visible('1’299.50 CHF')).toBe('1’299.50 CHF')
+    // A group starts where a number starts: a year before a price is not its thousands.
+    expect(visible('2024 299 €')).toBe('299 €')
   })
 
   it('does not match bare numbers or dates', () => {

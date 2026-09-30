@@ -521,6 +521,50 @@ describe('LadderRunner — best-so-far content', () => {
   })
 })
 
+describe('LadderRunner — a page with no main content', () => {
+  const url = 'https://example.com/p'
+  const PAGE = '[Home](https://example.com/)\n\n- [Docs](https://example.com/docs)'
+  /** HTTP found no main content: failed, the whole page kept as evidence, the browser asked for. */
+  function noMainContent(): FetchResult {
+    return {
+      ...failedResult(url, 'empty_unverified'),
+      evidence: { ...failedResult(url, 'empty_unverified').evidence, httpStatus: 200 },
+      markdown: PAGE,
+      escalations: [{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null }],
+    }
+  }
+  const browserFailure = (reason: FetchResult['failureReason']): FetchResult => ({ ...failedResult(url, reason), lane: 'browser_local' })
+
+  it('keeps the HTTP page as evidence when the browser rung fails without a page', async () => {
+    const run = await new LadderRunner([channel('http', [noMainContent()]), channel('browser_local', [browserFailure('connection_error')])], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: PAGE })
+    expect(run.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: false }])
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', channel: 'http', detail: { kept: 'http', failed: 'browser_local', reason: 'connection_error' } }))
+    expect(run.summary.attempts.map((attempt) => attempt.result.failureReason)).toEqual(['empty_unverified', 'connection_error'])
+  })
+
+  it('answers with the browser rung\'s own page or block instead', async () => {
+    const rendered: FetchResult = { ...noMainContent(), lane: 'browser_local', escalations: [], markdown: 'Rendered whole page' }
+    const renderedRun = await new LadderRunner([channel('http', [noMainContent()]), channel('browser_local', [rendered])], { mode: 'standard' }).run(url)
+    expect(renderedRun.result).toMatchObject({ lane: 'browser_local', markdown: 'Rendered whole page' })
+    const blocked = { ...blockedResult(url, 'captcha'), lane: 'browser_local' as const }
+    const blockedRun = await new LadderRunner([channel('http', [noMainContent()]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
+    expect(blockedRun.result).toMatchObject({ status: 'blocked', lane: 'browser_local' })
+  })
+
+  it('keeps the HTTP page as evidence on the timeout when the deadline ends the browser rung', async () => {
+    const hanging: Channel = {
+      id: 'browser_local',
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
+    }
+    const run = await new LadderRunner([channel('http', [noMainContent()]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', markdown: PAGE, usage: { deadlineExceeded: true } })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'deadline_exceeded', detail: { channel: 'browser_local', kept: null, evidence: 'http' } }))
+  })
+})
+
 describe('LadderRunner — identity on contentful results', () => {
   function mismatchedContentful(url: string): FetchResult {
     return {
@@ -712,5 +756,72 @@ describe('LadderRunner — declared identity is mandatory', () => {
     expect(run.channelsTried).toEqual(['http'])
     expect(run.result.failureReason).toBe('identity_compromised')
     expect(run.result.trace.some((t) => t.event === 'identity_mismatch')).toBe(true)
+  })
+})
+
+describe('LadderRunner — deadline and fetch options', () => {
+  const url = 'https://example.com/p'
+  function thinHttp(): FetchResult {
+    return { ...contentfulResult(url, 'http'), trace: [{ at: 5, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 12, confidence: 0.1 } }] }
+  }
+  /** A rung that only ends when its execution stops, like a page load that never settles. */
+  function hanging(id: string): Channel {
+    return {
+      id,
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
+    }
+  }
+
+  it('a deadline while the browser rung runs returns the HTTP content as partial, not an error', async () => {
+    const run = await new LadderRunner([channel('http', [thinHttp()]), hanging('browser_local')], { mode: 'standard' })
+      .run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result).toMatchObject({ status: 'partial', lane: 'http', markdown: 'MAIN CONTENT', failureReason: null, budgetExceeded: null, usage: { deadlineExceeded: true } })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'deadline_exceeded', detail: { channel: 'browser_local', kept: 'http' } }))
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_deadline_exceeded', channel: 'browser_local' }))
+  })
+
+  it('with nothing usable the deadline is failed/timeout, while cancellation still rejects', async () => {
+    const runner = new LadderRunner([hanging('http')], { mode: 'standard' })
+    const run = await runner.run(url, undefined, { deadlineAt: Date.now() + 100 })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', budgetExceeded: null, lane: 'http', markdown: null, usage: { deadlineExceeded: true } })
+    const controller = new AbortController()
+    const cancelled = runner.run(url, undefined, { signal: controller.signal, deadlineAt: Date.now() + 5_000 })
+    controller.abort()
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('a rung that reports the deadline itself ends the ladder without trying the next rung', async () => {
+    const timedOut = failedResult(url, 'timeout')
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [{ ...timedOut, usage: { ...timedOut.usage, deadlineExceeded: true } }]), browser], { mode: 'standard' })
+      .run(url, undefined, { deadlineAt: Date.now() + 5_000 })
+    expect(browser.calls).toEqual([])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', usage: { deadlineExceeded: true } })
+  })
+
+  it('waitFor starts at a rung that can wait and hands it the fetch options', async () => {
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const seen: unknown[] = []
+    const browser: Channel = {
+      id: 'browser_local',
+      identity: COHERENT,
+      waitsFor: true,
+      fetch: async (target, _session, _execution, options) => { seen.push(options); return contentfulResult(target, 'browser_local') },
+    }
+    const run = await new LadderRunner([http, browser], { mode: 'standard' }).run(url, undefined, {}, { waitFor: 1_000, onlyMainContent: false })
+    expect(http.calls).toEqual([])
+    expect(seen).toEqual([{ waitFor: 1_000, onlyMainContent: false }])
+    expect(run.channelsTried).toEqual(['browser_local'])
+    expect(run.ladderTrace[0]).toMatchObject({ event: 'ladder_channel_skipped', channel: 'http', detail: { reason: expect.stringContaining('waitFor') } })
+  })
+
+  it('waitFor with no rung that can wait is an honest failure, not an HTTP answer that ignored it', async () => {
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const run = await new LadderRunner([http], { mode: 'standard' }).run(url, undefined, {}, { waitFor: 1_000 })
+    expect(http.calls).toEqual([])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
   })
 })

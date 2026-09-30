@@ -13,7 +13,8 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
  *    maxRetries times; 429 and every other status never retry
  *  - honour Retry-After seconds / HTTP-date without shortening server waits
  *  - map thrown transport errors by name: undici HeadersTimeoutError /
- *    BodyTimeoutError -> timeout, everything else -> connection_error
+ *    BodyTimeoutError -> timeout, DnsLookupError -> dns_error, everything
+ *    else -> connection_error
  *
  * Counting semantics: `attemptCount` counts logical attempts (the outer
  * loop; one attempt may contain a whole redirect chain), `requestCount`
@@ -24,10 +25,10 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
 export type UrlGuard = (url: string) => Promise<void>
 
 /** Undici may wrap a connector rejection as the cause of its socket error. */
-function isSsrfDeniedError(error: unknown): boolean {
+function hasErrorNamed(error: unknown, name: 'SsrfDeniedError' | 'DnsLookupError'): boolean {
   let current = error
   for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
-    if ('name' in current && current.name === 'SsrfDeniedError') return true
+    if ('name' in current && current.name === name) return true
     current = 'cause' in current ? current.cause : null
   }
   return false
@@ -44,8 +45,15 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   retryBackoffBaseMs: number
   /** Extra deterministic-injection hook for tests and operators. */
   retryJitterMs: number
+  /** Default wait for a response's headers, and for each chunk of its body; never past deadlineAt. */
   headersTimeoutMs: number
   bodyTimeoutMs: number
+  /**
+   * deadlineAt is the caller's own timeout: wait for headers and body until it
+   * instead of stopping at headersTimeoutMs / bodyTimeoutMs. Without a
+   * deadline the two caps apply.
+   */
+  capsFollowDeadline?: boolean
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -71,6 +79,8 @@ export interface ResilientResponseLike {
   status: number
   headers: { get(name: string): string | null }
   bodyText(): Promise<string>
+  /** The body as received. A response without it is read as text and encoded as UTF-8. */
+  bodyBytes?(): Promise<Uint8Array>
 }
 
 /** One wire request. Throws are mapped by error name inside the engine. */
@@ -81,6 +91,7 @@ export type ResilientFetcher = (
 
 export type ResilientFailureReason =
   | 'timeout'
+  | 'dns_error'
   | 'connection_error'
   | 'http_error'
   | 'redirect_loop'
@@ -95,7 +106,18 @@ export interface ResilientOutcome {
   /** Terminal HTTP status of the final response (null when a transport error fired). */
   status: number | null
   failureReason: ResilientFailureReason | null
-  /** Last URL the engine acted on. */
+  /**
+   * The deadline ended the request: its own timer fired, or a header or body
+   * wait set to the time left ran out. Timers run on the event loop's cached
+   * clock, so such a wait can end a few milliseconds before Date.now()
+   * reaches the deadline.
+   */
+  deadlineExceeded?: true
+  /**
+   * The URL `redirectChain` ends with: the one whose response `status` is,
+   * or whose request failed or was refused. The target of a redirect the
+   * engine did not follow (a loop, the limit, a denied target) is not it.
+   */
   finalUrl: string
   /** Every URL visited, in order, starting with the requested one. */
   redirectChain: string[]
@@ -105,6 +127,8 @@ export interface ResilientOutcome {
   attemptCount: number
   headers: ResilientResponseLike['headers'] | null
   bodyText(): Promise<string>
+  /** The final body as received, within the same body budget as bodyText. */
+  bodyBytes(): Promise<Uint8Array>
   trace: Array<{ at: number; event: string; detail?: Record<string, unknown> }>
 }
 
@@ -139,6 +163,7 @@ function emptyOutcomeFields(chain: string[], requestCount: number, attemptCount:
     requestCount,
     attemptCount,
     bodyText: async () => '',
+    bodyBytes: async () => new Uint8Array(),
     trace,
   }
 }
@@ -150,11 +175,12 @@ function denied(
   attemptCount: number,
   trace: ResilientOutcome['trace'],
   headers: ResilientOutcome['headers'] = null,
+  failureReason: 'policy_denied' | 'dns_error' = 'policy_denied',
 ): ResilientOutcome {
   return {
     kind: 'failure',
     status: null,
-    failureReason: 'policy_denied',
+    failureReason,
     finalUrl: current,
     ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
     headers,
@@ -176,12 +202,14 @@ async function guardUrl(
     await assertUrl(url)
     return null
   } catch (err) {
+    // A name that does not resolve is a DNS fact about the target, not a policy decision.
+    const dns = hasErrorNamed(err, 'DnsLookupError')
     trace.push({
       at,
-      event: 'ssrf_denied',
+      event: dns ? 'dns_failed' : 'ssrf_denied',
       detail: { to: url, error: err instanceof Error ? err.message : String(err) },
     })
-    return denied(current, chain, requestCount, attemptCount, trace)
+    return denied(current, chain, requestCount, attemptCount, trace, null, dns ? 'dns_error' : 'policy_denied')
   }
 }
 
@@ -225,46 +253,53 @@ export async function resilientFetch(
       requestCount++
       const at = Date.now() - start
       let response: ResilientResponseLike
+      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
+      const headersCapMs = cap(cfg.headersTimeoutMs), bodyCapMs = cap(cfg.bodyTimeoutMs)
+      let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
       try {
-        response = await raceWithSignal(fetcher(current, {
-          headersTimeoutMs: remainingTimeout(scope, cfg.headersTimeoutMs),
-          bodyTimeoutMs: remainingTimeout(scope, cfg.bodyTimeoutMs),
-          signal: scope.signal,
-        }), scope.signal)
+        headersTimeoutMs = remainingTimeout(scope, headersCapMs)
+        bodyTimeoutMs = remainingTimeout(scope, bodyCapMs)
+        response = await raceWithSignal(fetcher(current, { headersTimeoutMs, bodyTimeoutMs, signal: scope.signal }), scope.signal)
       } catch (err) {
         const name = err instanceof Error ? err.name : ''
+        const deadlineExceeded = scope.signal.reason?.name === 'TimeoutError' ||
+          (name === 'HeadersTimeoutError' && headersTimeoutMs < headersCapMs) || (name === 'BodyTimeoutError' && bodyTimeoutMs < bodyCapMs)
         const reason: ResilientFailureReason =
           scope.signal.aborted || name === 'AbortError' || name === 'TimeoutError' || name === 'HeadersTimeoutError' || name === 'BodyTimeoutError'
             ? 'timeout'
-            : isSsrfDeniedError(err)
+            : hasErrorNamed(err, 'SsrfDeniedError')
               ? 'policy_denied'
-              : name === 'BodyTooLargeError'
-                ? 'body_too_large'
-                : 'connection_error'
+              : hasErrorNamed(err, 'DnsLookupError')
+                ? 'dns_error'
+                : name === 'BodyTooLargeError'
+                  ? 'body_too_large'
+                  : 'connection_error'
         trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err) } })
         return {
           kind: 'failure',
           status: null,
           failureReason: reason,
+          ...(reason === 'timeout' && deadlineExceeded ? { deadlineExceeded: true as const } : {}),
           finalUrl: current,
           ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
           headers: null,
         }
       }
 
-      let bodyPromise: Promise<string> | null = null
-      const responseBody = (): Promise<string> => {
-        bodyPromise ??= (async () => {
-          const bodyScope = createExecutionScope(cfg)
-          try {
-            throwIfExecutionStopped(bodyScope)
-            const body = await raceWithSignal(response.bodyText(), bodyScope.signal)
-            trace.push({ at: Date.now() - start, event: 'request_complete', detail: { status: response.status } })
-            return body
-          } finally { bodyScope.dispose() }
-        })()
-        return bodyPromise
+      const withinBodyBudget = async <T>(read: () => Promise<T>): Promise<T> => {
+        const bodyScope = createExecutionScope(cfg)
+        try {
+          throwIfExecutionStopped(bodyScope)
+          const body = await raceWithSignal(read(), bodyScope.signal)
+          trace.push({ at: Date.now() - start, event: 'request_complete', detail: { status: response.status } })
+          return body
+        } finally { bodyScope.dispose() }
       }
+      let bodyPromise: Promise<string> | null = null
+      let bytesPromise: Promise<Uint8Array> | null = null
+      const responseBody = (): Promise<string> => (bodyPromise ??= withinBodyBudget(() => response.bodyText()))
+      const responseBytes = (): Promise<Uint8Array> => (bytesPromise ??= withinBodyBudget(() =>
+        response.bodyBytes?.() ?? response.bodyText().then(text => new TextEncoder().encode(text))))
       if (response.status === 429 || response.status === 503) {
         const delay = parseRetryAfterMs(response.headers.get('retry-after'), now())
         if (delay !== null) cfg.onRetryAfter?.(current, now() + delay)
@@ -308,12 +343,14 @@ export async function resilientFetch(
           }
         }
         if (seen.has(next)) {
-          trace.push({ at, event: 'redirect_loop', detail: { to: next } })
+          // The loop's target was requested already and is not requested
+          // again: the final URL is the one whose redirect closes the loop.
+          trace.push({ at, event: 'redirect_loop', detail: { from: current, to: next } })
           return {
             kind: 'failure',
             status: response.status,
             failureReason: 'redirect_loop',
-            finalUrl: next,
+            finalUrl: current,
             ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
             headers: response.headers,
           }
@@ -381,6 +418,7 @@ export async function resilientFetch(
         attemptCount,
         headers: response.headers,
         bodyText: responseBody,
+        bodyBytes: responseBytes,
         trace,
       }
     }
@@ -388,6 +426,6 @@ export async function resilientFetch(
   } catch (error) {
     if (!scope.signal.aborted && !(error instanceof Error && error.name === 'TimeoutError')) throw error
     trace.push({ at: Date.now() - start, event: 'execution_stopped' })
-    return { kind: 'failure', status: null, failureReason: 'timeout', finalUrl: current, ...emptyOutcomeFields(chain, requestCount, attemptCount, trace), headers: null }
+    return { kind: 'failure', status: null, failureReason: 'timeout', ...(scope.signal.reason?.name === 'TimeoutError' ? { deadlineExceeded: true as const } : {}), finalUrl: current, ...emptyOutcomeFields(chain, requestCount, attemptCount, trace), headers: null }
   } finally { scope.dispose() }
 }

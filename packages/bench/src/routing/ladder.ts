@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { ExecutionContext, Escalation, FetchResult, HandoffRequest, IdentityBundle, LadderExecutionSummary, Meter } from '@w2l/contracts'
+import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, TraceEvent } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, identityBundleIssues } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -45,8 +45,13 @@ export interface Channel {
    * fetch; it does not try a different fake identity.
    */
   readonly identity?: IdentityBundle
+  /**
+   * Whether this rung honours FetchOptions.waitFor: it runs scripts and
+   * waits before capture. A request with waitFor skips rungs without it.
+   */
+  readonly waitsFor?: boolean
   /** Run the channel against url, optionally with a user session attached. */
-  fetch(url: string, session?: SessionSnapshot | null, execution?: ExecutionContext): Promise<FetchResult>
+  fetch(url: string, session?: SessionSnapshot | null, execution?: ExecutionContext, options?: FetchOptions): Promise<FetchResult>
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
   close?(): Promise<void>
@@ -79,6 +84,14 @@ export interface LadderRunResult {
    */
   ladderTrace: readonly { at: number; event: string; channel: string; detail: Record<string, unknown> }[]
   summary: LadderExecutionSummary
+}
+
+/** What one run has done so far; the deadline path reads it when the run is cut short. */
+interface LadderProgress {
+  startedAt: number
+  channelsTried: string[]
+  ladderTrace: LadderRunResult['ladderTrace'][number][]
+  attempts: LadderAttempt[]
 }
 
 function summarize(channelsTried: readonly string[], attempts: readonly { channel: string; result: FetchResult }[]): LadderExecutionSummary {
@@ -188,19 +201,25 @@ export class LadderRunner {
    * All of it lands in `ladderTrace`. The signed compliance record remains
    * the winning subject's own; the ladder audit travels alongside it,
    * unrewritten and unsigned — that boundary is deliberate.
+   *
+   * The caller's deadline (a scrape's `timeout`) ends the run with a result,
+   * never an error: the best content a rung produced so far as `partial`,
+   * or `failed`/`timeout`. Cancellation and shutdown still reject.
    */
-  async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}): Promise<LadderRunResult> {
+  async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    try { return await this.runWithinBudget(url, session, scope) } finally { scope.dispose() }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [] }
+    try { return await this.runWithinBudget(url, session, scope, options, progress) }
+    catch (error) {
+      if (!deadlineReached(scope)) throw error
+      return deadlineOutcome(url, progress, null)
+    } finally { scope.dispose() }
   }
 
-  private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext): Promise<LadderRunResult> {
-    const startedAt = performance.now()
+  private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress): Promise<LadderRunResult> {
+    const { startedAt, channelsTried, ladderTrace, attempts } = progress
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
-    const channelsTried: string[] = []
-    const ladderTrace: LadderRunResult['ladderTrace'][number][] = []
-    const attempts: { channel: string; result: FetchResult }[] = []
     const finish = (result: FetchResult, handoffRequested: boolean): LadderRunResult => {
       const summary = summarize(channelsTried, attempts)
       return {
@@ -210,6 +229,17 @@ export class LadderRunner {
         ladderTrace,
         summary: { ...summary, totalMs: Math.max(0, performance.now() - startedAt) },
       }
+    }
+    // A later rung that failed without a page does not erase the page an
+    // earlier rung kept as evidence when it found no main content: that
+    // result is the answer, its hop marked not improved. The later failure
+    // stays in the audit.
+    const failedAnswer = (result: FetchResult): FetchResult => {
+      if (result.status !== 'failed' || result.markdown !== null || classifyFetchFailure(result) !== null) return result
+      const kept = noMainContentEvidence(attempts)
+      if (kept === null || kept.result === result) return result
+      ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: kept.channel, detail: { kept: kept.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason } })
+      return { ...kept.result, escalations: kept.result.escalations.map((e) => (e.improved === null ? { ...e, improved: false } : e)) }
     }
 
     // Sessions exist for authed mode ONLY. standard/research never load or
@@ -249,7 +279,20 @@ export class LadderRunner {
     const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id))
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
-    const ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
+    let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
+
+    // waitFor needs a rung that runs scripts and waits before capture; the
+    // HTTP rung cannot. Such rungs are skipped, and when none is left the
+    // result says so instead of answering without the wait.
+    const waitFor = options.waitFor ?? 0
+    if (waitFor > 0 && ordered.length > 0) {
+      const skipped = ordered.filter((c) => c.waitsFor !== true)
+      for (const c of skipped) {
+        ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: c.id, detail: { vendorId: c.vendorId ?? null, reason: 'waitFor needs a rung that runs scripts and waits before capture', waitFor } })
+      }
+      ordered = ordered.filter((c) => c.waitsFor === true)
+      if (ordered.length === 0) return finish(this.waitForUnavailable(url, waitFor, skipped.map((c) => c.id)), false)
+    }
 
     let last: FetchResult | null = null
     let best: FetchResult | null = null
@@ -276,8 +319,12 @@ export class LadderRunner {
           return finish(identityBlock, false)
         }
         channelsTried.push(channel.id)
-        const result = await raceWithSignal(channel.fetch(url, effectiveSession, execution), execution.signal)
+        const result = await raceWithSignal(channel.fetch(url, effectiveSession, execution, options), execution.signal)
         attempts.push({ channel: channel.id, result })
+      // A rung the deadline cut short ends the run: nothing after it has time.
+      if (result.usage.deadlineExceeded === true || (result.failureReason === 'timeout' && deadlineReached(execution))) {
+        return deadlineOutcome(url, progress, result)
+      }
       last = result
       if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
 
@@ -407,7 +454,7 @@ export class LadderRunner {
           })
           continue
         }
-        return await this.attemptHandoff(url, result, channelsTried, channel, effectiveSession, ladderTrace, best, attempts, execution)
+        return await this.attemptHandoff(url, result, channelsTried, channel, effectiveSession, ladderTrace, best, attempts, execution, options)
       }
 
       const cls = classifyFetchFailure(result)
@@ -431,7 +478,7 @@ export class LadderRunner {
         // content, that content is still the answer — the failure does not
         // erase it. Otherwise stop and report honestly.
         if (best !== null) break
-        return finish(result, false)
+        return finish(failedAnswer(result), false)
       }
 
       if (cls !== null && !LADDER_CONTINUES_FAILURE_CLASS.has(cls) && !subjectAsked) {
@@ -473,7 +520,7 @@ export class LadderRunner {
       return finish({ ...best, escalations: finalEscalations }, false)
     }
 
-    const final = best ?? last ?? this.governanceRefusal(url, 'no permitted channel was configured')
+    const final = best ?? (last === null ? null : failedAnswer(last)) ?? this.governanceRefusal(url, 'no permitted channel was configured')
     return finish(sanitizeResult(final), false)
   }
 
@@ -520,6 +567,7 @@ export class LadderRunner {
     best: FetchResult | null,
     attempts: { channel: string; result: FetchResult }[],
     execution: ExecutionContext,
+    options: FetchOptions,
   ): Promise<LadderRunResult> {
     ladderTrace.push({
       at: result.usage.wallMs,
@@ -599,7 +647,7 @@ export class LadderRunner {
         summary: summarize([...channelsTried, `${channel.id}(retry)`], attempts),
       }
     }
-    const retry = await raceWithSignal(channel.fetch(url, snapshot, execution), execution.signal)
+    const retry = await raceWithSignal(channel.fetch(url, snapshot, execution, options), execution.signal)
     attempts.push({ channel: `${channel.id}(retry)`, result: retry })
     ladderTrace.push({
       at: retry.usage.wallMs,
@@ -659,6 +707,96 @@ export class LadderRunner {
       trace: [{ at: 0, lane: 'http', event: 'governance_refusal', detail: { reason } }],
     }
   }
+
+  /** waitFor was asked for, and no configured rung can wait: say so rather than answer without it. */
+  private waitForUnavailable(url: string, waitFor: number, skipped: readonly string[]): FetchResult {
+    const reason = 'waitFor needs a browser rung that runs scripts and waits before capture; none is configured for this URL'
+    return {
+      ...this.governanceRefusal(url, reason),
+      trace: [{ at: 0, lane: 'http', event: 'wait_for_unavailable', detail: { reason, waitFor, skipped } }],
+    }
+  }
+}
+
+/** The caller's deadline ended this execution. Cancellation and shutdown are not deadlines. */
+function deadlineReached(execution: ExecutionContext): boolean {
+  if (execution.signal?.aborted) return (execution.signal.reason as { name?: unknown } | null | undefined)?.name === 'TimeoutError'
+  return execution.deadlineAt !== undefined && Date.now() >= execution.deadlineAt
+}
+
+/**
+ * The run's answer when its deadline cut it short: the largest clean
+ * contentful result any rung produced, as `partial`, or `failed`/`timeout`
+ * when there is none (the rung's own timeout result when it returned one, or
+ * the result that kept a page as evidence when its rung found no main
+ * content, with that page). Either way the result says the deadline ended
+ * it, in its trace and usage.
+ */
+function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchResult | null): LadderRunResult {
+  const { startedAt, channelsTried, ladderTrace, attempts } = progress
+  const at = Math.max(0, performance.now() - startedAt)
+  // The rung the deadline cut: the one that returned its timeout, or the one
+  // still running (tried, with no attempt yet). Null between rungs.
+  const interrupted = returned !== null || attempts.length < channelsTried.length ? channelsTried.at(-1) ?? null : null
+  let best: LadderAttempt | null = null
+  for (const attempt of attempts) {
+    const { result } = attempt
+    if (!CONTENTFUL_STATUS.has(result.status) || identityCompromised(result.trace)) continue
+    if (best === null || contentSize(result) > contentSize(best.result)) best = attempt
+  }
+  const detail = { channel: interrupted, kept: best?.channel ?? null }
+  ladderTrace.push({ at, event: 'ladder_deadline_exceeded', channel: interrupted ?? '—', detail })
+  let result: FetchResult
+  if (best !== null) {
+    const event: TraceEvent = { at, lane: best.result.lane, event: 'deadline_exceeded', detail }
+    result = { ...best.result, status: 'partial', failureReason: null, blockReason: null, budgetExceeded: null, usage: { ...best.result.usage, deadlineExceeded: true }, trace: [...best.result.trace, event] }
+  } else {
+    // A page a rung kept as evidence when it found no main content stays on
+    // the timeout, as evidence.
+    const evidence = noMainContentEvidence(attempts)
+    const base = evidence?.result ?? (returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
+    const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: evidence === null ? detail : { ...detail, evidence: evidence.channel } }
+    result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
+  }
+  return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...summarize(channelsTried, attempts), totalMs: at } }
+}
+
+/**
+ * The latest attempt whose extractor found no main content and kept the whole
+ * page as evidence (failed/empty_unverified with Markdown).
+ */
+function noMainContentEvidence(attempts: readonly LadderAttempt[]): LadderAttempt | null {
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const { result } = attempts[i]!
+    if (result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null) return attempts[i]!
+  }
+  return null
+}
+
+/** A timeout for a rung the deadline interrupted before it returned anything. */
+function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
+  return {
+    requestedUrl: url,
+    status: 'failed',
+    failureReason: 'timeout',
+    blockReason: null,
+    budgetExceeded: null,
+    lane,
+    escalations: [],
+    handoff: null,
+    markdown: null,
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    // The interrupted rung's traffic was not measured; the ladder summary holds what was.
+    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: null },
+    trace: [],
+  }
+}
+
+function laneOf(channelId: string | null): Lane {
+  return channelId === 'provider' ? 'provider' : channelId === 'authed_session' ? 'browser_local_authed' : channelId === 'browser_local' ? 'browser_local' : 'http'
 }
 
 /**
@@ -683,7 +821,7 @@ function identityRefusedResult(
   event: 'identity_mismatch' | 'identity_unobserved',
   issues: readonly string[],
 ): FetchResult {
-  const lane = channel.id === 'provider' ? 'provider' : channel.id === 'authed_session' ? 'browser_local_authed' : channel.id === 'browser_local' ? 'browser_local' : 'http'
+  const lane = laneOf(channel.id)
   return {
     requestedUrl: url,
     status: 'failed',

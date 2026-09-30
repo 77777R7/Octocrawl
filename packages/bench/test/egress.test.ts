@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { hostedNetworkPolicy, localNetworkPolicy } from '@w2l/contracts'
+import { describe, expect, it, vi } from 'vitest'
+import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { request } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, createGuardedDispatcher, DnsLookupError, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
 
 async function* chunks(...parts: Uint8Array[]): AsyncIterable<Uint8Array> {
   for (const part of parts) yield part
@@ -21,6 +21,33 @@ describe('assertSafeUrl', () => {
 
   it('rejects credential-bearing URLs before a request', async () => {
     await expect(assertSafeUrl('https://user:pass@example.com/', hostedNetworkPolicy())).rejects.toBeInstanceOf(SsrfDeniedError)
+  })
+
+  it('leaves a proxied name to the proxy but still applies the literal checks', async () => {
+    const proxied = withEnvironmentProxy(localNetworkPolicy(), { HTTPS_PROXY: 'http://127.0.0.1:9', HTTP_PROXY: 'http://127.0.0.1:9', NO_PROXY: 'direct.test' })
+    const notFound = vi.fn(async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }) })
+    await expect(assertSafeUrl('https://en.wikipedia.org/wiki/X', proxied, notFound)).resolves.toBeUndefined()
+    expect(notFound).not.toHaveBeenCalled()
+    for (const url of ['http://169.254.169.254/latest/', 'http://metadata.google.internal/', 'http://[::]/', 'https://user:pass@example.com/']) {
+      await expect(assertSafeUrl(url, proxied, notFound)).rejects.toBeInstanceOf(SsrfDeniedError)
+    }
+    // A NO_PROXY host connects directly, so it is resolved and validated here.
+    await expect(assertSafeUrl('https://direct.test/', proxied, notFound)).rejects.toBeInstanceOf(DnsLookupError)
+    await expect(assertSafeUrl('https://direct.test/', proxied, async () => [{ address: '169.254.169.254', family: 4 }])).rejects.toBeInstanceOf(SsrfDeniedError)
+  })
+})
+
+describe('Chromium proxy at launch', () => {
+  it('names the environment proxy when W2L uses one, and turns the system proxy off otherwise', () => {
+    // Without either, Chromium would use the operating system's proxy: a route nothing records.
+    const off = { args: ['--proxy-server=direct://'] }
+    expect(chromiumProxyLaunchOptions(browserProxySettings(localNetworkPolicy()))).toEqual(off)
+    expect(chromiumProxyLaunchOptions(browserProxySettings(hostedNetworkPolicy()))).toEqual(off)
+    const env = { HTTPS_PROXY: 'http://user:secret@127.0.0.1:7890', HTTP_PROXY: 'http://user:secret@127.0.0.1:7890', NO_PROXY: 'example.org' }
+    expect(chromiumProxyLaunchOptions(browserProxySettings(withEnvironmentProxy(localNetworkPolicy(), { ...env, W2L_PROXY: 'off' })))).toEqual(off)
+    expect(chromiumProxyLaunchOptions(browserProxySettings(withEnvironmentProxy(localNetworkPolicy(), env)))).toEqual({
+      proxy: { server: 'http://127.0.0.1:7890', bypass: 'localhost,*.localhost,127.0.0.1,[::1],example.org,.example.org', username: 'user', password: 'secret' },
+    })
   })
 })
 
@@ -68,6 +95,16 @@ describe('guarded socket lookup', () => {
       server.close()
       await once(server, 'close')
     }
+  })
+
+  it('reports a failed lookup as a DNS error, not a policy denial', async () => {
+    const dispatcher = createGuardedDispatcher(localNetworkPolicy(), async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND nx.test'), { code: 'ENOTFOUND' }) })
+    try {
+      const failure: unknown = await request('http://nx.test/', { dispatcher }).catch((error: unknown) => error)
+      const names = [failure, (failure as { cause?: unknown }).cause].map(error => (error as { name?: string } | undefined)?.name)
+      expect(names).toContain('DnsLookupError')
+      expect(names).not.toContain('SsrfDeniedError')
+    } finally { await dispatcher.close() }
   })
 
   it('rejects a mixed public and private answer set without selecting the public member', async () => {

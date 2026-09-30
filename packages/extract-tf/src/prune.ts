@@ -11,6 +11,7 @@
  */
 
 import { detach, qsa, tagOf, textOf } from './dom.js'
+import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
 
 const MANUALLY_CLEANED = [
@@ -34,6 +35,9 @@ const MANUALLY_CLEANED = [
   'canvas',
   'svg',
   'template',
+  // An inline XBRL filing's hidden facts and contexts (SEC EDGAR), which the
+  // filing keeps off the page.
+  'ix\\:header',
 ] as const
 
 const CLEANED_SELECTOR = MANUALLY_CLEANED.join(',')
@@ -204,7 +208,36 @@ export function pruneRecommendations(doc: Document): void {
  * Strip elements that can never be main content. Idempotent.
  */
 export function cleanTree(doc: Document): void {
+  // What the page's CSS hides, where a browser capture marked it, is not
+  // content either.
+  for (const el of qsa(doc, `[${LAYOUT_MARKERS.hidden}]`)) detach(el)
+  // A form that wraps the page's content (an ASP.NET WebForms page, a
+  // statistics table viewer with filter controls) is unwrapped rather than
+  // removed: its controls still go below, its content stays.
+  for (const form of qsa(doc, 'form')) {
+    if (!formHoldsContent(form)) continue
+    while (form.firstChild) form.parentNode?.insertBefore(form.firstChild, form)
+    detach(form)
+  }
   for (const el of qsa(doc, CLEANED_SELECTOR)) detach(el)
+}
+
+/** Text outside form controls that makes a form more than a form. */
+const FORM_CONTENT_MIN_TEXT = 400
+const FORM_CONTROLS = new Set(['select', 'option', 'textarea', 'button', 'label', 'script', 'style', 'noscript', 'template'])
+
+function formHoldsContent(form: Element): boolean {
+  if (form.querySelector('tr td') !== null) return true
+  let length = 0
+  const walk = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) length += (child.textContent ?? '').replace(/\s+/g, ' ').trim().length
+      else if (child.nodeType === 1 && !FORM_CONTROLS.has(tagOf(child as Element))) walk(child)
+      if (length >= FORM_CONTENT_MIN_TEXT) return
+    }
+  }
+  walk(form)
+  return length >= FORM_CONTENT_MIN_TEXT
 }
 
 /**

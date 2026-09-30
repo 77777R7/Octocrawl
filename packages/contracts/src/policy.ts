@@ -22,6 +22,12 @@ export interface NetworkPolicy {
   privateAllowlist: readonly string[]
   maxRedirects: number
   maxBodyBytes: number
+  /**
+   * Cap on a file saved as received (PDF, CSV, XLSX, ZIP, JSON, text), in
+   * place of maxBodyBytes: the operator's `W2L_MAX_FILE_BYTES`. Absent means
+   * DEFAULT_MAX_FILE_BYTES; a request may only lower it (`maxFileBytes`).
+   */
+  maxFileBytes?: number
   /** Cap on post-decompression size, to bound zip bombs. */
   maxDecompressedBytes: number
   /** Per-host concurrent request ceiling. */
@@ -29,6 +35,54 @@ export interface NetworkPolicy {
   /** Minimum delay between requests to the same host. */
   perHostMinDelayMs: number
   respectRobotsTxt: boolean
+  /** How long one robots.txt lookup may take before the file counts as unreachable. Default 5000. */
+  robotsTimeoutMs?: number
+  /**
+   * How long an unreachable robots.txt (a 5xx, a network error or a lookup
+   * timeout) stays a complete disallow for its origin before it is fetched
+   * again. Other robots.txt results are kept for the life of the process.
+   * Default 300000 (5 minutes).
+   */
+  robotsUnreachableTtlMs?: number
+  /**
+   * The operator's forward proxy, read from the standard environment
+   * variables by local-mode entry points (`withEnvironmentProxy`). Hosted
+   * policies never carry one. A proxied host is resolved by the proxy, so only
+   * the literal host checks apply to it (`proxyFor`). Ignored unless origin
+   * is 'operator'.
+   */
+  egressProxy?: EgressProxy | null
+  /**
+   * The operator's contact from `W2L_CONTACT` (`withOperatorContact`), which
+   * research mode declares in its User-Agent. Absent or null declares none.
+   */
+  contact?: string | null
+}
+
+/**
+ * Where outbound requests go when the operator's environment names a proxy:
+ * one proxy per URL scheme, and NO_PROXY entries that go direct. Loopback
+ * always goes direct. `https` and `http` are equal or one of them is null,
+ * because the browser lane can route through only one proxy.
+ */
+export interface EgressProxy {
+  source: 'environment'
+  /** From HTTPS_PROXY / https_proxy. Null sends https: URLs direct. */
+  https: ProxyServer | null
+  /** From HTTP_PROXY / http_proxy. Null sends http: URLs direct. */
+  http: ProxyServer | null
+  /** NO_PROXY / no_proxy entries, lower-cased. */
+  noProxy: readonly string[]
+}
+
+export interface ProxyServer {
+  /** `http://host:port` or `https://host:port`, without credentials. */
+  url: string
+  /** `host:port`: the only form of the proxy that results record. */
+  endpoint: string
+  /** Credentials from the variable's userinfo. Held in memory for the proxy, never recorded or logged. */
+  username?: string
+  password?: string
 }
 
 export const DEFAULT_NETWORK_POLICY: NetworkPolicy = {

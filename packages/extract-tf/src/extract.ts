@@ -17,9 +17,12 @@ import { cleanTree, pruneRecommendations, pruneTree } from './prune.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
-import { pageSignalsFor, routePage, selectList, selectTable } from './route.js'
+import { pageSignalsFor, routePage, selectCardList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
+import { documentBaseUrl } from './links.js'
+import { collectLabelledValues } from './labels.js'
+import { collectPageMetadata } from './metadata.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -93,6 +96,9 @@ export class ExtractTf implements Extractor {
     // which would otherwise suppress forum routing.
     const signals = pageSignalsFor(doc.document)
     const preliminaryAdapter = adapterFor(doc.document, options.url)
+    const baseUrl = documentBaseUrl(doc.document, options.url)
+    // The page's own <title>, <meta> and <link> declarations, read before cleaning.
+    const metadata = collectPageMetadata(doc.document, baseUrl)
 
     // Declared product facts share those carriers, so they are read from the
     // raw tree too. The visible-price fallback runs much later, after
@@ -103,6 +109,13 @@ export class ExtractTf implements Extractor {
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
+    // Counted before cleaning, which may drop empty elements.
+    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
+    // Data the page's scripts will fetch once they run: whatever they build
+    // from it is not in this HTML either.
+    const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
+      (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('preload') &&
+      (link.getAttribute('as') ?? '').trim().toLowerCase() === 'fetch').length
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -155,6 +168,12 @@ export class ExtractTf implements Extractor {
         main = selectMain(doc.document, blocks)
       }
     }
+    // A listing of cards has no text block for the cascade to find. Before
+    // the page is reported empty, look for one.
+    if (main === null) {
+      main = selectCardList(doc.document)
+      if (main !== null) strategy = 'list'
+    }
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {
@@ -176,6 +195,8 @@ export class ExtractTf implements Extractor {
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
       mainHtml: main ? outerHtml(main) : '',
+      baseUrl,
+      metadata,
       confidence: confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,
@@ -195,6 +216,9 @@ export class ExtractTf implements Extractor {
       adapter: adapter.descriptor,
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
+      emptyTableShells,
+      fetchPreloads,
+      labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
 

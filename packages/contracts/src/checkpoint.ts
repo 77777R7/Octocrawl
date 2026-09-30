@@ -8,6 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
+import type { PageOptions } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
@@ -59,8 +60,24 @@ export interface Task {
   mode: CrawlMode
   status: TaskStatus
   budget: CrawlBudget
-  /** Present only for an explicit URL-array batch. Stored with the checkpoint. */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean }
+  /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options included. */
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean } & PageOptions
+  /**
+   * Every crawl option but the page budget (`budget`), stored when the crawl
+   * starts so a resumed crawl runs with the options it was started with.
+   */
+  crawl?: {
+    formats?: readonly ScrapeFormat[]
+    includeLinks?: boolean
+    includePaths?: readonly string[]
+    excludePaths?: readonly string[]
+    /** Link hops from the seed; null is unbounded. Absent on a task stored before depth was kept. */
+    maxDepth?: number | null
+    /** Hosts links may lead to; empty follows the seed's host, its apex/www twin and where the seed redirected. */
+    allowlistedDomains?: readonly string[]
+    /** A resume reuses the pages this task already fetched instead of fetching them again. */
+    useCached?: boolean
+  } & PageOptions
   createdAt: string
   updatedAt: string
 }

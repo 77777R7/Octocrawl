@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { verifyLedger, type ProviderDeclaration } from '@w2l/http-core'
 import {
   ProviderSubject,
+  robotsFetcherVia,
   type ProviderResponse,
   type ProviderTransport,
   type RobotsFetcher,
@@ -90,6 +91,29 @@ describe('ProviderSubject robots gate', () => {
     expect(out.lane).toBe('provider')
     expect(out.markdown).toContain('four spouts for even infusion')
     expect(transport.calls).toHaveLength(1)
+  })
+
+  it('returns the whole page for onlyMainContent false, with the same evidence', async () => {
+    const body = PAGE.replace('<body>', '<body><nav><a href="/shop">Shop navigation</a></nav>').replace('</body>', '<footer>Provider footer</footer></body>')
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const main = await subject.fetch('https://shop.example/dp/B0TEST')
+    const full = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { onlyMainContent: false })
+    expect(main.markdown).not.toContain('Shop navigation')
+    expect(full.markdown).toContain('[Shop navigation](https://shop.example/shop)')
+    expect(full.markdown).toContain('Provider footer')
+    expect(full.markdown).toContain('four spouts for even infusion')
+    expect(full).toMatchObject({ status: 'success', evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
+  })
+
+  it('keeps a page with no main block as evidence, and returns it for onlyMainContent false', async () => {
+    const body = '<!doctype html><html><body><nav><a href="/shop">Shop navigation</a></nav><footer>Provider footer</footer></body></html>'
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const main = await subject.fetch('https://shop.example/dp/B0TEST')
+    expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: '[Shop navigation](https://shop.example/shop)\n\nProvider footer', links: ['https://shop.example/shop'] })
+    const full = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { onlyMainContent: false })
+    expect(full).toMatchObject({ status: 'success', markdown: main.markdown, evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
   })
 
   it('evaluates robots under the PROVIDER UA, not ours', async () => {
@@ -198,6 +222,52 @@ describe('ProviderSubject robots gate', () => {
     expect(out.compliance!.robots.decision).toBe('no_robots')
     expect(out.compliance!.robots.robotsSha256).toBeNull()
   })
+
+  it('refuses, without touching the origin, when robots.txt is unreachable, and records why', async () => {
+    const cases: Array<[RobotsFetcher, 'timeout' | 'network_error' | 'server_error']> = [
+      [async () => null, 'network_error'],
+      [async () => ({ unreachable: 'timeout' }), 'timeout'],
+      [async () => ({ text: '', status: 503, contentType: 'text/html' }), 'server_error'],
+    ]
+    for (const [fetcher, unreachable] of cases) {
+      const transport = new CountingTransport()
+      const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(transport.calls).toEqual([])
+      expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', skippedFetch: true, robotsSha256: null, appliedRules: [], unreachable })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'provider_refused', detail: expect.objectContaining({ refusal: 'robots_unreachable' }) }))
+    }
+  })
+
+  it('asks for an unreachable robots.txt again after five minutes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      let calls = 0
+      const fetcher: RobotsFetcher = async () => ++calls === 1 ? null : { text: 'User-agent: *\nAllow: /\n', status: 200, contentType: 'text/plain' }
+      const subject = new ProviderSubject(decl(), new CountingTransport(), 'standard', null, fetcher)
+      expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect(calls).toBe(1)
+      vi.setSystemTime(Date.now() + 5 * 60_000)
+      expect((await subject.fetch('https://shop.example/dp/A')).status).toBe('success')
+      expect(calls).toBe(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('the default robots fetcher reports its own deadline as a timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))))
+      const pending = robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(await pending).toEqual({ unreachable: 'timeout' })
+      vi.stubGlobal('fetch', async () => { throw new TypeError('fetch failed') })
+      expect(await robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe('ProviderSubject capability refusal', () => {
@@ -265,6 +335,13 @@ describe('ProviderSubject result mapping', () => {
     expect(out.compliance).toBeNull()
   })
 
+  it('reports a target the vendor browser cannot resolve as dns_error, not a vendor fault', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const transport: ProviderTransport = { fetch: async () => { throw new Error('page.goto: net::ERR_NAME_NOT_RESOLVED at https://nx.example/') } }
+    const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://nx.example/')
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+  })
+
   it('classifies an origin challenge as blocked, not as a plain http_error', async () => {
     const transport = new CountingTransport({
       status: 403,
@@ -276,6 +353,23 @@ describe('ProviderSubject result mapping', () => {
     const out = await subject.fetch('https://shop.example/dp/B0TEST')
     expect(out.status).toBe('blocked')
     expect(out.blockReason).toBe('cloudflare_challenge')
+    expect(out.markdown).toContain('Just a moment...')
+  })
+
+  it('keeps an origin error page as evidence and judges any 2xx page from its content', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const missing = await new ProviderSubject(decl(), new CountingTransport({
+      status: 404,
+      headers: { 'content-type': 'text/html' },
+      body: '<!doctype html><html><body><h1>404 Not Found</h1><p>No such product.</p></body></html>',
+    }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0MISSING')
+    expect(missing).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+    expect(missing.evidence.httpStatus).toBe(404)
+    expect(missing.markdown).toContain('404 Not Found')
+    expect(missing.usage.contentTokens).toBeNull()
+    const created = await new ProviderSubject(decl(), new CountingTransport({ status: 201 }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(created.status).toBe('success')
+    expect(created.markdown).toContain('Cobalt ash kettle')
   })
 
   it('offers no further lane when a detection gate holds at the provider', async () => {

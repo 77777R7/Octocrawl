@@ -1,6 +1,6 @@
 # Persistent URL-array scraping
 
-`POST /v1/batches` accepts 1–1000 distinct HTTP(S) URLs and returns a durable `taskId` immediately. URLs that collapse to the same crawl canonical URL are rejected. A batch visits only the supplied URLs; it does not follow links. Omitting `formats` selects Markdown. JSON formats use the same deterministic-first Schema extraction as single-page scrape.
+`POST /v1/batches` accepts 1–1000 distinct HTTP(S) URLs and returns a durable `taskId` immediately. URLs that collapse to the same crawl canonical URL are rejected. A batch visits only the supplied URLs; it does not follow links. Omitting `formats` selects Markdown. Add `links` (or `includeLinks: true`) to get each item's absolute outbound links, as scrape returns them. Each item whose page was extracted carries that page's `metadata` (its `<title>`, description, language and the rest), as scrape does. JSON formats use the same deterministic-first Schema extraction as single-page scrape. `onlyMainContent`, `waitFor`, `timeout` and `maxFileBytes` apply to every URL as they do to one scrape ([README](../README.md)), and a URL that answers with a file (PDF, CSV, XLSX, ZIP, JSON, text) is saved and described as on scrape, with its own `file` block; `timeout` is each item's own deadline, JSON extraction and its model fallback included, and an item it cuts short is `partial` or `failed`/`timeout` with `usage.deadlineExceeded: true` while the batch goes on. An unsupported format or an unknown request field is rejected with HTTP 400 naming it.
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8787/v1/batches \
@@ -14,19 +14,23 @@ Use the returned ID with `GET /v1/batches/:id` for `requested`, `completed`, `re
 const { taskId } = await w2l.batchScrape(urls, {
   formats: [{ type: 'json', schema: productSchema }],
 })
-const done = await w2l.waitBatch(taskId)
+const done = await w2l.waitBatch(taskId, { timeoutMs: 600_000 })
 for await (const item of w2l.listBatchItems(taskId, { limit: 50 })) {
   console.log(item.url, item.status, item.json?.data)
 }
 ```
 
-MCP exposes `batch_scrape`, `get_batch`, `get_batch_items`, `wait_batch`, and `cancel_batch`. `wait_batch` waits at most 30 seconds by default (configurable with `timeoutMs` up to 300 seconds) and returns the current state if the batch is still running; for incremental work, page through items while the task runs. The task and item checkpoints are SQLite-backed; after a process restart, pending/running/paused batches resume missing URLs and keep prior results.
+`waitBatch` and `waitCrawl` poll every 500 ms (`pollIntervalMs` changes it) until the task completes, fails or is cancelled; a paused task is still waited on. `batchAndWait(urls, options, wait)` starts a batch, waits for it and returns `{ taskId, report, items }` with every item; `crawlAndWait(url, options, wait)` does the same for a crawl and returns its `pages` and `errors`. With `timeoutMs`, a wait throws `WaitTimeoutError` once that time is up, a status request in flight included; the error carries `taskId`, `timeoutMs` and `last`, the last status read (null when none answered in time), and the task keeps running. A status request that fails with a network error, HTTP 408, 429 or 5xx is retried after 1, 2, 4, 8, then 10 s, or after its `Retry-After` when that asks for 60 s or less, until `maxRetries` (default 5) retries in a row have failed; any other error ends the wait at once.
+
+MCP exposes `batch_scrape`, `get_batch`, `get_batch_items`, `wait_batch`, and `cancel_batch`. `wait_batch` waits at most 30 seconds by default (configurable with `timeoutMs` up to 300 seconds) and returns the current state if the batch is still running; cancelling the `wait_batch` call stops the wait, over stdio and over the local and hosted HTTP services alike ([cancelling an MCP call](mcp-first-use.md#cancelling-a-call)), and the batch keeps running. For incremental work, page through items while the task runs. The task and item checkpoints are SQLite-backed; after a process restart, pending/running/paused batches resume missing URLs and keep prior results.
 
 An [actual process-kill test](evidence/batch-crash-recovery.json) stopped the API with `SIGKILL` after URL 1 completed and URL 2 started. The restarted API finished 2/2 items; URL 1 was requested once and URL 2 twice. Repeat with `npm run verify:batch-crash`. Run one API process per task root; multi-process ownership/lease coordination is not part of this batch contract.
 
 The process shares one origin scheduler across local HTTP, browser, and Monitor paths. It caps same-origin work to the operator's `perHostConcurrency` (hard maximum four), enforces `perHostMinDelayMs` between starts, and holds queued requests during Retry-After. Queued cancellation and deadlines release their place. The controlled 1→2→4 comparison and test setup are in [the evidence JSON](evidence/same-origin-concurrency-controlled.json); run `npm run baseline:concurrency` to repeat it. This experiment does not establish a safe or faster Amazon setting. Test the same URLs, fields, and observed delivery region separately before changing the hosted setting.
 
 Set `W2L_PER_HOST_CONCURRENCY=1|2|3|4` and `W2L_PER_HOST_MIN_DELAY_MS` (1–60000, default 250) on the API process to tune the shared origin gate. These are operator settings, not batch-request parameters.
+
+A local-mode API also follows the operator's `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (curl semantics, loopback always direct) for every item, and each item's `evidence.envProxy` names the proxy it went through. `W2L_PROXY=off` ignores them; hosted mode never uses them. See the README's proxy paragraph.
 
 The [real 10-URL Amazon comparison](evidence/amazon-batch-concurrency.json) used the same URLs, JSON Schema, and 250 ms interval. Both 1 and 2 completed 10/10 pages with complete JSON and correct ASINs. Client batch time was 44.5 seconds at 1 and 23.5 seconds at 2. This raw difference is **not** a fully controlled speed claim: four pages in each arm lacked an observed delivery region. The other six kept the same observed region, currency, and route. Real concurrency 4 was withheld; the local controlled 4-arm experiment remains separate evidence. The [earlier run](evidence/amazon-batch-concurrency-before-transport-pacing.json) is retained because the implementation subsequently added pacing at the actual transport start.
 

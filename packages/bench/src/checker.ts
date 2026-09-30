@@ -6,11 +6,17 @@ import { estimateTokens, evaluateExpectedTable } from '@w2l/contracts'
 /**
  * Run the five false-success checks against a contentful result.
  * Annotation-dependent checks return 'unknown' when ground truth is unavailable.
+ *
+ * The checks judge delivered content, so they read Markdown only from a
+ * contentful status. A failed or blocked result may carry the page an error
+ * status returned as evidence; that page is not content, and the checks see
+ * such a result exactly as one without Markdown.
  */
 export function checkFalseSuccess(
-  result: FetchResult,
+  input: FetchResult,
   truth: GroundTruth,
 ): readonly CheckResult[] {
+  const result = CONTENTFUL_STATUS.has(input.status) ? input : { ...input, markdown: null }
   const checks: CheckResult[] = []
 
   // Check 1: missing_required_content

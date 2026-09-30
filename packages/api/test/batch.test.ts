@@ -29,7 +29,7 @@ describe('persistent URL-array batch', () => {
       if (res.destroyed) return
       const number = req.url?.split('/').at(-1) ?? '0'
       res.writeHead(200, { 'content-type': 'text/html' })
-      res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p></article></main></body></html>`)
+      res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p><p><a href="details">Details</a></p></article></main></body></html>`)
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -55,7 +55,7 @@ describe('persistent URL-array batch', () => {
     expect(second.items).toHaveLength(1)
     const items = [...first.items, ...second.items]
     expect(new Set(items.map(item => item.url))).toEqual(new Set(urls))
-    expect(items.every(item => item.markdown === null && item.json?.status === 'complete')).toBe(true)
+    expect(items.every(item => item.markdown === null && item.links === undefined && item.json?.status === 'complete')).toBe(true)
     expect(items.every(item => (item.usage?.attemptCount ?? 0) >= 1 && (item.usage?.wallMs ?? -1) >= 0)).toBe(true)
     expect(items.map(item => (item.json?.data as { title: string }).title).sort()).toEqual(['Fixture item 1', 'Fixture item 2', 'Fixture item 3'])
     expect(items.every(item => item.audit === undefined && item.trace.length === 0)).toBe(true)
@@ -68,6 +68,37 @@ describe('persistent URL-array batch', () => {
     expect(await events.text()).toContain('event: complete')
   })
 
+  it('finishes every URL when one origin never answers its robots.txt, and does not fetch that origin', async () => {
+    const f = await fixture()
+    let silentPageHits = 0
+    const silent = createServer((req, res) => {
+      if (req.url === '/robots.txt') return // never answers
+      silentPageHits++
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end('<html><body><main><article><h1>Silent robots</h1><p>This origin never answers its robots.txt, so the lookup deadline must count as an unreachable robots.txt instead of failing the batch that contains it.</p></article></main></body></html>')
+    })
+    await new Promise<void>(resolve => silent.listen(0, '127.0.0.1', resolve))
+    cleanup.push(async () => { silent.closeAllConnections(); await new Promise<void>(resolve => silent.close(() => resolve())) })
+    const silentUrl = `http://127.0.0.1:${(silent.address() as AddressInfo).port}/page`
+    const engine = createApiEngine({ taskRoot: f.root, networkPolicy: { ...localNetworkPolicy(), perHostMinDelayMs: 0, robotsTimeoutMs: 100 }, workerCount: 2 })
+    cleanup.push(() => engine.close())
+    const urls = [silentUrl, `${f.origin}/item/1`, `${f.origin}/item/2`]
+    const { taskId } = await engine.startBatch({ urls })
+    let report = await engine.getBatch(taskId)
+    for (let i = 0; i < 200 && (report === null || ['pending', 'running'].includes(report.status)); i++) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+      report = await engine.getBatch(taskId)
+    }
+    expect(report).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
+    const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items
+    const silentItem = items.find(item => item.url === silentUrl)!
+    expect(items.filter(item => item !== silentItem).map(item => item.status)).toEqual(['success', 'success'])
+    // RFC 9309 §2.3.1.4: an unreachable robots.txt is a complete disallow, and the item says why.
+    expect(silentItem).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
+    expect(silentItem.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'timeout' }) }))
+    expect(silentPageHits).toBe(0)
+  })
+
   it('recovers an interrupted URL without refetching completed items', async () => {
     const f = await fixture()
     f.setSlow(true)
@@ -77,7 +108,7 @@ describe('persistent URL-array batch', () => {
     const engine1 = f.engine()
     const app1 = createApp(engine1)
     const client1 = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app1.request(String(input), init)) as typeof fetch })
-    const accepted = await client1.batchScrape([`${f.origin}/item/1`, `${f.origin}/item/2`])
+    const accepted = await client1.batchScrape([`${f.origin}/item/1`, `${f.origin}/item/2`], { formats: ['markdown', 'links'] })
     await secondStarted
     await engine1.close({ cancelActive: true })
     const paused = await client1.getBatch(accepted.taskId)
@@ -91,6 +122,9 @@ describe('persistent URL-array batch', () => {
     expect(recovered).toMatchObject({ status: 'completed', requested: 2, completed: 2, remaining: 0 })
     expect(f.seen.filter(url => url === '/item/1')).toHaveLength(1)
     expect(f.seen.filter(url => url === '/item/2')).toHaveLength(2)
+    // Links requested at submission survive the restart: item 1 comes from the first run, item 2 from the resumed one.
+    const { items } = await client2.getBatchItems(accepted.taskId)
+    expect(items.map(item => [item.url, item.links])).toEqual([1, 2].map(n => [`${f.origin}/item/${n}`, [`${f.origin}/item/details`]]))
   })
 
   it('pages a 100-URL durable batch without returning the whole result set at once', async () => {

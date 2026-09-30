@@ -4,7 +4,7 @@ This guide runs the TypeScript SDK against the actual REST API, a controlled pro
 
 ## 1. Install the checkout you are evaluating
 
-Use Node.js 22.12+ or 24+ and npm. The root manifest permits older Node versions, but locked dependencies require newer runtimes. Git is required; browser capture additionally requires Chromium. `@w2l/sdk` is currently a private workspace package, so these instructions use it from the repository, not an unpublished npm installation.
+Use Node.js 22.13+ or 24+ and npm; the root manifest requires it (`engines`), as the PDF text engine (pdf.js) does. Git is required; browser capture additionally requires Chromium. `@w2l/sdk` is currently a private workspace package, so these instructions use it from the repository, not an unpublished npm installation.
 
 For a fresh checkout:
 
@@ -49,6 +49,8 @@ npm run api
 
 The API listens at `http://127.0.0.1:8787`. Keep `W2L_TASK_ROOT` identical for the API, Monitor worker, and delivery worker. The control database is `$W2L_TASK_ROOT/section-b-control.sqlite`; the default without this variable is `.w2l/api/section-b-control.sqlite`. Keep this directory across restarts.
 
+If the machine reaches the web through a proxy, the local API and a `W2L_MONITOR_NETWORK_MODE=local` Monitor worker send captures through `HTTPS_PROXY`/`HTTP_PROXY`, except `NO_PROXY` hosts and loopback (so this guide's local source stays direct). `W2L_PROXY=off` ignores the variables. The delivery worker below does not read them.
+
 Source terminal:
 
 ```bash
@@ -70,6 +72,8 @@ node --import tsx examples/monitor-workflow.ts inspect
 ```
 
 On a fresh database, the first run creates baseline version 1 and an `initialized` event. The second returns `unchanged`, with a 304 in the source log and the cached body reassessed. The changed price creates version 2 and a `changed` event. The decimal field is normalized (`10.00` becomes `10`). Existing database history changes these version numbers. `inspect` prints the current baseline, runs, events, outbox, and deliveries.
+
+A committed run records why the baseline moved in `changeReason`; its event carries the same `reason`: `initialized`, `source_changed`, `schema_migrated`, or `extraction_reprocessed` for a revised rule. Each observation records the SHA-256 of the raw body its Markdown came from (after a 304, the reused body) and the extractor version that produced that Markdown (`extractorVersion`, null where unknown, such as rows from before W2L recorded it). If fields change while the raw body is byte-identical to the baseline's, for example after a W2L upgrade changed the Markdown converter, the run records `changeReason: extraction_reprocessed` and the baseline moves, but no event or delivery is created, because the source did not change. `source_changed` means the raw body differed from the baseline's or could not be compared. If the extractor also changed since the baseline, that event carries `extractorChange` (`from` is null for a baseline recorded before versions existed), since part of the diff may then come from W2L.
 
 The complete runnable SDK code is [examples/monitor-workflow.ts](../examples/monitor-workflow.ts). A Monitor configuration explicitly selects `captureMode: 'http'` for this example. `conditionalRequests` controls HTTP validators/cache reuse; it does not select the capture engine. Use `captureMode: 'ladder', conditionalRequests: false` for HTTP-to-browser capture. The combination `ladder` plus conditional requests is rejected until conditional caching is supported by the ladder. New omitted modes default to `ladder`; when migrating an older cached configuration, explicitly choose `http` in a new revision. Identity changes require a new Monitor.
 
@@ -153,7 +157,7 @@ A committed Monitor event and a `delivered` delivery are separate outcomes. Chec
 node --import tsx examples/monitor-workflow.ts delivery DELIVERY_ID
 ```
 
-Delivery is at least once. The payload's `eventId` stays constant across attempts and manual retry; `eventVersion` is the committed snapshot version. The worker retries transient failures, honors `Retry-After`, uses leases/fencing for ownership, and moves exhausted/permanent failures to `dead_letter`. The receiver should persist its deduplication receipt and downstream mutation in the same transaction. The example implements that pattern for its local projection; an external business API needs its own idempotency contract.
+Delivery is at least once. The payload's `eventId` stays constant across attempts and manual retry; `eventVersion` is the committed snapshot version. It can skip a number where W2L reprocessed an unchanged source without an event, so compare versions instead of expecting consecutive ones. The worker retries transient failures, honors `Retry-After`, uses leases/fencing for ownership, and moves exhausted/permanent failures to `dead_letter`. The receiver should persist its deduplication receipt and downstream mutation in the same transaction. The example implements that pattern for its local projection; an external business API needs its own idempotency contract.
 
 After fixing a receiver for a `dead_letter` delivery, request another attempt using the same delivery/event identity. Pending retries already run automatically after `nextAttemptAt`; manually retrying a non-dead-letter delivery returns 409.
 
@@ -198,20 +202,17 @@ SDK `request.signal` cancels the client's HTTP request; synchronous `scrape` and
 
 ```bash
 node --import tsx --input-type=module <<'JS'
-import { setTimeout } from 'node:timers/promises'
 import { W2L } from '@w2l/sdk'
 const client = new W2L({ baseUrl: process.env.W2L_API_URL ?? 'http://127.0.0.1:8787', token: process.env.W2L_API_TOKEN })
 const { taskId } = await client.crawl('http://127.0.0.1:8790/product', { maxPages: 1 })
-let report = await client.getCrawl(taskId)
-while (report.status === 'pending' || report.status === 'running') {
-  await setTimeout(250)
-  report = await client.getCrawl(taskId)
-}
+const report = await client.waitCrawl(taskId, { pollIntervalMs: 250, timeoutMs: 60_000 })
 console.log(report)
 for await (const page of client.listCrawlPages(taskId, { limit: 10 })) console.log(page)
 console.log(await client.getCrawlErrors(taskId, { limit: 10 }))
 JS
 ```
+
+`waitCrawl` polls until the crawl is completed, failed or cancelled and returns its status; `crawlAndWait(url, options, waitOptions)` starts the crawl, waits and returns `{ taskId, report, pages, errors }` in one call (`waitBatch` and `batchAndWait` do the same for a batch). When `timeoutMs` runs out the wait throws `WaitTimeoutError` with `taskId`, `timeoutMs` and `last` (the last status read, or null), and the crawl keeps running. While polling, a network error or an HTTP 408, 429 or 5xx answer is retried with backoff (`maxRetries`, default 5); see the README.
 
 The SDK exports Crawl, Monitor and Delivery contract types. Mutation methods retain the server's error status/body. Optional final `{ signal }` arguments work with reads, mutations and pagination:
 

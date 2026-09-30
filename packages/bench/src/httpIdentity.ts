@@ -21,8 +21,9 @@ export interface PreparedHttpIdentity {
   sentHeaders: SentHeadersFact
 }
 
-export function prepareHttpIdentity(mode: CrawlMode = 'standard'): PreparedHttpIdentity {
-  const identity = modeIdentity(mode)
+/** The identity for requests to `host`: research mode declares its contact in the format the host asks for (researchUserAgent). */
+export function prepareHttpIdentity(mode: CrawlMode = 'standard', contact: string | null = null, host: string | null = null): PreparedHttpIdentity {
+  const identity = modeIdentity(mode, undefined, contact, host)
   const headers = headersFromIdentity(identityBundleFrom(identity))
   const sentHeaders: SentHeadersFact = {
     headers: Object.entries(headers)

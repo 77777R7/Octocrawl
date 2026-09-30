@@ -20,12 +20,14 @@ export interface ManagedRuntimeOptions {
   defaultMaxPages?: number | null
   monitorPollMs?: number
   deliveryPollMs?: number
+  /** Local single-user service only: tool errors keep an internal error's own message. */
+  exposeInternalErrors?: boolean
 }
 
 /** The REST API stays in-process; both MCP transports share these durable workers. */
 export function createManagedRuntime(options: ManagedRuntimeOptions) {
   const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
-  const api = createApp(engine)
+  const api = createApp(engine, {exposeInternalErrors:options.exposeInternalErrors})
   const client = new W2L({baseUrl:'http://w2l.internal',fetch:async(input,init)=>api.fetch(new Request(input,init))})
   const deliveryStore = DeliveryStore.open(join(options.taskRoot,'section-b-control.sqlite'))
   const worker = new DeliveryWorker(deliveryStore,{networkPolicy:options.deliveryNetworkPolicy ?? hostedNetworkPolicy(),ca:process.env.W2L_DELIVERY_CA_FILE ? readFileSync(process.env.W2L_DELIVERY_CA_FILE) : undefined})

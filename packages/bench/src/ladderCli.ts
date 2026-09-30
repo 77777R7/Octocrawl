@@ -23,19 +23,26 @@
  * vendor before the first fetch.
  */
 
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ExecutionContext, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
+import type { ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
   CONTENTFUL_STATUS,
+  describeEgressProxy,
   formatIdentitySummary,
   identityForRoute,
+  maxFileBytesFromEnv,
+  withEnvironmentProxy,
+  withOperatorContact,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
-import { defaultNetworkPolicy } from './egress.js'
+import { FileStore } from './fileStore.js'
+import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
+import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
 import { browserbaseOps } from './vendors/browserbase.js'
 import { steelOps } from './vendors/steel.js'
@@ -129,8 +136,8 @@ export function buildChannels(
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
     localSubjects?: {
-      http?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext) => Promise<FetchResult>; teardown?: () => Promise<void> }
-      browser_local?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext) => Promise<FetchResult>; teardown?: () => Promise<void> }
+      http?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext, options?: FetchOptions) => Promise<FetchResult>; teardown?: () => Promise<void> }
+      browser_local?: { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: ExecutionContext, options?: FetchOptions) => Promise<FetchResult>; teardown?: () => Promise<void> }
     }
     /** Opt-in headed Chromium on the browser arm only. Default remains headless. */
     headed?: boolean
@@ -142,20 +149,21 @@ export function buildChannels(
     browserAllowedHosts?: readonly string[]
     /** In-memory raw witness for an explicitly authorized caller. */
     onRenderedHtml?: (html: string, sha256: string) => void
-    /** Public HTTP/browser previews fail closed when robots is unreachable. */
-    robotsFailClosed?: boolean
     /** Loopback-only review egress for fixed Reddit/X hosts; never set by a public visitor. */
     localPreviewProxyUrl?: string
     /** Explicit local-review exception for fixed public platform pages only. */
     localPreviewRobotsException?: boolean
+    /** Where the HTTP and browser rungs save files (PDF, CSV, ...) as received. */
+    fileStore?: FileStore | null
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
   // fetch would be both slow and leaky; the channel's close() is what tears
   // the browser down at the end.
   const originScheduler = opts.originScheduler ?? new OriginScheduler(opts.networkPolicy ?? defaultNetworkPolicy())
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.robotsFailClosed === true, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, opts.robotsFailClosed === true)
+  const fileStore = opts.fileStore ?? null
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore)
   const declared: IdentityBundle = identityForRoute(mode)
 
   // ----------------------------------------------------------------------
@@ -182,7 +190,7 @@ export function buildChannels(
       }
       if (session.cookies !== undefined) access.session!.cookies = session.cookies
       if (session.storageState !== undefined) access.session!.storageState = session.storageState
-      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler)
+      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler, null, undefined, undefined, fileStore)
       authedSubjects.set(session.domain, subject)
     }
     return subject
@@ -192,8 +200,8 @@ export function buildChannels(
     {
       id: 'http',
       identity: declared,
-      fetch: (url, _session, execution) =>
-        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter),
+      fetch: (url, _session, execution, options) =>
+        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options),
       close: async () => {
         await http.teardown()
         await opts.localSubjects?.http?.teardown?.()
@@ -202,11 +210,12 @@ export function buildChannels(
     {
       id: 'browser_local',
       identity: declared,
+      waitsFor: true,
       // No session here, ever: the plain rung is the public browser.
-      fetch: (url, _session, execution) =>
+      fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
-          ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter),
+          ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -218,7 +227,8 @@ export function buildChannels(
     channels.push({
       id: 'authed_session',
       identity: identityForRoute('authed', { session: true }),
-      fetch: async (url, session, execution) => {
+      waitsFor: true,
+      fetch: async (url, session, execution, options) => {
         const host = new URL(url).hostname.toLowerCase()
         // Skip, never terminal, never a throw: without a local session this
         // rung has nothing to offer, and the ladder must move on to the
@@ -274,7 +284,7 @@ export function buildChannels(
           }
           return skip
         }
-        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
+        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
       },
       close: async () => {
         for (const subject of authedSubjects.values()) await subject.teardown()
@@ -288,6 +298,11 @@ export function buildChannels(
 
   const bbKey = opts.keys?.browserbase ?? process.env.BROWSERBASE_API_KEY ?? ''
   const steelKey = opts.keys?.steel ?? process.env.STEEL_API_KEY ?? ''
+  // The vendor's browser fetches the page; robots.txt is the one request this
+  // lane sends from this machine, so it takes the operator's proxy like the HTTP lane.
+  const routedPolicy = opts.robotsFetcher === undefined && opts.networkPolicy?.egressProxy ? opts.networkPolicy : null
+  let providerRoutes: EgressRoutes | null = null
+  const providerRobots = opts.robotsFetcher ?? (routedPolicy === null ? undefined : robotsFetcherVia(url => (providerRoutes ??= new EgressRoutes(routedPolicy)).dispatcherFor(url)))
 
   const vendorChannel = (
     vendorId: string,
@@ -329,7 +344,7 @@ export function buildChannels(
       id: 'provider',
       vendorId,
       identity: identityForRoute(mode, { resume: true }),
-      fetch: async (url, session, execution) => {
+      fetch: async (url, session, execution, options) => {
         // Session resume acceptance is strict: only this vendor's own
         // material, only for this domain. A Steel profile never reaches
         // Browserbase.
@@ -410,9 +425,9 @@ export function buildChannels(
           transport,
           mode,
           null,
-          opts.robotsFetcher ?? undefined,
+          providerRobots,
         )
-        return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
+        return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
       },
       close: async () => {
         if (connected !== null) {
@@ -420,6 +435,7 @@ export function buildChannels(
         } else if (pending !== null) {
           await pending.then((c) => c.transport.close()).catch(() => {})
         }
+        await providerRoutes?.close()
       },
     }
   }
@@ -502,7 +518,9 @@ export function formatScrapeReport(input: {
     `wallMs      : ${input.wallMs}`,
   ]
   if (input.markdown !== null && input.markdown !== '') {
-    lines.push('', '--- extracted ---', input.markdown.slice(0, 1500))
+    // A failed or blocked result's Markdown is the page an error status carried.
+    const label = input.status === 'success' || input.status === 'partial' ? '--- extracted ---' : '--- error page (evidence, not content) ---'
+    lines.push('', label, input.markdown.slice(0, 1500))
   }
   return lines.join('\n')
 }
@@ -517,8 +535,15 @@ export async function runLadder(args: Args): Promise<number> {
       ...(args.liveView ? ['live_view_handoff'] : []),
     ] as const,
   }
+  // The CLI runs in local mode: outbound requests follow the operator's proxy
+  // variables, and research mode declares W2L_CONTACT. Files are saved where
+  // the API saves them, under W2L_TASK_ROOT, capped by W2L_MAX_FILE_BYTES.
+  const networkPolicy = { ...withOperatorContact(withEnvironmentProxy(defaultNetworkPolicy(), process.env), process.env), maxFileBytes: maxFileBytesFromEnv(process.env) }
+  const fileStore = new FileStore(join(process.env.W2L_TASK_ROOT ?? '.w2l/api', 'files'))
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    networkPolicy,
+    fileStore,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),
   })
   const policy: CrawlPolicy = {
@@ -537,6 +562,7 @@ export async function runLadder(args: Args): Promise<number> {
   console.log(
     `vendor policy: ${vendorPolicy.authorized.length > 0 ? vendorPolicy.authorized.join(', ') : 'default (no persistence, no live view)'}`,
   )
+  if (networkPolicy.egressProxy) console.log(`egress proxy : ${describeEgressProxy(networkPolicy.egressProxy)}`)
   if (sessionStore !== null) console.log(`session store: ${args.sessionStoreFile}`)
   if (args.historyFile !== null) console.log(`history file : ${args.historyFile}`)
 
@@ -561,6 +587,7 @@ export async function runLadder(args: Args): Promise<number> {
         markdown: run.result.markdown,
       }),
     )
+    if (run.result.file !== undefined) console.log(`file        : ${run.result.file.kind} ${run.result.file.bytes ?? '?'} bytes sha256=${run.result.file.sha256 ?? '—'} saved=${run.result.file.path ?? '(not saved)'}`)
     for (const step of run.ladderTrace) {
       console.log(`audit       : ${step.event} channel=${step.channel} ${JSON.stringify(step.detail)}`)
     }

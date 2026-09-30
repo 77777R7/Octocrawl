@@ -47,6 +47,38 @@ beforeAll(async () => {
           '<div><p>A closing note at the bottom of the page with a few more words.</p></div>' +
           '</body></html>',
       )
+    } else if (req.url === '/table-shell') {
+      // A statistics table viewer: the HTML carries a confident-looking page
+      // and an empty table inside the viewer's form; a script fills the rows.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Population estimates, quarterly</h1>' +
+          '<p>Table 17-10-0009-01. Release date 2026-09-23. Frequency: quarterly. Geography: Canada, province or territory.</p>' +
+          '<form id="viewForm"><button>Apply</button><table><thead id="head"></thead><tbody id="body"></tbody></table></form>' +
+          '<script>' +
+          'document.getElementById("head").innerHTML = "<tr><th>Geography</th><th>July 1, 2026</th></tr>";' +
+          'document.getElementById("body").innerHTML = "<tr><th>Canada</th><td>41,651,653</td></tr><tr><th>Ontario</th><td>16,258,255</td></tr>";' +
+          '</script></main></body></html>',
+      )
+    } else if (req.url === '/fetched-table') {
+      // A data page (ourworldindata.org's table view): the server renders the
+      // description and a picture of the chart, and a script builds the table
+      // from JSON the page declares it will fetch.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Emissions per person</title>' +
+          '<link rel="preload" href="/fetched-table.json" as="fetch" crossorigin="anonymous"></head><body><main>' +
+          '<h1>Emissions per person</h1><figure id="chart"><img src="/chart.png" width="850" height="600"></figure>' +
+          '<p>Carbon dioxide emissions from burning fossil fuels and industrial processes, in tonnes per person. This includes transport, electricity generation and heating, but not land-use change.</p>' +
+          '<p>Emissions from international aviation and shipping are not included in the data for any individual country. They are only counted in the global total.</p>' +
+          '<script>fetch("/fetched-table.json").then((r) => r.json()).then((rows) => {' +
+          'document.getElementById("chart").innerHTML = "<table><tr><th>Country or region</th><th>2024</th></tr>" + ' +
+          'rows.map((row) => "<tr><td>" + row[0] + "</td><td>" + row[1] + "</td></tr>").join("") + "</table>" })</script>' +
+          '</main></body></html>',
+      )
+    } else if (req.url === '/fetched-table.json') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify([['Canada', '13.42 t'], ['Kenya', '0.41 t'], ['World', '4.73 t']]))
     } else if (req.url === '/gate') {
       res.writeHead(403, {
         'content-type': 'text/html; charset=utf-8',
@@ -119,6 +151,58 @@ describe('ladder with real subjects on a real server', () => {
       expect(run.result.status).toBe('blocked')
       expect(run.result.blockReason).toBe('cloudflare_challenge')
       expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    } finally {
+      await browser.teardown()
+    }
+  })
+
+  it('empty table shell: http offers the page to the browser, which returns the rows', async () => {
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const runner = new LadderRunner(
+        [
+          { id: 'http', identity: IDENTITY, fetch: (url) => new ResilientHttpSubject().fetch(url) },
+          { id: 'browser_local', identity: IDENTITY, fetch: (url) => browser.fetch(url) },
+        ],
+        { mode: 'authed' },
+      )
+
+      const run = await runner.run(`${base}/table-shell`)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      expect(run.result.status).toBe('success')
+      expect(run.result.lane).toBe('browser_local')
+      expect(run.result.markdown).toMatch(/\| Canada \| 41,651,653 \|/)
+      const steps = run.ladderTrace.filter((t) => t.event === 'ladder_step')
+      expect(steps[0]).toMatchObject({
+        channel: 'http',
+        detail: { escalate: 'quality_low_yield', status: 'success' },
+      })
+    } finally {
+      await browser.teardown()
+    }
+  })
+
+  it('script-fetched data: http offers the page to the browser, which returns the table', async () => {
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const runner = new LadderRunner(
+        [
+          { id: 'http', identity: IDENTITY, fetch: (url) => new ResilientHttpSubject().fetch(url) },
+          { id: 'browser_local', identity: IDENTITY, fetch: (url) => browser.fetch(url) },
+        ],
+        { mode: 'authed' },
+      )
+
+      const run = await runner.run(`${base}/fetched-table`)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      expect(run.result.status).toBe('success')
+      expect(run.result.lane).toBe('browser_local')
+      expect(run.result.markdown).toMatch(/\| Canada \| 13\.42 t \|/)
+      const steps = run.ladderTrace.filter((t) => t.event === 'ladder_step')
+      expect(steps[0]).toMatchObject({
+        channel: 'http',
+        detail: { escalate: 'quality_low_yield', status: 'success' },
+      })
     } finally {
       await browser.teardown()
     }

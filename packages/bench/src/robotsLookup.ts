@@ -1,12 +1,16 @@
 /**
  * Origin-cached robots.txt lookup shared by the HTTP and browser arms.
  *
- * A 4xx or a non-text/plain body is "no robots.txt". A 5xx or network
- * failure is recorded as unreachable (`absent: false`), so hosted public
- * callers can fail closed without changing the local product's legacy policy.
+ * A 4xx or a non-text/plain body is "no robots.txt" (RFC 9309 §2.3.1.3). A
+ * 5xx, a network failure or the lookup's own deadline is unreachable
+ * (§2.3.1.4): a complete disallow, in local and hosted mode alike, with the
+ * reason kept so it never reads as a rule the publisher wrote. Unreachable
+ * entries expire after `robotsUnreachableTtlMs`, so a transient failure is
+ * retried; other entries are kept for the life of the process. Only the
+ * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { type NetworkPolicy, type ExecutionContext } from '@w2l/contracts'
+import { robotsAgent, type NetworkPolicy, type ExecutionContext, type RobotsUnreachable } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -17,7 +21,7 @@ import {
   sha256Hex,
   type ComplianceRobotsDecision,
 } from '@w2l/http-core'
-import { assertSafeUrl, createGuardedDispatcher, defaultNetworkPolicy } from './egress.js'
+import { assertSafeUrl, defaultNetworkPolicy, EgressRoutes } from './egress.js'
 
 function isPlainText(contentType: string | null): boolean {
   if (contentType === null) return true
@@ -29,24 +33,28 @@ export interface CachedRobots {
   robots: ReturnType<typeof parseRobotsTxt> | null
   sha256: string | null
   absent: boolean
+  /** Why robots.txt was unreachable; set only when it was. */
+  unreachable?: RobotsUnreachable
 }
 
+const ROBOTS_TIMEOUT_MS = 5_000
+/** How long an unreachable robots.txt stays a complete disallow before it is fetched again. */
+export const ROBOTS_UNREACHABLE_TTL_MS = 5 * 60_000
+
 export class RobotsOriginCache {
-  private readonly byOrigin = new Map<string, CachedRobots>()
+  private readonly byOrigin = new Map<string, { entry: CachedRobots; expiresAt: number }>()
   private readonly pending = new Map<string, { promise: Promise<CachedRobots | null>; controller: AbortController; users: number }>()
   private readonly dispatcher: Dispatcher | ((url: string) => Dispatcher)
-  private readonly ownsDispatcher: boolean
-  private teardownPromise: Promise<void> | null = null
-  constructor(private readonly networkPolicy: NetworkPolicy = defaultNetworkPolicy(), dispatcher?: Dispatcher | ((url: string) => Dispatcher), private readonly failClosedOnUnreachable = false) {
-    this.ownsDispatcher = dispatcher === undefined
-    this.dispatcher = dispatcher ?? createGuardedDispatcher(networkPolicy)
+  /** Without a caller's dispatcher, robots.txt takes the policy's own routes (direct or environment proxy). */
+  private readonly ownRoutes: EgressRoutes | null
+  constructor(private readonly networkPolicy: NetworkPolicy = defaultNetworkPolicy(), dispatcher?: Dispatcher | ((url: string) => Dispatcher)) {
+    const routes = dispatcher === undefined ? new EgressRoutes(networkPolicy) : null
+    this.ownRoutes = routes
+    this.dispatcher = dispatcher ?? (url => routes!.dispatcherFor(url))
   }
 
   async teardown(): Promise<void> {
-    if (this.ownsDispatcher) {
-      this.teardownPromise ??= (this.dispatcher as Dispatcher).close()
-      await this.teardownPromise
-    }
+    await this.ownRoutes?.close()
   }
 
   async lookup(url: string, userAgent: string, execution: ExecutionContext = {}): Promise<CachedRobots | null> {
@@ -62,12 +70,12 @@ export class RobotsOriginCache {
     }
 
     const cached = this.byOrigin.get(origin)
-    if (cached) return cached
+    if (cached !== undefined && Date.now() < cached.expiresAt) return cached.entry
     let pending = this.pending.get(origin)
     if (pending === undefined) {
       const controller = new AbortController()
       const request = (async (): Promise<CachedRobots | null> => {
-      const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + 5_000 })
+      const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + (this.networkPolicy.robotsTimeoutMs ?? ROBOTS_TIMEOUT_MS) })
       let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false }
       try {
       await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
@@ -92,7 +100,7 @@ export class RobotsOriginCache {
         }
       if (res.status >= 500) {
         await res.body?.cancel()
-        entry = { robotsUrl, robots: null, sha256: null, absent: false }
+        entry = { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'server_error' }
       } else if (res.status >= 400) {
         await res.body?.cancel()
         entry = { robotsUrl, robots: null, sha256: null, absent: true }
@@ -125,12 +133,16 @@ export class RobotsOriginCache {
       break
       }
     } catch {
-      throwIfExecutionStopped(scope)
-      entry = { robotsUrl, robots: null, sha256: null, absent: false }
+      // Only the waiters leaving cancels the lookup. Its own deadline is an
+      // unreachable robots.txt like any network error, never a thrown timeout
+      // that would fail the fetch this lookup guards.
+      controller.signal.throwIfAborted()
+      entry = { robotsUrl, robots: null, sha256: null, absent: false, unreachable: scope.signal.aborted ? 'timeout' : 'network_error' }
     } finally { scope.dispose() }
 
-      throwIfExecutionStopped(scope)
-      this.byOrigin.set(origin, entry)
+      controller.signal.throwIfAborted()
+      const expiresAt = entry.unreachable === undefined ? Infinity : Date.now() + (this.networkPolicy.robotsUnreachableTtlMs ?? ROBOTS_UNREACHABLE_TTL_MS)
+      this.byOrigin.set(origin, { entry, expiresAt })
       return entry
     })()
       pending = { promise: request, controller, users: 0 }
@@ -153,17 +165,19 @@ export class RobotsOriginCache {
 
   decision(cached: CachedRobots | null, url: string, userAgent: string): ComplianceRobotsDecision {
     if (cached === null || cached.robots === null) {
-      // RFC 9309: 4xx means unavailable and may be accessed; 5xx and network
-      // errors mean unreachable and must be treated as a complete disallow.
-      const unreachable = cached === null || !cached.absent
+      // RFC 9309: a 4xx means no robots.txt, and anything may be accessed
+      // (§2.3.1.3). A 5xx, a network error or a timeout means unreachable,
+      // which must be treated as a complete disallow (§2.3.1.4); so is a URL
+      // whose robots.txt could not even be located.
       return {
         robotsUrl: cached?.robotsUrl ?? null,
         robotsSha256: null,
         matchedUserAgentGroup: null,
         appliedRules: [],
-        decision: this.failClosedOnUnreachable && unreachable ? 'disallowed' : 'no_robots',
+        decision: cached?.absent === true ? 'no_robots' : 'disallowed',
         skippedFetch: false,
         crawlDelayMs: null,
+        ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
       }
     }
 
@@ -175,7 +189,8 @@ export class RobotsOriginCache {
       /* keep '/' */
     }
 
-    const match = evaluateRobots(cached.robots, userAgent, path)
+    // The research product token governs SEC's format too (robotsAgent).
+    const match = evaluateRobots(cached.robots, robotsAgent(userAgent), path)
     return {
       robotsUrl: cached.robotsUrl,
       robotsSha256: cached.sha256,

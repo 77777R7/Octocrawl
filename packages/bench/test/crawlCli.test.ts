@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Task } from '@w2l/contracts'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { CHECKPOINT_FILENAME, CrawlOrchestrator, SqliteTaskStore } from '@w2l/runtime'
-import { CRAWL_USAGE, latestTaskId, parseCrawlArgs } from '../src/crawlCli.js'
+import { CRAWL_USAGE, latestTaskId, parseCrawlArgs, resumeOptions, runCrawl } from '../src/crawlCli.js'
 import { LadderScrapeAtom } from '../src/scrapeAtom.js'
 import { buildChannels } from '../src/ladderCli.js'
 import { LadderRunner } from '../src/routing/ladder.js'
@@ -53,6 +54,34 @@ describe('crawl CLI arguments', () => {
   })
 })
 
+describe('crawl CLI --resume options', () => {
+  const at = '2026-09-29T00:00:00.000Z'
+  const stored: Task = {
+    id: 'task-1', seedUrl: 'https://example.com/', taskDir: '/tmp/task', mode: 'research', status: 'paused',
+    budget: { maxPages: 20, maxWallMs: null, maxCostUsd: null, maxTokens: null },
+    crawl: { maxDepth: 2, allowlistedDomains: ['example.com', 'www.example.com'] },
+    createdAt: at, updatedAt: at,
+  }
+
+  it('runs a task with the options it was started with; repeating them is not a conflict', () => {
+    const expected = { seedUrl: 'https://example.com/', mode: 'research', budget: stored.budget, maxDepth: 2, allowlistedDomains: ['example.com', 'www.example.com'] }
+    expect(resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task']))).toEqual(expected)
+    expect(resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task', '--research', '--max-pages', '20', '--max-depth', '2', '--allowlist-hosts', 'www.example.com,example.com']))).toEqual(expected)
+  })
+
+  it('rejects a flag that names a different value instead of dropping it', () => {
+    expect(() => resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task', '--max-pages', '100']))).toThrow(/--max-pages 100 .*20/)
+    expect(() => resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task', '--max-depth', '5']))).toThrow(/--max-depth 5/)
+    expect(() => resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task', '--authed']))).toThrow(/--authed/)
+    expect(() => resumeOptions(stored, parseCrawlArgs(['--resume', '/tmp/task', '--allowlist-hosts', 'other.test']))).toThrow(/--allowlist-hosts other\.test/)
+  })
+
+  it('takes depth and hosts from the flags only for a task stored before they were kept', () => {
+    const legacy: Task = { ...stored, crawl: undefined }
+    expect(resumeOptions(legacy, parseCrawlArgs(['--resume', '/tmp/task', '--max-depth', '1', '--allowlist-hosts', 'example.com']))).toMatchObject({ maxDepth: 1, allowlistedDomains: ['example.com'] })
+  })
+})
+
 describe('w2l crawl against the fixture graph', () => {
   let server: FixtureServer
 
@@ -76,16 +105,20 @@ describe('w2l crawl against the fixture graph', () => {
     expect(channels.map((c) => c.id)).toEqual(['http', 'browser_local'])
     const runner = new LadderRunner(channels, policy, new MemoryRoutingHistory())
     const atom = new LadderScrapeAtom(runner)
-    const first = new CrawlOrchestrator({ store, atom })
+    // The kill lands right after the first page is checkpointed.
+    const kill = new AbortController()
+    const putStep = store.putStep.bind(store)
+    store.putStep = async (step) => { await putStep(step); kill.abort(new DOMException('simulated kill', 'ShutdownError')) }
+    const first = new CrawlOrchestrator({ store, atom, shutdownSignal: kill.signal })
     try {
       const report = await first.run({
         seedUrl: seed,
         taskDir: dir,
         allowlistedDomains: [host],
-        budget: { maxPages: 1, maxWallMs: null, maxCostUsd: null, maxTokens: null },
+        budget: { maxPages: 20, maxWallMs: null, maxCostUsd: null, maxTokens: null },
       })
       expect(report.pagesFetched).toBe(1)
-      expect(report.budgetExceeded).toBe('pages')
+      expect(report.status).toBe('paused')
       const firstSteps = await store.listSteps(report.taskId)
       expect(firstSteps.map((s) => s.canonicalUrl)).toEqual([seed])
       expect(firstSteps[0]?.result?.links).toEqual(
@@ -130,6 +163,29 @@ describe('w2l crawl against the fixture graph', () => {
     } finally {
       await Promise.all(resumeChannels.map((c) => c.close?.().catch(() => {})))
       await reopened.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('w2l crawl --resume keeps the page budget of the task it resumes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-crawl-cli-resume-'))
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const seed = `${server.url}/crawl/listing`
+      expect(await runCrawl(parseCrawlArgs(['--max-pages', '2', '--task-dir', dir, seed]))).toBe(0)
+      // No flags: the stored budget still holds, so the resume adds no third page.
+      expect(await runCrawl(parseCrawlArgs(['--resume', dir]))).toBe(0)
+      await expect(runCrawl(parseCrawlArgs(['--resume', dir, '--max-pages', '10']))).rejects.toThrow(/--max-pages 10/)
+      const store = SqliteTaskStore.open(dir)
+      try {
+        const task = (await store.listTasks())[0]!
+        expect(new Set((await store.listSteps(task.id)).map((step) => step.canonicalUrl)).size).toBe(2)
+        expect(await store.listAttempts(task.id)).toHaveLength(2)
+      } finally {
+        await store.close()
+      }
+    } finally {
+      log.mockRestore()
       await rm(dir, { recursive: true, force: true })
     }
   })

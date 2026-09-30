@@ -91,7 +91,6 @@ export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSig
   const localPlatformRequest = url.amazonAsin === null && isLocalPreviewProxyTarget(url.url)
   const channels = buildChannels('standard', {
     networkPolicy: policy,
-    robotsFailClosed: true,
     originScheduler: new OriginScheduler(policy),
     publicPreferenceState: url.amazonAsin === null ? null : amazonState,
     browserAllowedHosts: url.amazonAsin === null ? undefined : ['www.amazon.sg', 'm.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-eu.ssl-images-amazon.com'],

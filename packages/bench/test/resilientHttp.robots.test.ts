@@ -1,7 +1,12 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { localNetworkPolicy } from '@w2l/contracts'
 import { ALL_BOILERPLATE, NAV_MARKER, startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { buildChannels } from '../src/ladderCli.js'
+import { LadderRunner } from '../src/routing/ladder.js'
+import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
+import { LadderScrapeAtom } from '../src/scrapeAtom.js'
 
 let robotsServer: Server
 let robotsUrl: string
@@ -46,13 +51,13 @@ afterAll(async () => {
 
 describe('ResilientHttpSubject robots', () => {
   it('never applies a local platform exception to another host', async () => {
-    const subject = new ResilientHttpSubject('standard', undefined, undefined, true, 'http://127.0.0.1:7890', true)
+    const subject = new ResilientHttpSubject('standard', undefined, undefined, 'http://127.0.0.1:7890', true)
     try {
       await expect(subject.fetch('https://example.com/')).rejects.toThrow('limited to fixed platform hosts')
     } finally { await subject.teardown() }
   })
 
-  it('never fetches the page when public-preview robots responds 503', async () => {
+  it('never fetches the page when robots.txt responds 503, and says robots.txt was unreachable', async () => {
     let pageHits = 0
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') res.writeHead(503).end('temporarily unavailable')
@@ -61,15 +66,42 @@ describe('ResilientHttpSubject robots', () => {
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('no fixture address')
-    const subject = new ResilientHttpSubject('standard', undefined, undefined, true)
+    const subject = new ResilientHttpSubject()
     try {
       const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
       expect(out.status).toBe('failed')
       expect(out.failureReason).toBe('policy_denied')
-      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed' }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'server_error', ruleCount: 0 }) }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error', appliedRules: [] }) }))
       expect(pageHits).toBe(0)
     } finally {
       await subject.teardown()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  it('never fetches the page when robots.txt never answers, and records the timeout', async () => {
+    // RFC 9309 §2.3.1.4: an unreachable robots.txt is a complete disallow.
+    let pageHits = 0
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') return // never answers
+      pageHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Slow robots</h1><p>The origin serves this page normally, but its robots.txt never answers within the lookup deadline.</p></article></body></html>')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const subject = new ResilientHttpSubject('standard', { ...localNetworkPolicy(), robotsTimeoutMs: 100 })
+    try {
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'disallowed', unreachable: 'timeout' }) }))
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'timeout' }) }))
+      expect(pageHits).toBe(0)
+    } finally {
+      await subject.teardown()
+      server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
   })
@@ -82,7 +114,10 @@ describe('ResilientHttpSubject robots', () => {
     expect(out.status).toBe('failed')
     expect(out.failureReason).toBe('policy_denied')
     expect(out.markdown).toBeNull()
-    expect(out.trace.some((t) => t.event === 'robots_disallowed')).toBe(true)
+    const disallowed = out.trace.find((t) => t.event === 'robots_disallowed')
+    expect(disallowed?.detail).toMatchObject({ appliedRules: [{ pattern: '/private', allow: false }] })
+    // A rule the publisher wrote, not an unreachable robots.txt.
+    expect(disallowed?.detail).not.toHaveProperty('unreachable')
   })
 
   it('honours a more-specific Allow beneath a Disallow', async () => {
@@ -90,6 +125,35 @@ describe('ResilientHttpSubject robots', () => {
     const out = await subject.fetch(`${robotsUrl}/private/ok`)
     expect(out.status).toBe('success')
     expect(out.markdown).toContain('Private area')
+  })
+
+  it('reports robots.txt Crawl-delay on robots_checked, and the scrape atom hands it to the crawl', async () => {
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nCrawl-delay: 2.5\nDisallow: /private\n')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Polite page</h1><p>This origin asks crawlers to wait two and a half seconds between requests, and the HTTP lane must pass that request on to the crawl frontier instead of dropping it.</p><p>The page itself is ordinary prose, long enough for the extraction cascade to accept it as the main content of an article.</p></article></body></html>')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const url = `http://127.0.0.1:${address.port}/page`
+    const subject = new ResilientHttpSubject()
+    const channels = buildChannels('standard', { localSubjects: { browser_local: { fetch: async () => { throw new Error('HTTP only: the browser arm was reached') } } } })
+    try {
+      const out = await subject.fetch(url)
+      expect(out.status).toBe('success')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_checked', detail: expect.objectContaining({ decision: 'allowed', crawlDelayMs: 2500 }) }))
+      const atom = new LadderScrapeAtom(new LadderRunner(channels, { mode: 'standard' }, new MemoryRoutingHistory()))
+      expect((await atom.scrape(url)).crawlDelayMs).toBe(2500)
+    } finally {
+      await subject.teardown()
+      await Promise.all(channels.map(channel => channel.close?.().catch(() => {})))
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   })
 
   it('rejects a redirect to metadata before any follow-up request', async () => {

@@ -3,7 +3,10 @@
  *
  * Never opens Playwright. A page is one ScrapeAtom.scrape(url).
  * Resume restores frontier membership from prior steps. Default is refetch;
- * --use-cached is the only skip-fetch path.
+ * --use-cached is the only skip-fetch path. A resumed task runs with the
+ * options it stored, and its page budget counts every URL the task has, so
+ * refetching one costs nothing new and a resume never exceeds maxPages.
+ * Attempt counters are written after every page, so status reads are live.
  *
  * Same rawBodySha256 on two distinct canonical URLs is duplicate content,
  * not a crawl loop. The duplicate is recorded and skipped; the crawl
@@ -21,12 +24,13 @@ import {
   type CrawlSpec,
   type FetchResult,
   type ScrapeAtom,
+  type ScrapeOutcome,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { reportFromTaskAttempt } from './crawlReport.js'
-import { Frontier } from './frontier.js'
+import { Frontier, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 
@@ -74,6 +78,7 @@ export class CrawlOrchestrator {
   private readonly workerCount: number
   private readonly signal?: AbortSignal
   private readonly shutdownSignal?: AbortSignal
+  private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
     this.store = options.store
@@ -84,6 +89,15 @@ export class CrawlOrchestrator {
     this.workerCount = Math.max(1, options.workerCount ?? 4)
     this.signal = options.signal
     this.shutdownSignal = options.shutdownSignal
+  }
+
+  /**
+   * The pages this run will still record if it runs to its end: those in
+   * flight and the queued ones its page budget admits. It grows as pages add
+   * links. Null when no run is under way.
+   */
+  pagesAhead(): number | null {
+    return this.ahead?.() ?? null
   }
 
   async run(partial: Pick<CrawlSpec, 'seedUrl' | 'taskDir'> & Partial<CrawlSpec>): Promise<CrawlReport> {
@@ -113,6 +127,15 @@ export class CrawlOrchestrator {
     let failed: unknown = null
     let task: Task | undefined
     let attempt: Attempt | undefined
+    const meters = () => ({
+      pagesFetched: pagesFetched + cachedPages,
+      wallMs: this.clock.now() - startedAtMs,
+      costUsd: costUnknown ? null : costUsd,
+      costUnknown,
+      contentTokens,
+      contentTokensUnknown,
+      budgetExceeded,
+    })
 
     const markTimeBudget = (): void => {
       budgetExceeded = 'time'
@@ -128,17 +151,37 @@ export class CrawlOrchestrator {
       const opened = await this.openRun(spec, startedAt)
       task = opened.task
       attempt = opened.attempt
+      // A crawl runs with the options it stored; a batch, and a crawl stored
+      // before its depth and hosts were kept, with the caller's.
+      const stored = task.batch === undefined ? task.crawl : undefined
       const frontier = new Frontier({
         seedUrl: task.seedUrl,
-        maxDepth: spec.maxDepth,
-        allowlistedDomains: spec.allowlistedDomains,
+        maxDepth: stored?.maxDepth !== undefined ? stored.maxDepth : spec.maxDepth,
+        allowlistedDomains: stored?.allowlistedDomains ?? spec.allowlistedDomains,
+        includePaths: stored?.includePaths ?? spec.includePaths,
+        excludePaths: stored?.excludePaths ?? spec.excludePaths,
         ...this.frontierOptions,
       })
-      await this.restoreFrontier(frontier, task, spec)
+      const priorSteps = await this.store.listSteps(task.id)
+      await this.restoreFrontier(frontier, task, spec, priorSteps)
       const runningTask = task
       const runningAttempt = attempt
+      // The page budget is the task's: every URL it already has counts once,
+      // and a page it has fetched before may be fetched again for free.
+      const maxPages = task.budget.maxPages
+      const taskUrls = new Set(priorSteps.map((step) => step.canonicalUrl))
+      let newPagesReserved = 0
+      const admit = (item: FrontierItem): boolean => maxPages === null || taskUrls.has(item.canonicalUrl) || taskUrls.size + newPagesReserved < maxPages
+      // Dequeued pages whose step is not written yet.
+      let pagesInFlight = 0
+      this.ahead = () => {
+        const queued = frontier.pendingCount()
+        if (maxPages === null) return pagesInFlight + queued
+        // A page the task already has is fetched again for free; a new one needs budget.
+        const known = frontier.pendingCount((item) => taskUrls.has(item.canonicalUrl))
+        return pagesInFlight + known + Math.min(queued - known, Math.max(0, maxPages - taskUrls.size - newPagesReserved))
+      }
       let activePages = 0
-      let reservedPages = 0
       let stopping = false
       const wakeResolvers: Array<() => void> = []
       wakeWorkers = (): void => {
@@ -174,10 +217,11 @@ export class CrawlOrchestrator {
             stopController.abort(new DOMException('Crawl cancelled', 'AbortError'))
           }
           if (stopped()) { stopping = true; break }
-          const spent: CrawlBudgetSpent = { pages: pagesFetched + cachedPages + reservedPages, wallMs: now - startedAtMs, costUsd, costUnknown, tokens: contentTokens, tokensUnknown: contentTokensUnknown }
+          const spent: CrawlBudgetSpent = { wallMs: now - startedAtMs, costUsd, costUnknown, tokens: contentTokens, tokensUnknown: contentTokensUnknown }
           const hit = budgetHit(spec.budget, spent)
           if (hit !== null) { budgetExceeded = hit; if (hit === 'time') markTimeBudget(); break }
-          const next = frontier.dequeue(now)
+          const next = frontier.dequeue(now, admit)
+          if (next.refused > 0) budgetExceeded = 'pages'
           if (next.item === null) {
             if (next.nextReadyAtMs === null) {
               if (activePages === 0) break
@@ -190,8 +234,12 @@ export class CrawlOrchestrator {
             continue
           }
           const item = next.item
-          reservedPages++
+          let reserved = !taskUrls.has(item.canonicalUrl)
+          if (reserved) newPagesReserved++
+          const delay = crawlDelayDetail(item.host, now, next.previousStartAtMs, frontier.hostDelayMs(item.host), frontier.crawlDelayMs(item.host))
           activePages++
+          pagesInFlight++
+          let inFlight = true
           try {
             const cached = spec.useCached ? await this.store.getStepByCanonicalUrl(runningTask.id, item.canonicalUrl) : null
             const reusable = cached !== null && cached.result !== null && CONTENTFUL_STATUS.has(cached.result.status)
@@ -202,10 +250,22 @@ export class CrawlOrchestrator {
             if (reusable && cached.result !== null) {
               result = cached.result; links = linksOf(cached.result); audit = cached.audit; cachedPage = true
             } else {
-              const outcome = await raceWithSignal(this.atom.scrape(item.url, scope), scope.signal)
+              const scrapeStartedAt = Date.now()
+              let outcome: ScrapeOutcome
+              try { outcome = await raceWithSignal(this.atom.scrape(item.url, scope), scope.signal) }
+              catch (error) {
+                // Cancellation, shutdown and the crawl's own budget stop the run.
+                // Any other exception belongs to this URL: it becomes the URL's
+                // failed item, and one page never fails a whole batch or crawl.
+                if (stopped()) throw error
+                outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt), links: [] }
+              }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
               frontier.setCrawlDelay(item.host, outcome.crawlDelayMs ?? null)
+              // The politeness delay this request waited for is part of its record.
+              result = { ...result, trace: [{ at: 0, lane: result.lane, event: 'crawl_delay', detail: delay }, ...result.trace] }
             }
+            if (item.depth === 0 && CONTENTFUL_STATUS.has(result.status)) frontier.followSeedRedirect(result.evidence.finalUrl)
             const latestTask = await this.store.getTask(runningTask.id)
             if (latestTask?.status === 'cancelled') {
               persistedCancellation = true
@@ -220,7 +280,12 @@ export class CrawlOrchestrator {
               else seenHash.set(hash, item.canonicalUrl)
             }
             const at = new Date(this.clock.now()).toISOString()
+            // Written from here on, no longer in flight (the write itself is synchronous).
+            inFlight = false
+            pagesInFlight--
             await this.store.putStep({ id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at })
+            taskUrls.add(item.canonicalUrl)
+            if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
             if (!cachedPage) {
               const meter = audit?.summary
@@ -236,6 +301,8 @@ export class CrawlOrchestrator {
                 contentTokensUnknown ||= result.usage.contentTokens === null
               }
             }
+            // A status read while the crawl runs sees its progress.
+            await this.store.putAttempt({ ...runningAttempt, ...meters() })
             if (CONTENTFUL_STATUS.has(result.status)) {
               for (const href of links) frontier.enqueue(href, item.depth + 1, item.canonicalUrl)
               wakeWorkers()
@@ -248,7 +315,8 @@ export class CrawlOrchestrator {
             stopController.abort(err)
             throw err
           } finally {
-            reservedPages--
+            if (inFlight) pagesInFlight--
+            if (reserved) newPagesReserved--
             frontier.release(item.canonicalUrl)
             activePages--
             wakeWorkers()
@@ -262,6 +330,7 @@ export class CrawlOrchestrator {
     } catch (err) {
       if (!stopped()) failed = err
     } finally {
+      this.ahead = null
       pollingStopped = true
       if (pollTimer !== undefined) clearTimeout(pollTimer)
       scope.signal.removeEventListener('abort', onStop)
@@ -284,13 +353,7 @@ export class CrawlOrchestrator {
       ...attempt,
       status: interrupted ? 'interrupted' : status === 'paused' ? 'interrupted' : status,
       endedAt,
-      pagesFetched: pagesFetched + cachedPages,
-      wallMs: this.clock.now() - startedAtMs,
-       costUsd: costUnknown ? null : costUsd,
-       costUnknown,
-       contentTokens,
-       contentTokensUnknown,
-      budgetExceeded,
+      ...meters(),
     }
     const finished: Task = { ...task, status, updatedAt: endedAt }
     try {
@@ -340,6 +403,7 @@ export class CrawlOrchestrator {
       mode: spec.mode,
       status: 'running',
       budget: spec.budget,
+      crawl: { maxDepth: spec.maxDepth, allowlistedDomains: spec.allowlistedDomains, includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [] },
       createdAt: startedAt,
       updatedAt: startedAt,
     }
@@ -367,9 +431,9 @@ export class CrawlOrchestrator {
     return recoveredFrom
   }
 
-  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec): Promise<void> {
+  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<void> {
     if (task.batch !== undefined) {
-      const completed = new Set((await this.store.listSteps(task.id))
+      const completed = new Set(prior
         .filter(step => step.result !== null)
         .map(step => step.canonicalUrl))
       for (const url of task.batch.urls) {
@@ -383,12 +447,13 @@ export class CrawlOrchestrator {
       frontier.seed(task.seedUrl)
       return
     }
-    const prior = await this.store.listSteps(task.id)
     const contentful = prior.filter((step) => step.result !== null && CONTENTFUL_STATUS.has(step.result.status))
     if (contentful.length === 0) {
       frontier.seed(task.seedUrl)
       return
     }
+    // Pages on the host the seed redirected to belong to the crawl, as before.
+    for (const step of contentful) if (step.depth === 0) frontier.followSeedRedirect(step.result!.evidence.finalUrl)
     for (const step of contentful) frontier.seed(step.url, step.depth)
     for (const step of contentful) {
       for (const href of linksOf(step.result!)) {
@@ -398,8 +463,8 @@ export class CrawlOrchestrator {
   }
 }
 
+/** What an attempt has spent. Pages are the task's, counted by the frontier's admit test. */
 interface CrawlBudgetSpent {
-  pages: number
   wallMs: number
   costUsd: number
   costUnknown: boolean
@@ -408,13 +473,28 @@ interface CrawlBudgetSpent {
 }
 
 function budgetHit(budget: CrawlBudget, spent: CrawlBudgetSpent): BudgetKind | null {
-  if (budget.maxPages !== null && spent.pages >= budget.maxPages) return 'pages'
   if (budget.maxWallMs !== null && spent.wallMs >= budget.maxWallMs) return 'time'
   if (budget.maxCostUsd !== null && spent.costUnknown) return 'cost_unknown'
   if (budget.maxCostUsd !== null && spent.costUsd >= budget.maxCostUsd) return 'cost'
   if (budget.maxTokens !== null && spent.tokensUnknown) return 'tokens_unknown'
   if (budget.maxTokens !== null && spent.tokens >= budget.maxTokens) return 'tokens'
   return null
+}
+
+/**
+ * The politeness a page's request waited for: when it started, when the
+ * previous page on its host started, and the spacing required between them,
+ * max(perHostMinDelayMs, robots.txt Crawl-delay).
+ */
+function crawlDelayDetail(host: string, startedAtMs: number, previousStartAtMs: number | null, requiredDelayMs: number, robotsCrawlDelayMs: number | null): Record<string, unknown> {
+  return {
+    host,
+    startedAt: new Date(startedAtMs).toISOString(),
+    previousStartedAt: previousStartAtMs === null ? null : new Date(previousStartAtMs).toISOString(),
+    observedDelayMs: previousStartAtMs === null ? null : startedAtMs - previousStartAtMs,
+    requiredDelayMs,
+    robotsCrawlDelayMs,
+  }
 }
 
 function linksOf(result: FetchResult): readonly string[] {
@@ -439,6 +519,35 @@ function newAttempt(id: string, taskId: string, startedAt: string, recoveredFrom
   }
 }
 
+/**
+ * The item for a URL whose scrape threw instead of returning a result. No
+ * response fact is known, so the evidence stays null and the usage meters
+ * stay unknown; the lane is the ladder's first rung, as in its own refusals.
+ */
+function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchResult {
+  const name = error instanceof Error ? error.name : typeof error
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    requestedUrl: url,
+    status: 'failed',
+    failureReason: name === 'TimeoutError' ? 'timeout' : 'internal_error',
+    blockReason: null,
+    budgetExceeded: null,
+    lane: 'http',
+    escalations: [],
+    markdown: null,
+    links: [],
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    usage: { ...EMPTY_USAGE, wallMs, bytesWire: null },
+    trace: [{ at: wallMs, lane: 'http', event: 'scrape_error', detail: { name, error: message.slice(0, 500) } }],
+  }
+}
+
+// The page keeps its own links (an empty list would claim it has none); the
+// caller does not follow them because a duplicate is not contentful.
 function duplicateResult(url: string, prior: FetchResult, firstCanonicalUrl: string): FetchResult {
   return {
     ...prior,
@@ -448,7 +557,6 @@ function duplicateResult(url: string, prior: FetchResult, firstCanonicalUrl: str
     blockReason: null,
     budgetExceeded: null,
     markdown: null,
-    links: [],
     usage: {
       ...EMPTY_USAGE,
       wallMs: prior.usage.wallMs,

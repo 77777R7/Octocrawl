@@ -137,6 +137,16 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getStepByCanonicalUrl('task-1', 'https://example.com/')).toEqual(step())
     })
 
+    it('round-trips every crawl option a resume needs on the task', async () => {
+      ;({ store, cleanup } = await open())
+      const crawl = task({
+        budget: { ...DEFAULT_CRAWL_BUDGET, maxPages: 20 },
+        crawl: { formats: ['markdown', 'links'], includeLinks: false, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'], maxDepth: null, allowlistedDomains: ['example.com'], useCached: true, onlyMainContent: false, waitFor: 500, timeout: 20_000 },
+      })
+      await store.putTask(crawl)
+      expect(await store.getTask('task-1')).toEqual(crawl)
+    })
+
     it('counts unique completed URLs and pages all outcomes without loading bodies for status', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)
@@ -145,6 +155,8 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       await store.putStep(step({ id: 'step-3', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', status: 'failed', result: null, createdAt: LATER }))
       expect(await store.countCompletedSteps('task-1')).toBe(1)
       expect((await store.listStepsPage('task-1', { limit: 10, kind: 'all' })).steps).toHaveLength(3)
+      expect(await store.countSteps('task-1', 'attempt-1')).toEqual({ success: 2, failed: 1 })
+      expect(await store.countSteps('task-1', 'attempt-2')).toEqual({})
     })
 
     it('is idempotent: the same (taskId, attemptId, stepId) does not create a second row', async () => {
@@ -292,9 +304,12 @@ describe('@w2l/runtime public surface', () => {
       'assessConfiguredDocument',
       'assessFirecrawlIntroduction',
       'canonicalizeUrl',
+      'compilePathFilter',
       'crawlReportFromStore',
       'createHttpsWebhookTransport',
+      'decodeStepCursor',
       'diffDocument',
+      'encodeStepCursor',
       'hostOf',
       'initializeFirecrawlMonitor',
       'initializeMonitor',
@@ -303,6 +318,7 @@ describe('@w2l/runtime public surface', () => {
       'runConfiguredMonitor',
       'runFirecrawlMonitor',
       'systemClock',
+      'toEvidenceRecord',
       'verifyWebhookSignature',
       'webhookSignature',
     ])

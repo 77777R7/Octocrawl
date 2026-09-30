@@ -8,7 +8,7 @@
  * on contradiction. This is not disguise — it is refusing to ship a lie.
  */
 
-import { BROWSER_FINGERPRINT, modeIdentity, type CrawlMode, type ModeIdentity } from './compliance.js'
+import { BROWSER_FINGERPRINT, isResearchUserAgent, modeIdentity, type CrawlMode, type ModeIdentity } from './compliance.js'
 
 export interface IdentityBundle {
   userAgent: string
@@ -84,7 +84,7 @@ export function identityBundleIssues(bundle: IdentityBundle): string[] {
 
   const claimsBrowser =
     clientHints['sec-ch-ua'] !== undefined || clientHints['sec-ch-ua-platform'] !== undefined
-  if (/\bw2l-research\b/.test(ua) && claimsBrowser) {
+  if (isResearchUserAgent(ua) && claimsBrowser) {
     issues.push('research UA must not send Chromium client hints')
   }
   if (uaMajor !== null && Object.keys(clientHints).length === 0) {
@@ -202,7 +202,7 @@ export function identityBundleFrom(
 
 /** One-line identity for CLI stdout. Never empty for a coherent bundle. */
 export function formatIdentitySummary(bundle: IdentityBundle): string {
-  if (/\bw2l-research\b/.test(bundle.userAgent)) {
+  if (isResearchUserAgent(bundle.userAgent)) {
     return `w2l-research · ${bundle.locale}`
   }
   const major = chromeMajorFromUa(bundle.userAgent)

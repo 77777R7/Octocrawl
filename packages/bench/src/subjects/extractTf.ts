@@ -5,6 +5,7 @@ import { classifyGate, escalationForBlock } from '@w2l/http-core'
 import { request } from 'undici'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import type { SubjectAdapter } from '../subject.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus } from './errorPage.js'
 
 /**
  * extract-tf subject: undici fetch + the extract-tf cascade. The first
@@ -59,7 +60,7 @@ export class ExtractTfSubject implements SubjectAdapter {
         confidence: number
         escalate: boolean
       } | null = null
-      if (status === 200) {
+      if (isSuccessStatus(status) && !isNoContentStatus(status)) {
         const out = extractTf.extract(body, { url })
         document = {
           title: out.title,
@@ -70,6 +71,7 @@ export class ExtractTfSubject implements SubjectAdapter {
           adapter: out.adapter,
           entities: out.entities,
           adapterValidation: out.adapterValidation,
+          labelledValues: out.labelledValues,
         }
         routeEvidence = {
           pageType: out.pageType,
@@ -80,7 +82,7 @@ export class ExtractTfSubject implements SubjectAdapter {
         if (out.escalate) {
           escalated = true
         } else {
-          markdown = htmlToMarkdown(out.mainHtml)
+          markdown = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
         }
       }
 
@@ -95,14 +97,19 @@ export class ExtractTfSubject implements SubjectAdapter {
       const blockEscalation =
         verdict === null ? null : escalationForBlock(verdict.reason, 'http')
 
-      let terminalStatus: 'success' | 'failed' | 'blocked' = 'success'
+      // An error status is never content; its page is kept as evidence.
+      const errorPage = errorPageEvidence(status, header('content-type'), body, url)
+      let terminalStatus: 'success' | 'failed' | 'blocked' | 'empty_verified' = 'success'
       let failureReason: 'http_error' | 'empty_unverified' | null = null
       if (verdict !== null) {
         terminalStatus = 'blocked'
-        markdown = null
-      } else if (status !== 200) {
+        markdown = errorPage?.markdown ?? null
+      } else if (!isSuccessStatus(status)) {
         terminalStatus = 'failed'
         failureReason = 'http_error'
+        markdown = errorPage?.markdown ?? null
+      } else if (isNoContentStatus(status)) {
+        terminalStatus = 'empty_verified'
       } else if (escalated) {
         terminalStatus = 'failed'
         failureReason = 'empty_unverified'
@@ -203,7 +210,7 @@ export class ExtractTfSubject implements SubjectAdapter {
           bytesDecompressed: bodyBuffer.byteLength,
           requestCount: 1,
           attemptCount: 1,
-          contentTokens: markdown !== null ? estimateTokens(markdown) : null,
+          contentTokens: terminalStatus === 'success' && markdown !== null ? estimateTokens(markdown) : null,
           browserMs: 0,
           externalCostUsd: null,
         },

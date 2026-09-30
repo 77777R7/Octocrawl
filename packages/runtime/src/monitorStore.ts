@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import { configureControlDatabase } from './sqliteSetup.js'
 import type {
-  DocumentAssessment, DocumentDiff, DocumentFields, MonitorAttempt, MonitorEvent,
+  DocumentAssessment, DocumentDiff, DocumentFields, MonitorAttempt, MonitorChangeReason, MonitorEvent,
   MonitorObservation, MonitorRevision, MonitorRun, MonitorSnapshot, MonitorView,
 } from '@w2l/contracts'
 import { DOCUMENT_RULE_VERSION, FIRECRAWL_INTRO_URL, parseMonitorRevision, monitorIdentity, type TransportRepresentation } from '@w2l/contracts'
@@ -12,7 +12,7 @@ import { createDeliveryTables, enqueueEventDeliveries, registerDeliveryDestinati
 import type { WebhookEventEnvelope, DeliveryDestinationInput, DeliveryDestination } from '@w2l/contracts'
 
 interface MonitorRow { id: string; enabled: number; control_epoch: number; revision: number; url: string; rule_version: string; interval_ms: number; stale_after_ms: number; created_at: number; updated_at: number; next_run_at: number; last_checked_at: number | null; last_verified_at: number | null }
-interface RunRow { id: string; monitor_id: string; revision: number; trigger_key: string; state: string; epoch: number; fencing_token: number; attempt_id: string | null; lease_until: number | null; deadline_at: number | null; next_attempt_at: number | null; expected_baseline_id: string | null; created_at: number; ended_at: number | null; quality: string | null; change_kind: string | null; error: string | null }
+interface RunRow { id: string; monitor_id: string; revision: number; trigger_key: string; state: string; epoch: number; fencing_token: number; attempt_id: string | null; lease_until: number | null; deadline_at: number | null; next_attempt_at: number | null; expected_baseline_id: string | null; created_at: number; ended_at: number | null; quality: string | null; change_kind: string | null; change_reason: string | null; error: string | null }
 interface AttemptRow { id: string; run_id: string; fencing_token: number; state: string; started_at: number; ended_at: number | null; recovered_from_attempt_id: string | null }
 export interface MonitorStoreTestOptions { failCommitAfter?: 'snapshot' | 'event'; leaseMs?: number; attemptTimeoutMs?: number }
 
@@ -100,6 +100,10 @@ export class MonitorStore {
       if (!columns.some((c)=>c.name==='config_json')) this.db.exec('ALTER TABLE monitor_revisions ADD COLUMN config_json TEXT')
       this.db.exec('CREATE TABLE IF NOT EXISTS monitor_transport (key TEXT PRIMARY KEY, body TEXT NOT NULL)')
     }).immediate()
+    // Change attribution. Rows written before these columns existed read as unknown (NULL).
+    for (const [table, column] of [['monitor_observations', 'raw_body_sha256'], ['monitor_observations', 'extractor_version'], ['monitor_snapshots', 'extractor_version'], ['monitor_runs', 'change_reason'], ['monitor_events', 'extractor_change_json']] as const) {
+      if (!(this.db.prepare(`PRAGMA table_info(${table})`).all() as {name:string}[]).some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`)
+    }
     }).immediate()
   }
 
@@ -307,8 +311,8 @@ export class MonitorStore {
     const run = this.getRun(runId)
     if (!run || run.monitorId !== monitorId) return null
     const assessmentRow = this.db.prepare('SELECT * FROM monitor_assessments WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(runId) as {rule_version?:string; quality:DocumentAssessment['quality'];reasons_json:string;fields_json:string|null;evidence_json:string} | undefined
-    const observationRow = this.db.prepare('SELECT * FROM monitor_observations WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(runId) as {id:string;run_id:string;attempt_id:string;observed_at:number;client_wall_ms:number;markdown_sha256:string|null;transport_json:string|null;outcome_json:string|null;error:string|null} | undefined
-    const observation: MonitorObservation | null = observationRow ? { id:observationRow.id,runId:observationRow.run_id,attemptId:observationRow.attempt_id,observedAt:observationRow.observed_at,clientWallMs:observationRow.client_wall_ms,markdownSha256:observationRow.markdown_sha256,transport:observationRow.transport_json ? JSON.parse(observationRow.transport_json) : null,outcome:observationRow.outcome_json ? JSON.parse(observationRow.outcome_json) : null,error:observationRow.error } : null
+    const observationRow = this.db.prepare('SELECT * FROM monitor_observations WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(runId) as {id:string;run_id:string;attempt_id:string;observed_at:number;client_wall_ms:number;markdown_sha256:string|null;raw_body_sha256:string|null;extractor_version:string|null;transport_json:string|null;outcome_json:string|null;error:string|null} | undefined
+    const observation: MonitorObservation | null = observationRow ? { id:observationRow.id,runId:observationRow.run_id,attemptId:observationRow.attempt_id,observedAt:observationRow.observed_at,clientWallMs:observationRow.client_wall_ms,markdownSha256:observationRow.markdown_sha256,rawBodySha256:this.observationSource(observationRow.id).rawBodySha256,extractorVersion:observationRow.extractor_version,transport:observationRow.transport_json ? JSON.parse(observationRow.transport_json) : null,outcome:observationRow.outcome_json ? JSON.parse(observationRow.outcome_json) : null,error:observationRow.error } : null
     const assessment: DocumentAssessment | null = assessmentRow ? { ruleVersion:this.getRevision(monitorId,run.revision).ruleVersion,quality:assessmentRow.quality,reasons:JSON.parse(assessmentRow.reasons_json),fields:assessmentRow.fields_json ? JSON.parse(assessmentRow.fields_json) : null,evidence:JSON.parse(assessmentRow.evidence_json) } : null
     return {run,assessment,observation,attempts:this.attempts(runId)}
   }
@@ -328,8 +332,8 @@ export class MonitorStore {
       else this.deleteRepresentation(transportChange.key)
     }
     if (assessment.ruleVersion !== this.getRevision(run.monitorId,run.revision).ruleVersion) throw new Error('assessment rule mismatch')
-    this.db.prepare(`INSERT INTO monitor_observations (id, run_id, attempt_id, observed_at, client_wall_ms, markdown_sha256, transport_json, outcome_json, error) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(observation.id, observation.runId, observation.attemptId, observation.observedAt, observation.clientWallMs, observation.markdownSha256, JSON.stringify(observation.transport ?? null), JSON.stringify(observation.outcome), observation.error)
+    this.db.prepare(`INSERT INTO monitor_observations (id, run_id, attempt_id, observed_at, client_wall_ms, markdown_sha256, raw_body_sha256, extractor_version, transport_json, outcome_json, error) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(observation.id, observation.runId, observation.attemptId, observation.observedAt, observation.clientWallMs, observation.markdownSha256, observation.rawBodySha256 ?? null, observation.extractorVersion ?? null, JSON.stringify(observation.transport ?? null), JSON.stringify(observation.outcome), observation.error)
     this.db.prepare(`INSERT INTO monitor_assessments (id, run_id, observation_id, quality, reasons_json, fields_json, evidence_json) VALUES (?,?,?,?,?,?,?)`)
       .run(assessmentId, observation.runId, observation.id, assessment.quality, JSON.stringify(assessment.reasons), assessment.fields ? JSON.stringify(assessment.fields) : null, JSON.stringify(assessment.evidence))
     // Serialization can consume the remaining budget; rollback transport too.
@@ -368,21 +372,34 @@ export class MonitorStore {
       this.assertOwner(run, nowOverride ?? Date.now())
       return null
     }
+    const source = this.observationSource(observationId), priorSource = prior ? this.observationSource(prior.observationId) : null
+    // The same raw bytes cannot carry a source change: fields that differ over them come from W2L's own extraction.
+    const sameSource = priorSource?.rawBodySha256 != null && priorSource.rawBodySha256 === source.rawBodySha256
+    const reason: MonitorChangeReason = kind === 'initialized' ? 'initialized' : schemaChanged ? 'schema_migrated' : ruleChanged || sameSource ? 'extraction_reprocessed' : 'source_changed'
     const version = (prior?.version ?? 0) + 1
     const snapshotId = crypto.randomUUID()
-      this.db.prepare(`INSERT INTO monitor_snapshots (id, monitor_id, revision, version, observation_id, assessment_id, fields_json, created_at) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(snapshotId, run.monitorId, run.revision, version, observationId, assessmentId, JSON.stringify(assessment.fields), now)
+      this.db.prepare(`INSERT INTO monitor_snapshots (id, monitor_id, revision, version, observation_id, assessment_id, fields_json, extractor_version, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(snapshotId, run.monitorId, run.revision, version, observationId, assessmentId, JSON.stringify(assessment.fields), source.extractorVersion, now)
       this.db.prepare('INSERT OR REPLACE INTO monitor_baselines (monitor_id, snapshot_id, version) VALUES (?,?,?)').run(run.monitorId, snapshotId, version)
       if (this.testOptions.failCommitAfter === 'snapshot') throw new Error('injected commit failure after snapshot')
+      // W2L re-reading an unchanged source (an extractor upgrade) is not a source event: the run records the
+      // reason and the baseline moves, so later runs compare output of one extractor, but no event or delivery
+      // is created. A rule revision is the user's own change and keeps its event.
+      if (reason === 'extraction_reprocessed' && !ruleChanged) {
+        this.finishRun(runId, 'completed', 'valid', kind, now, null, reason)
+        this.assertOwner(run, nowOverride ?? Date.now())
+        return null
+      }
+      const extractorChange = priorSource && priorSource.extractorVersion !== source.extractorVersion ? { from: priorSource.extractorVersion, to: source.extractorVersion } : null
       let event: MonitorEvent | null = null
       {
-        event = { id: crypto.randomUUID(), runId, monitorId: run.monitorId, kind, reason: kind === 'initialized' ? 'initialized' : schemaChanged ? 'schema_migrated' : ruleChanged ? 'extraction_reprocessed' : 'source_changed', fromSnapshotId: prior?.id ?? null, toSnapshotId: snapshotId, changes, observedAt: now }
-        this.db.prepare(`INSERT INTO monitor_events (id, run_id, monitor_id, kind, reason, from_snapshot_id, to_snapshot_id, changes_json, observed_at) VALUES (?,?,?,?,?,?,?,?,?)`).run(event.id, runId, run.monitorId, event.kind, event.reason, event.fromSnapshotId, event.toSnapshotId, JSON.stringify(event.changes), now)
+        event = { id: crypto.randomUUID(), runId, monitorId: run.monitorId, kind, reason, fromSnapshotId: prior?.id ?? null, toSnapshotId: snapshotId, ...(extractorChange ? { extractorChange } : {}), changes, observedAt: now }
+        this.db.prepare(`INSERT INTO monitor_events (id, run_id, monitor_id, kind, reason, from_snapshot_id, to_snapshot_id, changes_json, extractor_change_json, observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(event.id, runId, run.monitorId, event.kind, event.reason, event.fromSnapshotId, event.toSnapshotId, JSON.stringify(event.changes), extractorChange ? JSON.stringify(extractorChange) : null, now)
         this.db.prepare('INSERT INTO monitor_outbox (event_id, state) VALUES (?,?)').run(event.id, 'pending')
         enqueueEventDeliveries(this.db, this.eventEnvelope(event), now)
         if (this.testOptions.failCommitAfter === 'event') throw new Error('injected commit failure after event')
       }
-      this.finishRun(runId, 'completed', 'valid', kind, now, null)
+      this.finishRun(runId, 'completed', 'valid', kind, now, null, reason)
       this.assertOwner(run, nowOverride ?? Date.now())
       return event
     }).immediate()
@@ -411,8 +428,8 @@ export class MonitorStore {
     }).immediate()
   }
 
-  private finishRun(runId: string, state: MonitorRun['state'], quality: MonitorRun['quality'], change: MonitorRun['change'], now: number, error: string | null): void {
-    this.db.prepare('UPDATE monitor_runs SET state=?, ended_at=?, quality=?, change_kind=?, error=? WHERE id=?').run(state, now, quality, change, error, runId)
+  private finishRun(runId: string, state: MonitorRun['state'], quality: MonitorRun['quality'], change: MonitorRun['change'], now: number, error: string | null, reason: MonitorChangeReason | null = null): void {
+    this.db.prepare('UPDATE monitor_runs SET state=?, ended_at=?, quality=?, change_kind=?, change_reason=?, error=? WHERE id=?').run(state, now, quality, change, reason, error, runId)
     this.db.prepare('UPDATE monitor_attempts SET state=?, ended_at=? WHERE run_id=? AND state=?').run(state === 'completed' ? 'succeeded' : state === 'cancelled' ? 'cancelled' : 'failed', now, runId, 'running')
     const run = this.getRun(runId)
     if (run) {
@@ -443,7 +460,7 @@ export class MonitorStore {
     if (!row) return null
     try {
       const value = JSON.parse(row.body) as TransportRepresentation
-      return value && value.key === key && value.outcome?.result?.evidence && typeof value.outcome.result.markdown === 'string' ? value : null
+      return value && value.key === key && value.outcome?.result?.evidence && typeof value.outcome.result.markdown === 'string' && ['undefined', 'string'].includes(typeof value.extractorVersion) ? value : null
     } catch { return null }
   }
   saveRepresentation(value: TransportRepresentation): void {this.db.prepare('INSERT OR REPLACE INTO monitor_transport VALUES(?,?)').run(value.key,JSON.stringify(value))}
@@ -473,7 +490,7 @@ export class MonitorStore {
   exportEvidence(monitorId: string) {
     const view = this.view(monitorId, Date.now())
     const attempts = view.runs.flatMap((run) => this.attempts(run.id))
-    const observations = this.db.prepare('SELECT id,run_id,attempt_id,observed_at,client_wall_ms,markdown_sha256,transport_json,error FROM monitor_observations WHERE run_id IN (SELECT id FROM monitor_runs WHERE monitor_id=?) ORDER BY observed_at,id').all(monitorId)
+    const observations = this.db.prepare('SELECT id,run_id,attempt_id,observed_at,client_wall_ms,markdown_sha256,raw_body_sha256,extractor_version,transport_json,error FROM monitor_observations WHERE run_id IN (SELECT id FROM monitor_runs WHERE monitor_id=?) ORDER BY observed_at,id').all(monitorId)
     const assessments = this.db.prepare('SELECT id,run_id,observation_id,quality,reasons_json,fields_json,evidence_json FROM monitor_assessments WHERE run_id IN (SELECT id FROM monitor_runs WHERE monitor_id=?) ORDER BY id').all(monitorId)
     return { generatedAt: Date.now(), monitorId, revision: view.revision, baseline: view.baseline, runs: view.runs, attempts, observations, assessments, events: view.events, outbox: view.outbox }
   }
@@ -482,11 +499,26 @@ export class MonitorStore {
     if (run.state !== 'running' || !monitor?.enabled || run.epoch !== monitor.control_epoch || run.revision !== monitor.revision || (run.leaseUntil ?? 0) <= now || (run.deadlineAt ?? 0) <= now) throw new Error('expired or stale execution')
   }
   private getBaselineId(monitorId: string): string | null { return (this.db.prepare('SELECT snapshot_id FROM monitor_baselines WHERE monitor_id=?').get(monitorId) as { snapshot_id: string } | undefined)?.snapshot_id ?? null }
+  /**
+   * The raw body and extractor behind an observation's Markdown. Rows written before
+   * raw_body_sha256 existed take the hash from their stored outcome, except after a 304:
+   * that outcome is the empty 304 response, not the reused body, so the hash is unknown.
+   */
+  private observationSource(observationId: string): { rawBodySha256: string | null; extractorVersion: string | null } {
+    const row = this.db.prepare('SELECT raw_body_sha256, extractor_version, transport_json, outcome_json FROM monitor_observations WHERE id=?').get(observationId) as { raw_body_sha256: string | null; extractor_version: string | null; transport_json: string | null; outcome_json: string | null } | undefined
+    if (!row) return { rawBodySha256: null, extractorVersion: null }
+    let rawBodySha256 = row.raw_body_sha256
+    if (rawBodySha256 === null && row.outcome_json && (row.transport_json ? JSON.parse(row.transport_json) : null)?.reusedFrom === undefined) {
+      const stored = (JSON.parse(row.outcome_json) as { result?: { evidence?: { rawBodySha256?: unknown } } } | null)?.result?.evidence?.rawBodySha256
+      rawBodySha256 = typeof stored === 'string' ? stored : null
+    }
+    return { rawBodySha256, extractorVersion: row.extractor_version }
+  }
 }
 
-interface SnapshotRow { id: string; monitor_id: string; revision: number; version: number; observation_id: string; assessment_id: string; fields_json: string; created_at: number }
-interface EventRow { id: string; run_id: string; monitor_id: string; kind: 'initialized' | 'changed'; reason: MonitorEvent['reason']; from_snapshot_id: string | null; to_snapshot_id: string; changes_json: string; observed_at: number }
-function runFrom(row: RunRow): MonitorRun { let key=row.trigger_key; try {const parts=JSON.parse(key);if(Array.isArray(parts)&&parts[0]===row.monitor_id) key=parts[1]}catch{}; return { id: row.id, monitorId: row.monitor_id, revision: row.revision, triggerKey: key, state: row.state as MonitorRun['state'], epoch: row.epoch, fencingToken: row.fencing_token, attemptId: row.attempt_id, leaseUntil: row.lease_until, deadlineAt: row.deadline_at, nextAttemptAt: row.next_attempt_at, expectedBaselineId: row.expected_baseline_id, createdAt: row.created_at, endedAt: row.ended_at, quality: row.quality as MonitorRun['quality'], change: row.change_kind as MonitorRun['change'], error: row.error } }
-function snapshotFrom(row: SnapshotRow): MonitorSnapshot { return { id: row.id, monitorId: row.monitor_id, revision: row.revision, version: row.version, observationId: row.observation_id, assessmentId: row.assessment_id, fields: JSON.parse(row.fields_json) as DocumentFields, createdAt: row.created_at } }
-function eventFrom(row: EventRow): MonitorEvent { return { id: row.id, runId: row.run_id, monitorId: row.monitor_id, kind: row.kind, reason: row.reason, fromSnapshotId: row.from_snapshot_id, toSnapshotId: row.to_snapshot_id, changes: JSON.parse(row.changes_json) as DocumentDiff[], observedAt: row.observed_at } }
+interface SnapshotRow { id: string; monitor_id: string; revision: number; version: number; observation_id: string; assessment_id: string; fields_json: string; extractor_version: string | null; created_at: number }
+interface EventRow { id: string; run_id: string; monitor_id: string; kind: 'initialized' | 'changed'; reason: MonitorEvent['reason']; from_snapshot_id: string | null; to_snapshot_id: string; changes_json: string; extractor_change_json: string | null; observed_at: number }
+function runFrom(row: RunRow): MonitorRun { let key=row.trigger_key; try {const parts=JSON.parse(key);if(Array.isArray(parts)&&parts[0]===row.monitor_id) key=parts[1]}catch{}; return { id: row.id, monitorId: row.monitor_id, revision: row.revision, triggerKey: key, state: row.state as MonitorRun['state'], epoch: row.epoch, fencingToken: row.fencing_token, attemptId: row.attempt_id, leaseUntil: row.lease_until, deadlineAt: row.deadline_at, nextAttemptAt: row.next_attempt_at, expectedBaselineId: row.expected_baseline_id, createdAt: row.created_at, endedAt: row.ended_at, quality: row.quality as MonitorRun['quality'], change: row.change_kind as MonitorRun['change'], changeReason: row.change_reason as MonitorChangeReason | null, error: row.error } }
+function snapshotFrom(row: SnapshotRow): MonitorSnapshot { return { id: row.id, monitorId: row.monitor_id, revision: row.revision, version: row.version, observationId: row.observation_id, assessmentId: row.assessment_id, fields: JSON.parse(row.fields_json) as DocumentFields, extractorVersion: row.extractor_version, createdAt: row.created_at } }
+function eventFrom(row: EventRow): MonitorEvent { return { id: row.id, runId: row.run_id, monitorId: row.monitor_id, kind: row.kind, reason: row.reason, fromSnapshotId: row.from_snapshot_id, toSnapshotId: row.to_snapshot_id, ...(row.extractor_change_json ? { extractorChange: JSON.parse(row.extractor_change_json) as NonNullable<MonitorEvent['extractorChange']> } : {}), changes: JSON.parse(row.changes_json) as DocumentDiff[], observedAt: row.observed_at } }
 function diffFields(before: DocumentFields, after: DocumentFields): DocumentDiff[] { return (Object.keys({...before,...after}) as (keyof DocumentFields)[]).filter((field) => JSON.stringify(fieldComparable(before[field])) !== JSON.stringify(fieldComparable(after[field]))).map((field) => ({ field, before: before[field] ?? null, after: after[field] ?? null })) }

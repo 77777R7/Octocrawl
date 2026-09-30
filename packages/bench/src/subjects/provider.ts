@@ -1,4 +1,4 @@
-import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   createExecutionScope,
@@ -20,10 +20,13 @@ import {
   type ProviderGateVerdict,
   type RobotsTxt,
 } from '@w2l/http-core'
-import { DEFAULT_NETWORK_POLICY, type CrawlMode } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '@w2l/contracts'
 import type { SubjectAdapter } from '../subject.js'
+import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
+import type { Dispatcher } from 'undici'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -103,31 +106,39 @@ export interface ProviderResponse {
 /**
  * How to obtain the target's robots.txt. Defaults to a plain fetch under the
  * PROVIDER's UA — the identity whose permissions we are actually asking about.
+ * Null means the request failed (a network error); `{ unreachable: 'timeout' }`
+ * means the fetcher's own deadline passed. Either is a complete disallow.
  */
 export type RobotsFetcher = (
   robotsUrl: string,
   userAgent: string,
   execution?: ExecutionContext,
-) => Promise<{ text: string; status: number; contentType: string | null } | null>
+) => Promise<{ text: string; status: number; contentType: string | null } | { unreachable: 'timeout' } | null>
 
-const defaultRobotsFetcher: RobotsFetcher = async (robotsUrl, userAgent, execution = {}) => {
-  const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
-  try {
-    throwIfExecutionStopped(scope)
-    const res = await fetch(robotsUrl, {
-      headers: { 'user-agent': userAgent },
-      signal: scope.signal,
-    })
-    return {
-      text: res.status >= 400 ? '' : await res.text(),
-      status: res.status,
-      contentType: res.headers.get('content-type'),
-    }
-  } catch {
-    throwIfExecutionStopped(execution)
-    return null
-  } finally { scope.dispose() }
+/** The default fetcher; `dispatcherFor` sends it through the operator's egress routes (local mode's environment proxy). */
+export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): RobotsFetcher {
+  return async (robotsUrl, userAgent, execution = {}) => {
+    const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
+    try {
+      throwIfExecutionStopped(scope)
+      const res = await fetch(robotsUrl, {
+        headers: { 'user-agent': userAgent },
+        signal: scope.signal,
+        ...(dispatcherFor === undefined ? {} : { dispatcher: dispatcherFor(robotsUrl) }),
+      } as RequestInit)
+      return {
+        text: res.status >= 400 ? '' : await res.text(),
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+      }
+    } catch {
+      throwIfExecutionStopped(execution)
+      return scope.signal.aborted ? { unreachable: 'timeout' } : null
+    } finally { scope.dispose() }
+  }
 }
+
+const defaultRobotsFetcher: RobotsFetcher = robotsFetcherVia()
 
 interface CachedRobots {
   robotsUrl: string
@@ -135,6 +146,9 @@ interface CachedRobots {
   sha256: string | null
   /** True when the server said there are no rules (4xx) — a real full allow. */
   absent: boolean
+  /** Why robots.txt could not be fetched; set only then, and kept until `expiresAt`. */
+  unreachable?: RobotsUnreachable
+  expiresAt?: number
 }
 
 function isPlainText(contentType: string | null): boolean {
@@ -173,12 +187,12 @@ export class ProviderSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
-    try { return await this.fetchWithinBudget(url, scope) } finally { scope.dispose() }
+    try { return await this.fetchWithinBudget(url, scope, options) } finally { scope.dispose() }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, options: FetchOptions): Promise<FetchResult> {
     throwIfExecutionStopped(execution)
     const start = Date.now()
     const trace: TraceEvent[] = [
@@ -203,7 +217,7 @@ export class ProviderSubject implements SubjectAdapter {
     const ua = this.provider.declaredUserAgent!
     const cached = await this.robotsFor(url, ua, execution)
     const path = this.pathOf(url)
-    const verdict = evaluateProviderGate(this.provider, cached?.robots ?? null, path)
+    const verdict = evaluateProviderGate(this.provider, cached?.robots ?? null, path, cached?.unreachable ?? null)
     trace.push({
       at: Date.now() - start,
       lane: 'provider',
@@ -222,13 +236,32 @@ export class ProviderSubject implements SubjectAdapter {
       matchedUserAgentGroup: verdict.matchedUserAgentGroup,
       appliedRules: verdict.appliedRules,
       decision:
-        cached === null || cached.robots === null
-          ? 'no_robots'
-          : verdict.allowed
-            ? 'allowed'
-            : 'disallowed',
+        cached?.unreachable !== undefined
+          ? 'disallowed'
+          : cached === null || cached.robots === null
+            ? 'no_robots'
+            : verdict.allowed
+              ? 'allowed'
+              : 'disallowed',
       skippedFetch: !verdict.allowed,
+      ...(cached?.unreachable === undefined ? {} : { unreachable: cached.unreachable }),
     }
+    // As on the other lanes: a result without a compliance record (a vendor
+    // failure) still says which robots.txt decision it was fetched under.
+    trace.push({
+      at: Date.now() - start,
+      lane: 'provider',
+      event: 'robots_checked',
+      detail: {
+        decision: robotsDecision.decision,
+        robotsUrl: robotsDecision.robotsUrl,
+        robotsSha256: robotsDecision.robotsSha256,
+        matchedGroup: robotsDecision.matchedUserAgentGroup,
+        ruleCount: robotsDecision.appliedRules.length,
+        crawlDelayMs: robotsDecision.crawlDelayMs ?? null,
+        ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
+      },
+    })
 
     if (!verdict.allowed) {
       return this.denied(url, start, trace, verdict, robotsDecision)
@@ -241,8 +274,10 @@ export class ProviderSubject implements SubjectAdapter {
     this.lastRequestAtMsByHost.set(host, Date.now())
 
     let res: ProviderResponse
+    let fetchedAt: string
     try {
       res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal), execution.signal)
+      fetchedAt = new Date().toISOString()
       if (res.status === 429 || res.status === 503) {
         const delay = parseRetryAfterMs(res.headers['retry-after'] ?? null)
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)
@@ -259,8 +294,9 @@ export class ProviderSubject implements SubjectAdapter {
         requestedUrl: url,
         status: 'failed',
         // The provider broke, not the target. Reporting this as http_error
-        // would blame the publisher for our vendor's outage.
-        failureReason: execution.signal?.aborted ? 'timeout' : 'provider_error',
+        // would blame the publisher for our vendor's outage. A target name
+        // the vendor's browser could not resolve is a DNS fact, not a fault.
+        failureReason: execution.signal?.aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',
@@ -371,6 +407,7 @@ export class ProviderSubject implements SubjectAdapter {
         contentType: res.headers['content-type'] ?? null,
         rawBodySha256: sha256Hex(new TextEncoder().encode(res.body)),
         artifacts: [],
+        fetchedAt,
       },
       usage: {
         wallMs,
@@ -392,6 +429,10 @@ export class ProviderSubject implements SubjectAdapter {
       header: (name) => res.headers[name.toLowerCase()] ?? null,
       body: res.body,
     })
+    // An error status is never content, but its page is what the origin
+    // said: the failed or blocked result keeps it as evidence.
+    const errorPage = errorPageEvidence(res.status, res.headers['content-type'] ?? null, res.body, res.finalUrl, options)
+    const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
     const blocked = (v: NonNullable<typeof gate>): FetchResult => {
       trace.push({
         at: wallMs,
@@ -413,7 +454,7 @@ export class ProviderSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'provider',
         escalations: next === null ? [] : [{ ...next, improved: null }],
-        markdown: null,
+        ...errorPageFields,
         // A captcha or login wall with an open live-view door is a handoff
         // point: the ladder pauses here and asks a human, exactly because
         // the refused capabilities (auto-solving) are not on the table. A
@@ -436,11 +477,23 @@ export class ProviderSubject implements SubjectAdapter {
 
     const nonOk = res.status !== 200 && res.status !== 0
     if (nonOk && gate !== null) return blocked(gate)
-    if (nonOk) {
+    if (nonOk && !isSuccessStatus(res.status)) {
       return {
         ...base,
         status: 'failed',
         failureReason: 'http_error',
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'provider',
+        escalations: [],
+        ...errorPageFields,
+      }
+    }
+    if (isNoContentStatus(res.status)) {
+      return {
+        ...base,
+        status: 'empty_verified',
+        failureReason: null,
         blockReason: null,
         budgetExceeded: null,
         lane: 'provider',
@@ -461,12 +514,18 @@ export class ProviderSubject implements SubjectAdapter {
         confidence: extracted.confidence,
         escalate: extracted.escalate,
         linkCount: links.length,
+        ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
       },
     })
 
+    // No main content: the whole page stays on the failed result as evidence,
+    // never content. onlyMainContent: false asks for the whole page, so there
+    // it is the answer.
+    let wholePage: string | null = null
     if (extracted.escalate) {
       if (gate !== null) return blocked(gate)
-      return {
+      wholePage = wholePageMarkdown(res.body, res.finalUrl)
+      if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
         failureReason: 'empty_unverified',
@@ -474,7 +533,8 @@ export class ProviderSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'provider',
         escalations: [],
-        markdown: null,
+        markdown: wholePage,
+        ...(wholePage === null ? {} : { links }),
       }
     }
 
@@ -486,7 +546,10 @@ export class ProviderSubject implements SubjectAdapter {
     })
     if (decisive !== null) return blocked(decisive)
 
-    const markdown = htmlToMarkdown(extracted.mainHtml)
+    // onlyMainContent: false emits the whole page through the same converter and base URL.
+    const markdown = options.onlyMainContent === false
+      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+      : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
     // RoutingHistory all follow it): a fetch whose wire identity was
@@ -518,6 +581,7 @@ export class ProviderSubject implements SubjectAdapter {
       escalations: [],
       markdown,
       links,
+      metadata: extracted.metadata,
       document: {
         title: extracted.title,
         pageType: extracted.pageType,
@@ -527,6 +591,7 @@ export class ProviderSubject implements SubjectAdapter {
         adapter: extracted.adapter,
         entities: extracted.entities,
         adapterValidation: extracted.adapterValidation,
+        labelledValues: extracted.labelledValues,
       },
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
     }
@@ -636,14 +701,19 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     const cached = this.robotsByOrigin.get(origin)
-    if (cached) return cached
+    if (cached && (cached.expiresAt === undefined || Date.now() < cached.expiresAt)) return cached
 
     const res = await raceWithSignal(this.robotsFetcher(robotsUrl, userAgent, execution), execution.signal)
     let entry: CachedRobots
-    if (res === null) {
-      // Fetch failure. NOT the same as "no robots.txt": absent stays false, so
-      // a network error can never be read back as the publisher's permission.
-      entry = { robotsUrl, robots: null, sha256: null, absent: false }
+    if (res === null || 'unreachable' in res || res.status >= 500) {
+      // Fetch failure or a 5xx. NOT the same as "no robots.txt": it is a
+      // complete disallow (RFC 9309 §2.3.1.4), so a network error can never
+      // be read back as the publisher's permission. Asked again after the TTL.
+      entry = {
+        robotsUrl, robots: null, sha256: null, absent: false,
+        unreachable: res === null ? 'network_error' : 'unreachable' in res ? res.unreachable : 'server_error',
+        expiresAt: Date.now() + ROBOTS_UNREACHABLE_TTL_MS,
+      }
     } else if (res.status >= 400) {
       entry = { robotsUrl, robots: null, sha256: null, absent: true }
     } else if (!isPlainText(res.contentType)) {

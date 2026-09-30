@@ -28,6 +28,12 @@ public URL or WorkOS login on this local path. Keep this checkout in place
 while the LaunchAgent points at it. On a non-macOS system, run
 `npm run local:mcp` in one terminal instead.
 
+If this Mac reaches the web through a proxy, add `HTTPS_PROXY=...`,
+`HTTP_PROXY=...` and `NO_PROXY=...` lines to `.w2l/local-mcp.env` (the
+LaunchAgent does not inherit your shell) and restart the service. Captures
+then follow them as described in the README; `W2L_PROXY=off` ignores them.
+The hosted process below never uses these variables.
+
 For a signed HTTPS receiver on the **same Mac**, install the separate
 LaunchAgent and explicitly allow the local delivery worker to reach its
 verified loopback certificate:
@@ -130,6 +136,32 @@ the browser with an Amazon.sg-only preference state and a reviewed HTTPS
 subresource host list. `scrape_product` and `batch_products` use the fixed
 schema without caller-supplied model prompts. One active batch, at most 1000
 distinct products, and a 90-minute run budget bound the initial host.
+
+## Cancelling a call
+
+Both HTTP services keep no MCP session: each POST is handled on its own. A
+client stops a tool call in flight in either of two ways, and both stop the
+API requests the call made (a `scrape` stops on the server; a `wait_batch`
+stops waiting, and the batch goes on):
+
+- It sends `notifications/cancelled` with the call's request id, as an MCP
+  client does when its user stops a call or its own request timeout runs
+  out. Request ids are chosen by each client and repeat across clients, so
+  at initialize each client gets an `Mcp-Session-Id`, used only to tell its
+  calls from another client's: a cancellation reaches only a call made with
+  the same session id. On the hosted service it must also come with the same
+  bearer token (a refreshed token counts as another one), and a client that
+  sends no session id is matched by its token alone. On the local service a
+  client that sends no session id cannot cancel by notification. A
+  cancellation that arrives before the call has started is ignored, as MCP
+  allows.
+- It closes the call's HTTP request before the result. The service could not
+  deliver that result later, so it stops the call.
+
+After a `notifications/cancelled`, the call's own request is answered with
+the JSON-RPC error `Request cancelled` (code 0), as the MCP Python SDK
+answers a cancelled request; the client ignores it. Over stdio (`npm run mcp`) the MCP SDK
+delivers `notifications/cancelled` to the call itself.
 
 ## Render pilot deployment
 

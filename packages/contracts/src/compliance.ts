@@ -30,6 +30,7 @@
 
 import type { Lane } from './status.js'
 import type { AccessFact } from './access.js'
+import type { NetworkPolicy } from './policy.js'
 
 // ---------------------------------------------------------------------------
 // Modes
@@ -83,8 +84,94 @@ export interface ModeIdentity {
  * sec-ch-ua — that contradiction is the inconsistency the probe showed gets a
  * request blocked, and it is exactly the lie the signed record exposes.
  */
-export const RESEARCH_USER_AGENT =
-  'Mozilla/5.0 (compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page)'
+const RESEARCH_UA_COMMENT = 'compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page'
+export const RESEARCH_USER_AGENT = `Mozilla/5.0 (${RESEARCH_UA_COMMENT})`
+
+/** Longest operator contact (`W2L_CONTACT`) the research User-Agent declares. */
+export const MAX_CONTACT_LENGTH = 200
+
+/**
+ * Why a contact cannot go into the research User-Agent, or null when it can.
+ * It becomes part of the User-Agent comment, so it is printable ASCII without
+ * parentheses or backslashes, and never names a browser product: the
+ * research identity is a declared bot.
+ */
+function contactIssue(contact: string): string | null {
+  if (contact.length === 0 || contact.length > MAX_CONTACT_LENGTH) return `must be 1 to ${MAX_CONTACT_LENGTH} characters`
+  if (!/^[\x20-\x7e]+$/.test(contact)) return 'must be printable ASCII'
+  if (/[()\\]/.test(contact)) return 'must not contain parentheses or backslashes, which would end the User-Agent comment'
+  if (/(?:Chrome|Chromium)\/|HeadlessChrome/.test(contact)) return 'must not name a browser product: research mode declares a bot'
+  return null
+}
+
+/** The name research mode declares to SEC.gov, before the contact, in SEC's `<Company or name> <email>` format. */
+export const SEC_DECLARED_NAME = 'W2L Research'
+
+/** The robots.txt product token of both research User-Agent formats (RFC 9309 §2.2.1). */
+export const RESEARCH_PRODUCT_TOKEN = 'w2l-research'
+
+/**
+ * Whether a host is sec.gov or one of its subdomains. SEC's fair-access
+ * policy prescribes the declared User-Agent `<Company or name> <email>`, and
+ * SEC.gov answers 403 to the research format even when it declares a contact.
+ */
+export function isSecHost(host: string): boolean {
+  const name = host.toLowerCase().replace(/\.$/, '')
+  return name === 'sec.gov' || name.endsWith('.sec.gov')
+}
+
+/**
+ * The research-mode User-Agent. With the operator's contact (`W2L_CONTACT`,
+ * such as a name and email address or a URL), it ends `; contact: <contact>)`:
+ * publishers such as the SEC ask automated clients to declare one. To an SEC
+ * host (`host`, see isSecHost) it is SEC's own format instead,
+ * `W2L Research <contact>`.
+ */
+export function researchUserAgent(contact: string | null = null, host: string | null = null): string {
+  if (contact === null) return RESEARCH_USER_AGENT
+  const issue = contactIssue(contact)
+  if (issue !== null) throw new Error(`W2L_CONTACT ${issue}.`)
+  if (host !== null && isSecHost(host)) return `${SEC_DECLARED_NAME} ${contact}`
+  return `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: ${contact})`
+}
+
+/** The contact a research-mode User-Agent declares, in either format (see researchUserAgent); null for any other User-Agent. */
+export function declaredContact(userAgent: string): string | null {
+  const prefix = `Mozilla/5.0 (${RESEARCH_UA_COMMENT}; contact: `
+  if (userAgent.startsWith(prefix) && userAgent.endsWith(')')) return userAgent.slice(prefix.length, -1)
+  const sec = userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? userAgent.slice(SEC_DECLARED_NAME.length + 1) : null
+  return sec !== null && contactIssue(sec) === null ? sec : null
+}
+
+/** Whether a User-Agent is one research mode declares, in either format. */
+export function isResearchUserAgent(userAgent: string): boolean {
+  return /\bw2l-research\b/.test(userAgent) || userAgent.startsWith(`${SEC_DECLARED_NAME} `)
+}
+
+/**
+ * The text robots.txt `User-agent` lines are matched against for a
+ * User-Agent W2L sends. SEC's format names no product token, so the research
+ * token is added: a group for w2l-research governs research requests to
+ * SEC.gov as it does on every other host.
+ */
+export function robotsAgent(userAgent: string): string {
+  return userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
+}
+
+/** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
+export function operatorContact(env: Readonly<Record<string, string | undefined>>): string | null {
+  const contact = (env['W2L_CONTACT'] ?? '').trim()
+  if (contact === '') return null
+  const issue = contactIssue(contact)
+  if (issue !== null) throw new Error(`W2L_CONTACT ${issue}.`)
+  return contact
+}
+
+/** An operator policy whose research-mode requests declare `W2L_CONTACT`, when it is set. */
+export function withOperatorContact(policy: NetworkPolicy, env: Readonly<Record<string, string | undefined>>): NetworkPolicy {
+  const contact = operatorContact(env)
+  return contact === null ? policy : { ...policy, contact }
+}
 
 /**
  * Floor used when no real browser version is known. Subjects driving real
@@ -134,12 +221,14 @@ export const BROWSER_FINGERPRINT = {
 /**
  * The identity for a mode. `standard`, `authed`, and `proxy` share one
  * consistent-browser identity (they differ only in execution lane — session,
- * egress); `research` is the declared bot with no client hints.
+ * egress); `research` is the declared bot with no client hints, declaring the
+ * operator's `contact` when there is one, in the format the page's `host`
+ * asks for (see researchUserAgent).
  */
-export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR): ModeIdentity {
+export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null, host: string | null = null): ModeIdentity {
   switch (mode) {
     case 'research':
-      return { mode, userAgent: RESEARCH_USER_AGENT, clientHints: {}, respectsRobots: true, lane: 'browser_local' }
+      return { mode, userAgent: researchUserAgent(contact, host), clientHints: {}, respectsRobots: true, lane: 'browser_local' }
     case 'standard':
       return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_local' }
     case 'authed':
@@ -160,6 +249,9 @@ export const MODE_IDENTITIES: Readonly<Record<CrawlMode, ModeIdentity>> = {
 // ---------------------------------------------------------------------------
 // Compliance facts
 // ---------------------------------------------------------------------------
+
+/** Why robots.txt could not be fetched: a 5xx, a network failure, or the lookup's own deadline. */
+export type RobotsUnreachable = 'server_error' | 'network_error' | 'timeout'
 
 /**
  * The outcome of consulting robots.txt for a single target URL. One record per
@@ -183,6 +275,14 @@ export interface RobotsDecision {
   /** When disallowed, whether the fetch was skipped because of it. */
   skippedFetch: boolean
   crawlDelayMs?: number | null
+  /**
+   * Set only when robots.txt could not be fetched. RFC 9309 §2.3.1.4 then
+   * requires assuming a complete disallow: `decision` is `disallowed` with no
+   * rules and no robots.txt hash, and this reason tells it apart from a
+   * disallow the publisher wrote. A 4xx is not unreachable: it means no
+   * robots.txt, and `decision` is `no_robots`.
+   */
+  unreachable?: RobotsUnreachable
 }
 
 /**

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -56,6 +57,24 @@ describe('Monitor execution and commit protocol', () => {
     expect(view.baseline?.version).toBe(1)
     expect(view.events).toHaveLength(1)
     expect(JSON.parse((db.prepare('SELECT body FROM monitor_transport').get() as { body: string }).body).outcome.result.markdown).toContain('10.00')
+  })
+  it('does not cache or revalidate a 200 whose result failed, though it keeps Markdown as evidence', async () => {
+    const dbPath = path()
+    const store = openStore(dbPath, { leaseMs: 5_000, attemptTimeoutMs: 30_000 })
+    const config = revision(undefined, undefined, true)
+    const failed = outcome()
+    failed.result = { ...failed.result, status: 'failed', failureReason: 'empty_unverified', markdown: '# Access check' }
+    await runConfiguredMonitor(store, config, async () => failed, 'failed-200')
+    const db = new Database(dbPath); cleanups.push(() => db.close())
+    expect(db.prepare('SELECT COUNT(*) AS count FROM monitor_transport').get()).toEqual({ count: 0 })
+    // A failed representation cached before this rule is not revalidated either.
+    await runConfiguredMonitor(store, config, async () => outcome(), 'content')
+    db.prepare('UPDATE monitor_transport SET body=?').run(JSON.stringify({ ...JSON.parse((db.prepare('SELECT body FROM monitor_transport').get() as { body: string }).body), outcome: failed, bodySha256: createHash('sha256').update('# Access check').digest('hex') }))
+    const view = await runConfiguredMonitor(store, config, async options => {
+      expect(options.etag).toBeUndefined()
+      return outcome()
+    }, 'after-failed-cache')
+    expect(view.runs.find(run => run.triggerKey === 'after-failed-cache')).toMatchObject({ state: 'completed' })
   })
   it('makes redundant resume idempotent while an attempt owns the monitor', () => {
     const store = openStore()

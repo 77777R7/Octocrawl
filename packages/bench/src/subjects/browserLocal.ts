@@ -1,5 +1,5 @@
-import { estimateTokens, type ExecutionContext, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
+import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -18,15 +18,20 @@ import {
   type ComplianceRecord,
   type ComplianceSentHeader,
 } from '@w2l/http-core'
-import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { chromium, type Browser, type BrowserContext, type Download, type Page, type Response } from 'playwright'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
+import type { FileStore } from '../fileStore.js'
+import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
-import { waitForRenderedStability } from '../browserSettle.js'
+import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
+import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
+import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
+import { MainFrameDocuments, reported, type MainFrameEntry } from './browserDocuments.js'
 import {
   BROWSER_FINGERPRINT,
   CHROME_MAJOR_FLOOR,
@@ -38,6 +43,37 @@ import {
   type CrawlMode,
   type HonestyVerdict,
 } from '@w2l/contracts'
+
+/**
+ * Time kept free before the caller's deadline when a waitFor wait would run
+ * into it, so the page can still be captured and extracted.
+ */
+const CAPTURE_RESERVE_MS = 1_000
+
+/**
+ * Reads of a page that loads new documents while W2L reads it, before W2L
+ * gives up pairing what it read with one of them: such a page (a client-side
+ * redirect loop, a meta refresh to itself) fails with `redirect_loop`.
+ */
+const CAPTURE_ATTEMPTS = 3
+
+/** Time a page's close may take before W2L closes its context instead. */
+const PAGE_CLOSE_MS = 2_000
+
+/**
+ * Close a page, waiting `timeoutMs` at most: Chromium can leave the close of
+ * a page that keeps navigating (a refresh loop) unanswered, and a fetch that
+ * waited for it would never end, nor would the next one to its origin.
+ * Closing the page's context, which follows, ends it. True when it closed in
+ * time.
+ */
+export async function closePage(page: Pick<Page, 'close'>, timeoutMs = PAGE_CLOSE_MS): Promise<boolean> {
+  const closing = page.close().then(() => true, () => true)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const closed = await Promise.race([closing, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })])
+  clearTimeout(timer)
+  return closed
+}
 
 /**
  * Browser-local subject: the escalation target the http lane flags into.
@@ -106,6 +142,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * It is never written to a record, a trace, or a log line.
    */
   private readonly accessConfig: AccessConfigInput | null
+  /** The operator's environment proxy for every context this subject opens (local mode). */
+  private readonly envProxy: ReturnType<typeof browserProxySettings>
 
   constructor(
     private readonly mode: CrawlMode = 'standard',
@@ -118,7 +156,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserAllowedHosts?: readonly string[],
     /** In-memory witness for an explicitly authorized evaluation. Never a persistence path. */
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
-    robotsFailClosed = false,
+    /** Where files (PDF, CSV, ...) the browser downloads or displays are saved as received; without one they are read but not saved. */
+    private readonly fileStore: FileStore | null = null,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -130,9 +169,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.chain = new ComplianceChain(crypto.randomUUID(), mode)
     this.access = normalizeAccessConfig(access)
     this.accessConfig = access ?? null
-    this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
+    const policy = networkPolicy ?? defaultNetworkPolicy()
+    // A user's own proxy and hosted host pinning each fix the route already;
+    // everywhere else the browser follows the operator's environment proxy.
+    this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
+    this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, undefined, robotsFailClosed)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy)
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -143,7 +186,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
@@ -173,7 +216,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options)
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -192,7 +235,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -213,7 +256,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // version we are not running is an inconsistency, not a feature.
       const version = browser.version()
       const major = Number(version.split('.')[0] ?? CHROME_MAJOR_FLOOR)
-      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR)
+      // Research mode declares its contact in the format the page's host asks for (researchUserAgent).
+      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname)
       assertIdentityBundle(
         identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR),
       )
@@ -232,9 +276,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
         detail: {
           decision: robotsDecision.decision,
           robotsUrl: robotsDecision.robotsUrl,
+          robotsSha256: robotsDecision.robotsSha256,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
+          ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }),
         },
       })
 
@@ -263,7 +309,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           at: wallMs,
           lane: 'browser_local',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
         return {
           requestedUrl: url,
@@ -332,7 +378,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
                   : { password: this.accessConfig.proxy.password }),
               },
             }
-          : {}),
+          : this.envProxy === null ? {} : { proxy: this.envProxy.proxy }),
       })
       void pendingContext.then(created => { if (signal?.aborted && created !== this.managedContext) void created.close().catch(() => {}) }, () => {})
       context = await raceWithSignal(pendingContext, signal)
@@ -386,6 +432,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
       void pendingPage.then(created => { if (signal?.aborted) void created.close().catch(() => {}) }, () => {})
       page = await raceWithSignal(pendingPage, signal)
       throwIfExecutionStopped(execution)
+      // A file (PDF, CSV, ZIP, ...) starts a download instead of a page: the
+      // navigation fails with "Download is starting". Keep the download and
+      // the navigation responses, whose headers and request say what came.
+      const seen: { download: Download | null; navigations: Response[] } = { download: null, navigations: [] }
+      page.on('download', download => { seen.download ??= download })
+      page.on('response', navigation => { if (navigation.request().isNavigationRequest()) seen.navigations.push(navigation) })
+      // The document the main frame shows, which a script, a meta refresh or
+      // the history API can change after the navigation W2L started answered.
+      const documents = new MainFrameDocuments(page)
+      const shownPage = page
+      // Documents loaded when the last wait for stability began: one loaded since has not settled.
+      let settledLoads = 0
+      const settle = async (maxMs: number) => {
+        settledLoads = documents.loads
+        await raceWithSignal(waitForRenderedStability(shownPage, { maxMs }), signal)
+      }
 
       // Rate-limit facts are captured at actual navigation, after setup.
       let previousRequestAtMs: number | null = null
@@ -415,8 +477,20 @@ export class BrowserLocalSubject implements SubjectAdapter {
         compliant &&= observedDelayMs === null || observedDelayMs >= requiredDelayMs
         this.lastRequestAtMsByHost.set(host, navigationAt)
         attemptCount++
-        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount } })
-        response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: remainingTimeout(execution, 20_000) })
+        // Navigation waits 20 s at most, or until the deadline when the caller chose it (its timeout).
+        const navigationTimeoutMs = remainingTimeout(execution, options.timeout !== undefined && execution.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : 20_000)
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount, timeoutMs: navigationTimeoutMs } })
+        const envProxy = proxyFor(navigationUrl, this.networkPolicy)
+        if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
+        try {
+          documents.restart()
+          response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('Download is starting')) throw error
+          seen.download ??= await raceWithSignal(page.waitForEvent('download', { timeout: remainingTimeout(execution, 5_000) }), signal)
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'download', detail: { url: seen.download.url(), suggestedFilename: seen.download.suggestedFilename() } })
+          break
+        }
         const status = response?.status() ?? 0
         if (status === 429 || status === 503) {
           const delay = parseRetryAfterMs(response?.headers()['retry-after'] ?? null)
@@ -434,7 +508,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           if (execution.deadlineAt !== undefined && retryAt >= execution.deadlineAt) {
             trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'retry_deferred', detail: { retryAt, delayMs, status } })
             const deferred = this.denied(url, start, trace, new Error('aborted'))
-            return { ...deferred, retryAt, evidence: { ...deferred.evidence, httpStatus: status, finalUrl: page.url() } }
+            return { ...deferred, retryAt, evidence: { ...deferred.evidence, httpStatus: status, finalUrl: response?.url() ?? page.url() } }
           }
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'retry', detail: { attempt: attemptCount, status, delayMs } })
           statusRetries++
@@ -445,7 +519,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           continue
         }
-        await raceWithSignal(waitForRenderedStability(page, { maxMs: remainingTimeout(execution, 1_500) }), signal)
+        await settle(remainingTimeout(execution, 1_500))
         throwIfExecutionStopped(execution)
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({
@@ -471,9 +545,63 @@ export class BrowserLocalSubject implements SubjectAdapter {
         break
       }
       throwIfExecutionStopped(execution)
-      const status = response?.status() ?? 0
-      const finalUrl = page.url()
+      // A file the page displays is the document it shows now, not necessarily the one W2L navigated to.
+      const shownFirst = documents.shown()
+      const file = await this.fileAnswer(url, start, trace, execution, options, seen, shownFirst === null ? response : shownFirst.response, documents, attemptCount, (finalUrl, sentHeaders) => this.chain.append({
+        recordId: crypto.randomUUID(),
+        mode: this.mode,
+        requestedUrl: url,
+        finalUrl,
+        requestedAt: new Date(start).toISOString(),
+        robots: robotsDecision,
+        sentHeaders: { headers: sentHeaders },
+        rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
+        access: this.access,
+      }), identity)
+      if (file !== null) return file
+      // waitFor: the caller's extra wait after load and stability. It counts
+      // toward the scrape's deadline; when the deadline would end it, the
+      // wait stops early enough to capture the page as it is then, and that
+      // capture is partial, never success.
+      const waitFor = options.waitFor ?? 0
+      let waitCutShort = false
+      if (waitFor > 0) {
+        const waitMs = execution.deadlineAt === undefined ? waitFor : Math.min(waitFor, Math.max(0, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now()))
+        waitCutShort = waitMs < waitFor
+        const waitStarted = performance.now()
+        if (waitMs > 0) await abortableSleep(waitMs, signal)
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'wait_for', detail: { requestedMs: waitFor, waitedMs: Math.round(performance.now() - waitStarted), ...(waitCutShort ? { cutShortBy: 'timeout' } : {}) } })
+        throwIfExecutionStopped(execution)
+      }
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
+      // The page as it is now, read while no new document loads, so that what
+      // is read and the document's response belong together. A document
+      // loaded since the last wait for stability (a script or a meta refresh
+      // moved the page on) settles first, within the capture reserve.
+      let body: string | null = null
+      let shown: MainFrameEntry | null = null
+      let pageUrl = page.url()
+      let steady = false
+      for (let attempt = 1; attempt <= CAPTURE_ATTEMPTS && !steady; attempt++) {
+        if (documents.loads !== settledLoads) {
+          const settleMs = execution.deadlineAt === undefined ? 1_500 : Math.min(1_500, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
+          if (settleMs > 0) await settle(settleMs)
+          throwIfExecutionStopped(execution)
+        }
+        const loads = documents.loads
+        try {
+          body = await raceWithSignal(page.content(), signal)
+        } catch (error) {
+          if (!isNavigationError(error)) throw error
+          continue
+        }
+        shown = documents.shown()
+        pageUrl = page.url()
+        steady = documents.loads === loads
+      }
+      // The document's own response, and the URL it answered (see reported);
+      // with nothing committed since the navigation, the navigation's answer.
+      const { finalUrl, response: documentResponse } = reported(shown ?? { url: pageUrl, response, kind: 'document' })
       if (finalUrl !== url) {
         try {
           await assertSafeUrl(finalUrl, this.networkPolicy)
@@ -481,20 +609,34 @@ export class BrowserLocalSubject implements SubjectAdapter {
           return this.denied(url, start, trace, err)
         }
       }
-      const body = await page.content()
+      if (!steady || body === null) return this.keptNavigating(url, start, trace, documents, finalUrl, attemptCount)
+      // Status, headers and verdict are the document's own. A document that
+      // came without a response (status 0 here) is judged by its content.
+      const status = documentResponse?.status() ?? 0
+      const documentHeaders = documentResponse?.headers() ?? {}
+      // Links and Markdown resolve against the page's URL, the document's base.
+      if (pageUrl !== finalUrl && documentResponse !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'same_document_navigation', detail: { from: finalUrl, to: pageUrl } })
+      const fetchedAt = new Date().toISOString()
       if (Buffer.byteLength(body) > this.networkPolicy.maxDecompressedBytes) {
         return this.denied(url, start, trace, new BodyTooLargeError(this.networkPolicy.maxDecompressedBytes))
       }
       const rawBodySha256 = sha256Utf8(body)
       this.onRenderedHtml?.(body, rawBodySha256)
       const rawArtifacts = await captureRawHtml(body, rawBodySha256)
+      // The layout the page's CSS gives, as markers on a copy of the body that
+      // only extraction and Markdown see; the hash, the raw artifact and the
+      // rendered-HTML witness above keep the page as rendered. Without a copy
+      // (see the trace's layout event), the body converts by its tags.
+      const layout = await captureLayout(page, body, execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt - CAPTURE_RESERVE_MS })
+      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'layout', detail: layout.detail })
+      const converted = layout.html ?? body
       const wallMs = Date.now() - start
       const browserMs = wallMs
       trace.push({ at: wallMs, lane: 'browser_local', event: 'rendered', detail: { status, attemptCount } })
 
       // What actually went on the wire, as Playwright saw it — the fact the
       // honesty check compares against, and the record signs.
-      const sentHeaders: ComplianceSentHeader[] = Object.entries(response?.request().headers() ?? {})
+      const sentHeaders: ComplianceSentHeader[] = Object.entries((documentResponse ?? response)?.request().headers() ?? {})
         .map(([name, value]) => ({ name: name.toLowerCase(), value }))
         .sort((a, b) => a.name.localeCompare(b.name))
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
@@ -528,19 +670,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
         access: this.access,
       })
 
+      const navigation = documents.chain(url, finalUrl)
       const base = {
         requestedUrl: url,
-        ...([429, 503].includes(status) ? { retryAt: Date.now() + (parseRetryAfterMs(response?.headers()['retry-after'] ?? null) ?? 250) } : {}),
+        ...([429, 503].includes(status) ? { retryAt: Date.now() + (parseRetryAfterMs(documentHeaders['retry-after'] ?? null) ?? 250) } : {}),
         truncated: false,
         truncatedAt: null,
         compliance: record,
         evidence: {
           finalUrl,
-          httpStatus: status,
-          redirectChain: finalUrl !== url ? [url, finalUrl] : [],
-          contentType: 'text/html; rendered',
+          httpStatus: documentResponse?.status() ?? null,
+          redirectChain: navigation.chain,
+          redirectChainComplete: navigation.complete,
+          contentType: documentHeaders['content-type'] ?? null,
           rawBodySha256,
           artifacts: rawArtifacts,
+          fetchedAt,
+          ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },
         usage: {
           wallMs,
@@ -564,9 +710,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // evidence so a 200 interstitial with extractable prose is not success.
       const gate = classifyGate({
         status,
-        header: (name) => response?.headers()[name.toLowerCase()] ?? null,
+        header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
       })
+      // An error status is never content, but its page is what the server
+      // said: the failed or blocked result keeps it as evidence.
+      const errorPage = errorPageEvidence(status, documentHeaders['content-type'] ?? null, converted, pageUrl, options)
+      const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
       const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
         const next = escalationForBlock(verdict.reason, 'browser_local')
         trace.push({
@@ -583,7 +733,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: next === null ? [] : [{ ...next, improved: null }],
-          markdown: null,
+          ...errorPageFields,
         }
       }
 
@@ -591,7 +741,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (nonOk && gate !== null) {
         return blocked(gate)
       }
-      if (nonOk) {
+      if (nonOk && !isSuccessStatus(status)) {
         return {
           ...base,
           status: 'failed',
@@ -600,12 +750,24 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
+          ...errorPageFields,
+        }
+      }
+      if (isNoContentStatus(status)) {
+        return {
+          ...base,
+          status: 'empty_verified',
+          failureReason: null,
+          blockReason: null,
+          budgetExceeded: null,
+          lane: 'browser_local',
+          escalations: [],
           markdown: null,
         }
       }
 
-      const extracted = extractTf.extract(body, { url: finalUrl })
-      const links = collectLinks(body, finalUrl)
+      const extracted = extractTf.extract(converted, { url: pageUrl })
+      const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -616,35 +778,49 @@ export class BrowserLocalSubject implements SubjectAdapter {
           confidence: extracted.confidence,
           escalate: extracted.escalate,
           linkCount: links.length,
+          ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
         },
       })
 
+      // No main content: the whole rendered page stays on the failed result
+      // as evidence, never content. onlyMainContent: false asks for the whole
+      // page, not the main content, so there it is the answer.
+      let wholePage: string | null = null
       if (extracted.escalate) {
         if (gate !== null) return blocked(gate)
-        return {
+        wholePage = wholePageMarkdown(converted, pageUrl)
+        // A page captured before its wait ended is not proven empty: the
+        // deadline, not the page, is the reason there is no content.
+        if (options.onlyMainContent !== false || wholePage === null) return {
           ...base,
           status: 'failed',
-          failureReason: 'empty_unverified',
+          failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
           blockReason: null,
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
-          markdown: null,
+          markdown: wholePage,
+          ...(wholePage === null ? {} : { links }),
+          ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
       }
 
       const decisive = classifyGate({
         status,
-        header: (name) => response?.headers()[name.toLowerCase()] ?? null,
+        header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
         contentful: true,
       })
       if (decisive !== null) return blocked(decisive)
 
-      const markdown = htmlToMarkdown(extracted.mainHtml)
+      // onlyMainContent: false emits the whole rendered page (header,
+      // navigation and footer kept) through the same converter and base URL.
+      const markdown = options.onlyMainContent === false
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl })
+        : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
-        status: 'success',
+        status: waitCutShort ? 'partial' : 'success',
         failureReason: null,
         blockReason: null,
         budgetExceeded: null,
@@ -652,6 +828,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         escalations: [],
         markdown,
         links,
+        metadata: extracted.metadata,
         document: {
           title: extracted.title,
           pageType: extracted.pageType,
@@ -661,15 +838,21 @@ export class BrowserLocalSubject implements SubjectAdapter {
           adapter: extracted.adapter,
           entities: extracted.entities,
           adapterValidation: extracted.adapterValidation,
+          labelledValues: extracted.labelledValues,
         },
-        usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
+        usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
       }
     } catch (err) {
       const wallMs = Date.now() - start
       // Playwright surfaces deadline misses as TimeoutError; map them to the
-      // contract's timeout reason so the timeout fixtures match, and leave
-      // every other navigation failure as connection_error.
-      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout' : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied' : 'connection_error'
+      // contract's timeout reason so the timeout fixtures match. Chromium
+      // stops following redirects after 20, a loop included. Every other
+      // navigation failure is a connection_error.
+      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
+        : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
+          : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
+            : err instanceof Error && err.message.includes('net::ERR_TOO_MANY_REDIRECTS') ? 'redirect_limit'
+              : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -710,8 +893,157 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      await page?.close().catch(() => {})
+      if (page !== undefined) await closePage(page)
       if (context !== this.managedContext) await context?.close().catch(() => {})
+    }
+  }
+
+  /**
+   * The answer for a file (see fileResult.ts) the navigation downloaded, or
+   * displays in place of a page (JSON, plain text, a PDF in a headed
+   * browser): the bytes the browser received, saved as received. Null when
+   * the navigation is a web page after all. `response` answered the document
+   * the page shows.
+   */
+  private async fileAnswer(
+    url: string,
+    start: number,
+    trace: TraceEvent[],
+    execution: ExecutionContext,
+    options: FetchOptions,
+    seen: { download: Download | null; navigations: readonly Response[] },
+    response: Response | null,
+    documents: MainFrameDocuments,
+    attemptCount: number,
+    mint: (finalUrl: string, sentHeaders: ComplianceSentHeader[]) => ComplianceRecord,
+    identity: Parameters<typeof checkIdentityHonesty>[0],
+  ): Promise<FetchResult | null> {
+    const { download } = seen
+    const navigation = download === null ? response : [...seen.navigations].reverse().find(item => item.url() === download.url()) ?? null
+    const status = navigation?.status() ?? null
+    const headers = navigation?.headers() ?? {}
+    const contentType = headers['content-type'] ?? null
+    const declared = classifyContentType(contentType)
+    // Displayed rather than downloaded: only a response whose type names a file (or a type W2L does not read) is one.
+    if (download === null && (navigation === null || !isSuccessStatus(status) || isNoContentStatus(status) || typeof declared !== 'object' && declared !== 'unsupported')) return null
+    const finalUrl = download?.url() ?? navigation!.url()
+    if (finalUrl !== url) await raceWithSignal(assertSafeUrl(finalUrl, this.networkPolicy), execution.signal)
+    // A download commits no document: its navigation's hops end the chain.
+    const hops = documents.chain(url, finalUrl, download === null ? null : navigation)
+    const at = () => Date.now() - start
+    const maxBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
+    const declaredBytes = declaredLength(headers['content-length'])
+    const base = (): Omit<FetchResult, 'status' | 'failureReason'> => {
+      // What went on the wire, as Playwright saw it, checked and signed as for a page.
+      const sentHeaders: ComplianceSentHeader[] = Object.entries(navigation === null ? {} : navigation.request().headers())
+        .map(([name, value]) => ({ name: name.toLowerCase(), value }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+      const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
+      if (!honesty.honest) trace.push({ at: at(), lane: 'browser_local', event: 'identity_mismatch', detail: { mismatches: honesty.mismatches } })
+      return {
+        requestedUrl: url,
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'browser_local',
+        escalations: [],
+        markdown: null,
+        links: [],
+        truncated: false,
+        truncatedAt: null,
+        compliance: mint(finalUrl, sentHeaders),
+        evidence: {
+          finalUrl,
+          httpStatus: status,
+          redirectChain: hops.chain,
+          redirectChainComplete: hops.complete,
+          contentType,
+          rawBodySha256: null,
+          artifacts: [],
+          fetchedAt: new Date().toISOString(),
+          ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
+        },
+        // The file's bytes are counted; what crossed the wire (compressed) is not measured.
+        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: null },
+        trace,
+      }
+    }
+    const unsupported = (): FetchResult => {
+      trace.push({ at: at(), lane: 'browser_local', event: 'unsupported_content_type', detail: { contentType, download: download !== null } })
+      return { ...base(), status: 'failed', failureReason: 'unsupported_content_type' }
+    }
+    const tooLarge = (error: BodyTooLargeError): FetchResult => {
+      const file = typeof declared === 'object' ? fileTooLarge({ decision: { kind: declared.kind, detectedBy: 'content_type' }, contentType, declaredBytes: error.declaredBytes, maxBytes }, { lane: 'browser_local', trace, at }) : undefined
+      if (file === undefined) trace.push({ at: at(), lane: 'browser_local', event: 'file_too_large', detail: { kind: null, declaredBytes: error.declaredBytes, maxBytes } })
+      return { ...base(), status: 'failed', failureReason: 'body_too_large', ...(file === undefined ? {} : { file }) }
+    }
+    if (declared === 'unsupported') {
+      await download?.cancel().catch(() => {})
+      return unsupported()
+    }
+    let bytes: Uint8Array
+    try {
+      if (declaredBytes !== null && declaredBytes > maxBytes) throw new BodyTooLargeError(maxBytes, declaredBytes)
+      if (download !== null) {
+        bytes = await raceWithSignal(download.createReadStream().then(stream => readCappedBody(stream, maxBytes)), execution.signal)
+      } else {
+        bytes = new Uint8Array(await raceWithSignal(navigation!.body(), execution.signal))
+        if (bytes.byteLength > maxBytes) throw new BodyTooLargeError(maxBytes)
+      }
+    } catch (error) {
+      if (!(error instanceof BodyTooLargeError)) throw error
+      await download?.cancel().catch(() => {})
+      return tooLarge(error)
+    }
+    const decision = detectFile(contentType, bytes, responseFileName(finalUrl, headers['content-disposition'] ?? null))
+    if (decision === null && download === null) return null
+    if (decision === null || decision === 'unsupported') return unsupported()
+    const content = await readFileResponse({ decision, contentType, declaredBytes, maxBytes }, bytes, { lane: 'browser_local', store: this.fileStore, ...(execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt }), trace, at })
+    const answered = base()
+    return {
+      ...answered,
+      status: content.status,
+      failureReason: content.failureReason,
+      markdown: content.markdown,
+      file: content.file,
+      evidence: { ...answered.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
+      usage: { ...answered.usage, bytesDecompressed: bytes.byteLength, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
+    }
+  }
+
+  /**
+   * A page that loaded a new document during every read (a client-side
+   * redirect loop, a meta refresh to itself): what was read cannot be paired
+   * with a response, so nothing is delivered and no status is claimed. The
+   * chain shows where it went.
+   */
+  private keptNavigating(url: string, start: number, trace: TraceEvent[], documents: MainFrameDocuments, finalUrl: string, attemptCount: number): FetchResult {
+    const wallMs = Date.now() - start
+    const navigation = documents.chain(url, finalUrl)
+    trace.push({ at: wallMs, lane: 'browser_local', event: 'page_kept_navigating', detail: { reads: CAPTURE_ATTEMPTS, documentsLoaded: documents.loads, finalUrl } })
+    return {
+      requestedUrl: url,
+      status: 'failed',
+      failureReason: 'redirect_loop',
+      blockReason: null,
+      budgetExceeded: null,
+      lane: 'browser_local',
+      escalations: [],
+      markdown: null,
+      truncated: false,
+      truncatedAt: null,
+      compliance: null,
+      evidence: {
+        finalUrl,
+        httpStatus: null,
+        redirectChain: navigation.chain,
+        redirectChainComplete: navigation.complete,
+        contentType: null,
+        rawBodySha256: null,
+        artifacts: [],
+        ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
+      },
+      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: null },
+      trace,
     }
   }
 
@@ -727,11 +1059,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       ? 'timeout'
       : err instanceof Error && err.name === 'BodyTooLargeError'
         ? 'body_too_large'
-        : failureReason
+        : err instanceof Error && err.name === 'DnsLookupError'
+          ? 'dns_error'
+          : failureReason
     trace.push({
       at: wallMs,
       lane: 'browser_local',
-      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : 'ssrf_denied',
+      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : reason === 'dns_error' ? 'dns_failed' : 'ssrf_denied',
       detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
     })
     return {
@@ -790,7 +1124,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
           `--host-resolver-rules=${await pinnedBrowserHostRules(this.browserAllowedHosts, this.networkPolicy)}`,
         ]
         if (this.activeExecutions === 0) throw new DOMException('Browser startup abandoned', 'AbortError')
-        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? {} : { args }) })
+        // Never the operating system's proxy: the environment proxy when W2L
+        // uses one, otherwise direct (a user's proxy is set per context).
+        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
       }
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {
@@ -813,7 +1149,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     throwIfExecutionStopped(execution)
     if (this.managedContext !== null) return this.managedContext
     if (this.managedContextPromise === null) {
-      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000 })
+      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) })
         .then(async context => {
           if (this.activeExecutions === 0) {
             if (this.managedContextPromise === pending) this.managedContextPromise = null

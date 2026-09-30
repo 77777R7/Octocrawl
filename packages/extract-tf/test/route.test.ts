@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf, routePage, selectList, selectTable } from '../src/index.js'
+import { extractTf, htmlToMarkdown, routePage, selectList, selectTable } from '../src/index.js'
 import { parse } from '../src/dom.js'
 
 const wrap = (bodyHtml: string, headExtra = '') =>
@@ -43,6 +43,16 @@ describe('routePage', () => {
     expect(d.type).toBe('collection')
     expect(d.strategy).toBe('table')
     doc.close()
+  })
+
+  it('does not route a page whose text lies outside its tables to the table strategy', () => {
+    const prose = Array.from({ length: 4 }, (_, i) =>
+      `<div>Paragraph ${i + 1} explains how the kiln readings were taken and why the quarterly figures in the table were revised.</div>`).join('')
+    for (const tables of [1, 3]) {
+      const doc = parse(wrap(prose + TABLE_SNIPPET.repeat(tables)))
+      expect(routePage(doc.document)).toEqual({ type: 'article', strategy: 'article' })
+      doc.close()
+    }
   })
 
   it('does not route a single product-spec-shaped table to product', () => {
@@ -111,6 +121,35 @@ describe('routePage', () => {
     )
     const d = routePage(doc.document)
     expect(d.type).toBe('product')
+    doc.close()
+  })
+
+  it('routes a visible buy box to product: the one h1, then the one price in its section', () => {
+    const doc = parse(wrap('<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li><a href="/poetry">Poetry</a></li><li>A Light in the Attic</li></ul>' +
+      '<article><div class="product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p><p class="availability">In stock (22 available)</p></div>' +
+      '<h2>Product Description</h2><p>A collection of poems and line drawings.</p></article>'))
+    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+    doc.close()
+  })
+
+  it('does not route a price that belongs to a listed item to product', () => {
+    // One card under its own heading, or in a list item, is a listing of one.
+    for (const body of [
+      '<h1>Crime</h1><section><h3><a href="/b/1">The Long Goodbye</a></h3><p class="price_color">£31.12</p></section>',
+      '<h1>Deals</h1><ul><li><a href="/b/1">Cobalt teapot</a> <span class="price">£19.00</span></li></ul>',
+      '<h1>Teapots</h1>' + ['£19.00', '£24.00'].map((p, i) => `<div><a href="/t/${i}">Teapot ${i}</a><span class="price">${p}</span></div>`).join(''),
+    ]) {
+      const doc = parse(wrap(body))
+      expect(routePage(doc.document).type).not.toBe('product')
+      doc.close()
+    }
+  })
+
+  it('does not take a price box on a page declared an article for a buy box', () => {
+    const doc = parse(wrap('<article><h1>Gold hits a record</h1><div class="price-box"><span class="price">$2,410.50</span></div>' +
+      '<p>Gold rose for a fifth day as investors sought safety ahead of the central bank meeting.</p></article>',
+    '<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Gold hits a record"}</script>'))
+    expect(routePage(doc.document).type).not.toBe('product')
     doc.close()
   })
 
@@ -323,6 +362,43 @@ describe('strategies', () => {
     expect(table).not.toBeNull()
     expect(table!.textContent).toContain('Cobalt')
     doc.close()
+  })
+
+  it('selectTable picks the data table inside a layout table, not the layout table around it (Hacker News)', () => {
+    const story = (n: number) => `<tr class="athing"><td class="title">${n}.</td><td class="votelinks"><a href="vote?id=${n}"></a></td>` +
+      `<td class="title"><a href="https://news.fixture.test/${n}">Story ${n}</a></td></tr>` +
+      `<tr><td colspan="2"></td><td class="subtext">${n * 10} points by user${n} | <a href="item?id=${n}">${n} comments</a></td></tr><tr class="spacer"></tr>`
+    const html = wrap('<center><table id="hnmain">' +
+      '<tr><td><table><tr><td><a href="news">Hacker News</a> <a href="newest">new</a> | <a href="front">past</a></td><td><a href="login">login</a></td></tr></table></td></tr>' +
+      `<tr><td><table>${[1, 2, 3, 4].map(story).join('')}</table></td></tr>` +
+      '<tr><td><table><tr><td></td></tr></table><center><a href="newsguidelines.html">Guidelines</a> | <a href="newsfaq.html">FAQ</a></center></td></tr>' +
+      '</table></center>')
+    const doc = parse(html)
+    const table = selectTable(doc.document)
+    expect(table!.textContent).toContain('Story 4')
+    expect(table!.textContent).not.toContain('login')
+    expect(table!.textContent).not.toContain('Guidelines')
+    doc.close()
+    const out = extractTf.extract(html, { url: 'https://news.fixture.test/' })
+    expect(out.strategy).toBe('table')
+    expect(out.mainHtml).toContain('Story 4')
+    expect(out.mainHtml).not.toContain('Guidelines')
+  })
+
+  it('selectTable keeps a data table that holds a small table in one cell, not the small table', () => {
+    const html = wrap('<div><h2>Kiln survey</h2><table>' +
+      '<tr><th>Kiln</th><th>Site</th><th>Firings</th><th>Glazes</th></tr>' +
+      '<tr><td>North</td><td>Harbour</td><td>41</td><td><table><tr><td>Cobalt</td><td>12</td></tr><tr><td>Ash</td><td>29</td></tr></table></td></tr>' +
+      '<tr><td>South</td><td>Estuary</td><td>37</td><td>Celadon</td></tr>' +
+      '<tr><td>West</td><td>Quarry</td><td>22</td><td>Tenmoku</td></tr></table></div>')
+    const doc = parse(html)
+    expect(selectTable(doc.document)!.textContent).toContain('Quarry')
+    doc.close()
+    const out = extractTf.extract(html)
+    expect(out.strategy).toBe('table')
+    const md = htmlToMarkdown(out.mainHtml)
+    expect(md).toContain('| North | Harbour | 41 | Cobalt 12 Ash 29 |')
+    expect(md).toContain('| West | Quarry | 22 | Tenmoku |')
   })
 })
 

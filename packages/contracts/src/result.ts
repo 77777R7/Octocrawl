@@ -1,7 +1,8 @@
 import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from './status.js'
 import type { ComplianceRecord } from './compliance.js'
-import type { DocumentExtraction } from './extractor.js'
+import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { StructuredExtractionResult } from './structured.js'
+import type { FileDescription } from './file.js'
 
 export interface ResourceTimings {
   queueMs?: number
@@ -53,6 +54,12 @@ export interface ResourceUsage {
   externalCostUsd: number | null
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
+  /**
+   * True when the caller's deadline (a scrape's `timeout`) ended this fetch
+   * before it finished: the result is then `partial` with the content
+   * fetched so far, or `failed` with `timeout`. Absent otherwise.
+   */
+  deadlineExceeded?: boolean
 }
 
 export interface Meter {
@@ -61,15 +68,55 @@ export interface Meter {
 }
 
 export interface Evidence {
-  /** Final URL after redirects. */
+  /**
+   * Final URL after redirects: the last URL requested for the page, whose
+   * response `httpStatus` and `contentType` are from. In the browser lane a
+   * script or a meta refresh that loaded another document is a redirect; a
+   * URL the page set with the history API (pushState, replaceState), which
+   * nothing requested, is not: the page keeps it as the base of its links.
+   */
   finalUrl: string
+  /**
+   * The status of the response that answered `finalUrl`: in the browser lane,
+   * of the document the page shows when it is read, not of the navigation W2L
+   * started. Null when there was none (no request, a transport failure, a
+   * document that came without a response).
+   */
   httpStatus: number | null
+  /**
+   * The URLs of a redirect, the requested URL first and `finalUrl` last;
+   * empty when nothing redirected.
+   */
   redirectChain: readonly string[]
+  /**
+   * True when `redirectChain` lists every hop the lane requested: the HTTP
+   * lane follows each redirect itself, and the browser lane lists each
+   * redirect Chromium followed and each document a script or a meta refresh
+   * loaded, for a page it shows or a file it displays or downloads. The
+   * browser lane says false when a follow-up navigation did not start at the
+   * requested URL, a document came without a request, or it cut the chain of
+   * a page that kept moving on to its first URL and last 20. Absent when the
+   * lane does not say (the provider lane, which sees where its vendor started
+   * and ended, and results stored before lanes recorded it).
+   */
+  redirectChainComplete?: boolean
+  /**
+   * The `content-type` header of the response `httpStatus` is from, as the
+   * server sent it, in every lane (the browser lane reads the rendered page,
+   * whatever it says); null when there was no response or no such header.
+   */
   contentType: string | null
   /** sha256 of the raw response body. Null only when no body was read. */
   rawBodySha256: string | null
   /** Relative artifact paths (raw body, screenshot, DOM snapshot). */
   artifacts: readonly string[]
+  /**
+   * UTC ISO time the lane received what it reports: the final response's
+   * headers (HTTP), the vendor's answer (provider), the rendered page's
+   * capture (browser). Absent when no response was read, and on results
+   * stored before lanes recorded it.
+   */
+  fetchedAt?: string
   /** HTTP validators observed for the representation, when exposed. */
   etag?: string | null
   lastModified?: string | null
@@ -77,6 +124,14 @@ export interface Evidence {
   vary?: string | null
   /** A response setting cookies cannot enter the public monitor cache. */
   setsCookie?: boolean
+  /**
+   * `host:port` of the operator's environment proxy (local mode) that the
+   * request for `finalUrl` went through; never its credentials. Null when that
+   * request did not use it (NO_PROXY, loopback). Absent when no environment
+   * proxy was configured, no request was answered, or the lane does not
+   * report its route (the provider lane).
+   */
+  envProxy?: string | null
 }
 
 export interface TraceEvent {
@@ -159,12 +214,34 @@ export interface FetchResult {
    * Shape is vendor-specific; it is a credential-free continuation token.
    */
   resumeContext?: unknown | null
-  /** Extracted main content as Markdown. Null unless status is contentful. */
+  /**
+   * The page as Markdown: its main content, or the whole page when
+   * `onlyMainContent` is false. `data:` image URIs are dropped, their alt
+   * text kept. Null unless status is contentful, except on a failed or
+   * blocked result that kept a page as evidence, never content: the page an
+   * error status carried, or the whole page when the extractor found no main
+   * content (`empty_unverified`, and `timeout` when the deadline then ended a
+   * later rung).
+   */
   markdown: string | null
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
   document?: DocumentExtraction | null
+  /**
+   * What the page's HTML declares about itself (its `<title>`, description,
+   * language, keywords, robots, icon and canonical URL), present with
+   * `document`. `metadata.title` is the page's `<title>`; `document.title` is
+   * the content's title, usually its first heading.
+   */
+  metadata?: PageMetadata
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
+  /**
+   * Present when the response was a file (PDF, CSV, JSON, text, XLSX, XLS,
+   * ZIP) rather than a web page: what it was, its size, SHA-256 and where it
+   * was saved, and for a PDF its pages. Such a result has no `document` or
+   * `metadata`.
+   */
+  file?: FileDescription
   /**
    * Outbound http(s) links from the FULL document, collected after extract
    * and before the raw HTML is dropped. Not from `mainHtml` — prune strips

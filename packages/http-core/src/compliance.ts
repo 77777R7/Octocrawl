@@ -42,6 +42,8 @@ export interface ComplianceRobotsDecision {
   decision: 'allowed' | 'disallowed' | 'no_robots'
   skippedFetch: boolean
   crawlDelayMs?: number | null
+  /** Why robots.txt could not be fetched; set only then (RFC 9309 §2.3.1.4). */
+  unreachable?: 'server_error' | 'network_error' | 'timeout'
 }
 
 export interface ComplianceSentHeader {
@@ -184,6 +186,15 @@ function serialize(input: ComplianceRecordInput): Uint8Array {
   nullableField(c, ax.attestedBy)
   nullableField(c, ax.attestedAt)
   nullableField(c, ax.attestationStatement)
+
+  // Why robots.txt was unreachable, appended only when it was: a complete
+  // disallow W2L assumed (RFC 9309 §2.3.1.4) never hashes like one the
+  // publisher wrote, and stripping the reason breaks the hash. Records
+  // without a reason keep the bytes, and the hash, they had before it existed.
+  if (r.unreachable !== undefined) {
+    field(c, 'robots.unreachable')
+    field(c, r.unreachable)
+  }
 
   const total = c.reduce((n, arr) => n + arr.length, 0)
   const out = new Uint8Array(total)

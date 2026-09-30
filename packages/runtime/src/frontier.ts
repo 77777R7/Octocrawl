@@ -3,13 +3,24 @@
  *
  * No fetch. The orchestrator (Phase 4/5) calls seed/enqueue/dequeue/release.
  * Host delay is max(perHostMinDelayMs, robots crawlDelayMs for that host).
- * Default host filter is the seed host; a non-empty allowlist uses the same
- * exact / `*.domain` match as governance.
+ * Until a page on a host has reported that host's robots.txt answer
+ * (setCrawlDelay), the host starts one page at a time, so a Crawl-delay holds
+ * from its second request on.
+ * Default host filter is the seed host, its apex/www twin and the host the
+ * seed redirected to (followSeedRedirect); a non-empty allowlist replaces it
+ * with the same exact / `*.domain` match as governance. includePaths /
+ * excludePaths are regexes on an enqueued link's pathname (Firecrawl
+ * semantics, exclude wins; a link a filter cannot decide in its time limit is
+ * skipped, see pathFilter.ts), and links to assets (images, fonts, styles,
+ * scripts, audio, video, programs) are not enqueued. Seeds bypass the path
+ * and asset filters, so the seed URL is always fetched.
  */
 
+import { isIP } from 'node:net'
 import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
+import { compilePathFilter, type PathFilter } from './pathFilter.js'
 
 export interface FrontierItem {
   url: string
@@ -28,6 +39,9 @@ export interface FrontierEnqueueResult {
     | 'malformed'
     | 'depth'
     | 'host_denied'
+    | 'path_denied'
+    | 'path_undecided'
+    | 'asset_denied'
     | 'scheme_denied'
 }
 
@@ -35,6 +49,10 @@ export interface FrontierDequeue {
   item: FrontierItem | null
   /** When `item` is null and the queue is not empty, the next host delay expiry. */
   nextReadyAtMs: number | null
+  /** Pending pages the admit test refused and dropped during this call. */
+  refused: number
+  /** When the previous page on `item`'s host started; null for its first page. */
+  previousStartAtMs: number | null
 }
 
 export interface FrontierOptions {
@@ -45,13 +63,17 @@ export interface FrontierOptions {
   perHostMinDelayMs?: number
   /** robots.txt Crawl-delay per host, already parsed to milliseconds. */
   crawlDelayMsByHost?: ReadonlyMap<string, number>
+  includePaths?: readonly string[]
+  excludePaths?: readonly string[]
 }
 
 export class Frontier {
   readonly seedCanonicalUrl: string
-  private readonly seedHost: string
+  private readonly seedHosts = new Set<string>()
   private readonly maxDepth: number | null
   private readonly allowlistedDomains: readonly string[]
+  private readonly includePaths: readonly PathFilter[]
+  private readonly excludePaths: readonly PathFilter[]
   private readonly perHostConcurrency: number
   private readonly perHostMinDelayMs: number
   private crawlDelayMsByHost: ReadonlyMap<string, number>
@@ -59,14 +81,18 @@ export class Frontier {
   private readonly visited = new Set<string>()
   private readonly inFlight = new Map<string, number>()
   private readonly lastStartedAtMs = new Map<string, number>()
+  /** Hosts a page has reported robots.txt for, with or without a Crawl-delay. */
+  private readonly robotsKnown = new Set<string>()
 
   constructor(options: FrontierOptions) {
     const seed = canonicalizeUrl(options.seedUrl)
     if (seed === null) throw new Error(`Frontier seed is not an http(s) URL: ${options.seedUrl}`)
     this.seedCanonicalUrl = seed
-    this.seedHost = hostOf(seed)
+    this.addSeedHost(hostOf(seed))
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
+    this.includePaths = (options.includePaths ?? []).map((pattern) => compilePathFilter(pattern))
+    this.excludePaths = (options.excludePaths ?? []).map((pattern) => compilePathFilter(pattern))
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
@@ -80,12 +106,23 @@ export class Frontier {
     return this.offer(url, depth, 'enqueued', base)
   }
 
-  dequeue(nowMs: number): FrontierDequeue {
+  /**
+   * The next page whose host has a free slot and whose delay has passed.
+   * Pages `admit` refuses (the orchestrator's page budget) leave the queue
+   * without starting, so they neither take a slot nor delay their host.
+   */
+  dequeue(nowMs: number, admit?: (item: FrontierItem) => boolean): FrontierDequeue {
     let nextReadyAtMs: number | null = null
+    let refused = 0
     for (let i = 0; i < this.pending.length; i++) {
       const item = this.pending[i]!
+      if (admit !== undefined && !admit(item)) {
+        this.pending.splice(i--, 1)
+        refused++
+        continue
+      }
       const inFlight = this.inFlight.get(item.host) ?? 0
-      if (inFlight >= this.perHostConcurrency) continue
+      if (inFlight >= (this.robotsKnown.has(item.host) ? this.perHostConcurrency : 1)) continue
       const delay = this.hostDelayMs(item.host)
       const last = this.lastStartedAtMs.get(item.host)
       if (last !== undefined) {
@@ -98,11 +135,13 @@ export class Frontier {
       this.pending.splice(i, 1)
       this.inFlight.set(item.host, inFlight + 1)
       this.lastStartedAtMs.set(item.host, nowMs)
-      return { item, nextReadyAtMs: null }
+      return { item, nextReadyAtMs: null, refused, previousStartAtMs: last ?? null }
     }
     return {
       item: null,
       nextReadyAtMs: this.pending.length === 0 ? null : nextReadyAtMs,
+      refused,
+      previousStartAtMs: null,
     }
   }
 
@@ -129,8 +168,9 @@ export class Frontier {
     this.visited.add(canonicalUrl)
   }
 
-  pendingCount(): number {
-    return this.pending.length
+  /** Queued pages, or those of them `where` accepts. */
+  pendingCount(where?: (item: FrontierItem) => boolean): number {
+    return where === undefined ? this.pending.length : this.pending.filter(where).length
   }
 
   inFlightCount(host?: string): number {
@@ -145,12 +185,29 @@ export class Frontier {
     return Math.max(this.perHostMinDelayMs, robotsDelay)
   }
 
+  /** A page on `host` reported its robots.txt Crawl-delay (null: none). The strictest one seen holds. */
   setCrawlDelay(host: string, delayMs: number | null): void {
+    this.robotsKnown.add(host)
     if (delayMs === null) return
     const next = Math.max(0, delayMs)
     const current = this.crawlDelayMsByHost.get(host) ?? 0
     if (next <= current) return
     this.crawlDelayMsByHost = new Map(this.crawlDelayMsByHost).set(host, next)
+  }
+
+  /** The robots.txt Crawl-delay in force for `host`, or null when none is known. */
+  crawlDelayMs(host: string): number | null {
+    return this.crawlDelayMsByHost.get(host) ?? null
+  }
+
+  /**
+   * The seed answered from `finalUrl`, and its links resolve against that URL:
+   * its host and that host's apex/www twin count as the seed host from now on.
+   * An explicit allowlist is never widened.
+   */
+  followSeedRedirect(finalUrl: string): void {
+    const canonical = canonicalizeUrl(finalUrl)
+    if (canonical !== null) this.addSeedHost(hostOf(canonical))
   }
 
   private offer(
@@ -170,6 +227,12 @@ export class Frontier {
     if (!this.hostAllowed(host)) {
       return { accepted: false, canonicalUrl, reason: 'host_denied' }
     }
+    if (acceptedReason === 'enqueued') {
+      const pathname = new URL(canonicalUrl).pathname
+      if (isAssetPath(pathname)) return { accepted: false, canonicalUrl, reason: 'asset_denied' }
+      const allowed = this.pathAllowed(pathname)
+      if (allowed !== true) return { accepted: false, canonicalUrl, reason: allowed === false ? 'path_denied' : 'path_undecided' }
+    }
     if (this.visited.has(canonicalUrl)) {
       return { accepted: false, canonicalUrl, reason: 'duplicate' }
     }
@@ -182,8 +245,58 @@ export class Frontier {
     if (this.allowlistedDomains.length > 0) {
       return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
     }
-    return host === this.seedHost
+    return this.seedHosts.has(host)
   }
+
+  private addSeedHost(host: string): void {
+    this.seedHosts.add(host)
+    const twin = wwwTwin(host)
+    if (twin !== null) this.seedHosts.add(twin)
+  }
+
+  /** Exclude wins; null when a filter that could change the answer did not decide in its time limit. */
+  private pathAllowed(pathname: string): boolean | null {
+    let undecided = false
+    for (const pattern of this.excludePaths) {
+      const match = pattern.test(pathname)
+      if (match === true) return false
+      if (match === null) undecided = true
+    }
+    if (undecided) return null
+    if (this.includePaths.length === 0) return true
+    for (const pattern of this.includePaths) {
+      const match = pattern.test(pathname)
+      if (match === true) return true
+      if (match === null) undecided = true
+    }
+    return undecided ? null : false
+  }
+}
+
+/** `www.example.com` and `example.com` name one site; an IP address or a one-label host has no twin. */
+function wwwTwin(host: string): string | null {
+  if (host.startsWith('www.')) return host.slice(4)
+  if (!host.includes('.') || isIP(host.replace(/^\[|\]$/g, '')) !== 0) return null
+  return `www.${host}`
+}
+
+/**
+ * Links a crawl does not follow: images, fonts, stylesheets, scripts, audio,
+ * video and programs. Documents and data files (PDF, CSV, XLSX, JSON, XML,
+ * ZIP) stay: P2's file download starts with them.
+ */
+const ASSET_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'tif', 'tiff', 'heic',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'css', 'js', 'mjs', 'map',
+  'mp3', 'wav', 'ogg', 'oga', 'flac', 'aac', 'm4a', 'mp4', 'm4v', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', 'mpg', 'mpeg',
+  'exe', 'msi', 'dmg', 'pkg', 'deb', 'rpm', 'apk', 'iso', 'bin',
+])
+
+function isAssetPath(pathname: string): boolean {
+  const name = pathname.slice(pathname.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && ASSET_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
 }
 
 function resolvedHref(url: string, base?: string): string | null {

@@ -6,6 +6,8 @@
  * char is roughly one token rather than 1/4).
  */
 
+import { LAYOUT_MARKERS } from './markdown.js'
+
 const MIN_TEXT_LENGTH = 25
 const MIN_CJK_LENGTH = 8
 const MAX_LINK_DENSITY = 0.2
@@ -13,6 +15,15 @@ const MAX_LINK_DENSITY = 0.2
 // prose-length text here would drop every table the fixtures exist to test.
 const MIN_STRUCT_LENGTH = 5
 const MIN_STRUCT_LENGTH_PRECISE = 12
+/**
+ * trafilatura's MIN_EXTRACTED_SIZE (250) times 3: below this much <p> text it
+ * takes <div>s as paragraphs too. Here they must also hold that much prose
+ * between them, so one alert <div> above a listing of cards does not make one.
+ */
+const MIN_PARAGRAPH_TEXT = 750
+
+const CANDIDATES = 'p,h1,h2,h3,h4,h5,h6,li,td,th,blockquote,pre'
+const BLOCK_SELECTOR = LAYOUT_MARKERS.blockTags.join(',')
 
 export interface TextBlock {
   /** Element the text came from. */
@@ -55,8 +66,18 @@ export interface ClassifyOptions {
 }
 
 /**
+ * A <div> that is one paragraph: nothing inside it is laid out as a block,
+ * and it is not already inside a candidate element.
+ */
+function isParagraphDiv(div: Element): boolean {
+  return div.querySelector(BLOCK_SELECTOR) === null && div.closest(CANDIDATES) === null
+}
+
+/**
  * Extract and classify text blocks from a document.
- * Candidate elements: p, h1-h6, li, td, th, blockquote, pre.
+ * Candidate elements: p, h1-h6, li, td, th, blockquote, pre, and paragraph
+ * <div>s on a page that writes its prose in them instead of <p> (an SEC inline
+ * XBRL filing has no <p> at all).
  *
  * Table cells (td/th) and list items (li) use a short structural threshold and
  * skip the prose test — structured content is short by nature and a
@@ -70,13 +91,17 @@ export function classifyBlocks(
   const maxDensity = options.maxLinkDensity ?? MAX_LINK_DENSITY
   const structLength = options.favorPrecision ? MIN_STRUCT_LENGTH_PRECISE : MIN_STRUCT_LENGTH
 
-  const els = doc.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,td,th,blockquote,pre')
+  const paragraphText = Array.from(doc.querySelectorAll('p')).reduce((sum, p) => sum + (p.textContent ?? '').replace(/\s+/g, ' ').trim().length, 0)
+  const divs = paragraphText < MIN_PARAGRAPH_TEXT
+  const els = doc.querySelectorAll(divs ? `${CANDIDATES},div` : CANDIDATES)
   const blocks: TextBlock[] = []
+  let divText = 0
   for (const el of Array.from(els)) {
+    const tag = el.tagName.toLowerCase()
+    if (tag === 'div' && !isParagraphDiv(el)) continue
     const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
     if (text.length === 0) continue
 
-    const tag = el.tagName.toLowerCase()
     const structural = tag === 'td' || tag === 'th' || tag === 'li'
 
     // CJK carve-out: shorter text is meaningful.
@@ -93,7 +118,8 @@ export function classifyBlocks(
     if (density > maxDensity) continue
     if (!structural && !looksProse(text)) continue
 
+    if (tag === 'div') divText += text.length
     blocks.push({ el, text, length: text.length, linkDensity: density })
   }
-  return blocks
+  return divText >= MIN_PARAGRAPH_TEXT ? blocks : blocks.filter((b) => b.el.tagName.toLowerCase() !== 'div')
 }

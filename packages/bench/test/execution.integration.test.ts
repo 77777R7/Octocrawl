@@ -47,6 +47,7 @@ describe('execution budget over real HTTP', () => {
     controller.abort()
     const out = await task
     expect(out.failureReason).toBe('timeout')
+    expect(out.usage.deadlineExceeded).toBeUndefined()
     expect(out.usage.timings?.totalMs).toBeGreaterThanOrEqual(out.usage.timings?.robotsMs ?? 0)
     await expect.poll(() => closed).toBe(true)
     expect(pageHits).toBe(0)
@@ -63,6 +64,8 @@ describe('execution budget over real HTTP', () => {
     const start = Date.now()
     const out = await new ResilientHttpSubject().fetch(`${origin}/stream`, start + 150)
     expect(out.failureReason).toBe('timeout')
+    // budgetExceeded is reserved for status budget_exceeded; the deadline is a usage fact.
+    expect(out).toMatchObject({ status: 'failed', budgetExceeded: null, usage: { deadlineExceeded: true } })
     expect(out.usage.timings?.totalMs).toBeGreaterThanOrEqual(100)
     expect(Date.now() - start).toBeLessThan(1_000)
     await expect.poll(() => closed).toBe(true)

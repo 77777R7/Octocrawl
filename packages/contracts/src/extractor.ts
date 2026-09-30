@@ -148,6 +148,50 @@ export interface ProductFacts {
   quoteState?: QuoteState
 }
 
+/**
+ * A value the page states under its own label: a two-cell table row (a `<th>`
+ * label and a `<td>` value) or a definition-list pair (one `<dt>`, one
+ * `<dd>`) in the main content. Both texts are as the page shows them, with
+ * whitespace collapsed; nothing is normalized.
+ */
+export interface LabelledValue {
+  label: string
+  value: string
+  /**
+   * `table[i] tr[j]` or `dl[i] dt[j]`: zero-based, in document order, the
+   * table or list among those in the main content and the row or term in it.
+   */
+  path: string
+}
+
+/**
+ * What the page's own markup declares about the page, read from the whole
+ * document before cleaning. Each value is that declaration or null when the
+ * page makes none: nothing is inferred from the URL, the content or another
+ * tag (no `og:description` for a missing description, no `/favicon.ico` for a
+ * missing icon).
+ */
+export interface PageMetadata {
+  /**
+   * The document's `<title>`, whitespace collapsed as `document.title` does
+   * (an SVG `<title>` does not count). Unlike `document.title`, the content
+   * title, it never comes from a heading.
+   */
+  title: string | null
+  /** `<meta name="description">`. */
+  description: string | null
+  /** `<html lang>`; when `<html>` has no lang attribute, `<meta http-equiv="content-language">`. */
+  language: string | null
+  /** `<meta name="keywords">` as declared, not split. */
+  keywords: string | null
+  /** `<meta name="robots">`. */
+  robots: string | null
+  /** The first `<link rel~="icon">` that resolves, against the document base URL, to an http(s) URL. */
+  favicon: string | null
+  /** The first `<link rel~="canonical">` that resolves to an http(s) URL. */
+  canonicalUrl: string | null
+}
+
 export interface DocumentExtraction {
   title: string | null
   pageType: PageType
@@ -157,6 +201,8 @@ export interface DocumentExtraction {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  /** Label/value pairs of the main content; JSON extraction matches them to schema keys. */
+  labelledValues?: readonly LabelledValue[]
 }
 
 export interface ExtractorOutput {
@@ -164,6 +210,15 @@ export interface ExtractorOutput {
   title: string | null
   /** Extracted main content as HTML. Markdown conversion happens later in the pipeline. */
   mainHtml: string
+  /**
+   * Base URL for the page's relative URLs: the first `<base href>` resolved
+   * against `options.url`, else `options.url`. mainHtml is a fragment without
+   * the page's `<base>` element, so Markdown conversion takes this instead.
+   * Null when no absolute URL is known.
+   */
+  baseUrl: string | null
+  /** The page's own declarations (title, description, language, ...), from the whole document. */
+  metadata: PageMetadata
   /** 0..1 self-assessed extraction confidence. */
   confidence: number
   /**
@@ -188,6 +243,19 @@ export interface ExtractorOutput {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  /**
+   * Tables in the fetched HTML with no rows at all: an empty `<thead>` and
+   * `<tbody>` waiting for a script to fill them. The data is not in this HTML.
+   */
+  emptyTableShells?: number
+  /**
+   * Data the page declares its scripts will fetch once they run
+   * (`<link rel="preload" as="fetch">`). Whatever the scripts build from it,
+   * a table or a chart, is not in this HTML.
+   */
+  fetchPreloads?: number
+  /** Label/value pairs of the main content (see LabelledValue). */
+  labelledValues?: readonly LabelledValue[]
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }

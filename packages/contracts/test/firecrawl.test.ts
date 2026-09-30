@@ -8,6 +8,7 @@ import {
   RequestError,
   wrapCrawlAccepted,
   wrapCrawlStatus,
+  firecrawlCrawlCounts,
   wrapScrape,
 } from '../src/index.js'
 
@@ -64,29 +65,72 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /refetch|useCached/i.test(d))).toBe(true)
   })
 
-  it('maps url + limit + maxDepth and ignores Firecrawl extras', () => {
-    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown'], actions: [] })).toEqual({
+  it('maps the supported Firecrawl fields onto the native request', () => {
+    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: true, origin: 'js-sdk@1.29.3' })).toEqual({
       url: 'https://example.com/',
-      mode: undefined,
-      allowlistedDomains: undefined,
+      formats: ['markdown', 'links'],
+      onlyMainContent: true,
+    })
+    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', onlyMainContent: false, waitFor: 2000, timeout: 15000 })).toMatchObject({
+      onlyMainContent: false,
+      waitFor: 2000,
+      timeout: 15000,
+    })
+    expect(parseFirecrawlCrawlRequest({ url: 'https://example.com/', scrapeOptions: { onlyMainContent: false, waitFor: 500, timeout: 8000 } })).toMatchObject({
+      onlyMainContent: false,
+      waitFor: 500,
+      timeout: 8000,
     })
     expect(
       parseFirecrawlCrawlRequest({
         url: 'https://example.com/listing',
         limit: 4,
         maxDepth: 2,
-        useCached: true,
-        proxy: 'stealth',
-        scrapeOptions: { formats: ['html'] },
+        includePaths: ['^/item/'],
+        excludePaths: ['^/item/2$'],
+        ignoreSitemap: true,
+        origin: 'js-sdk@1.29.3',
+        scrapeOptions: { formats: ['links'], onlyMainContent: true },
       }),
-    ).toEqual({
+    ).toMatchObject({
       url: 'https://example.com/listing',
-      mode: undefined,
       maxPages: 4,
       maxDepth: 2,
-      useCached: undefined,
-      allowlistedDomains: undefined,
+      includePaths: ['^/item/'],
+      excludePaths: ['^/item/2$'],
+      formats: ['links'],
     })
+  })
+
+  it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
+    const url = 'https://example.com/'
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html'] })).toThrow('unsupported format: html (the /fc shim supports markdown, links)')
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], mobile: true, waitFor: 500 })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['html'], headers: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.headers; unsupported format: html')
+    expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
+    // W2L always drops data: image URIs, which is Firecrawl's removeBase64Images default.
+    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: true } })).toMatchObject({ url })
+    expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: false })).toThrow('removeBase64Images: false is not supported')
+    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toThrow('scrapeOptions.removeBase64Images: false is not supported')
+  })
+
+  it('gives shim rejections a code and names what was rejected in details', () => {
+    const url = 'https://example.com/'
+    const thrown = (fn: () => unknown): unknown => {
+      try { fn() } catch (error) { return error }
+      return undefined
+    }
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html', 'screenshot'] })))
+      .toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    // Parameters and formats together: the parameter code wins and details keep both lists.
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['html'], actions: [] } })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['html'] } })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreSitemap'] } })
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url: 'ftp://example.com/' }))).toMatchObject({ code: 'invalid_request' })
   })
 
   it('rejects a missing url the same way the native parser does', () => {
@@ -115,6 +159,35 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(wrapped.data.metadata.error).toBe('cloudflare_challenge')
   })
 
+  it('keeps an error-status page success: false while returning its markdown and status code', () => {
+    const wrapped = wrapScrape(
+      page({
+        requestedUrl: 'https://example.com/missing',
+        status: 'failed',
+        failureReason: 'http_error',
+        markdown: '# 404 Not Found',
+        links: [],
+        evidence: {
+          finalUrl: 'https://example.com/missing',
+          httpStatus: 404,
+          redirectChain: [],
+          contentType: 'text/html',
+          rawBodySha256: 'a'.repeat(64),
+          artifacts: [],
+        },
+      }),
+    )
+    expect(wrapped).toEqual({
+      success: false,
+      error: 'failed: http_error',
+      data: {
+        markdown: '# 404 Not Found',
+        links: [],
+        metadata: { sourceURL: 'https://example.com/missing', url: 'https://example.com/missing', statusCode: 404, contentType: 'text/html', error: 'http_error' },
+      },
+    })
+  })
+
   it('wraps a contentful scrape and a crawl start onto the Firecrawl envelope', () => {
     const scrape = wrapScrape(
       page({
@@ -129,7 +202,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       data: {
         markdown: 'Harbour lantern catalog',
         links: ['https://example.com/item/1'],
-        metadata: { sourceURL: 'https://example.com/listing', statusCode: 200 },
+        metadata: { sourceURL: 'https://example.com/listing', url: 'https://example.com/listing', statusCode: 200, contentType: 'text/html' },
       },
     })
     expect(wrapCrawlAccepted({ taskId: 'task-1' }, 'https://example.com/listing')).toEqual({
@@ -137,6 +210,46 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       id: 'task-1',
       url: 'https://example.com/listing',
     })
+  })
+
+  it('maps the page metadata into data.metadata and leaves out what the page did not declare', () => {
+    const wrapped = wrapScrape(
+      page({
+        requestedUrl: 'https://example.com/',
+        status: 'success',
+        markdown: 'Example Domain',
+        metadata: {
+          title: 'Example Domain',
+          description: null,
+          language: 'en',
+          keywords: 'example, domain',
+          robots: 'noindex',
+          favicon: 'https://example.com/favicon.ico',
+          canonicalUrl: 'https://example.com/',
+        },
+      }),
+    )
+    expect(wrapped.data.metadata).toEqual({
+      title: 'Example Domain',
+      language: 'en',
+      keywords: 'example, domain',
+      robots: 'noindex',
+      favicon: 'https://example.com/favicon.ico',
+      sourceURL: 'https://example.com/',
+      url: 'https://example.com/',
+      statusCode: 200,
+      contentType: 'text/html',
+    })
+  })
+
+  it('names the final URL after a redirect and leaves an unknown content type out', () => {
+    const moved = wrapScrape(page({
+      requestedUrl: 'http://example.com/old',
+      status: 'success',
+      markdown: 'Moved page',
+      evidence: { finalUrl: 'https://example.com/new', httpStatus: 200, redirectChain: ['http://example.com/old', 'https://example.com/new'], contentType: null, rawBodySha256: null, artifacts: [] },
+    }))
+    expect(moved.data.metadata).toEqual({ sourceURL: 'http://example.com/old', url: 'https://example.com/new', statusCode: 200 })
   })
 
   it('projects crawl steps into Firecrawl status data without inventing credits', () => {
@@ -170,12 +283,24 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
         updatedAt: '2026-09-18T00:00:00.000Z',
       },
     ]
-    const status = wrapCrawlStatus(report, steps)
+    const status = wrapCrawlStatus(report, steps, { completed: 1, total: 2 })
     expect(status.status).toBe('completed')
-    expect(status.total).toBe(1)
+    expect(status.total).toBe(2)
     expect(status.completed).toBe(1)
-    expect(status.creditsUsed).toBe(0)
-    expect(status.next).toBeNull()
+    // No credits and no expiry exist in W2L: unknown is null, never an invented value.
+    expect(status.creditsUsed).toBeNull()
+    expect(status.expiresAt).toBeNull()
+    // No further page: `next` is left out, as Firecrawl does; a v1 client follows it while the key is there.
+    expect(status).not.toHaveProperty('next')
     expect(status.data[0]?.markdown).toBe('MAIN')
+    const next = 'http://127.0.0.1:8787/fc/v1/crawl/task-1?cursor=abc'
+    expect(wrapCrawlStatus(report, steps, { completed: 1, total: null, next })).toMatchObject({ total: null, next })
+    const statuses = (['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'] as const).map((taskStatus) => wrapCrawlStatus({ ...report, status: taskStatus }, [], { completed: 0, total: null }).status)
+    expect(statuses).toEqual(['scraping', 'scraping', 'scraping', 'completed', 'failed', 'cancelled'])
+    // completed: success and partial pages; total: every step, plus the pages ahead while the crawl runs here, else unknown.
+    const counts = { success: 2, partial: 1, failed: 1, duplicate: 1 }
+    expect(firecrawlCrawlCounts('running', counts, 3)).toEqual({ completed: 3, total: 8 })
+    expect(firecrawlCrawlCounts('paused', counts, null)).toEqual({ completed: 3, total: null })
+    expect(firecrawlCrawlCounts('cancelled', counts, 3)).toEqual({ completed: 3, total: 5 })
   })
 })

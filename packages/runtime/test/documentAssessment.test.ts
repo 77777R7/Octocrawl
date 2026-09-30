@@ -31,6 +31,23 @@ describe('Firecrawl introduction quality contract', () => {
     expect(assessment.reasons).toContain('missing_or_ambiguous_search_section')
   })
 
+  it('reads an introduction that spans the page lead and the paragraph after it', () => {
+    const section = (name: string) =>
+      `## [\u200b](#${name.toLowerCase()}) ${name}\n\n${name} any page. See the [${name} docs](https://docs.firecrawl.dev/features/${name.toLowerCase()}) for all options.\n\n\`\`\`\ncode\n\`\`\``
+    const markdown = [
+      '# Introduction',
+      'The web data API for AI agents.',
+      'Firecrawl is the web data API for AI agents.',
+      section('Search'),
+      section('Scrape'),
+      section('Interact'),
+    ].join('\n\n')
+    const assessment = assessFirecrawlIntroduction({ ...base, markdown })
+    expect(assessment.quality).toBe('valid')
+    expect(assessment.fields?.introduction).toBe('The web data API for AI agents. Firecrawl is the web data API for AI agents.')
+    expect(assessment.fields?.searchDescription).toBe('Search any page. See the Search docs for all options.')
+  })
+
   it('rejects truncated content', () => {
     const result = { ...base, truncated: true, markdown: '# Introduction\nFirecrawl is the web data API for AI agents.' }
     expect(assessFirecrawlIntroduction(result).quality).toBe('partial')

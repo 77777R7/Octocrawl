@@ -1,0 +1,334 @@
+{
+  "id": "pdf-corpus.v1",
+  "created": "2026-09-29",
+  "purpose": "Real public report PDFs for PDF text (ROADMAP P2, File download and PDF text): each check is a phrase or number that must appear in the text of one page.",
+  "checkRule": "A check passes when its text, with every run of whitespace collapsed to one space, occurs in pages[page - 1].text collapsed the same way. A report passes when its SHA-256 matches, every page is read and every check passes.",
+  "verification": "Every check was confirmed on its page, and on no other page, with pdftotext 26.04.0 (poppler) run per page; checks of kind \"table row\" with pdftotext -layout. Robots.txt was read on 2026-09-29 for the User-agent * group. Files were fetched once each through HTTPS_PROXY with User-Agent \"Mozilla/5.0 (compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page)\".",
+  "files": ".w2l/pdf-corpus/<id>.pdf (git-ignored, never committed)",
+  "reports": [
+    {
+      "id": "S1",
+      "source": "seed",
+      "publisher": "AirTrunk",
+      "title": "Green Financing Framework (April 2025)",
+      "url": "https://airtrunk.com/wp-content/uploads/2023/03/AirTrunk-Green-Financing-Framework-Final-1.pdf",
+      "robots": {
+        "url": "https://airtrunk.com/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * / Disallow: (empty)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 12,
+      "bytes": 342998,
+      "sha256": "dfa24a3fe9f8c87b20bce5763fad53e07bda57ff2866f853d2817acf57d698cb",
+      "checks": [
+        {
+          "page": 3,
+          "text": "PUEs as low as 1.15"
+        },
+        {
+          "page": 3,
+          "text": "Portfolio average annual operating PUE for FY24 is 1.32"
+        },
+        {
+          "page": 5,
+          "text": "A$10 billion+ in debt across our portfolio as at February 2025"
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "source": "seed",
+      "publisher": "Meta",
+      "title": "2025 Environmental Data Index",
+      "url": "https://sustainability.atmeta.com/asset/2025-environmental-data-index/",
+      "finalUrl": "https://sustainability.atmeta.com/wp-content/uploads/2025/10/Meta_2025-Environmental-Data-Index.pdf",
+      "robots": {
+        "url": "https://sustainability.atmeta.com/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * / Disallow: (empty)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 19,
+      "bytes": 2266742,
+      "sha256": "d7527cd23308869105b404b486117603bb3f5ee10e30499367f8698110afb66d",
+      "checks": [
+        {
+          "page": 3,
+          "text": "48,826"
+        },
+        {
+          "page": 4,
+          "text": "Altoona (IA) - 555,000 - 425,377 - 474,826 - 532,158 0 666,434",
+          "kind": "table row"
+        },
+        {
+          "page": 18,
+          "text": "We have publicly committed to matching 100% of our electricity use with clean and renewable energy"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "source": "seed",
+      "publisher": "Meta (Ernst & Young LLP)",
+      "title": "FY24 Independent Accountants’ Review Report and Appendix",
+      "url": "https://sustainability.atmeta.com/asset/2025-independent-accountants-review-report/",
+      "finalUrl": "https://sustainability.atmeta.com/wp-content/uploads/2025/09/Meta-EY_FY24-Independent-Accountants-Review-Report-and-Appendix.pdf",
+      "robots": {
+        "url": "https://sustainability.atmeta.com/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * / Disallow: (empty)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 17,
+      "bytes": 407496,
+      "sha256": "0bdd15186f7401891c7b0c59314657144f5a34d2ea8a1a9fa4c09183602e5d24",
+      "checks": [
+        {
+          "page": 1,
+          "text": "for the year-ended December 31, 2024"
+        },
+        {
+          "page": 3,
+          "text": "47,468"
+        },
+        {
+          "page": 16,
+          "text": "are equal to 70,529 mtCO2e"
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "source": "seed",
+      "publisher": "OVHcloud",
+      "title": "PUE, WUE, REF values, Fiscal Year 2025 (KPIs per DC)",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "robots": {
+        "url": "https://www.ovhcloud.com/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * disallows /cgi-bin/, one script and */node/ only",
+        "verdict": "allowed"
+      },
+      "expectedPages": 3,
+      "bytes": 267398,
+      "sha256": "facf8c6699f72ebb0960a2a3efba3f411debbf7551dee6ddaa6b2bf189046b2d",
+      "checks": [
+        {
+          "page": 1,
+          "text": "PUE, WUE, REF values for the following period - Fiscal Year 2025"
+        },
+        {
+          "page": 3,
+          "text": "Hillsboro – United States, OR 1.27 1.35 1.46",
+          "kind": "table row"
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "source": "seed",
+      "publisher": "STT GDC",
+      "title": "Sustainability-Linked Financing Framework (August 2024)",
+      "url": "https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf",
+      "robots": {
+        "url": "https://assets.sttelemediagdc.com/robots.txt",
+        "status": 404,
+        "rule": "no robots.txt (4xx: no restrictions, RFC 9309)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 26,
+      "bytes": 6313505,
+      "sha256": "c5608d0b6f75b57a63cf418ed249fc380a44bf5ef64814c7508422e6229d3d4d",
+      "checks": [
+        {
+          "page": 14,
+          "text": "Base year 2021: 597 tonnes/SGD millions"
+        },
+        {
+          "page": 16,
+          "text": "Increase the percentage of renewable energy to 85% by 2028."
+        },
+        {
+          "page": 17,
+          "text": "Reduce carbon intensity by 70% compared to the base year by 2028."
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "source": "seed",
+      "publisher": "Nebius",
+      "title": "Nebius 2025 Sustainability Report",
+      "url": "https://assets.nebius.com/assets/79cf11ba-bb23-4cb8-802e-21dc155be31c/Nebius%202025%20Sustainability%20Report.pdf",
+      "robots": {
+        "url": "https://assets.nebius.com/robots.txt",
+        "status": 404,
+        "rule": "no robots.txt (4xx: no restrictions, RFC 9309)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 72,
+      "bytes": 4878004,
+      "sha256": "38a7d1750df525cde74cdd5b6560762672d56c0a22b2fa367cfb59ebca814b23",
+      "checks": [
+        {
+          "page": 10,
+          "text": "At our Finland-1 data center, 19.5 GWh of heat"
+        },
+        {
+          "page": 14,
+          "text": "power usage effectiveness (PUE) of 1.25"
+        },
+        {
+          "page": 30,
+          "text": "stands at over 7,500 graduates"
+        }
+      ]
+    },
+    {
+      "id": "R1",
+      "source": "research",
+      "publisher": "International Energy Agency",
+      "title": "Energy and AI (World Energy Outlook Special Report, 2025)",
+      "url": "https://iea.blob.core.windows.net/assets/de9dea13-b07d-42c5-a398-d1b3ae17d866/EnergyandAI.pdf",
+      "robots": {
+        "url": "https://iea.blob.core.windows.net/robots.txt",
+        "status": 400,
+        "rule": "no robots.txt (storage error 400; 4xx: no restrictions, RFC 9309)",
+        "verdict": "allowed"
+      },
+      "expectedPages": 304,
+      "bytes": 8213160,
+      "sha256": "3956b80152d4aac6b659a09d0cd7671a4bd53efeeb067e4d50df4230701b33e4",
+      "checks": [
+        {
+          "page": 14,
+          "text": "Data centre electricity consumption is set to more than double to around 945 TWh by 2030."
+        },
+        {
+          "page": 63,
+          "text": "This is more than double the estimated approximately 415 TWh for 2024"
+        },
+        {
+          "page": 64,
+          "text": "increases by around 240 TWh (up 130%) in the United States"
+        }
+      ]
+    },
+    {
+      "id": "R2",
+      "source": "research",
+      "publisher": "Insee",
+      "title": "Insee Première n° 2077: Émissions de gaz à effet de serre et empreinte carbone de la France en 2024 (October 2025)",
+      "url": "https://www.insee.fr/fr/statistiques/fichier/version-html/8654458/ip2077.pdf",
+      "robots": {
+        "url": "https://www.insee.fr/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * disallows *.xls, *.csv, *.zip, *.xlsx, /*/bdm2/, /*/ddl/ only",
+        "verdict": "allowed"
+      },
+      "expectedPages": 4,
+      "bytes": 751079,
+      "sha256": "5a2b836faef7c04a980ed2ef3b9760df3cfd2cc5dab86d7fdf31572d1bae69df",
+      "checks": [
+        {
+          "page": 1,
+          "text": "s’élèvent à 404 millions de tonnes équivalent CO2 (Mt CO2 éq)"
+        },
+        {
+          "page": 2,
+          "text": "est estimée à 563 Mt CO2 éq, en baisse de 3,4 % par rapport à 2023"
+        },
+        {
+          "page": 2,
+          "text": "Depuis 1990, les émissions de la France ont baissé de 31 %"
+        }
+      ]
+    },
+    {
+      "id": "R3",
+      "source": "research",
+      "publisher": "U.S. Energy Information Administration",
+      "title": "International Energy Outlook 2023 Narrative",
+      "url": "https://www.eia.gov/outlooks/ieo/pdf/IEO2023_Narrative.pdf",
+      "robots": {
+        "url": "https://www.eia.gov/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * Allow: /; /outlooks/ is not disallowed",
+        "verdict": "allowed"
+      },
+      "expectedPages": 70,
+      "bytes": 10256196,
+      "sha256": "044aca021e26286505223cb7621f89c87d81c8dbeaebb1eb3f0f223f6cf95203",
+      "checks": [
+        {
+          "page": 14,
+          "text": "Global energy consumption increases 34% from 638 quadrillion British thermal units (quads) in 2022 to 855 quads in 2050"
+        },
+        {
+          "page": 16,
+          "text": "Global population increases from 7.9 billion in 2022 to 9.6 billion in 2050"
+        }
+      ]
+    },
+    {
+      "id": "R4",
+      "source": "research",
+      "publisher": "Eurostat",
+      "title": "Key figures on Europe – 2025 edition",
+      "url": "https://ec.europa.eu/eurostat/documents/15216629/22447468/KS-01-25-003-EN-N.pdf",
+      "robots": {
+        "url": "https://ec.europa.eu/robots.txt",
+        "status": 200,
+        "rule": "User-agent: * does not disallow /eurostat/documents/",
+        "verdict": "allowed"
+      },
+      "expectedPages": 84,
+      "bytes": 11145558,
+      "sha256": "6a39b318af350a35520571b41d7ada3ca971dffc29492049b87b9e2152baf607",
+      "checks": [
+        {
+          "page": 20,
+          "text": "In 2024, the share of early leavers from education and training in the EU was 9.3%, ranging from 16.8% in Romania to 2.0% in Croatia."
+        },
+        {
+          "page": 21,
+          "text": "In 2024, the NEET rate for young people in the EU stood at 9.1%."
+        }
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:39ee2b33-ca04-460f-a97b-1e92ef62ec05/Equinix-Inc_2025_Data-Summary.pdf",
+      "source": "seed",
+      "reason": "robots.txt of delivery-p112322-e1154416.adobeaemcloud.com: User-agent: * Disallow: / (read 2026-09-29)"
+    },
+    {
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:500c1bb1-fec2-4101-b518-162282bd3fc9/green-bond-allocation-report-2025.pdf",
+      "source": "seed",
+      "reason": "robots.txt of delivery-p112322-e1154416.adobeaemcloud.com: User-agent: * Disallow: / (read 2026-09-29)"
+    },
+    {
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:b04d8496-c8ac-4015-b1bd-02c526ce7f22/Eq_GU_Equinix",
+      "source": "seed",
+      "reason": "robots.txt of delivery-p112322-e1154416.adobeaemcloud.com: User-agent: * Disallow: / (read 2026-09-29); the ROADMAP also lists this link as possibly truncated"
+    },
+    {
+      "url": "https://aka.ms/SustainabilityFactsheet2025",
+      "source": "seed",
+      "reason": "robots.txt of aka.ms: User-agent: * Disallow: / with Allow: /fwlink/p/ only (read 2026-09-29)"
+    },
+    {
+      "url": "https://go2.digitalrealty.com/rs/087-YZJ-646/images/Report_Digital_Realty_2605_Impact_Report.pdf",
+      "source": "seed",
+      "reason": "robots.txt disallows /rs/ (robots_disallowed in the 2026-09-29 preliminary baseline; not fetched again)"
+    },
+    {
+      "url": "https://www.gstatic.com/gumdrop/sustainability/google-2025-environmental-report.pdf",
+      "source": "seed",
+      "reason": "robots.txt disallows / (robots_disallowed in the 2026-09-29 preliminary baseline; not fetched again)"
+    }
+  ]
+}

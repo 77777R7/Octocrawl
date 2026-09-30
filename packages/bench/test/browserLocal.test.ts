@@ -1,7 +1,11 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { AccessConfigError, verifyLedger } from '@w2l/http-core'
-import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
+import { localNetworkPolicy } from '@w2l/contracts'
+import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
+import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 
 /**
  * Browser-local transport behaviour against a bespoke server:
@@ -39,6 +43,70 @@ beforeAll(async () => {
           '<!doctype html><html><body><article><h1>Recovered</h1><p>Succeeded on the second attempt.</p></article></body></html>',
         )
       }
+    } else if (req.url === '/delayed') {
+      // Part of the article is in the HTML; the rest arrives two seconds after load.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><article><h1>Delayed report</h1><p>The opening paragraph is in the HTML the server sends, ' +
+          'so it is on the page from the first render onwards and any capture contains it.</p><div id="late"></div></article>' +
+          '<script>setTimeout(function () { document.getElementById("late").innerHTML = "<p>The late paragraph arrives two seconds after load.</p>" }, 2000)</script>' +
+          '</body></html>',
+      )
+    } else if (req.url === '/chrome') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Chrome page</title><style>p { color: black }</style></head><body>' +
+          '<header><a href="/">Site header link</a></header><nav><a href="/a">Navigation entry</a></nav>' +
+          '<main><article><h1>Main story</h1><p>The main story is long enough for the extraction cascade to select it as the ' +
+          'content of the page, while the header, the navigation and the footer around it are page chrome.</p></article></main>' +
+          '<footer><p>Footer notice text</p></footer><script>document.title = "script text never shows"</script></body></html>',
+      )
+    } else if (req.url === '/css-layout') {
+      // S05 and S09 in miniature: the page's CSS, not its tags, puts the quote
+      // and its author on separate lines and hides two of three platform names.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><style>.quote span.text { display: block } .platform-linux, .platform-windows { display: none }</style></head>' +
+          '<body><main><script>document.write("<div class=\'quote\'><span class=\'text\'>“The world as we have created it is a process of our thinking.”</span>' +
+          '<span>by <small>Albert Einstein</small></span></div>")</script><ol><li><p>Open <span class="platform-mac">Terminal</span>' +
+          '<span class="platform-linux">Terminal</span><span class="platform-windows">Git Bash</span>.</p></li><li><p>Set a Git username.</p></li></ol>' +
+          '</main></body></html>',
+      )
+    } else if (req.url === '/hop/1' || req.url === '/hop/2') {
+      // Two server redirects before the page: every hop is a request Chromium makes.
+      res.writeHead(req.url === '/hop/1' ? 302 : 301, { location: req.url === '/hop/1' ? '/hop/2' : '/landing' })
+      res.end()
+    } else if (req.url === '/landing') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=iso-8859-1' })
+      res.end('<!doctype html><html><body><article><h1>Landing</h1><p>The page two redirects lead to, served with a content type the evidence must repeat as sent.</p></article></body></html>')
+    } else if (req.url?.startsWith('/client/')) {
+      // Pages that move on by themselves after they answered: a script, a meta
+      // refresh or the history API. /client/gone and /client/spa-missing answer 404.
+      const article = (title: string) => `<article><h1>${title}</h1><p>The page the browser shows at the end, long enough for the extraction cascade to select it as the content of the page.</p></article>`
+      const pages: Record<string, [number, string, string]> = {
+        '/client/replace': [200, 'text/html; charset=utf-8', '<p>Leaving for the next page.</p><script>location.replace("/client/gone")</script>'],
+        '/client/gone': [404, 'text/html; charset=iso-8859-1', '<main><h1>Page not found</h1><p>The page you asked for is not on this server.</p></main>'],
+        '/client/onward': [200, 'text/html; charset=utf-8', '<p>Moving on.</p><script>location.replace("/landing")</script>'],
+        '/client/meta': [200, 'text/html; charset=utf-8', '<meta http-equiv="refresh" content="0;url=/landing"><p>Moving on.</p>'],
+        '/client/push': [200, 'text/html; charset=utf-8', `${article('Pushed')}<p><a href="detail">Detail</a></p><script>history.pushState(null, "", "/client/sub/pushed")</script>`],
+        '/client/fragment': [200, 'text/html; charset=utf-8', `${article('Fragment')}<script>location.hash = "part"</script>`],
+        '/client/spa-missing': [404, 'text/html; charset=utf-8', `${article('Home')}<script>history.replaceState(null, "", "/client/home")</script>`],
+        '/client/to-gate': [200, 'text/html; charset=utf-8', '<p>Checking.</p><script>location.replace("/gate")</script>'],
+        '/client/refresh-loop': [200, 'text/html; charset=utf-8', `<meta http-equiv="refresh" content="0">${article('Again')}`],
+      }
+      const page = pages[req.url]
+      if (req.url === '/client/hop') res.writeHead(302, { location: '/client/onward' }).end()
+      else if (req.url === '/client/loop/a' || req.url === '/client/loop/b') res.writeHead(302, { location: req.url.endsWith('a') ? '/client/loop/b' : '/client/loop/a' }).end()
+      else if (page === undefined) res.writeHead(404).end()
+      else res.writeHead(page[0], { 'content-type': page[1] }).end(`<!doctype html><html><body>${page[2]}</body></html>`)
+    } else if (req.url === '/nav-only') {
+      // Navigation and a footer, no main block: the extractor finds no content.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+          '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav>' +
+          '<footer><p>Published by the harbour office</p></footer></body></html>',
+      )
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
     } else if (req.url === '/gate') {
@@ -53,6 +121,9 @@ beforeAll(async () => {
     } else if (req.url === '/plain-403') {
       res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><body><h1>403 Forbidden</h1></body></html>')
+    } else if (req.url === '/created') {
+      res.writeHead(201, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><article><h1>Created</h1><p>A 201 page with a full document is judged from its content in the browser lane too.</p></article></body></html>')
     } else if (req.url === '/echo-cookie') {
       // Echoes the Cookie header back as page content, so a test can prove the
       // inherited session really went on the wire rather than just being
@@ -137,6 +208,19 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('declares the operator contact in research mode and signs the User-Agent that carried it', async () => {
+    const subject = new BrowserLocalSubject('research', null, false, { ...localNetworkPolicy(), contact: 'Jane Doe jane@example.org' })
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out.status).toBe('success')
+      const sent = out.compliance!.sentHeaders.headers.find((h) => h.name === 'user-agent')
+      expect(sent?.value).toMatch(/w2l-research.*; contact: Jane Doe jane@example\.org\)$/)
+      expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('refuses a robots-disallowed path and still mints a record proving it', async () => {
     const subject = new BrowserLocalSubject()
     const before = privateHits
@@ -155,8 +239,34 @@ describe('BrowserLocalSubject transport', () => {
       // The rule that did it is cited, so the publisher can check the verdict
       // against their own robots.txt rather than take our word for it.
       expect(record.robots.appliedRules.map((r) => r.pattern)).toContain('/private')
+      expect(record.robots).not.toHaveProperty('unreachable')
     } finally {
       await subject.teardown()
+    }
+  })
+
+  it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
+    let pageHits = 0
+    const failing = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(503).end('temporarily unavailable'); return }
+      pageHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><article><h1>Must not fetch</h1></article></body></html>')
+    })
+    await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve))
+    const address = failing.address()
+    if (address === null || typeof address === 'string') throw new Error('no address')
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(pageHits).toBe(0)
+      // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
+      expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      expect(verifyLedger(subject.ledger()).valid).toBe(true)
+    } finally {
+      await subject.teardown()
+      await new Promise<void>((resolve) => failing.close(() => resolve()))
     }
   })
 
@@ -229,12 +339,142 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('waits waitFor after load and stability before it captures', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const plain = await subject.fetch(`${url}/delayed`)
+      expect(plain.markdown).toContain('The opening paragraph')
+      expect(plain.markdown).not.toContain('The late paragraph')
+      const waited = await subject.fetch(`${url}/delayed`, undefined, undefined, undefined, { waitFor: 2_500 })
+      expect(waited.status).toBe('success')
+      expect(waited.markdown).toContain('The late paragraph arrives two seconds after load.')
+      expect(waited.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 2_500 }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('captures the page so far as partial when the timeout cuts waitFor short', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      await subject.fetch(`${url}/spa`) // warm the browser so the deadline covers only this page
+      const deadline = Date.now() + 2_500
+      const out = await subject.fetch(`${url}/delayed`, deadline, undefined, undefined, { waitFor: 10_000 })
+      expect(Date.now()).toBeLessThan(deadline)
+      expect(out).toMatchObject({ status: 'partial', failureReason: null, budgetExceeded: null, usage: { deadlineExceeded: true } })
+      expect(out.markdown).toContain('The opening paragraph')
+      expect(out.markdown).not.toContain('The late paragraph')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 10_000, cutShortBy: 'timeout' }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('returns the whole page for onlyMainContent false, with the same evidence', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const main = await subject.fetch(`${url}/chrome`)
+      const full = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false })
+      expect(main.markdown).toContain('Main story')
+      expect(main.markdown).not.toContain('Navigation entry')
+      expect(full.markdown).toContain(`[Navigation entry](${url}/a)`)
+      expect(full.markdown).toContain('Site header link')
+      expect(full.markdown).toContain('Footer notice text')
+      expect(full.markdown).toContain('Main story')
+      expect(full.markdown).not.toContain('script text never shows')
+      expect(full.status).toBe(main.status)
+      expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('keeps the whole page as evidence when no main block is found, and returns it for onlyMainContent false', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const whole = `[Harbour office](${url}/)\n\n- [Tide tables](${url}/tides)\n- [Weather](${url}/weather)\n\nPublished by the harbour office`
+      const main = await subject.fetch(`${url}/nav-only`)
+      expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: whole, usage: { contentTokens: null } })
+      expect(main.links).toEqual([`${url}/`, `${url}/tides`, `${url}/weather`])
+      expect(main.document).toBeUndefined()
+      const full = await subject.fetch(`${url}/nav-only`, undefined, undefined, undefined, { onlyMainContent: false })
+      expect(full).toMatchObject({ status: 'success', failureReason: null, markdown: whole, metadata: { title: 'Harbour office' } })
+      expect(full.usage.contentTokens).toBeGreaterThan(0)
+      expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
+      expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports the response content type and every redirect hop of the navigation', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const moved = await subject.fetch(`${url}/hop/1`)
+      expect(moved.status).toBe('success')
+      expect(moved.evidence).toMatchObject({
+        finalUrl: `${url}/landing`,
+        httpStatus: 200,
+        contentType: 'text/html; charset=iso-8859-1',
+        redirectChain: [`${url}/hop/1`, `${url}/hop/2`, `${url}/landing`],
+        redirectChainComplete: true,
+      })
+      const direct = await subject.fetch(`${url}/landing`)
+      expect(direct.evidence).toMatchObject({ finalUrl: `${url}/landing`, redirectChain: [], redirectChainComplete: true, contentType: 'text/html; charset=iso-8859-1' })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('converts with the layout the page CSS gives, and keeps the evidence unannotated', async () => {
+    const previous = process.env.W2L_CAPTURE_RAW_DIR
+    const root = await mkdtemp(join(tmpdir(), 'w2l-layout-'))
+    process.env.W2L_CAPTURE_RAW_DIR = root
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`${url}/css-layout`)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('“The world as we have created it is a process of our thinking.”\n\nby Albert Einstein')
+      expect(out.markdown).toContain('1. Open Terminal.\n2. Set a Git username.')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'layout', detail: expect.objectContaining({ outcome: 'annotated', blocks: 1, hidden: 2 }) }))
+      // The evidence is the page as rendered, without W2L's markers.
+      const raw = await readFile(out.evidence.artifacts[0]!, 'utf8')
+      expect(raw).toContain('Git Bash')
+      expect(raw).not.toContain('data-w2l')
+      expect(sha256Utf8(raw)).toBe(out.evidence.rawBodySha256)
+    } finally {
+      await subject.teardown()
+      if (previous === undefined) delete process.env.W2L_CAPTURE_RAW_DIR
+      else process.env.W2L_CAPTURE_RAW_DIR = previous
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('maps a navigation deadline to failureReason timeout', async () => {
     const subject = new BrowserLocalSubject()
     try {
       const out = await subject.fetch(`${url}/hang`)
       expect(out.status).toBe('failed')
       expect(out.failureReason).toBe('timeout')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('gives navigation until a caller-chosen deadline, never past it, and 20 s without one', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const navigationTimeout = async (deadlineAt?: number, timeout?: number): Promise<unknown> => {
+        const out = await subject.fetch(`${url}/spa`, deadlineAt, undefined, undefined, timeout === undefined ? {} : { timeout })
+        expect(out.status).toBe('success')
+        return out.trace.find((event) => event.event === 'navigate')?.detail?.timeoutMs
+      }
+      expect(await navigationTimeout()).toBe(20_000)
+      expect(await navigationTimeout(Date.now() + 60_000)).toBe(20_000)
+      const followed = await navigationTimeout(Date.now() + 60_000, 60_000)
+      expect(followed).toBeGreaterThan(50_000)
+      expect(followed).toBeLessThanOrEqual(60_000)
+      expect(await navigationTimeout(Date.now() + 8_000, 8_000)).toBeLessThanOrEqual(8_000)
     } finally {
       await subject.teardown()
     }
@@ -264,7 +504,8 @@ describe('BrowserLocalSubject transport', () => {
       const out = await subject.fetch(`${url}/gate`)
       expect(out.status).toBe('blocked')
       expect(out.blockReason).toBe('cloudflare_challenge')
-      expect(out.markdown).toBeNull()
+      // The 403 block page is evidence of what the server said, not content.
+      expect(out.markdown).toContain('Just a moment...')
       expect(out.escalations).toEqual([
         {
           from: 'browser_local',
@@ -285,6 +526,166 @@ describe('BrowserLocalSubject transport', () => {
       expect(out.status).toBe('failed')
       expect(out.failureReason).toBe('http_error')
       expect(out.blockReason).toBeNull()
+      expect(out.evidence.httpStatus).toBe(403)
+      expect(out.markdown).toContain('403 Forbidden')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('judges a 201 page from its content like a 200', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`${url}/created`)
+      expect(out.status).toBe('success')
+      expect(out.evidence.httpStatus).toBe(201)
+      expect(out.markdown).toContain('judged from its content in the browser lane too')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports a server redirect loop as the redirect limit Chromium reached, not a connection error', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch(`${url}/client/loop/a`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'redirect_limit', evidence: { httpStatus: null } })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports a host that does not resolve as dns_error, not policy_denied', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const out = await subject.fetch('http://w2l-dns-failure.invalid/page')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+    } finally {
+      await subject.teardown()
+    }
+  })
+})
+
+describe('BrowserLocalSubject after the page moves on by itself', () => {
+  it('reports the status and content type of the document it shows, and judges it by them', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // 200, then location.replace to a 404: the 404 page is what the browser shows.
+      const gone = await subject.fetch(`${url}/client/replace`)
+      expect(gone).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+      expect(gone.evidence).toMatchObject({
+        finalUrl: `${url}/client/gone`,
+        httpStatus: 404,
+        contentType: 'text/html; charset=iso-8859-1',
+        redirectChain: [`${url}/client/replace`, `${url}/client/gone`],
+        redirectChainComplete: true,
+      })
+      expect(gone.markdown).toContain('Page not found')
+      expect(gone.compliance?.finalUrl).toBe(`${url}/client/gone`)
+
+      // A server redirect, then a script: every hop is listed and the last document answers.
+      const onward = await subject.fetch(`${url}/client/hop`)
+      expect(onward.status).toBe('success')
+      expect(onward.evidence).toMatchObject({
+        finalUrl: `${url}/landing`,
+        httpStatus: 200,
+        contentType: 'text/html; charset=iso-8859-1',
+        redirectChain: [`${url}/client/hop`, `${url}/client/onward`, `${url}/landing`],
+        redirectChainComplete: true,
+      })
+
+      // A 403 block page reached by a script is blocked, with its own status.
+      const gate = await subject.fetch(`${url}/client/to-gate`)
+      expect(gate).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
+      expect(gate.evidence).toMatchObject({ finalUrl: `${url}/gate`, httpStatus: 403, redirectChain: [`${url}/client/to-gate`, `${url}/gate`], redirectChainComplete: true })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('settles on the document a zero-second meta refresh loads, with or without waitFor', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      for (const options of [{}, { waitFor: 500 }]) {
+        const out = await subject.fetch(`${url}/client/meta`, undefined, undefined, undefined, options)
+        expect(out.status).toBe('success')
+        expect(out.markdown).toContain('The page two redirects lead to')
+        expect(out.evidence).toMatchObject({
+          finalUrl: `${url}/landing`,
+          httpStatus: 200,
+          contentType: 'text/html; charset=iso-8859-1',
+          redirectChain: [`${url}/client/meta`, `${url}/landing`],
+          redirectChainComplete: true,
+        })
+      }
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports the URL a document was loaded from when the history API changed it, and keeps a fragment', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // history.pushState: no request answered /client/sub/pushed; /client/push answered the document.
+      const pushed = await subject.fetch(`${url}/client/push`)
+      expect(pushed.status).toBe('success')
+      expect(pushed.markdown).toContain('The page the browser shows at the end')
+      expect(pushed.evidence).toMatchObject({
+        finalUrl: `${url}/client/push`,
+        httpStatus: 200,
+        contentType: 'text/html; charset=utf-8',
+        redirectChain: [],
+        redirectChainComplete: true,
+      })
+      expect(pushed.compliance?.finalUrl).toBe(`${url}/client/push`)
+      expect(pushed.trace).toContainEqual(expect.objectContaining({ event: 'same_document_navigation', detail: { from: `${url}/client/push`, to: `${url}/client/sub/pushed` } }))
+      // Relative links resolve as the browser resolves them: against the page's URL.
+      expect(pushed.links).toContain(`${url}/client/sub/detail`)
+
+      // The document answered 404, whatever URL the page gave itself afterwards.
+      const missing = await subject.fetch(`${url}/client/spa-missing`)
+      expect(missing).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+      expect(missing.evidence).toMatchObject({ finalUrl: `${url}/client/spa-missing`, httpStatus: 404, contentType: 'text/html; charset=utf-8', redirectChain: [], redirectChainComplete: true })
+      expect(missing.markdown).toContain('The page the browser shows at the end')
+
+      // A fragment names a part of the same document: the URL keeps it.
+      const fragment = await subject.fetch(`${url}/client/fragment`)
+      expect(fragment.status).toBe('success')
+      expect(fragment.evidence).toMatchObject({
+        finalUrl: `${url}/client/fragment#part`,
+        httpStatus: 200,
+        contentType: 'text/html; charset=utf-8',
+        redirectChain: [],
+        redirectChainComplete: true,
+      })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('stops waiting for a page close Chromium leaves unanswered', async () => {
+    expect(await closePage({ close: () => new Promise<void>(() => {}) }, 50)).toBe(false)
+    expect(await closePage({ close: async () => {} }, 50)).toBe(true)
+    expect(await closePage({ close: async () => { throw new Error('Target closed') } }, 50)).toBe(true)
+  })
+
+  it('never pairs a page that reloads itself without end with another document, bounds its chain and closes it', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // Chromium leaves some closes of such a page unanswered (see closePage).
+      for (let fetchIndex = 0; fetchIndex < 3; fetchIndex++) {
+        const out = await subject.fetch(`${url}/client/refresh-loop`, Date.now() + 4_000)
+        // Either a read held still (the document read is the one that answered)
+        // or none did (nothing is delivered): which depends on timing.
+        if (out.status === 'success') expect(out.evidence).toMatchObject({ httpStatus: 200, contentType: 'text/html; charset=utf-8' })
+        else {
+          expect(out).toMatchObject({ status: 'failed', failureReason: 'redirect_loop', markdown: null, evidence: { finalUrl: `${url}/client/refresh-loop`, httpStatus: null, contentType: null } })
+          expect(out.trace).toContainEqual(expect.objectContaining({ event: 'page_kept_navigating' }))
+        }
+        expect(out.evidence.redirectChain.length).toBeGreaterThan(2)
+        expect(out.evidence.redirectChain.length).toBeLessThanOrEqual(21)
+        expect(out.evidence.redirectChainComplete).toBe(false)
+      }
     } finally {
       await subject.teardown()
     }

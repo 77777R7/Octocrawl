@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { identityForRoute } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
@@ -83,6 +85,59 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
   })
 
+  it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {
+    const app = createApp(engine)
+    const post = async (path: string, body: Record<string, unknown>) => (await app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/error/404`, ...body }),
+    })).json()
+    const snapshot = { httpStatus: 404, contentType: 'text/html; charset=utf-8', rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) }
+    const full = await post('/v1/scrape', { formats: ['markdown'] })
+    expect(full).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { httpStatus: 404 }, snapshot })
+    expect(full.markdown).toContain('Not Found')
+    const compact = await post('/v1/scrape', { formats: ['markdown'], debug: false })
+    expect(compact).toMatchObject({ status: 'failed', failureReason: 'http_error', snapshot })
+    expect(compact.markdown).toContain('Not Found')
+    const shim = await post('/fc/v1/scrape', {})
+    expect(shim).toMatchObject({ success: false, error: 'failed: http_error', data: { metadata: { url: `${server.url}/error/404`, statusCode: 404, contentType: 'text/html; charset=utf-8', error: 'http_error' } } })
+    expect(shim.data.markdown).toContain('Not Found')
+  })
+
+  it('returns the page metadata on full and compact scrapes, /fc, batch items and crawl pages', async () => {
+    const app = createApp(engine)
+    const url = `${server.url}/crawl/listing`
+    const post = async (path: string, body: Record<string, unknown>) => (await app.request(path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })).json()
+    const declared = {
+      title: 'Harbour lantern catalog',
+      description: 'Synthetic fixture page for benchmark purposes.',
+      language: 'en',
+      keywords: null,
+      robots: null,
+      favicon: null,
+      canonicalUrl: null,
+    }
+    expect((await post('/v1/scrape', { url })).metadata).toEqual(declared)
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], debug: false })).metadata).toEqual(declared)
+    expect((await post('/fc/v1/scrape', { url })).data.metadata).toEqual({
+      title: 'Harbour lantern catalog',
+      description: 'Synthetic fixture page for benchmark purposes.',
+      language: 'en',
+      sourceURL: url,
+      url,
+      statusCode: 200,
+      contentType: 'text/html; charset=utf-8',
+    })
+    const batch = await post('/v1/batches', { urls: [url] })
+    const crawl = await post('/v1/crawl', { url, maxPages: 1 })
+    await engine.close()
+    const items = await (await app.request(`/v1/batches/${batch.taskId}/items`)).json()
+    const pages = await (await app.request(`/v1/crawl/${crawl.taskId}/pages`)).json()
+    expect(items.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
+    expect(pages.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
+  })
+
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
     const app = createApp(engine)
     const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
@@ -97,6 +152,40 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const both = await scrape(['markdown', { type: 'json', schema }])
     expect(both.markdown).toContain('Harbour lantern catalog')
     expect(both.json.data.title).toBe('Harbour lantern catalog')
+  })
+
+  it('reads JSON numbers as the page writes them, and leaves one it cannot settle unfilled with the text quoted', async () => {
+    const shop = (price: string) => `<!doctype html><html lang="de"><head><title>Messinglampe | Shop</title></head><body><main><h1>Messinglampe</h1><p class="price">${price}</p>` +
+      '<p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p></main></body></html>'
+    const pages: Record<string, string> = { '/a': shop('12,99 €'), '/b': shop('1.299,00 €'), '/c': shop('1 299,00 €'), '/d': shop('1.299 €') }
+    const local = createServer((req, res) => {
+      const body = pages[req.url ?? '']
+      if (body === undefined) res.writeHead(404).end()
+      else res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body)
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(local.address() as AddressInfo).port}`
+    try {
+      const app = createApp(engine)
+      const schema = { type: 'object', properties: { title: { type: 'string' }, price: { type: 'number' } }, required: ['title', 'price'] }
+      const scrape = async (path: string) => (await app.request('/v1/scrape', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: origin + path, formats: [{ type: 'json', schema }], debug: false }),
+      })).json()
+      for (const [path, price, text] of [['/a', 12.99, '12,99 €'], ['/b', 1299, '1.299,00 €'], ['/c', 1299, '1 299,00 €']] as const) {
+        const out = await scrape(path)
+        expect(out.json, path).toMatchObject({ status: 'complete', data: { title: 'Messinglampe', price } })
+        expect(out.json.evidence, path).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text })
+        expect(out.evidenceRecord.fieldEvidence['/price'], path).toEqual({ source: 'text', locator: 'p.price' })
+      }
+      const unsettled = await scrape('/d')
+      expect(unsettled.json).toMatchObject({ status: 'incomplete', data: { title: 'Messinglampe' } })
+      expect(unsettled.json.data).not.toHaveProperty('price')
+      expect(unsettled.json.issues[0]).toMatchObject({ code: 'field_unavailable', path: '/price', message: expect.stringContaining('the page states "1.299 €"') })
+      expect(unsettled.evidenceRecord.fieldEvidence).not.toHaveProperty('/price')
+    } finally {
+      await new Promise<void>(resolve => local.close(() => resolve()))
+    }
   })
 
   it('POST /v1/crawl is 202 and GET /v1/crawl/:id returns CrawlReport', async () => {
@@ -157,9 +246,9 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     try {
       const first = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2`)
       expect(first.status).toBe(200)
-      const firstPage = await first.json() as { items: Array<{ markdown: string | null }>; nextCursor: string | null; hasMore: boolean }
+      const firstPage = await first.json() as { items: Array<{ markdown: string | null; links?: string[] }>; nextCursor: string | null; hasMore: boolean }
       expect(firstPage.items).toHaveLength(2)
-      expect(firstPage.items.every((item) => item.markdown !== null)).toBe(true)
+      expect(firstPage.items.every((item) => item.markdown !== null && item.links === undefined)).toBe(true)
       expect(firstPage.hasMore).toBe(true)
 
       const second = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`)
@@ -195,6 +284,42 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       failureReason: 'http_error',
     })
     expect(body.items[0]?.trace).toEqual(expect.any(Array))
+  })
+
+  it('rejects unknown keys and unsupported formats by name', async () => {
+    const app = createApp(engine)
+    const post = async (path: string, body: unknown) => {
+      const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return { status: res.status, error: ((await res.json()) as { error?: string }).error }
+    }
+    const url = `${server.url}/crawl/listing`
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: html, rawHtml (supported: markdown, links, json)' })
+    expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
+    expect(await post('/v1/batches', { urls: [url], mobile: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: mobile') })
+    expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })
+  })
+
+  it('crawls with formats and pathname filters and returns absolute links on each page', async () => {
+    const app = createApp(engine)
+    const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+    const started = await app.request('/v1/crawl', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, formats: ['markdown', 'links', { type: 'json', schema }], includePaths: ['^/crawl/item/'], excludePaths: ['^/crawl/item/2$'] }),
+    })
+    const { taskId } = (await started.json()) as { taskId: string }
+    await engine.close()
+
+    const restarted = createApiEngine({ taskRoot, channelsFor: httpOnlyChannels })
+    try {
+      const pages = await restarted.getCrawlPages(taskId, { limit: 10 })
+      expect(pages?.items.map((item) => new URL(item.url).pathname).sort()).toEqual(['/crawl/item/1', '/crawl/item/3', '/crawl/listing'])
+      expect(pages?.items.every((item) => item.markdown !== null && (item.links?.length ?? 0) > 0 && item.links!.every((link) => link.startsWith(`${server.url}/`)))).toBe(true)
+      expect(pages?.items.every((item) => item.json?.status === 'complete' && typeof (item.json.data as { title?: unknown }).title === 'string')).toBe(true)
+    } finally {
+      await restarted.close()
+    }
   })
 
   it('cancels a running crawl persistently and preserves completed pages', async () => {
@@ -241,7 +366,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
-  it('GET /v1/crawl/:id is failed when scrape throws, not left running', async () => {
+  it('records a page whose scrape throws as a failed item, not a failed or running crawl', async () => {
     const throwingRoot = await mkdtemp(join(tmpdir(), 'w2l-api-fail-'))
     const throwing = createApiEngine({
       taskRoot: throwingRoot,
@@ -269,8 +394,13 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(got.status).toBe(200)
       const report = await got.json()
       expect(report.taskId).toBe(taskId)
-      expect(report.status).toBe('failed')
+      expect(report.status).toBe('completed')
+      expect(report.pagesFetched).toBe(1)
       expect(report.loopDetected).toBe(false)
+      const errors = await (await app.request(`/v1/crawl/${taskId}/errors?limit=10`)).json()
+      expect(errors.items).toHaveLength(1)
+      expect(errors.items[0]).toMatchObject({ status: 'failed', failureReason: 'internal_error' })
+      expect(JSON.stringify(errors.items[0].trace)).toContain('scrape exploded')
     } finally {
       await throwing.close()
       await rm(throwingRoot, { recursive: true, force: true })

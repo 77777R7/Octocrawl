@@ -10,6 +10,7 @@ import { createManagedRuntime } from './managedRuntime.js'
 import { REMOTE_TOOLS, normalizeHostedToolCall } from './hostedToolPolicy.js'
 import { validateAmazonPublicState } from './amazonState.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
+import { InFlightCalls, trackPost } from './inFlight.js'
 
 export interface HostedConfig {
   mcpUrl: string
@@ -56,6 +57,7 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
   const jwks = createRemoteJWKSet(new URL('/oauth2/jwks',issuer))
   const verifyToken = config.verifyToken ?? (async (token:string) => (await jwtVerify(token,jwks,{issuer:issuer.origin,audience:config.mcpUrl})).payload)
   let closing: Promise<void> | null = null
+  const calls = new InFlightCalls()
   const metadataUrl = `${mcpUrl.origin}/.well-known/oauth-protected-resource`
   const sendJson = (res: import('node:http').ServerResponse,status:number,body:unknown,headers:Record<string,string>={}) => {
     res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}).end(JSON.stringify(body))
@@ -99,7 +101,8 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
       let parsedBody: unknown
       try {parsedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))}
       catch {sendJson(res,400,{error:'invalid JSON'});return}
-      const mcp = createMcpServer(client,{allowedTools:REMOTE_TOOLS,
+      // A cancellation reaches only a call made with the same bearer token and, when the client sends one, the same MCP session.
+      const mcp = createMcpServer(client,{allowedTools:REMOTE_TOOLS,calls:trackPost(calls,req,res,parsedBody,[token]),
         normalizeCall:(name,args)=>{
           const normalized=normalizeHostedToolCall(name,args,config.receiverUrl,AMAZON_PRODUCT_SCHEMA)
           if (name === 'create_monitor') {
