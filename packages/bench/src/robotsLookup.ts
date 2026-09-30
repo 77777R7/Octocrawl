@@ -10,7 +10,7 @@
  * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { robotsAgent, type NetworkPolicy, type ExecutionContext, type RobotsUnreachable } from '@w2l/contracts'
+import { robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type RobotsOverride, type RobotsUnreachable } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -35,6 +35,20 @@ export interface CachedRobots {
   absent: boolean
   /** Why robots.txt was unreachable; set only when it was. */
   unreachable?: RobotsUnreachable
+}
+
+/**
+ * The warning every result of an overridden fetch carries, so a reader who
+ * never opens the trace still sees that a rule was set aside, which one, and
+ * on whose word.
+ */
+export function robotsOverrideWarning(decision: ComplianceRobotsDecision, override: RobotsOverride): FetchWarning {
+  const rules = decision.appliedRules.map((rule) => rule.pattern).join(', ')
+  const who = override.recordedBy === undefined ? '' : ` by ${override.recordedBy}`
+  return {
+    code: 'robots_overridden',
+    message: `${decision.robotsUrl ?? 'robots.txt'} disallows this URL (rule ${rules}); it was fetched under an override recorded${who}: ${override.reason}`,
+  }
 }
 
 const ROBOTS_TIMEOUT_MS = 5_000

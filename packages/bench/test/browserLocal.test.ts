@@ -245,6 +245,29 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('fetches a robots-disallowed path under a recorded override and signs the override into its record', async () => {
+    const subject = new BrowserLocalSubject()
+    const before = privateHits
+    try {
+      const out = await subject.fetch(`${url}/private/secret`, undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } })
+      expect(privateHits).toBe(before + 1)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Private area')
+      // The verdict stays on the record next to the decision that set it aside.
+      const record = out.compliance!
+      expect(record.robots).toMatchObject({ decision: 'disallowed', skippedFetch: false, override: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } })
+      expect(record.robots.appliedRules.map((r) => r.pattern)).toContain('/private')
+      const events = out.trace.map((t) => t.event)
+      expect(events.indexOf('robots_overridden')).toBe(events.indexOf('robots_disallowed') + 1)
+      expect(out.warnings?.[0]).toMatchObject({ code: 'robots_overridden' })
+      expect(out.warnings?.[0]?.message).toContain('recorded by test researcher')
+      // The override is part of what the record's hash commits to.
+      expect(verifyLedger(subject.ledger()).valid).toBe(true)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
     let pageHits = 0
     const failing = createServer((req, res) => {
@@ -263,6 +286,13 @@ describe('BrowserLocalSubject transport', () => {
       // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
       expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      // No rule was read, so a recorded override has nothing to set aside.
+      const overridden = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, undefined, { robotsOverride: { reason: 'a rule I know of' } })
+      expect(overridden).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(overridden.compliance!.robots).toMatchObject({ unreachable: 'server_error', skippedFetch: true })
+      expect(overridden.compliance!.robots).not.toHaveProperty('override')
+      expect(overridden.warnings).toBeUndefined()
+      expect(pageHits).toBe(0)
       expect(verifyLedger(subject.ledger()).valid).toBe(true)
     } finally {
       await subject.teardown()

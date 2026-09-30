@@ -41,6 +41,8 @@ import {
   type TaskStatus,
   type CrawlPageQuery,
   type ExecutionContext,
+  type RobotsOverride,
+  type RobotsUrlOverride,
   type CompactScrapeResponse,
   type ScrapeResponse,
   type ScrapeAtom,
@@ -286,7 +288,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // every page. A task stored before crawl formats existed has neither and
     // keeps the full result.
     const selection = task.batch ?? task.crawl
-    const ladder = new LadderScrapeAtom(runner, fetchOptions(selection))
+    // A batch's recorded robots overrides are per URL: only the URL an
+    // override names is fetched past a disallow, never its neighbours.
+    const robotsOverrideFor = task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection) : (url) => {
+      const robotsOverride = robotsOverrideFor(url)
+      return { ...fetchOptions(selection), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
+    })
     const atom: ScrapeAtom = selection === undefined ? ladder : {
       async scrape(url, context) {
         // `timeout` is each page's own deadline, inside the task's.
@@ -392,7 +400,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       const runner = new LadderRunner(channels, policy, historyFor(mode))
       const operation = (async () => {
-        const run = await runner.run(req.url, undefined, scope, fetchOptions(req))
+        const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
         const full: ScrapeResponse = {
           ...run.result,
           channelsTried: run.channelsTried,
@@ -464,7 +472,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: { urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req) },
+        batch: {
+          urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
+          ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
+        },
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
@@ -710,6 +721,18 @@ function pageOptions(req: PageOptions): PageOptions {
   return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }) }
 }
 
+/** A batch's recorded robots overrides by URL, as sent and in canonical form; every other URL has none. */
+function robotsOverrideLookup(overrides: readonly RobotsUrlOverride[]): (url: string) => RobotsOverride | undefined {
+  const byUrl = new Map<string, RobotsOverride>()
+  for (const { url, reason, recordedBy } of overrides) {
+    const override: RobotsOverride = { reason, ...(recordedBy === undefined ? {} : { recordedBy }) }
+    byUrl.set(url, override)
+    const canonical = canonicalizeUrl(url)
+    if (canonical !== null) byUrl.set(canonical, override)
+  }
+  return (url) => byUrl.get(url) ?? byUrl.get(canonicalizeUrl(url) ?? url)
+}
+
 /** A crawl stored with every option it needs to resume (older tasks lack maxDepth and hosts). */
 function crawlOptionsStored(task: Task): boolean {
   return task.batch === undefined && task.crawl?.maxDepth !== undefined
@@ -745,6 +768,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']
     status: step.status,
     lane: step.lane,
     markdown: result?.markdown ?? null,
+    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),

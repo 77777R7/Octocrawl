@@ -120,6 +120,71 @@ describe('ResilientHttpSubject robots', () => {
     expect(disallowed?.detail).not.toHaveProperty('unreachable')
   })
 
+  it('fetches a disallowed path under a recorded override and says so in the trace and the warnings', async () => {
+    const subject = new ResilientHttpSubject()
+    const before = privateHits
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/secret`, undefined, undefined, {}, undefined, {
+        robotsOverride: { reason: 'The publisher links this report from its own site; the host rule addresses crawlers.', recordedBy: 'test researcher' },
+      })
+      expect(privateHits).toBe(before + 1)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Private area')
+      // robots.txt was still read and its verdict recorded; the override follows it.
+      expect(out.trace.find((t) => t.event === 'robots_checked')?.detail).toMatchObject({ decision: 'disallowed' })
+      const events = out.trace.map((t) => t.event)
+      expect(events.indexOf('robots_disallowed')).toBeGreaterThan(events.indexOf('robots_checked'))
+      expect(events.indexOf('robots_overridden')).toBe(events.indexOf('robots_disallowed') + 1)
+      expect(out.trace.find((t) => t.event === 'robots_overridden')?.detail).toEqual({
+        url: `${robotsUrl}/private/secret`,
+        appliedRules: [{ pattern: '/private', allow: false }],
+        reason: 'The publisher links this report from its own site; the host rule addresses crawlers.',
+        recordedBy: 'test researcher',
+      })
+      expect(out.warnings).toEqual([{
+        code: 'robots_overridden',
+        message: `${robotsUrl}/robots.txt disallows this URL (rule /private); it was fetched under an override recorded by test researcher: The publisher links this report from its own site; the host rule addresses crawlers.`,
+      }])
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('leaves an allowed path untouched by an override: no override event, no warning', async () => {
+    const subject = new ResilientHttpSubject()
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/ok`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'not needed here' } })
+      expect(out.status).toBe('success')
+      expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
+      expect(out.warnings).toBeUndefined()
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('does not set an unreachable robots.txt aside, override or not', async () => {
+    let pageHits = 0
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') res.writeHead(503).end('temporarily unavailable')
+      else { pageHits++; res.writeHead(200).end('<html><body>Must not fetch</body></html>') }
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const subject = new ResilientHttpSubject()
+    try {
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'a rule I know of' } })
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
+      expect(out.warnings).toBeUndefined()
+      expect(pageHits).toBe(0)
+    } finally {
+      await subject.teardown()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('honours a more-specific Allow beneath a Disallow', async () => {
     const subject = new ResilientHttpSubject()
     const out = await subject.fetch(`${robotsUrl}/private/ok`)

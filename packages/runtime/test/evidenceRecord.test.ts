@@ -100,6 +100,17 @@ describe('toEvidenceRecord', () => {
     expect(record.robotsDecision).toEqual({ decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, unreachable: null, crawlDelayMs: null, userOverride: false })
   })
 
+  it('reports a recorded robots override from the signed record or the trace', () => {
+    const overridden = compliance({ robots: { robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, matchedUserAgentGroup: '*', appliedRules: [{ pattern: '/', allow: false }], decision: 'disallowed', skippedFetch: false, crawlDelayMs: null, override: { reason: 'publisher link', recordedBy: 'analyst' } } })
+    expect(toEvidenceRecord(result({ lane: 'browser_local', compliance: overridden }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', unreachable: null, userOverride: true })
+    const trace = [
+      { at: 1, lane: 'http' as const, event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, matchedGroup: '*', ruleCount: 1, crawlDelayMs: null } },
+      { at: 2, lane: 'http' as const, event: 'robots_disallowed', detail: { url, appliedRules: [{ pattern: '/', allow: false }] } },
+      { at: 3, lane: 'http' as const, event: 'robots_overridden', detail: { url, appliedRules: [{ pattern: '/', allow: false }], reason: 'publisher link' } },
+    ]
+    expect(toEvidenceRecord(result({ trace }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', robotsSha256: ROBOTS, userOverride: true })
+  })
+
   it('keeps an unreachable robots.txt and treats an unconsulted one as no decision', () => {
     const unreachable = compliance({ finalUrl: null, robots: { robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, matchedUserAgentGroup: null, appliedRules: [], decision: 'disallowed', skippedFetch: true, crawlDelayMs: null, unreachable: 'timeout' } })
     expect(toEvidenceRecord(result({ lane: 'provider', compliance: unreachable }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', unreachable: 'timeout' })

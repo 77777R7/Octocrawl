@@ -153,4 +153,17 @@ describe('buildComplianceRecord', () => {
     ]
     expect(new Set(hashes).size).toBe(4)
   })
+
+  it('hashes a recorded robots override, its reason and who recorded it', () => {
+    const disallowed = { ...baseInput().robots, decision: 'disallowed' as const, skippedFetch: false, appliedRules: [{ pattern: '/private', allow: false }] }
+    const hashes = [
+      buildComplianceRecord({ ...baseInput(), robots: disallowed }).contentHash,
+      buildComplianceRecord({ ...baseInput(), robots: { ...disallowed, override: { reason: 'publisher link' } } }).contentHash,
+      buildComplianceRecord({ ...baseInput(), robots: { ...disallowed, override: { reason: 'publisher link', recordedBy: 'analyst' } } }).contentHash,
+      buildComplianceRecord({ ...baseInput(), robots: { ...disallowed, override: { reason: 'another reason', recordedBy: 'analyst' } } }).contentHash,
+    ]
+    expect(new Set(hashes).size).toBe(4)
+    const record = buildComplianceRecord({ ...baseInput(), robots: { ...disallowed, override: { reason: 'publisher link', recordedBy: 'analyst' } } })
+    expect(record.robots).toMatchObject({ decision: 'disallowed', skippedFetch: false, override: { reason: 'publisher link', recordedBy: 'analyst' } })
+  })
 })

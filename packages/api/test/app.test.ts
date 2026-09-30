@@ -188,6 +188,35 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
+  it('scrapes a robots-disallowed URL under a recorded override, keeps the warning on the full and compact responses, and refuses a blanket ignoreRobotsTxt', async () => {
+    let reportHits = 0
+    const local = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /'); return }
+      reportHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><head><title>Annual report</title></head><body><main><article><h1>Annual report</h1><p>The publisher links this report from its own pages, while the host that serves it tells every crawler to stay out; a researcher fetches it once, under a recorded decision, to cite its figures.</p><p>The report itself is ordinary prose, long enough for the extraction cascade to accept it as the main content of the page.</p></article></main></body></html>')
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(local.address() as AddressInfo).port}/report`
+    try {
+      const app = createApp(engine)
+      const post = (body: unknown) => app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const robotsOverride = { reason: 'The publisher links this report itself; the host rule addresses crawlers.', recordedBy: 'analyst' }
+      const full = await (await post({ url, robotsOverride })).json()
+      expect(full).toMatchObject({ status: 'success', channelsTried: ['http'], warnings: [{ code: 'robots_overridden', message: expect.stringContaining('(rule /); it was fetched under an override recorded by analyst') }] })
+      expect(full.trace.map((event: { event: string }) => event.event)).toEqual(expect.arrayContaining(['robots_checked', 'robots_disallowed', 'robots_overridden']))
+      const compact = await (await post({ url, robotsOverride, debug: false })).json()
+      expect(compact).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden' }], evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true } } })
+      expect(reportHits).toBe(2)
+      const blanket = await post({ url, ignoreRobotsTxt: true })
+      expect(blanket.status).toBe(400)
+      expect(await blanket.json()).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] } })
+      expect(reportHits).toBe(2)
+    } finally {
+      await new Promise<void>(resolve => local.close(() => resolve()))
+    }
+  })
+
   it('POST /v1/crawl is 202 and GET /v1/crawl/:id returns CrawlReport', async () => {
     const app = createApp(engine)
     const started = await app.request('/v1/crawl', {

@@ -7,6 +7,7 @@ import {
   type ExecutionContext,
   type FetchOptions,
   type FetchResult,
+  type FetchWarning,
   type FileDescription,
   type NetworkPolicy,
   type TraceEvent,
@@ -16,7 +17,7 @@ import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionS
 import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
@@ -182,12 +183,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
       modelMs: 0,
       totalMs,
     })
+    // Set when a robots disallow was set aside by the caller's recorded
+    // decision; every result of this fetch then carries the warning.
+    let overrideWarning: FetchWarning | null = null
     const timedDenied = (failureReason: FetchResult['failureReason'], retryAt?: number): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const denied = this.denied(url, start, trace, failureReason)
       return {
         ...denied,
         ...(retryAt === undefined ? {} : { retryAt }),
+        ...(overrideWarning === null ? {} : { warnings: [overrideWarning] }),
         usage: {
           ...denied.usage,
           wallMs: totalMs,
@@ -253,7 +258,20 @@ export class ResilientHttpSubject implements SubjectAdapter {
           event: 'robots_disallowed',
           detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
-        return timedDenied('policy_denied')
+        // The caller's recorded decision sets a rule the publisher wrote
+        // aside for this one URL; an unreachable robots.txt is not a rule and
+        // stays a complete disallow. The verdict stays in the trace above;
+        // this says who set it aside and why, and the result's warnings
+        // repeat it.
+        const override = options.robotsOverride
+        if (override === undefined || robotsDecision.unreachable !== undefined) return timedDenied('policy_denied')
+        trace.push({
+          at: Date.now() - start,
+          lane: 'http',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        overrideWarning = robotsOverrideWarning(robotsDecision, override)
       }
     }
 
@@ -399,6 +417,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       return {
         ...result,
+        ...(overrideWarning === null ? {} : { warnings: [overrideWarning, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,

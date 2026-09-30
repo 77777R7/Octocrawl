@@ -254,6 +254,22 @@ export const MODE_IDENTITIES: Readonly<Record<CrawlMode, ModeIdentity>> = {
 export type RobotsUnreachable = 'server_error' | 'network_error' | 'timeout'
 
 /**
+ * A caller's recorded decision to fetch one URL although its host's
+ * robots.txt disallows it: a researcher fetching a report the publisher links
+ * publicly from a CDN host whose rules address crawlers. It is never a blanket
+ * switch; it names one URL, carries a reason, and everything about it (the
+ * rule it set aside, the reason, who recorded it) goes into the trace, the
+ * result's warnings and, in a lane that mints one, the compliance record, so
+ * the fetch stays citable.
+ */
+export interface RobotsOverride {
+  /** Why this URL may be fetched despite the rule, in the caller's words. */
+  reason: string
+  /** Who recorded the decision, when the caller wants that on the record. */
+  recordedBy?: string
+}
+
+/**
  * The outcome of consulting robots.txt for a single target URL. One record per
  * fetch. `consulted` distinguishes "we checked and it said X" from "there was
  * nothing to check" — a record that skips the check must say so, never pretend.
@@ -283,6 +299,12 @@ export interface RobotsDecision {
    * robots.txt, and `decision` is `no_robots`.
    */
   unreachable?: RobotsUnreachable
+  /**
+   * Present when a disallow the publisher wrote was set aside by a recorded
+   * decision: the fetch went ahead (`skippedFetch: false`) and this says on
+   * whose word. Never set for an unreachable robots.txt.
+   */
+  override?: RobotsOverride
 }
 
 /**

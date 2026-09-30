@@ -187,6 +187,16 @@ export interface HandoffRequest {
 }
 
 /**
+ * A caveat a reader of the result must see without opening the trace. Never
+ * a failure reason, which `status` and its reason fields carry.
+ */
+export interface FetchWarning {
+  /** Machine-readable code. `robots_overridden`: a robots.txt rule was set aside by a recorded override. */
+  code: string
+  message: string
+}
+
+/**
  * A page-level fetch outcome. `status` is the single source of truth
  * (see RESULT_STATUS); the reason fields narrow it.
  */
@@ -249,6 +259,12 @@ export interface FetchResult {
    * HTML itself.
    */
   links?: readonly string[]
+  /**
+   * The fetch's caveats, present only when it has any: a `robots_overridden`
+   * warning first when a recorded override set a robots.txt rule aside. Kept
+   * on batch items and the compact scrape response too.
+   */
+  warnings?: readonly FetchWarning[]
   /** True when content was cut to fit a token budget. */
   truncated: boolean
   /** Character offset where truncation occurred; null when not truncated. */

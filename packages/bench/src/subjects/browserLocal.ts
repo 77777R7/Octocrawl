@@ -1,4 +1,4 @@
-import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -23,7 +23,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -192,10 +192,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const monotonicStart = performance.now()
     let queueMs = 0
     let cooldownWaitMs = 0
+    // Set when a robots disallow was set aside by the caller's recorded
+    // decision; every result of this fetch then carries the warning first.
+    const robots: { overrideWarning: FetchWarning | null } = { overrideWarning: null }
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       return {
         ...result,
+        ...(robots.overrideWarning === null ? {} : { warnings: [robots.overrideWarning, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -216,7 +220,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options)
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (warning) => { robots.overrideWarning = warning })
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -235,7 +239,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (warning: FetchWarning) => void): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -286,7 +290,25 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const host = this.hostOf(url)
 
-      if (identity.respectsRobots && robotsDecision.decision === 'disallowed') {
+      // A recorded override sets a disallow the publisher wrote aside for this
+      // one URL (never an unreachable robots.txt): the verdict, the override
+      // and its reason go into the trace, the warnings and the compliance
+      // record, and the fetch goes ahead.
+      const override = options.robotsOverride
+      const overridden = identity.respectsRobots && robotsDecision.decision === 'disallowed' && robotsDecision.unreachable === undefined && override !== undefined
+      if (override !== undefined && overridden) {
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'robots_disallowed', detail: { url, appliedRules: robotsDecision.appliedRules } })
+        trace.push({
+          at: Date.now() - start,
+          lane: 'browser_local',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        onRobotsOverride?.(robotsOverrideWarning(robotsDecision, override))
+      }
+      const robotsForRecord = override !== undefined && overridden ? { ...robotsDecision, skippedFetch: false, override } : robotsDecision
+
+      if (identity.respectsRobots && robotsDecision.decision === 'disallowed' && !overridden) {
         const wallMs = Date.now() - start
         const record = this.chain.append({
           recordId: crypto.randomUUID(),
@@ -553,7 +575,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         requestedUrl: url,
         finalUrl,
         requestedAt: new Date(start).toISOString(),
-        robots: robotsDecision,
+        robots: robotsForRecord,
         sentHeaders: { headers: sentHeaders },
         rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
         access: this.access,
@@ -658,7 +680,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         requestedUrl: url,
         finalUrl,
         requestedAt: new Date(start).toISOString(),
-        robots: robotsDecision,
+        robots: robotsForRecord,
         sentHeaders: { headers: sentHeaders },
         rateLimit: {
           previousRequestAtMs,

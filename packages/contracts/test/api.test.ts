@@ -136,6 +136,35 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
   })
 
+  it('parses a recorded robots override, insists on its reason, and names an unknown key inside it', () => {
+    const url = 'https://example.test/report.pdf'
+    expect(parseScrapeRequest({ url, robotsOverride: { reason: 'linked publicly by the publisher', recordedBy: 'analyst' } }).robotsOverride).toEqual({ reason: 'linked publicly by the publisher', recordedBy: 'analyst' })
+    expect(parseScrapeRequest({ url, robotsOverride: { reason: 'r' } }).robotsOverride).toEqual({ reason: 'r' })
+    expect(() => parseScrapeRequest({ url, robotsOverride: true })).toThrow('robotsOverride must be an object with a reason')
+    expect(() => parseScrapeRequest({ url, robotsOverride: {} })).toThrow('robotsOverride.reason must be a non-empty string of at most 500 characters')
+    expect(() => parseScrapeRequest({ url, robotsOverride: { reason: ' ' } })).toThrow('robotsOverride.reason must be a non-empty string')
+    expect(() => parseScrapeRequest({ url, robotsOverride: { reason: 'r', recordedBy: 'x'.repeat(201) } })).toThrow('robotsOverride.recordedBy must be a non-empty string of at most 200 characters')
+    expect(thrown(() => parseScrapeRequest({ url, robotsOverride: { reason: 'x', ignoreRobotsTxt: true } })))
+      .toMatchObject({ status: 400, code: 'unsupported_parameter', message: 'unsupported parameter: robotsOverride.ignoreRobotsTxt (supported: robotsOverride.reason, robotsOverride.recordedBy)', details: { parameters: ['robotsOverride.ignoreRobotsTxt'] } })
+    // The blanket switch stays refused by name, on scrape as on batch and crawl.
+    expect(() => parseScrapeRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
+    expect(() => parseBatchStartRequest({ urls: [url], robotsOverride: { reason: 'r' } })).toThrow('unsupported parameter: robotsOverride')
+    expect(() => parseCrawlStartRequest({ url, robotsOverrides: [] })).toThrow('unsupported parameter: robotsOverrides')
+  })
+
+  it('binds each batch robots override to one of the batch urls, once', () => {
+    const urls = ['https://a.test/one.pdf', 'https://b.test/two.pdf']
+    expect(parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://b.test/two.pdf', reason: 'publisher link' }] }).robotsOverrides).toEqual([{ url: 'https://b.test/two.pdf', reason: 'publisher link' }])
+    expect(parseBatchStartRequest({ urls })).not.toHaveProperty('robotsOverrides')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: { url: urls[0], reason: 'r' } })).toThrow('robotsOverrides must be an array')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://c.test/', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0], reason: 'r' }, { url: urls[0], reason: 'again' }] })).toThrow('robotsOverrides[1].url is overridden twice')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0] }] })).toThrow('robotsOverrides[0].reason must be a non-empty string')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ reason: 'r' }] })).toThrow('robotsOverrides[0].url is required')
+    expect(thrown(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0], reason: 'r', ignoreRobotsTxt: true }] })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['robotsOverrides[0].ignoreRobotsTxt'] } })
+  })
+
   it('accepts onlyMainContent, waitFor and timeout on scrape, batch and crawl within their bounds', () => {
     const url = 'https://example.com/'
     const options = { onlyMainContent: false, waitFor: 60_000, timeout: 1_000 }

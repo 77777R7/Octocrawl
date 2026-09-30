@@ -27,6 +27,9 @@ describe('single-owner hosted workflow policy', () => {
     expect(() => call('scrape',{url:'https://www.amazon.sg/dp/B000VW9PIK',formats:[{type:'json',schema}]})).toThrow()
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK','https://www.amazon.sg/dp/B000VW9PIK?tag=2']})).toThrow()
     expect(() => call('wait_batch',{id:'batch-1',timeoutMs:300_000})).toThrow()
+    // The remote endpoint takes no recorded robots override.
+    expect(() => call('scrape',{url:'https://www.amazon.sg/dp/B000VW9PIK',robotsOverride:{reason:'r'}})).toThrow('unsupported remote tool option')
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],robotsOverrides:[{url:'https://www.amazon.sg/dp/B000VW9PIK',reason:'r'}]})).toThrow('unsupported remote tool option')
   })
 
   it('allows reviewed public-document monitors with explicit HTTP capture and one receiver', () => {

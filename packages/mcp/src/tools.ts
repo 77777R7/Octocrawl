@@ -21,6 +21,18 @@ const PAGE_OPTION_PROPERTIES = {
   timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in milliseconds for the whole scrape (per page for crawl and batch). When it fires the result is partial with the content so far, or failed/timeout. Default 300000.' },
   maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file (PDF, CSV, XLSX, ZIP, JSON, text) to download, in bytes, below the server\'s own cap (W2L_MAX_FILE_BYTES, default 50 MiB). A larger file is failed with body_too_large and not saved.' },
 } as const
+/** A recorded decision to fetch one URL its host's robots.txt disallows; never a blanket switch. */
+const ROBOTS_OVERRIDE_PROPERTIES = {
+  reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
+  recordedBy: { type: 'string', minLength: 1, maxLength: 200, description: 'Who recorded the decision.' },
+} as const
+const ROBOTS_OVERRIDE_SCHEMA = {
+  type: 'object',
+  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside.',
+  properties: ROBOTS_OVERRIDE_PROPERTIES,
+  required: ['reason'],
+  additionalProperties: false,
+} as const
 const monitorConfigSchema = {type:'object',properties:{preset:{type:'string',enum:['firecrawl-introduction']},monitorId:{type:'string'},revision:{type:'integer',minimum:1},url:{type:'string'},ruleVersion:{type:'string'},intervalMs:{type:'integer',minimum:1},staleAfterMs:{type:'integer',minimum:1},config:{type:'object'},enabled:{type:'boolean'}},additionalProperties:false} as const
 const MONITOR_TOOLS = [
   {name:'preview_monitor',description:'Capture a nonpersistent sample and assess identity, fields, evidence, and missing reasons. Start with preset firecrawl-introduction.',inputSchema:monitorConfigSchema},
@@ -83,6 +95,7 @@ export const TOOLS = [
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
         ...PAGE_OPTION_PROPERTIES,
+        robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
       },
       required: ['url'],
       additionalProperties: false,
@@ -190,6 +203,11 @@ export const TOOLS = [
         ] } },
         includeLinks: { type: 'boolean' },
         ...PAGE_OPTION_PROPERTIES,
+        robotsOverrides: {
+          type: 'array', maxItems: 1000,
+          description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
+          items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
+        },
       },
       required: ['urls'], additionalProperties: false,
     },
@@ -228,6 +246,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       timeout: req.timeout,
       maxFileBytes: req.maxFileBytes,
+      ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
     }, request)
   }
   if (name === 'crawl') {
@@ -266,7 +285,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

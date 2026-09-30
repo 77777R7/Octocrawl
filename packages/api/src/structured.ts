@@ -1030,6 +1030,7 @@ export function compactScrapeResponse(
     ...(next.metadata === undefined ? {} : { metadata: next.metadata }),
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
     ...(next.file === undefined ? {} : { file: next.file }),
+    ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,
     usage: { ...next.usage, totalMs },

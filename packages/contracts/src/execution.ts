@@ -1,3 +1,5 @@
+import type { RobotsOverride } from './compliance.js'
+
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 export interface ExecutionContext {
   signal?: AbortSignal
@@ -28,4 +30,13 @@ export interface FetchOptions {
    * with `body_too_large` and not saved. Web pages keep `maxBodyBytes`.
    */
   maxFileBytes?: number
+  /**
+   * A recorded decision to fetch this one URL although its host's robots.txt
+   * disallows it. robots.txt is still read and its verdict recorded; the
+   * override goes into the trace, the warnings and, in the browser lane, the
+   * compliance record. An unreachable robots.txt is not set aside.
+   * Set per URL by the caller (a scrape's `robotsOverride`, a batch's
+   * `robotsOverrides` entry), never by a batch or crawl for every page.
+   */
+  robotsOverride?: RobotsOverride
 }

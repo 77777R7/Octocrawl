@@ -44,6 +44,8 @@ export interface ComplianceRobotsDecision {
   crawlDelayMs?: number | null
   /** Why robots.txt could not be fetched; set only then (RFC 9309 §2.3.1.4). */
   unreachable?: 'server_error' | 'network_error' | 'timeout'
+  /** A recorded decision that set a disallow aside for this URL; set only then, with the fetch gone ahead. */
+  override?: { reason: string; recordedBy?: string }
 }
 
 export interface ComplianceSentHeader {
@@ -194,6 +196,15 @@ function serialize(input: ComplianceRecordInput): Uint8Array {
   if (r.unreachable !== undefined) {
     field(c, 'robots.unreachable')
     field(c, r.unreachable)
+  }
+  // A recorded override, appended only when one set the disallow aside: the
+  // reason and who recorded it are part of what the record commits to, so a
+  // record cannot be stripped of the override, or given one, without breaking
+  // its hash. Records without one keep their bytes.
+  if (r.override !== undefined) {
+    field(c, 'robots.override')
+    field(c, r.override.reason)
+    nullableField(c, r.override.recordedBy ?? null)
   }
 
   const total = c.reduce((n, arr) => n + arr.length, 0)

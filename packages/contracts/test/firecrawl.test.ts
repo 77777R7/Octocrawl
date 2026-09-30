@@ -110,6 +110,9 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['html'], headers: {}, waitFor: 1 } }))
       .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.headers; unsupported format: html')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
+    // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
+    expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
+    expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
     // W2L always drops data: image URIs, which is Firecrawl's removeBase64Images default.
     expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: true } })).toMatchObject({ url })

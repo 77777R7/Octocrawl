@@ -6,11 +6,11 @@ import type { ExecutionContext, FetchOptions, ScrapeAtom, ScrapeOutcome } from '
 import { LadderRunner } from './routing/ladder.js'
 
 export class LadderScrapeAtom implements ScrapeAtom {
-  /** `options` apply to every page this atom scrapes (a batch's or crawl's page options). */
-  constructor(private readonly runner: LadderRunner, private readonly options: FetchOptions = {}) {}
+  /** `options` apply to every page this atom scrapes (a batch's or crawl's page options), or are chosen per URL (a batch's recorded robots overrides). */
+  constructor(private readonly runner: LadderRunner, private readonly options: FetchOptions | ((url: string) => FetchOptions) = {}) {}
 
   async scrape(url: string, execution?: ExecutionContext): Promise<ScrapeOutcome> {
-    const run = await this.runner.run(url, undefined, execution, this.options)
+    const run = await this.runner.run(url, undefined, execution, typeof this.options === 'function' ? this.options(url) : this.options)
     const robotsTrace = run.result.trace.find((event) => event.event === 'robots_checked')
     const crawlDelayMs = typeof robotsTrace?.detail?.crawlDelayMs === 'number' ? robotsTrace.detail.crawlDelayMs : null
     return {

@@ -8,7 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
-import type { PageOptions } from './api.js'
+import type { PageOptions, RobotsUrlOverride } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
@@ -60,8 +60,8 @@ export interface Task {
   mode: CrawlMode
   status: TaskStatus
   budget: CrawlBudget
-  /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options included. */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean } & PageOptions
+  /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options and recorded robots overrides included. */
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[] } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
