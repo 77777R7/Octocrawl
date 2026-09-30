@@ -49,7 +49,7 @@ import {
 import { FileSessionStore, type SessionSnapshot, type SessionStore } from './routing/sessionStore.js'
 
 export const USAGE =
-  'usage: w2l scrape [--research|--authed] [--persist-session] [--live-view] [--session-store f] [--history-file f] [--handoff] <url>\n' +
+  'usage: w2l scrape [--research|--authed] [--persist-session] [--live-view] [--session-store f] [--history-file f] [--handoff] [--timeout ms] <url>\n' +
   '       w2l-fetch is an alias for w2l scrape'
 
 export interface Args {
@@ -61,7 +61,11 @@ export interface Args {
   handoff: boolean
   persistSession: boolean
   liveView: boolean
+  /** Wall-clock budget for the whole run, every rung included. */
+  timeoutMs: number
 }
+
+const DEFAULT_CLI_TIMEOUT_MS = 300_000
 
 export function parseArgs(argv: readonly string[]): Args {
   let mode: Args['mode'] = 'standard'
@@ -71,6 +75,7 @@ export function parseArgs(argv: readonly string[]): Args {
   let handoff = false
   let persistSession = false
   let liveView = false
+  let timeoutMs = DEFAULT_CLI_TIMEOUT_MS
   const positional: string[] = []
 
   for (let i = 0; i < argv.length; i++) {
@@ -90,6 +95,10 @@ export function parseArgs(argv: readonly string[]): Args {
     } else if (arg === '--history-file') {
       historyFile = argv[++i] ?? null
       if (historyFile === null) throw new Error('--history-file needs a file path')
+    } else if (arg === '--timeout' || arg.startsWith('--timeout=')) {
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[++i]
+      timeoutMs = Number(value)
+      if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 3_600_000) throw new Error('--timeout needs milliseconds between 1000 and 3600000')
     } else if (arg.startsWith('-')) {
       throw new Error(`unknown flag ${arg}`)
     } else {
@@ -105,7 +114,7 @@ export function parseArgs(argv: readonly string[]): Args {
   } catch {
     throw new Error(`not a URL: ${url}`)
   }
-  return { url, mode, allowlistedDomains, sessionStoreFile, historyFile, handoff, persistSession, liveView }
+  return { url, mode, allowlistedDomains, sessionStoreFile, historyFile, handoff, persistSession, liveView, timeoutMs }
 }
 
 /**
@@ -550,7 +559,7 @@ export async function runLadder(args: Args): Promise<number> {
   const runner = new LadderRunner(channels, policy, history, handoff, sessionStore)
 
   try {
-    const run = await runner.run(args.url)
+    const run = await runner.run(args.url, undefined, { deadlineAt: Date.now() + args.timeoutMs })
     console.log('')
     console.log(
       formatScrapeReport({

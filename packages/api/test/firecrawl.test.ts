@@ -59,6 +59,13 @@ describe('Firecrawl /scrape /crawl shim', () => {
     expect(body).not.toHaveProperty('status')
   })
 
+  it('reports a refused shim request in the Firecrawl envelope with a code', async () => {
+    const app = createApp(engine)
+    const res = await app.request('/fc/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'ftp://example.com/' }) })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ success: false, error: 'url must be http(s)', code: 'invalid_request' })
+  })
+
   it('POST /fc/v1/crawl starts native crawl and GET returns Firecrawl status pages', async () => {
     const app = createApp(engine)
     const started = await app.request('/fc/v1/crawl', {

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { ApiEngine } from './engine.js'
@@ -23,19 +24,28 @@ import {
 } from '@w2l/contracts'
 
 export interface AppOptions {
+  /** One bearer token, or several separated by commas (rotation: old and new both valid for a while). */
   token?: string | null
 }
 
+const digest = (value: string): Buffer => createHash('sha256').update(value).digest()
+
 export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   const app = new Hono()
-  const token = options.token ?? null
+  const tokens = (options.token ?? '').split(',').map((token) => token.trim()).filter((token) => token.length > 0)
 
-  if (token !== null && token.length > 0) {
+  if (tokens.length > 0) {
+    const expected = tokens.map(digest)
     app.use('*', async (c, next) => {
       const header = c.req.header('authorization') ?? ''
       const presented = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
-      if (presented.length === 0 || presented !== token) {
-        return c.json({ error: 'unauthorized' }, 401)
+      // Hashing first makes the lengths equal, so the comparison takes the
+      // same time whatever was presented; every token is checked every time.
+      const candidate = digest(presented)
+      let matched = false
+      for (const token of expected) matched = timingSafeEqual(candidate, token) || matched
+      if (presented.length === 0 || !matched) {
+        return c.json({ error: 'unauthorized', code: 'unauthorized' }, 401)
       }
       await next()
     })
@@ -58,25 +68,25 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.get('/v1/batches/:id', async (c) => {
     const report = await engine.getBatch(c.req.param('id'))
-    return report ? c.json(report) : c.json({ error: 'not found' }, 404)
+    return report ? c.json(report) : c.json({ error: 'not found', code: 'not_found' }, 404)
   })
 
   app.get('/v1/batches/:id/items', async (c) => {
     const query = parseCrawlPageQuery(c.req.query())
     if (query.limit !== undefined && query.limit > 50) throw new RequestError('batch item limit must be at most 50')
     const page = await engine.getBatchItems(c.req.param('id'), query)
-    return page ? c.json(page) : c.json({ error: 'not found' }, 404)
+    return page ? c.json(page) : c.json({ error: 'not found', code: 'not_found' }, 404)
   })
 
   app.post('/v1/batches/:id/cancel', async (c) => {
     const report = await engine.cancelBatch(c.req.param('id'))
-    return report ? c.json(report) : c.json({ error: 'not found' }, 404)
+    return report ? c.json(report) : c.json({ error: 'not found', code: 'not_found' }, 404)
   })
 
   /** Reconnecting after a restart receives the current state and terminal event. */
   app.get('/v1/batches/:id/events', async (c) => {
     const id = c.req.param('id')
-    if (await engine.getBatch(id) === null) return c.json({ error: 'not found' }, 404)
+    if (await engine.getBatch(id) === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return streamSSE(c, async (stream) => {
       let last = ''
       while (!c.req.raw.signal.aborted) {
@@ -96,19 +106,19 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.get('/v1/crawl/:id', async (c) => {
     const id = c.req.param('id')
     const report = await engine.getCrawl(id)
-    if (report === null) return c.json({ error: 'not found' }, 404)
+    if (report === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return c.json(report, 200)
   })
 
   app.get('/v1/crawl/:id/pages', async (c) => {
     const result = await engine.getCrawlPages(c.req.param('id'), parseCrawlPageQuery(c.req.query()))
-    if (result === null) return c.json({ error: 'not found' }, 404)
+    if (result === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return c.json(result, 200)
   })
 
   app.get('/v1/crawl/:id/errors', async (c) => {
     const result = await engine.getCrawlErrors(c.req.param('id'), parseCrawlPageQuery(c.req.query()))
-    if (result === null) return c.json({ error: 'not found' }, 404)
+    if (result === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return c.json(result, 200)
   })
 
@@ -117,16 +127,16 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const req = parseCrawlResumeRequest(text.trim().length === 0 ? undefined : JSON.parse(text))
     try {
       const accepted = await engine.resumeCrawl(c.req.param('id'), req)
-      return accepted === null ? c.json({ error: 'not found' }, 404) : c.json(accepted, 202)
+      return accepted === null ? c.json({ error: 'not found', code: 'not_found' }, 404) : c.json(accepted, 202)
     } catch (error) {
-      if (error instanceof CrawlStateError) return c.json({ error: error.message }, 409)
+      if (error instanceof CrawlStateError) return c.json({ error: error.message, code: 'conflict' }, 409)
       throw error
     }
   })
 
   app.post('/v1/crawl/:id/cancel', async (c) => {
     const report = await engine.cancelCrawl(c.req.param('id'))
-    if (report === null) return c.json({ error: 'not found' }, 404)
+    if (report === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return c.json(report, 200)
   })
 
@@ -277,7 +287,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.post('/fc/v1/scrape', async (c) => {
     const req = parseFirecrawlScrapeRequest(await c.req.json())
-    return c.json(wrapScrape(await engine.scrape({ ...req, debug: true }) as ScrapeResponse), 200)
+    return c.json(wrapScrape(await engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal }) as ScrapeResponse), 200)
   })
 
   app.post('/fc/v1/crawl', async (c) => {
@@ -290,14 +300,22 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.get('/fc/v1/crawl/:id', async (c) => {
     const id = c.req.param('id')
     const detail = await engine.getCrawlWithSteps(id)
-    if (detail === null) return c.json({ error: 'not found' }, 404)
+    if (detail === null) return c.json({ error: 'not found', code: 'not_found' }, 404)
     return c.json(wrapCrawlStatus(detail.report, detail.steps), 200)
   })
 
+  // Every error carries a machine code. The /fc shim keeps Firecrawl's
+  // envelope. An unexpected failure is logged here and reported as
+  // internal_error: its message is for the operator, not the caller.
   app.onError((err, c) => {
-    if (err instanceof RequestError) return c.json({ error: err.message }, 400)
-    if (err instanceof SyntaxError) return c.json({ error: 'body must be JSON' }, 400)
-    return c.json({ error: err instanceof Error ? err.message : 'internal error' }, 500)
+    const shim = c.req.path.startsWith('/fc/')
+    const respond = (status: 400 | 409 | 500, error: string, code: string) =>
+      shim ? c.json({ success: false, error, code }, status) : c.json({ error, code }, status)
+    if (err instanceof RequestError) return respond(400, err.message, 'invalid_request')
+    if (err instanceof SyntaxError) return respond(400, 'body must be JSON', 'invalid_json')
+    if (err instanceof CrawlStateError) return respond(409, err.message, 'conflict')
+    console.error(err)
+    return respond(500, 'internal error', 'internal_error')
   })
 
   return app

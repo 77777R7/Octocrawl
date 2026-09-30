@@ -103,7 +103,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     })
     const bad = await post({ url: `${server.url}/crawl/listing`, onlyMainContnet: false })
     expect(bad.status).toBe(400)
-    expect(await bad.json()).toEqual({ error: 'unknown scrape option: onlyMainContnet' })
+    expect(await bad.json()).toEqual({ error: 'unknown scrape option: onlyMainContnet', code: 'invalid_request' })
   })
 
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
@@ -169,7 +169,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(debug.items[0]!.trace.length).toBeGreaterThan(0)
     const resumed = await app.request(`/v1/crawl/${taskId}/resume`, { method: 'POST' })
     expect(resumed.status).toBe(409)
-    expect(await resumed.json()).toEqual({ error: 'crawl is completed' })
+    expect(await resumed.json()).toEqual({ error: 'crawl is completed', code: 'conflict' })
     expect((await app.request('/v1/crawl/no-such-task/resume', { method: 'POST' })).status).toBe(404)
   })
 
@@ -360,6 +360,29 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       await throwing.close()
       await rm(throwingRoot, { recursive: true, force: true })
     }
+  })
+
+  it('answers every failure with a machine code and keeps internal detail out of the body', async () => {
+    const broken = createApp({ ...engine, getCrawl: async () => { throw new Error('sqlite path /var/private leaked') } } as ApiEngine)
+    const res = await broken.request('/v1/crawl/task-1')
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal error', code: 'internal_error' })
+    const app = createApp(engine)
+    const notJson = await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nope' })
+    expect(notJson.status).toBe(400)
+    expect(await notJson.json()).toEqual({ error: 'body must be JSON', code: 'invalid_json' })
+    const missing = await app.request('/v1/crawl/no-such-task')
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toEqual({ error: 'not found', code: 'not_found' })
+  })
+
+  it('accepts any of several configured tokens and names the refusal', async () => {
+    const app = createApp(engine, { token: 'old-token, new-token' })
+    const attempt = (authorization?: string) => app.request('/v1/crawl/no-such-task', { headers: authorization === undefined ? {} : { authorization } })
+    expect((await attempt()).status).toBe(401)
+    expect(await (await attempt('Bearer other')).json()).toEqual({ error: 'unauthorized', code: 'unauthorized' })
+    expect((await attempt('Bearer old-token')).status).toBe(404)
+    expect((await attempt('Bearer new-token')).status).toBe(404)
   })
 
   it('hosted token rejects missing or wrong bearer, accepts the matching one', async () => {

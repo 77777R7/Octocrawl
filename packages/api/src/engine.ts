@@ -636,7 +636,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (access.kind !== 'granted') return access
       const session = await sessionBrokerStoreGet(sessionBroker, input.sessionRef)
       const subject = new BrowserLocalSubject('standard', null, false, networkPolicy, session.profileDir, undefined, null, undefined, undefined, false, operatorProxy)
-      try { return await subject.fetch(input.url) } finally { await subject.teardown() }
+      // A capture is one page fetch; it gets the same budget as a scrape.
+      try { return await subject.fetch(input.url, Date.now() + 300_000) } finally { await subject.teardown() }
     },
 
     async close(options = {}) {

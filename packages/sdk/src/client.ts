@@ -29,6 +29,7 @@ import type {
 
 export interface W2LOptions {
   baseUrl: string
+  /** Bearer token; when omitted, `W2L_API_TOKEN` from the process environment is used. */
   token?: string
   fetch?: typeof fetch
 }
@@ -39,6 +40,64 @@ export interface W2LOptions {
  */
 export interface RequestOptions {
   signal?: AbortSignal
+}
+
+/** How a waiter polls a background job. */
+export interface WaitOptions extends RequestOptions {
+  /** Time between status reads; default 500 ms. */
+  pollIntervalMs?: number
+  /** Give up after this long with a JobTimeoutError; unbounded when omitted. */
+  timeoutMs?: number
+}
+
+/** A response the API refused: the status, the body as sent and the machine code when the body carried one. */
+export class W2LError extends Error {
+  override readonly name = 'W2LError'
+  constructor(
+    readonly method: 'GET' | 'POST',
+    readonly path: string,
+    readonly status: number,
+    readonly body: string,
+    readonly code: string | null,
+    message = `${method} ${path} failed: ${status} ${body}`,
+  ) {
+    super(message)
+  }
+}
+
+/** A waiter gave up: the job is still running, its id says which one to check on. */
+export class JobTimeoutError extends Error {
+  override readonly name = 'JobTimeoutError'
+  constructor(readonly jobId: string, readonly timeoutMs: number, readonly lastStatus: string | null) {
+    super(`job ${jobId} did not finish within ${timeoutMs} ms (last status: ${lastStatus ?? 'unknown'})`)
+  }
+}
+
+// A paused job is one the service resumes after a restart, so a waiter keeps
+// waiting through it; only a bounded wait (timeoutMs) ends earlier.
+const TERMINAL_JOB_STATUS: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled'])
+
+function errorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown }
+    return typeof parsed.code === 'string' ? parsed.code : null
+  } catch {
+    return null
+  }
+}
+
+function tokenFromEnv(): string | undefined {
+  const env = typeof process === 'undefined' ? undefined : process.env
+  const value = env?.W2L_API_TOKEN
+  return value === undefined || value.length === 0 ? undefined : value
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, ms)
+    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 export type CreateMonitorRequest = (Omit<MonitorRevision, 'createdAt'> & {enabled?:boolean}) | {preset:'firecrawl-introduction';enabled?:boolean}
@@ -55,7 +114,7 @@ export class W2L {
 
   constructor(options: W2LOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '')
-    this.token = options.token
+    this.token = options.token ?? tokenFromEnv()
     this.fetchImpl = options.fetch ?? fetch
   }
 
@@ -91,16 +150,40 @@ export class W2L {
     } while (cursor !== undefined)
   }
 
-  async waitBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
+  async waitBatch(id: string, options: WaitOptions = {}): Promise<BatchStatusResponse> {
+    return this.waitForJob(id, (request) => this.getBatch(id, request), options)
+  }
+
+  /** Poll a crawl until it is completed, failed or cancelled. */
+  async waitCrawl(id: string, options: WaitOptions = {}): Promise<CrawlReport> {
+    return this.waitForJob(id, (request) => this.getCrawl(id, request), options)
+  }
+
+  private async waitForJob<T extends { status: string }>(id: string, read: (request: RequestOptions) => Promise<T>, options: WaitOptions): Promise<T> {
+    const pollIntervalMs = options.pollIntervalMs ?? 500
+    const startedAt = Date.now()
+    let consecutiveFailures = 0
+    let lastStatus: string | null = null
     for (;;) {
-      request.signal?.throwIfAborted()
-      const report = await this.getBatch(id, request)
-      if (['completed', 'failed', 'cancelled'].includes(report.status)) return report
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { request.signal?.removeEventListener('abort', abort); resolve() }, 500)
-        const abort = () => { clearTimeout(timer); reject(request.signal?.reason) }
-        request.signal?.addEventListener('abort', abort, { once: true })
-      })
+      options.signal?.throwIfAborted()
+      let report: T | null = null
+      try {
+        report = await read({ signal: options.signal })
+        consecutiveFailures = 0
+      } catch (error) {
+        // A refused request is final; a server error or a dropped connection
+        // while polling is retried a few times before it is reported.
+        if (options.signal?.aborted || (error instanceof W2LError && error.status < 500)) throw error
+        if (++consecutiveFailures >= 3) throw error
+      }
+      if (report !== null) {
+        lastStatus = report.status
+        if (TERMINAL_JOB_STATUS.has(report.status)) return report
+      }
+      if (options.timeoutMs !== undefined && Date.now() - startedAt + pollIntervalMs > options.timeoutMs) {
+        throw new JobTimeoutError(id, options.timeoutMs, lastStatus)
+      }
+      await sleep(pollIntervalMs, options.signal)
     }
   }
 
@@ -246,7 +329,7 @@ export class W2L {
     })
     if (res.status !== ok) {
       const text = await res.text()
-      throw new Error(`POST ${path} failed: ${res.status} ${text}`)
+      throw new W2LError('POST', path, res.status, text, errorCode(text))
     }
     return (await res.json()) as T
   }
@@ -263,10 +346,10 @@ export class W2L {
 
   private async get<T>(path: string, request: RequestOptions, notFound?: string): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { headers: this.headers(), signal: request.signal })
-    if (res.status === 404 && notFound !== undefined) throw new Error(notFound)
+    if (res.status === 404 && notFound !== undefined) throw new W2LError('GET', path, 404, await res.text(), 'not_found', notFound)
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(`GET ${path} failed: ${res.status} ${text}`)
+      throw new W2LError('GET', path, res.status, text, errorCode(text))
     }
     return (await res.json()) as T
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { W2L, type CreateMonitorRequest } from '../src/index.js'
+import { JobTimeoutError, W2L, W2LError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -151,6 +151,55 @@ describe('W2L SDK', () => {
     expect((await iterator.next()).value).toEqual({ id: 'one' })
     controller.abort()
     await expect(iterator.next()).rejects.toThrow()
+  })
+
+  it('throws a typed error with the status, body and machine code', async () => {
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"crawl is completed","code":"conflict"}', { status: 409 })) as typeof fetch })
+    const error = await client.resumeCrawl('task-1').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(W2LError)
+    expect(error).toMatchObject({ name: 'W2LError', method: 'POST', path: '/v1/crawl/task-1/resume', status: 409, code: 'conflict' })
+    expect((error as Error).message).toBe('POST /v1/crawl/task-1/resume failed: 409 {"error":"crawl is completed","code":"conflict"}')
+    const missing = await client.getCrawl('task-2').catch((e: unknown) => e)
+    expect(missing).toMatchObject({ name: 'W2LError', status: 409, code: 'conflict' })
+  })
+
+  it('waits for a crawl, rides out a server error while polling, and names the job on timeout', async () => {
+    const statuses = ['running', 'error', 'running', 'completed']
+    const client = new W2L({
+      baseUrl: 'http://localhost',
+      fetch: (async () => {
+        const next = statuses.shift() ?? 'completed'
+        if (next === 'error') return new Response('{"error":"internal error","code":"internal_error"}', { status: 500 })
+        return new Response(JSON.stringify({ taskId: 'task-1', status: next, pagesFetched: 2 }), { status: 200 })
+      }) as typeof fetch,
+    })
+    const report = await client.waitCrawl('task-1', { pollIntervalMs: 1 })
+    expect(report).toMatchObject({ status: 'completed', pagesFetched: 2 })
+
+    const slow = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response(JSON.stringify({ taskId: 'task-9', status: 'running', pagesFetched: 0 }), { status: 200 })) as typeof fetch })
+    const timeout = await slow.waitBatch('task-9', { pollIntervalMs: 5, timeoutMs: 20 }).catch((e: unknown) => e)
+    expect(timeout).toBeInstanceOf(JobTimeoutError)
+    expect(timeout).toMatchObject({ jobId: 'task-9', timeoutMs: 20, lastStatus: 'running' })
+
+    const refused = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"unauthorized","code":"unauthorized"}', { status: 401 })) as typeof fetch })
+    await expect(refused.waitCrawl('task-1', { pollIntervalMs: 1 })).rejects.toMatchObject({ name: 'W2LError', status: 401 })
+  })
+
+  it('reads the token from W2L_API_TOKEN when none is given', async () => {
+    const previous = process.env.W2L_API_TOKEN
+    process.env.W2L_API_TOKEN = 'from-env'
+    try {
+      let seen: string | null = null
+      const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen = (init?.headers as Record<string, string>)?.authorization ?? null
+        return new Response('{"taskId":"t","status":"completed","pagesFetched":0}', { status: 200 })
+      }) as typeof fetch })
+      await client.getCrawl('t')
+      expect(seen).toBe('Bearer from-env')
+    } finally {
+      if (previous === undefined) delete process.env.W2L_API_TOKEN
+      else process.env.W2L_API_TOKEN = previous
+    }
   })
 
   it('preserves API error status and body for read and mutation failures', async () => {

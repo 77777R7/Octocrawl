@@ -1,5 +1,5 @@
-export { W2L } from './client.js'
-export type { W2LOptions, RequestOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
+export { W2L, W2LError, JobTimeoutError } from './client.js'
+export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
 export type {
   CrawlAccepted,
   DeliveryAttempt,
@@ -16,6 +16,7 @@ export type {
   CrawlPageList,
   CrawlPageQuery,
   CrawlStartRequest,
+  CrawlResumeRequest,
   FetchResult,
   DocumentMonitorConfig,
   DocumentFields,

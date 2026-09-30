@@ -4,7 +4,7 @@
  */
 
 import { parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest } from '@w2l/contracts'
-import type { W2L } from '@w2l/sdk'
+import type { RequestOptions, W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
@@ -189,18 +189,18 @@ export const TOOLS = [
   ...MONITOR_TOOLS,
 ] as const
 
-export async function callTool(client: W2L, name: string, args: unknown): Promise<unknown> {
+export async function callTool(client: W2L, name: string, args: unknown, request: RequestOptions = {}): Promise<unknown> {
   if (name === 'scrape_product') {
     const input=readRecord(args)
     if (Object.keys(input).some(key=>!['url','debug'].includes(key)) || (input.debug !== undefined && typeof input.debug !== 'boolean')) throw new Error('invalid scrape_product options')
-    return client.scrape(hostedAmazonUrl(input.url),{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],debug:input.debug === true})
+    return client.scrape(hostedAmazonUrl(input.url),{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],debug:input.debug === true},request)
   }
   if (name === 'batch_products') {
     const input=readRecord(args)
     if (Object.keys(input).some(key=>key!=='urls') || !Array.isArray(input.urls) || input.urls.length<1 || input.urls.length>1000) throw new Error('batch_products requires 1..1000 URLs')
     const urls=input.urls.map(hostedAmazonUrl)
     if(new Set(urls).size!==urls.length)throw new Error('batch_products URLs must be unique by ASIN')
-    return client.batchScrape(urls,{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],includeLinks:false})
+    return client.batchScrape(urls,{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],includeLinks:false},request)
   }
   if (name === 'scrape') {
     const req = parseScrapeRequest(args)
@@ -213,7 +213,7 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       timeout: req.timeout,
       waitFor: req.waitFor,
       debug: req.debug ?? false,
-    })
+    }, request)
   }
   if (name === 'crawl') {
     const req = parseCrawlStartRequest(args)
@@ -226,50 +226,51 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       includePaths: req.includePaths,
       excludePaths: req.excludePaths,
       scrapeOptions: req.scrapeOptions,
-    })
+    }, request)
   }
   if (name === 'resume_crawl') {
     const rec = args as Record<string, unknown>
     if (typeof rec.id !== 'string' || Object.keys(rec).some(key => !['id', 'useCached'].includes(key)) || (rec.useCached !== undefined && typeof rec.useCached !== 'boolean')) throw new Error('resume_crawl requires id and an optional boolean useCached')
-    return client.resumeCrawl(rec.id, rec.useCached === undefined ? {} : { useCached: rec.useCached })
+    return client.resumeCrawl(rec.id, rec.useCached === undefined ? {} : { useCached: rec.useCached }, request)
   }
   if (name === 'get_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
     if (typeof id !== 'string' || id.length === 0) throw new Error('id is required')
-    return client.getCrawl(id)
+    return client.getCrawl(id, request)
   }
   if (name === 'get_crawl_pages' || name === 'get_crawl_errors') {
     const input = readCrawlQuery(args)
-    return name === 'get_crawl_pages' ? client.getCrawlPages(input.id, input.options) : client.getCrawlErrors(input.id, input.options)
+    return name === 'get_crawl_pages' ? client.getCrawlPages(input.id, input.options, request) : client.getCrawlErrors(input.id, input.options, request)
   }
   if (name === 'cancel_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
     if (typeof id !== 'string' || id.length === 0) throw new Error('id is required')
-    return client.cancelCrawl(id)
+    return client.cancelCrawl(id, request)
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks })
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)
-    return client.getBatchItems(input.id, input.options)
+    return client.getBatchItems(input.id, input.options, request)
   }
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null
     if (typeof rec?.id !== 'string' || !rec.id) throw new Error('id is required')
-    if (name === 'get_batch') return client.getBatch(rec.id)
-    if (name === 'cancel_batch') return client.cancelBatch(rec.id)
+    if (name === 'get_batch') return client.getBatch(rec.id, request)
+    if (name === 'cancel_batch') return client.cancelBatch(rec.id, request)
     const timeoutMs = rec.timeoutMs ?? 30_000
     if (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) throw new Error('timeoutMs must be an integer between 1 and 300000')
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(new DOMException('wait_batch timeout', 'TimeoutError')), timeoutMs)
-    try { return await client.waitBatch(rec.id, { signal: controller.signal }) }
+    const signal = request.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, request.signal])
+    try { return await client.waitBatch(rec.id, { signal }) }
     catch (error) {
       if (!controller.signal.aborted) throw error
-      return client.getBatch(rec.id)
+      return client.getBatch(rec.id, request)
     } finally { clearTimeout(timer) }
   }
   if ((TOOL_NAMES as readonly string[]).includes(name)) return callMonitorTool(client,name,readRecord(args))

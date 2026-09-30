@@ -52,6 +52,7 @@ describe('ladder CLI arguments', () => {
       handoff: false,
       persistSession: false,
       liveView: false,
+      timeoutMs: 300_000,
     })
   })
 
