@@ -224,7 +224,12 @@ function readAllowlist(value: unknown): readonly string[] | undefined {
   return value.filter((item) => item.length > 0)
 }
 
-const SCHEMA_KEYS = new Set(['$ref', 'type', 'properties', 'required', 'items', 'enum', 'description', 'additionalProperties', '$defs'])
+const SCHEMA_KEYS = new Set([
+  '$ref', 'type', 'properties', 'required', 'items', 'enum', 'const', 'description', 'additionalProperties', '$defs', 'anyOf', 'oneOf',
+  // Annotations and value constraints a schema written for another tool carries; validated by Ajv, ignored by the mapper.
+  'title', '$schema', 'default', 'examples', 'format', 'pattern', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+  'minLength', 'maxLength', 'minItems', 'maxItems', 'uniqueItems',
+])
 const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
 
 function readSchema(value: unknown): import('./structured.js').JsonSchema {
@@ -250,6 +255,11 @@ function readSchema(value: unknown): import('./structured.js').JsonSchema {
     }
     if (properties > 100) throw new RequestError('json schema must contain at most 100 properties')
     if (rec.items !== undefined) visit(rec.items, depth + 1)
+    for (const keyword of ['anyOf', 'oneOf'] as const) {
+      if (rec[keyword] === undefined) continue
+      if (!Array.isArray(rec[keyword]) || (rec[keyword] as unknown[]).length === 0) throw new RequestError(`json schema ${keyword} must be a non-empty array`)
+      for (const branch of rec[keyword] as unknown[]) visit(branch, depth + 1)
+    }
     if (typeof rec.additionalProperties === 'object' && rec.additionalProperties !== null) visit(rec.additionalProperties, depth + 1)
     if (rec.$defs !== undefined) {
       if (rec.$defs === null || typeof rec.$defs !== 'object' || Array.isArray(rec.$defs)) throw new RequestError('json schema $defs must be an object')

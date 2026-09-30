@@ -99,6 +99,96 @@ describe('structured JSON extraction', () => {
     expect(out.modelUsage).toBeNull()
   })
 
+  it('does not count an invented array or empty object as a present required field', async () => {
+    const schema: JsonFormatRequest = { type: 'json', schema: {
+      type: 'object',
+      properties: { title: { type: 'string' }, rows: { type: 'array', items: { type: 'string' } }, author: { type: 'object', properties: { name: { type: 'string' } } } },
+      required: ['title', 'rows', 'author'],
+    } }
+    const out = await extractStructured(result, schema, {}, null)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toMatchObject({ title: 'Subject headphones', rows: [], author: {} })
+    expect(out.issues.map(issue => `${issue.code} ${issue.path}`)).toEqual(['missing_required /rows', 'missing_required /author'])
+  })
+
+  it('matches a leaf name under a subject-shaped parent only, and records where url and title came from', async () => {
+    const schema: JsonFormatRequest = { type: 'json', schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        title: { type: 'string' },
+        product: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' } } },
+        author: { type: 'object', properties: { name: { type: ['string', 'null'] } } },
+      },
+    } }
+    const out = await extractStructured(result, schema, {}, null)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({
+      url: 'https://www.amazon.com/dp/B012345678',
+      title: 'Subject headphones',
+      product: { name: 'Subject headphones', price: 1299 },
+      author: { name: null },
+    })
+    expect(out.evidence).toContainEqual({ path: '/url', source: 'url', evidencePath: 'evidence.finalUrl' })
+    // On a product page the product name is the title's source; the document title is the fallback.
+    expect(out.evidence).toContainEqual({ path: '/title', source: 'dom', evidencePath: '#productTitle' })
+    expect(out.evidence).toContainEqual({ path: '/product/price', source: 'dom', evidencePath: '#corePrice_feature_div' })
+    expect(out.evidence.some(item => item.path === '/author/name')).toBe(false)
+
+    const article: FetchResult = { ...result, document: { ...result.document!, pageType: 'article', product: null, entities: [] } }
+    const plain = await extractStructured(article, { type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } } } }, {}, null)
+    expect(plain.evidence).toEqual([{ path: '/title', source: 'dom', evidencePath: 'document.title' }])
+  })
+
+  it('reads a nullable written as anyOf and satisfies it with null', async () => {
+    const schema: JsonFormatRequest = { type: 'json', schema: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: 'Offer',
+      type: 'object',
+      properties: { asin: { type: 'string', minLength: 1 }, colour: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null } },
+      required: ['asin', 'colour'],
+    } }
+    const out = await extractStructured(result, schema, {}, null)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ asin: 'B012345678', colour: null })
+    expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/colour', message: 'no verified source for this nullable field on the selected page' }])
+  })
+
+  it('asks for strict decoding only when the schema qualifies, and lets the page win over the model in a deep merge', async () => {
+    const requests: Array<{ strict: boolean }> = []
+    const modelConfig = {
+      baseUrl: 'https://model.example', model: 'extractor',
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const request = JSON.parse(String(init?.body))
+        requests.push({ strict: request.response_format.json_schema.strict })
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'Model title', details: { material: 'aluminium', weight: '250 g' }, tags: ['audio'] }) } }] }), { status: 200 })
+      }) as typeof fetch,
+    }
+    const loose: JsonFormatRequest = { type: 'json', modelFallback: true, schema: {
+      type: 'object',
+      properties: { title: { type: 'string' }, details: { type: 'object', properties: { material: { type: 'string' }, weight: { type: 'string', pattern: '^\\d+ g$' } }, required: ['material', 'weight'] }, tags: { type: 'array', items: { type: 'string' } } },
+      required: ['title', 'details', 'tags'],
+    } }
+    const out = await extractStructured(result, loose, {}, modelConfig)
+    expect(requests).toEqual([{ strict: false }])
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ title: 'Subject headphones', details: { material: 'aluminium', weight: '250 g' }, tags: ['audio'] })
+    expect(out.evidence).toContainEqual({ path: '/title', source: 'dom', evidencePath: '#productTitle' })
+    expect(out.evidence).toContainEqual({ path: '/details/material', source: 'model' })
+    expect(out.evidence).toContainEqual({ path: '/details/weight', source: 'model' })
+    expect(out.evidence).toContainEqual({ path: '/tags', source: 'model' })
+    expect(out.evidence.some(item => item.path === '/title' && item.source === 'model')).toBe(false)
+
+    const strict: JsonFormatRequest = { type: 'json', modelFallback: true, schema: {
+      type: 'object',
+      properties: { title: { type: 'string' }, details: { type: 'object', properties: { material: { type: 'string' }, weight: { type: 'string' } }, required: ['material', 'weight'], additionalProperties: false }, tags: { type: 'array', items: { type: 'string' } } },
+      required: ['title', 'details', 'tags'],
+      additionalProperties: false,
+    } }
+    await extractStructured(result, strict, {}, modelConfig)
+    expect(requests.at(-1)).toEqual({ strict: true })
+  })
+
   it('keeps a verified subject complete while explaining null offer fields', async () => {
     const noOffer: FetchResult = { ...result, document: { ...result.document!, product: { ...product, price:null, priceCurrency:null, seller:null } } }
     const schema: JsonFormatRequest = {type:'json',schema:{type:'object',properties:{asin:{type:'string'},price:{type:['number','null']},currency:{type:['string','null']},seller:{type:['string','null']}},required:['asin','price','currency','seller']}}

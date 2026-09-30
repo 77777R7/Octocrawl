@@ -15,9 +15,29 @@ export interface JsonSchema {
   required?: readonly string[]
   items?: JsonSchema
   enum?: readonly JsonValue[]
+  const?: JsonValue
   description?: string
   additionalProperties?: boolean | JsonSchema
   $defs?: Readonly<Record<string, JsonSchema>>
+  /** A nullable or alternative shape, as `anyOf: [{type:'string'},{type:'null'}]` writes it. */
+  anyOf?: readonly JsonSchema[]
+  oneOf?: readonly JsonSchema[]
+  /** Annotations and value constraints are kept for the validator and the model; the mapper ignores them. */
+  title?: string
+  $schema?: string
+  default?: JsonValue
+  examples?: readonly JsonValue[]
+  format?: string
+  pattern?: string
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  exclusiveMaximum?: number
+  minLength?: number
+  maxLength?: number
+  minItems?: number
+  maxItems?: number
+  uniqueItems?: boolean
 }
 
 export interface JsonFormatRequest {
@@ -33,7 +53,8 @@ export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string
-  source: ProductFactSource | 'hydration'
+  /** Where the value came from; `url` is the request or final URL itself. */
+  source: ProductFactSource | 'hydration' | 'url'
   evidencePath?: string
 }
 

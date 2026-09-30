@@ -37,8 +37,15 @@ export function structuredModelConfigFromEnv(): StructuredModelConfig | null {
 
 interface Candidate {
   value: JsonValue
-  fact?: ProductFact
+  /** Where the value was read; a candidate without one leaves no evidence. */
+  fact?: { value: string; source: StructuredFieldEvidence['source']; path?: string }
 }
+
+/**
+ * Parents under which a leaf name still means the page's subject: `/offer/price`
+ * is the price, `/author/name` is not the product name.
+ */
+const SUBJECT_PARENTS: ReadonlySet<string> = new Set(['product', 'item', 'offer', 'listing', 'page', 'subject', 'data', 'result'])
 
 function numeric(value: string, integer = false): number | string {
   const parsed = Number(value.replace(integer ? /[^0-9-]/g : /[^0-9.-]/g, ''))
@@ -52,14 +59,17 @@ function candidates(result: FetchResult): Map<string, Candidate> {
     if (fact === null || fact === undefined) return
     for (const key of keys) map.set(key.toLowerCase(), { value: value ?? fact.value, fact })
   }
-  map.set('url', { value: result.evidence.finalUrl })
-  map.set('requesturl', { value: result.requestedUrl })
-  map.set('finalurl', { value: result.evidence.finalUrl })
+  // The URL and the title are read from the response and the document, and
+  // say so: a field filled from them carries evidence like any other.
+  map.set('url', { value: result.evidence.finalUrl, fact: { value: result.evidence.finalUrl, source: 'url', path: 'evidence.finalUrl' } })
+  map.set('requesturl', { value: result.requestedUrl, fact: { value: result.requestedUrl, source: 'url', path: 'requestedUrl' } })
+  map.set('finalurl', { value: result.evidence.finalUrl, fact: { value: result.evidence.finalUrl, source: 'url', path: 'evidence.finalUrl' } })
   if (result.document?.title) {
-    map.set('title', { value: result.document.title })
-    map.set('pagetitle', { value: result.document.title })
+    const title = { value: result.document.title, fact: { value: result.document.title, source: 'dom' as const, path: 'document.title' } }
+    map.set('title', title)
+    map.set('pagetitle', title)
   }
-  if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType })
+  if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType, fact: { value: result.document.pageType, source: 'inferred', path: 'document.pageType' } })
   if (product !== null) addProductCandidates(map, product, put)
   return map
 }
@@ -112,8 +122,33 @@ function addProductCandidates(
 }
 
 function schemaTypes(schema: JsonSchema): readonly string[] {
-  if (schema.type === undefined) return []
-  return typeof schema.type === 'string' ? [schema.type] : schema.type
+  const own = schema.type === undefined ? [] : typeof schema.type === 'string' ? [schema.type] : [...schema.type]
+  // `anyOf: [{type: 'string'}, {type: 'null'}]` is how many tools write a nullable field.
+  const branches = [...(schema.anyOf ?? []), ...(schema.oneOf ?? [])].flatMap((branch) => schemaTypes(branch))
+  return [...new Set([...own, ...branches])]
+}
+
+const STRICT_UNSUPPORTED_KEYWORDS = ['format', 'pattern', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'uniqueItems', 'default'] as const
+
+/**
+ * OpenAI-style strict decoding accepts only schemas whose objects close
+ * `additionalProperties` and require every property, without value
+ * constraints. Asking for strict mode with any other schema is a provider
+ * error, so the request says strict only when the schema qualifies.
+ */
+function isStrictCompatible(root: JsonSchema, schemaInput: JsonSchema = root, depth = 0): boolean {
+  if (depth > 16) return false
+  const schema = resolveRef(root, schemaInput)
+  if (STRICT_UNSUPPORTED_KEYWORDS.some((keyword) => schema[keyword] !== undefined)) return false
+  if (schema.properties !== undefined || schemaTypes(schema).includes('object')) {
+    const names = Object.keys(schema.properties ?? {})
+    if (schema.additionalProperties !== false) return false
+    if (names.some((name) => !(schema.required ?? []).includes(name))) return false
+    if (!names.every((name) => isStrictCompatible(root, schema.properties![name]!, depth + 1))) return false
+  }
+  if (schema.items !== undefined && !isStrictCompatible(root, schema.items, depth + 1)) return false
+  for (const branch of [...(schema.anyOf ?? []), ...(schema.oneOf ?? [])]) if (!isStrictCompatible(root, branch, depth + 1)) return false
+  return true
 }
 
 function resolveRef(root: JsonSchema, schema: JsonSchema): JsonSchema {
@@ -150,8 +185,12 @@ function mapSchema(
   evidence: StructuredFieldEvidence[],
 ): JsonValue | undefined {
   const schema = resolveRef(root, schemaInput)
-  const key = path.split('/').at(-1)?.toLowerCase() ?? ''
-  const direct = source.get(key)
+  const segments = path.split('/').filter((segment) => segment.length > 0)
+  const key = segments.at(-1)?.toLowerCase() ?? ''
+  const parent = segments.at(-2)?.toLowerCase()
+  // A leaf name is matched at the top level, or under a parent that still
+  // names the page's subject; `/author/name` is left to the model.
+  const direct = key.length > 0 && (segments.length === 1 || (parent !== undefined && SUBJECT_PARENTS.has(parent))) ? source.get(key) : undefined
   if (direct !== undefined) {
     const value = coerce(direct.value, schema)
     if (value !== undefined) {
@@ -207,13 +246,24 @@ function nullableMissingIssues(root: JsonSchema, schemaInput: JsonSchema, value:
     : []
 }
 
+/**
+ * Required fields are checked on what was actually read. An empty object
+ * the mapper opened for a schema with properties, or an array or object the
+ * nullable fill would invent, is not a value; a nullable field is satisfied
+ * by null, which the fill reports as unavailable rather than missing.
+ */
 function requiredMissing(root: JsonSchema, schemaInput: JsonSchema, value: JsonValue | undefined, path = ''): string[] {
   const schema = resolveRef(root, schemaInput)
   const missing: string[] = []
   if (schema.required !== undefined) {
     const rec = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, JsonValue> : {}
     for (const key of schema.required) {
-      if (!(key in rec)) missing.push(`${path}/${key}`)
+      const child = schema.properties?.[key] === undefined ? undefined : resolveRef(root, schema.properties[key]!)
+      const childValue = rec[key]
+      const emptyOpened = childValue !== null && typeof childValue === 'object' && !Array.isArray(childValue)
+        && Object.keys(childValue).length === 0 && child?.properties !== undefined && Object.keys(child.properties).length > 0
+      const present = key in rec && !emptyOpened
+      if (!present && !(child !== undefined && schemaTypes(child).includes('null'))) missing.push(`${path}/${key}`)
     }
   }
   if (schema.properties !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
@@ -228,7 +278,10 @@ function requiredMissing(root: JsonSchema, schemaInput: JsonSchema, value: JsonV
 function compile(schema: JsonSchema): ValidateFunction {
   const AjvConstructor = Ajv as unknown as new (options: { allErrors: boolean; strict: boolean }) => { compile(schema: object): ValidateFunction }
   const ajv = new AjvConstructor({ allErrors: true, strict: false })
-  return ajv.compile(schema as object)
+  // `$schema` names the dialect the author wrote for; the validator here
+  // reads the keywords the request parser accepted, whatever the dialect.
+  const { $schema: _dialect, ...body } = schema
+  return ajv.compile(body as object)
 }
 
 function validationMessage(errors: ErrorObject[] | null | undefined): string {
@@ -315,7 +368,7 @@ async function callModel(
       ],
       response_format: {
         type: 'json_schema',
-        json_schema: { name: 'w2l_extract', strict: true, schema: format.schema },
+        json_schema: { name: 'w2l_extract', strict: isStrictCompatible(format.schema), schema: format.schema },
       },
     }),
   })
@@ -330,10 +383,36 @@ async function callModel(
   }
 }
 
-function mergeObjects(base: JsonValue, patch: JsonValue): JsonValue {
-  if (base !== null && patch !== null && typeof base === 'object' && typeof patch === 'object' && !Array.isArray(base) && !Array.isArray(patch)) {
-    return { ...base, ...patch }
+function isPlainObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** A value the deterministic pass invented rather than read: absent, null, or an empty container. */
+function isPlaceholder(value: JsonValue | undefined): boolean {
+  if (value === undefined || value === null) return true
+  if (Array.isArray(value)) return value.length === 0
+  return isPlainObject(value) && Object.keys(value).length === 0
+}
+
+/**
+ * Deep merge in which what the page said wins: the model fills only the
+ * paths the deterministic pass left as placeholders, and every leaf it
+ * fills is recorded so the evidence names the model as its source.
+ */
+function mergeModelOutput(base: JsonValue | undefined, patch: JsonValue, path: string, filled: string[]): JsonValue {
+  if (isPlainObject(base) && isPlainObject(patch)) {
+    const out: Record<string, JsonValue> = { ...base }
+    for (const [key, value] of Object.entries(patch)) out[key] = mergeModelOutput(base[key], value, `${path}/${key}`, filled)
+    return out
   }
+  if (!isPlaceholder(base)) return base as JsonValue
+  if (isPlaceholder(patch)) return base === undefined ? patch : base
+  if (isPlainObject(patch)) {
+    const out: Record<string, JsonValue> = {}
+    for (const [key, value] of Object.entries(patch)) out[key] = mergeModelOutput(undefined, value, `${path}/${key}`, filled)
+    return out
+  }
+  filled.push(path)
   return patch
 }
 
@@ -356,7 +435,8 @@ export async function extractStructured(
     }
   }
   const evidence: StructuredFieldEvidence[] = []
-  let data = fillNullableMissing(format.schema, format.schema, mapSchema(format.schema, format.schema, candidates(result), '', evidence)) ?? null
+  const mapped = mapSchema(format.schema, format.schema, candidates(result), '', evidence)
+  let data = fillNullableMissing(format.schema, format.schema, mapped) ?? null
   let validate: ValidateFunction
   try {
     validate = compile(format.schema)
@@ -370,7 +450,7 @@ export async function extractStructured(
       modelUsage: null,
     }
   }
-  let missing = requiredMissing(format.schema, format.schema, data)
+  let missing = requiredMissing(format.schema, format.schema, mapped)
   const deterministicValid = validate(data)
   if (missing.length === 0 && deterministicValid) {
     return { status: 'complete', data, schemaSha256, evidence, issues: nullableMissingIssues(format.schema,format.schema,data), modelUsage: null }
@@ -400,16 +480,12 @@ export async function extractStructured(
         inputTokens += model.inputTokens
         outputTokens += model.outputTokens
       }
-      const merged = mergeObjects(data, model.value)
+      const filled: string[] = []
+      const merged = mergeModelOutput(data, model.value, '', filled)
       if (validate(merged)) {
         data = merged
-        const deterministicPaths = new Set(evidence.map(item => item.path))
-        if (model.value !== null && typeof model.value === 'object' && !Array.isArray(model.value)) {
-          for (const key of Object.keys(model.value)) {
-            const path = `/${key}`
-            if (!deterministicPaths.has(path)) evidence.push({ path, source: 'model' })
-          }
-        }
+        const known = new Set(evidence.map(item => item.path))
+        for (const path of filled) if (!known.has(path)) evidence.push({ path, source: 'model' })
         const modelUsage: StructuredModelUsage = { model: modelConfig.model, attempts, inputTokens: tokensKnown ? inputTokens : null, outputTokens: tokensKnown ? outputTokens : null, externalCostUsd: null }
         return { status: 'complete', data, schemaSha256, evidence, issues: [], modelUsage }
       }

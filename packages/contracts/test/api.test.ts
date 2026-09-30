@@ -91,6 +91,25 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseCrawlStartRequest({ url: 'https://example.com/', maxDepth: -1 })).toThrow('maxDepth must be an integer >= 0')
   })
 
+  it('accepts schema annotations and nullable alternatives written for other tools', () => {
+    const schema = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: 'Offer',
+      type: 'object',
+      properties: {
+        price: { type: 'number', minimum: 0, default: 0, description: 'Price as shown' },
+        sku: { type: 'string', pattern: '^[A-Z0-9]+$', format: 'sku', minLength: 1, maxLength: 20 },
+        colour: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        kind: { const: 'physical' },
+        tags: { type: 'array', items: { type: 'string' }, minItems: 0, maxItems: 20, uniqueItems: true, examples: [['audio']] },
+      },
+      required: ['price'],
+    }
+    expect(parseScrapeRequest({ url: 'https://example.com/', formats: [{ type: 'json', schema }] }).formats).toHaveLength(1)
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', formats: [{ type: 'json', schema: { oneOf: [] } }] })).toThrow('json schema oneOf must be a non-empty array')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', formats: [{ type: 'json', schema: { type: 'object', properties: { a: { readOnly: true } } } }] })).toThrow('unsupported json schema keyword: readOnly')
+  })
+
   it('rejects remote JSON schema references', () => {
     expect(() => parseScrapeRequest({
       url: 'https://example.com/product',
