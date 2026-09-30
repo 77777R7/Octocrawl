@@ -78,14 +78,14 @@ export interface FirecrawlCrawlStatus {
   data: FirecrawlPage[]
 }
 
-const FIRECRAWL_SERVED_FORMATS = ['markdown', 'links'] as const
+const FIRECRAWL_SERVED_FORMATS = ['markdown', 'links', 'html', 'rawHtml'] as const
 
 export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
   const native: Record<string, unknown> = { url: rec.url }
   if (Array.isArray(rec.formats)) {
     // Firecrawl formats are strings or `{ type }` objects. The shim serves
-    // markdown and links; anything else is dropped (see FIRECRAWL_SHIM_DIFFS).
+    // markdown, links, html and rawHtml; anything else is dropped (see FIRECRAWL_SHIM_DIFFS).
     const wanted = rec.formats.map((format) =>
       typeof format === 'string' ? format
         : format !== null && typeof format === 'object' && typeof (format as { type?: unknown }).type === 'string' ? (format as { type: string }).type
@@ -96,6 +96,8 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.onlyMainContent !== undefined) native.onlyMainContent = rec.onlyMainContent
   if (rec.timeout !== undefined) native.timeout = rec.timeout
   if (rec.waitFor !== undefined) native.waitFor = rec.waitFor
+  if (rec.includeTags !== undefined) native.includeTags = rec.includeTags
+  if (rec.excludeTags !== undefined) native.excludeTags = rec.excludeTags
   return parseScrapeRequest(native)
 }
 
@@ -113,6 +115,8 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
     if (scrape.onlyMainContent !== undefined) options.onlyMainContent = scrape.onlyMainContent
     if (scrape.timeout !== undefined) options.timeout = scrape.timeout
     if (scrape.waitFor !== undefined) options.waitFor = scrape.waitFor
+    if (scrape.includeTags !== undefined) options.includeTags = scrape.includeTags
+    if (scrape.excludeTags !== undefined) options.excludeTags = scrape.excludeTags
     if (Object.keys(options).length > 0) native.scrapeOptions = options
   }
   return parseCrawlStartRequest(native)

@@ -13,7 +13,7 @@
 
 import type { ExtractRecovery, Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { outerHtml, parse, textOf } from './dom.js'
-import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree, wholePageBody } from './prune.js'
+import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree, selectionBody, wholePageBody } from './prune.js'
 import { detectRenderSignals, rawSignals } from './render.js'
 import { readPageMetadata } from './metadata.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
@@ -94,7 +94,7 @@ function confidenceOf(
 
 export class ExtractTf implements Extractor {
   extract(html: string, options: ExtractorOptions = {}): ExtractorOutput {
-    const { favorPrecision = false, favorRecall = false, pruneSelectors, onlyMainContent = true } = options
+    const { favorPrecision = false, favorRecall = false, pruneSelectors, includeSelectors, onlyMainContent = true } = options
     const parseStart = performance.now()
     const doc = parse(html)
     const parseMs = Math.max(0, performance.now() - parseStart)
@@ -122,9 +122,14 @@ export class ExtractTf implements Extractor {
     const raw = rawSignals(doc.document)
     const metadata = readPageMetadata(doc.document, options.url)
 
+    // The caller's own selection is copied out before cleaning, so a named
+    // navigation survives; the page itself still goes through the cascade
+    // for its type, its render signals and its main region.
+    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(doc.document, includeSelectors, pruneSelectors) : null
+
     // The whole page, when asked for, is copied before cleaning: navigation
     // and footer stay, scripts and hidden markup do not.
-    const wholeBody = onlyMainContent ? null : wholePageBody(doc.document)
+    const wholeBody = onlyMainContent ? null : wholePageBody(doc.document, pruneSelectors)
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -232,10 +237,15 @@ export class ExtractTf implements Extractor {
     const mainLength = main ? textOf(main).length : 0
 
     const adapter = amazonProduct ? adapterFor(doc.document, options.url, product) : preliminaryAdapter
+    // A selection the caller made is the answer as a whole: what they named
+    // is the content, so it is emitted entire and counts as identified,
+    // whatever the cascade made of the page. An empty selection is an empty
+    // answer, not a page worth rendering.
+    const selected = selection !== null && selection.matched > 0
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
-      mainHtml: main === null ? '' : wholeBody ?? outerHtml(main),
-      confidence: confidenceOf(
+      mainHtml: selection !== null ? (selected ? selection.html : '') : main === null ? '' : wholeBody ?? outerHtml(main),
+      confidence: selected ? 1 : confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,
         blocks.length,
@@ -247,8 +257,9 @@ export class ExtractTf implements Extractor {
       ),
       // Escalate only when nothing at all could be returned, recovery
       // included. Routing to a non-article strategy is not by itself an
-      // escalation reason.
-      escalate: main === null,
+      // escalation reason, and a selection that matched nothing is an
+      // empty answer, not a page worth rendering.
+      escalate: main === null && selection === null,
       recovery,
       render: detectRenderSignals(raw, doc.document),
       metadata,

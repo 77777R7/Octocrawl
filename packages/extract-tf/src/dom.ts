@@ -46,6 +46,20 @@ export function qs(scope: ParentNode, selector: string): Element | null {
   }
 }
 
+/**
+ * Why a CSS selector cannot be used, or null when it parses. Callers that
+ * take selectors from a request check them here, so a broken selector is a
+ * named 400 rather than a silent "matched nothing".
+ */
+export function invalidSelector(selector: string): string | null {
+  try {
+    parseHTML('<html><body></body></html>').document.querySelector(selector)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 /** Serialize an element back to HTML. */
 export function outerHtml(el: Element): string {
   return el.outerHTML

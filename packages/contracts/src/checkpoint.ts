@@ -59,6 +59,8 @@ export interface TaskScrapeOptions {
   waitForMs?: number
   /** Budget for one page; the crawl's own wall budget still applies. */
   timeoutMs?: number
+  includeTags?: readonly string[]
+  excludeTags?: readonly string[]
 }
 
 /** What a crawl was started with, kept so a resume follows the same rules. */

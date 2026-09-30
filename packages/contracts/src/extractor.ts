@@ -261,6 +261,13 @@ export interface ExtractorOptions {
   /** Extra CSS selectors to prune from the tree before extraction. */
   pruneSelectors?: readonly string[]
   /**
+   * CSS selectors that name the only elements to keep: the page is reduced
+   * to them, in document order, before cleaning, routing and extraction,
+   * and mainHtml is that reduced page. Nothing matching gives empty output
+   * without asking for a browser render.
+   */
+  includeSelectors?: readonly string[]
+  /**
    * False returns the whole cleaned body as mainHtml (navigation and footer
    * included) instead of the main content region. Routing, confidence and
    * facts are still computed on the main region.

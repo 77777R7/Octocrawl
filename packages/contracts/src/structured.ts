@@ -49,7 +49,8 @@ export interface JsonFormatRequest {
 }
 
 /** String json returns the canonical envelope; an object maps into a caller schema. */
-export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
+/** `html` is the cleaned content region (the whole cleaned page when onlyMainContent is false); `rawHtml` is the page as the lane received it. */
+export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string

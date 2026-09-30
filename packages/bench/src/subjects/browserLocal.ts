@@ -709,7 +709,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(body, { url: finalUrl, onlyMainContent: pageOptions.onlyMainContent ?? true })
+      const extracted = extractTf.extract(body, { url: finalUrl, onlyMainContent: pageOptions.onlyMainContent ?? true, pruneSelectors: pageOptions.excludeTags, includeSelectors: pageOptions.includeTags })
       const links = collectLinks(body, finalUrl)
       trace.push({
         at: wallMs,
@@ -762,6 +762,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         ...(overrideWarnings.length + verdict.warnings.length > 0 ? { warnings: [...overrideWarnings, ...verdict.warnings] } : {}),
         links,
         document: documentOf(extracted),
+        ...(pageOptions.includeHtml ? { html: extracted.mainHtml } : {}),
+        ...(pageOptions.includeRawHtml ? { rawHtml: body } : {}),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
       }
     } catch (err) {

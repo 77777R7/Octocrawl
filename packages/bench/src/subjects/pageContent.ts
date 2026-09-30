@@ -23,7 +23,7 @@ export function documentOf(extracted: ReturnType<typeof extractTf.extract>): Non
 
 /** What a non-2xx HTML response says, when it says anything; null for an empty shell. */
 export function errorPageContent(body: string, finalUrl: string, page: PageOptions): { markdown: string; links: readonly string[]; document: NonNullable<FetchResult['document']> } | null {
-  const extracted = extractTf.extract(body, { url: finalUrl, onlyMainContent: page.onlyMainContent ?? true })
+  const extracted = extractTf.extract(body, { url: finalUrl, onlyMainContent: page.onlyMainContent ?? true, pruneSelectors: page.excludeTags, includeSelectors: page.includeTags })
   if (extracted.escalate) return null
   const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: finalUrl })
   if (markdown.trim().length === 0) return null

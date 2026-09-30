@@ -9,6 +9,7 @@
     { "path": "../contracts" },
     { "path": "../http-core" },
     { "path": "../runtime" },
-    { "path": "../bench" }
+    { "path": "../bench" },
+    { "path": "../extract-tf" }
   ]
 }

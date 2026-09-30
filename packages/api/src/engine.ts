@@ -16,6 +16,7 @@ import {
   type Channel,
   type OperatorProxy,
 } from '@w2l/bench'
+import { invalidSelector } from '@w2l/extract-tf'
 import {
   defaultApiMode,
   localNetworkPolicy,
@@ -38,6 +39,7 @@ import {
   type CrawlResumeRequest,
   type PageOptions,
   type RobotsOverride,
+  type ScrapeFormat,
   type TaskScrapeOptions,
   type CompactScrapeResponse,
   type ScrapeResponse,
@@ -178,6 +180,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     channelsByMode.set(mode, channels)
     return channels
   }
+  /** A broken selector is a named 400, never a silent "matched nothing". */
+  const assertSelectors = (selectors: readonly string[] | undefined, name: string): void => {
+    for (const selector of selectors ?? []) {
+      const problem = invalidSelector(selector)
+      if (problem !== null) throw new RequestError(`${name} entry is not a valid CSS selector: ${selector}`)
+    }
+  }
+  const wantsFormat = (formats: readonly ScrapeFormat[] | undefined, name: 'html' | 'rawHtml'): boolean =>
+    formats !== undefined && formats.some(format => format === name)
   const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string): Channel[] => {
     const channels = channelsFor(mode)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
@@ -279,6 +290,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...(scrapeOptions.onlyMainContent === undefined ? {} : { onlyMainContent: scrapeOptions.onlyMainContent }),
           ...(scrapeOptions.waitForMs === undefined ? {} : { waitForMs: scrapeOptions.waitForMs }),
           ...(robotsOverride === undefined ? {} : { robotsOverride }),
+          ...(scrapeOptions.includeTags === undefined ? {} : { includeTags: scrapeOptions.includeTags }),
+          ...(scrapeOptions.excludeTags === undefined ? {} : { excludeTags: scrapeOptions.excludeTags }),
+          ...(wantsFormat(scrapeOptions.formats, 'html') ? { includeHtml: true } : {}),
+          ...(wantsFormat(scrapeOptions.formats, 'rawHtml') ? { includeRawHtml: true } : {}),
         }
         const pageDeadline = scrapeOptions.timeoutMs === undefined ? undefined : Date.now() + scrapeOptions.timeoutMs
         const scoped: ExecutionContext = {
@@ -367,6 +382,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   return {
     async scrape(req, context = {}) {
+      assertSelectors(req.includeTags, 'includeTags')
+      assertSelectors(req.excludeTags, 'excludeTags')
       const overallStart = performance.now()
       const requestDeadline = Date.now() + (req.timeout ?? 300_000)
       const budget = createExecutionScope({
@@ -380,6 +397,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...(req.onlyMainContent === undefined ? {} : { onlyMainContent: req.onlyMainContent }),
           ...(req.waitFor === undefined ? {} : { waitForMs: req.waitFor }),
           ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
+          ...(req.includeTags === undefined ? {} : { includeTags: req.includeTags }),
+          ...(req.excludeTags === undefined ? {} : { excludeTags: req.excludeTags }),
+          ...(wantsFormat(req.formats, 'html') ? { includeHtml: true } : {}),
+          ...(wantsFormat(req.formats, 'rawHtml') ? { includeRawHtml: true } : {}),
         },
       }
       const mode = defaultApiMode(req.mode)
@@ -406,6 +427,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async startCrawl(req) {
+      assertSelectors(req.scrapeOptions?.includeTags, 'scrapeOptions.includeTags')
+      assertSelectors(req.scrapeOptions?.excludeTags, 'scrapeOptions.excludeTags')
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
@@ -425,6 +448,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...(scrape.onlyMainContent === undefined ? {} : { onlyMainContent: scrape.onlyMainContent }),
           ...(scrape.waitFor === undefined ? {} : { waitForMs: scrape.waitFor }),
           ...(scrape.timeout === undefined ? {} : { timeoutMs: scrape.timeout }),
+          ...(scrape.includeTags === undefined ? {} : { includeTags: scrape.includeTags }),
+          ...(scrape.excludeTags === undefined ? {} : { excludeTags: scrape.excludeTags }),
         },
       }
       const task: Task = {
@@ -682,6 +707,8 @@ function toCrawlPage(step: StepRecord): CrawlPage {
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
+    ...(result?.html === undefined ? {} : { html: result.html }),
+    ...(result?.rawHtml === undefined ? {} : { rawHtml: result.rawHtml }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.links === undefined ? {} : { links: result.links }),
     ...(result?.file === undefined || result.file === null ? {} : { file: result.file }),

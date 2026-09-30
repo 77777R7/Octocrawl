@@ -83,6 +83,8 @@ describe('MCP tools', () => {
     const scrape = TOOLS.find(tool => tool.name === 'scrape')
     const batch = TOOLS.find(tool => tool.name === 'batch_scrape')
     expect(JSON.stringify(scrape?.inputSchema)).toContain('"links"')
+    expect(JSON.stringify(scrape?.inputSchema)).toContain('"rawHtml"')
+    expect(JSON.stringify(scrape?.inputSchema)).toContain('"excludeTags"')
     expect(JSON.stringify(scrape?.inputSchema)).toContain('"schema"')
     expect(JSON.stringify(batch?.inputSchema)).toContain('"schema"')
   })

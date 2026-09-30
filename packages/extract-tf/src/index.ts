@@ -1,7 +1,8 @@
 export { ExtractTf, extractTf } from './extract.js'
 export { classifyBlocks } from './classify.js'
 export type { TextBlock, ClassifyOptions } from './classify.js'
-export { cleanTree, pruneTree, pruneRecommendations } from './prune.js'
+export { cleanTree, pruneTree, pruneRecommendations, selectionBody } from './prune.js'
+export { invalidSelector } from './dom.js'
 export type { PruneOptions } from './prune.js'
 export { selectMain } from './main.js'
 export {

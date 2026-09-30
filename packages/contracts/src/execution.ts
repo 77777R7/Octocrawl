@@ -17,6 +17,14 @@ export interface PageOptions {
    * override goes into the trace, the warnings and the compliance record.
    */
   robotsOverride?: RobotsOverride
+  /** CSS selectors: keep only the matching elements of the page before extraction. */
+  includeTags?: readonly string[]
+  /** CSS selectors removed from the page before extraction. */
+  excludeTags?: readonly string[]
+  /** Carry the cleaned content HTML on the result (the `html` format). */
+  includeHtml?: boolean
+  /** Carry the page as received on the result (the `rawHtml` format). */
+  includeRawHtml?: boolean
 }
 
 export interface ExecutionContext {

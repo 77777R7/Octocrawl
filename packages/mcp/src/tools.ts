@@ -13,7 +13,7 @@ const FORMATS_SCHEMA = {
   minItems: 1,
   items: {
     anyOf: [
-      { type: 'string', enum: ['markdown', 'links', 'json'] },
+      { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
       {
         type: 'object',
         properties: {
@@ -49,6 +49,8 @@ const PAGE_OPTION_SCHEMAS = {
   onlyMainContent: { type: 'boolean', description: 'Main content only (default true); false returns the cleaned whole page, navigation included.' },
   timeout: { type: 'number', minimum: 1000, maximum: 300000, description: 'Budget for one page in milliseconds. Default 300000.' },
   waitFor: { type: 'number', minimum: 0, maximum: 30000, description: 'Extra wait on the browser lane after the page settled, in milliseconds.' },
+  includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors; only the matching elements are kept before extraction.' },
+  excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors removed from the page before extraction.' },
 } as const
 
 export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
@@ -233,6 +235,8 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       debug: req.debug ?? false,
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
+      ...(req.includeTags === undefined ? {} : { includeTags: req.includeTags }),
+      ...(req.excludeTags === undefined ? {} : { excludeTags: req.excludeTags }),
     }, request)
   }
   if (name === 'crawl') {

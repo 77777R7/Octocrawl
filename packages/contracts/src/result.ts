@@ -197,6 +197,10 @@ export interface FetchResult {
   warnings?: readonly FetchWarning[]
   /** HTML-derived page/product facts; never reconstructed from Markdown. */
   document?: DocumentExtraction | null
+  /** The cleaned content HTML, present only when the `html` format was asked for; null for a file. */
+  html?: string | null
+  /** The page as the lane received it (wire body on the http lane, rendered DOM on the browser lane), present only when the `rawHtml` format was asked for; null for a file. */
+  rawHtml?: string | null
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
   /** Present when the response was a file (PDF, CSV, XLSX, ZIP, JSON) kept as received. */

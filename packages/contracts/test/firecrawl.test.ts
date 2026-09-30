@@ -78,7 +78,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       maxPages: 4,
       includePaths: ['^/docs/'],
       excludePaths: ['\\.pdf$'],
-      scrapeOptions: { formats: ['markdown'], onlyMainContent: false, waitFor: 100 },
+      scrapeOptions: { formats: ['markdown', 'html'], onlyMainContent: false, waitFor: 100 },
     })
   })
 
@@ -107,6 +107,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       maxDepth: 2,
       useCached: undefined,
       allowlistedDomains: undefined,
+      scrapeOptions: { formats: ['html'] },
     })
   })
 

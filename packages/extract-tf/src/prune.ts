@@ -232,6 +232,31 @@ export function pruneRecommendations(doc: Document): void {
 }
 
 /**
+ * The caller's own selection of the page: the elements the selectors name,
+ * in document order, an element inside another match not repeated, in a
+ * body of their own that is cleaned like the whole page (scripts and hidden
+ * markup gone, navigation kept if it was named) minus the caller's
+ * exclusions. Works on a copy: routing, render signals and the main region
+ * are still read from the full page.
+ */
+export function selectionBody(doc: Document, selectors: readonly string[], exclusions: readonly string[] = []): { html: string; matched: number } {
+  const body = doc.body
+  if (!body) return { html: '', matched: 0 }
+  const copy = body.cloneNode(true) as Element
+  const kept: Element[] = []
+  for (const el of qsa(copy, '*')) {
+    if (!selectors.some((selector) => { try { return el.matches(selector) } catch { return false } })) continue
+    if (kept.some((outer) => outer.contains(el))) continue
+    kept.push(el)
+  }
+  while (copy.firstChild) copy.removeChild(copy.firstChild)
+  for (const el of kept) copy.appendChild(el)
+  for (const el of qsa(copy, WHOLE_PAGE_CLEANED_SELECTOR)) detach(el)
+  for (const selector of exclusions) for (const el of qsa(copy, selector)) detach(el)
+  return { html: outerHtml(copy), matched: kept.length }
+}
+
+/**
  * Strip elements that can never be main content. Idempotent.
  */
 export function cleanTree(doc: Document): void {
@@ -240,14 +265,16 @@ export function cleanTree(doc: Document): void {
 
 /**
  * The body as a reader saves the whole page: scripts, controls and hidden
- * markup gone, navigation, asides and footer kept. Works on a copy, so the
- * document itself can still be cleaned and pruned for the main region.
+ * markup gone, navigation, asides and footer kept, and the caller's own
+ * exclusions removed. Works on a copy, so the document itself can still be
+ * cleaned and pruned for the main region.
  */
-export function wholePageBody(doc: Document): string {
+export function wholePageBody(doc: Document, selectors: readonly string[] = []): string {
   const body = doc.body
   if (!body) return ''
   const copy = body.cloneNode(true) as Element
   for (const el of qsa(copy, WHOLE_PAGE_CLEANED_SELECTOR)) detach(el)
+  for (const selector of selectors) for (const el of qsa(copy, selector)) detach(el)
   return outerHtml(copy)
 }
 

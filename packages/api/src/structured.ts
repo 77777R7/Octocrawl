@@ -549,7 +549,7 @@ export function scrapeMetadata(result: Pick<FetchResult, 'requestedUrl' | 'evide
   }
 }
 
-function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json'): boolean {
+function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml'): boolean {
   return formats.some(format => typeof format === 'string' ? format === name : name === 'json')
 }
 
@@ -627,10 +627,14 @@ export function compactScrapeResponse(
     lane: next.lane,
     formats: [
       ...(hasFormat(formats, 'markdown') ? ['markdown' as const] : []),
+      ...(hasFormat(formats, 'html') ? ['html' as const] : []),
+      ...(hasFormat(formats, 'rawHtml') ? ['rawHtml' as const] : []),
       ...(includeLinks ? ['links' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
+    ...(hasFormat(formats, 'html') ? { html: next.html ?? null } : {}),
+    ...(hasFormat(formats, 'rawHtml') ? { rawHtml: next.rawHtml ?? null } : {}),
     ...(next.warnings !== undefined && next.warnings.length > 0 ? { warnings: next.warnings } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
     metadata: scrapeMetadata(next),

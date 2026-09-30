@@ -48,6 +48,22 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchStartRequest({ urls: ['https://example.com/'], format: ['markdown'] })).toThrow('unknown batch option: format')
   })
 
+  it('accepts the html and rawHtml formats and CSS selector lists', () => {
+    const req = parseScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'html', 'rawHtml'], includeTags: ['main', ' table.wikitable '], excludeTags: ['.mw-editsection'] })
+    expect(req.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(req.includeTags).toEqual(['main', 'table.wikitable'])
+    expect(req.excludeTags).toEqual(['.mw-editsection'])
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', formats: ['html', 'html'] })).toThrow('formats must not contain duplicates')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', includeTags: 'main' })).toThrow('includeTags must be an array of at most 100 non-empty CSS selectors')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', excludeTags: [' '] })).toThrow('excludeTags must be an array of at most 100 non-empty CSS selectors')
+    const crawl = parseCrawlStartRequest({ url: 'https://example.com/', scrapeOptions: { formats: ['rawHtml'], excludeTags: ['nav'] } })
+    expect(crawl.scrapeOptions).toEqual({ formats: ['rawHtml'], excludeTags: ['nav'] })
+    const fc = parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'html', 'rawHtml', 'screenshot'], includeTags: ['article'], excludeTags: ['.ad'] })
+    expect(fc.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(fc.includeTags).toEqual(['article'])
+    expect(fc.excludeTags).toEqual(['.ad'])
+  })
+
   it('parses a recorded robots override and insists on its reason', () => {
     const parsed = parseScrapeRequest({ url: 'https://example.test/report.pdf', robotsOverride: { reason: 'linked publicly by the publisher', recordedBy: 'analyst' } })
     expect(parsed.robotsOverride).toEqual({ reason: 'linked publicly by the publisher', recordedBy: 'analyst' })
@@ -84,7 +100,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('maps a Firecrawl scrape body onto the served formats and page options', () => {
     const req = parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['html', 'links', { type: 'markdown' }], onlyMainContent: false, waitFor: 250, timeout: 20000 })
-    expect(req).toMatchObject({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: false, waitFor: 250, timeout: 20000 })
+    expect(req).toMatchObject({ url: 'https://example.com/', formats: ['markdown', 'links', 'html'], onlyMainContent: false, waitFor: 250, timeout: 20000 })
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['screenshot'] }).formats).toBeUndefined()
   })
 

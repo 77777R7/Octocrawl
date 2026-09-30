@@ -106,6 +106,30 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(await bad.json()).toEqual({ error: 'unknown scrape option: onlyMainContnet', code: 'invalid_request' })
   })
 
+  it('serves html and rawHtml, reduces the page to includeTags and removes excludeTags', async () => {
+    const app = createApp(engine)
+    const post = async (body: unknown) => {
+      const res = await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return { status: res.status, body: await res.json() }
+    }
+    const excluded = await post({ url: `${server.url}/crawl/listing`, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['ul'], debug: false })
+    expect(excluded.status).toBe(200)
+    expect(excluded.body.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(excluded.body.markdown).toContain('Harbour lantern catalog')
+    expect(excluded.body.markdown).not.toContain('Harbour lantern teapot 01')
+    expect(excluded.body.html).toContain('<h1>Harbour lantern catalog</h1>')
+    expect(excluded.body.html).not.toContain('<ul>')
+    expect(excluded.body.rawHtml).toMatch(/^<!doctype html>/i)
+    expect(excluded.body.rawHtml).toContain('<ul>')
+    const included = await post({ url: `${server.url}/crawl/listing`, formats: ['markdown'], includeTags: ['ul'], debug: false })
+    expect(included.body.markdown).toContain('Harbour lantern teapot 03')
+    expect(included.body.markdown).not.toContain('Harbour lantern catalog')
+    expect(included.body).not.toHaveProperty('html')
+    const broken = await post({ url: `${server.url}/crawl/listing`, includeTags: ['div[['] })
+    expect(broken.status).toBe(400)
+    expect(broken.body).toEqual({ error: 'includeTags entry is not a valid CSS selector: div[[', code: 'invalid_request' })
+  })
+
   it('answers a request timeout with a structured result inside the asked budget', async () => {
     const app = createApp(engine)
     const startedAt = Date.now()

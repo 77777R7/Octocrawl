@@ -498,7 +498,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // extractor found no main content — report failed/empty_unverified and
     // flag the browser lane, never a contentful success.
     const extractStart = performance.now()
-    const extracted = extractTf.extract(body, { url: out.finalUrl, onlyMainContent: page.onlyMainContent ?? true })
+    const extracted = extractTf.extract(body, { url: out.finalUrl, onlyMainContent: page.onlyMainContent ?? true, pruneSelectors: page.excludeTags, includeSelectors: page.includeTags })
     const extractionTotalMs = performance.now() - extractStart
     parseMs = extracted.timings.parseMs
     extractMs = Math.max(extracted.timings.extractMs, extractionTotalMs - parseMs)
@@ -585,6 +585,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
       links,
       document: documentOf(extracted),
+      ...(page.includeHtml ? { html: extracted.mainHtml } : {}),
+      ...(page.includeRawHtml ? { rawHtml: body } : {}),
       usage: { ...base.usage, contentTokens },
     })
   }

@@ -210,6 +210,37 @@ describe('extractTf', () => {
     expect(out.escalate).toBe(false)
   })
 
+  it('does not take a noscript notice on a long static page for a shell', () => {
+    // GOV.UK: 55,000 chars of report text, a generic "enable JavaScript"
+    // notice beside the analytics scripts, and more script than text.
+    const html = `<!doctype html><html><body><noscript>Please enable JavaScript to use this site's tools.</noscript><main><h1>Subnational consumption</h1>
+${'<p>Total consumption in the region fell by four percent over the period, with the largest change in the domestic sector.</p>\n'.repeat(40)}
+</main><script>${'var analytics = { region: "north", value: 12 };'.repeat(200)}</script></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.render?.markers).toContain('noscript_notice')
+    expect(out.render?.clientRendered).toBe(false)
+  })
+
+  it('reduces the page to the included selectors and returns that selection whole', () => {
+    const html = `<!doctype html><html><body>
+<header><h1>Kiln archive</h1><nav><a href="/a">Home</a></nav></header>
+<article><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the harbour office ledger.</p>
+<table id="readings"><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41</td></tr></table>
+<p class="mw-editsection">[edit]</p></article>
+<table id="legend"><tr><th>Key</th><th>Meaning</th></tr><tr><td>*</td><td>estimate</td></tr></table>
+<footer>Copyright 2026</footer></body></html>`
+    const out = extractTf.extract(html, { includeSelectors: ['table', 'h1'], pruneSelectors: ['#legend'] })
+    expect(out.mainHtml).toContain('Kiln archive')
+    expect(out.mainHtml).toContain('Meridian')
+    expect(out.mainHtml).not.toContain('estimate')
+    expect(out.mainHtml).not.toContain('glaze vitrified')
+    expect(out.mainHtml).not.toContain('Copyright')
+    expect(out.escalate).toBe(false)
+    const none = extractTf.extract(html, { includeSelectors: ['.does-not-exist'] })
+    expect(none.mainHtml).toBe('')
+    expect(none.escalate).toBe(false)
+  })
+
   it('applies caller prune selectors', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Report</h1>

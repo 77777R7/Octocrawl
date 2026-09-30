@@ -29,6 +29,10 @@ export interface ScrapeRequest {
   waitFor?: number
   /** Omitted preserves the legacy full REST/SDK response. MCP sends false by default. */
   debug?: boolean
+  /** CSS selectors: only the matching elements are kept before extraction. */
+  includeTags?: readonly string[]
+  /** CSS selectors removed from the page before extraction. */
+  excludeTags?: readonly string[]
   /**
    * A recorded decision to fetch this URL although its host's robots.txt
    * disallows it. The reason is required; robots.txt is still read, and the
@@ -65,8 +69,10 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'links' | 'json')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json')[]
   markdown?: string | null
+  html?: string | null
+  rawHtml?: string | null
   warnings?: FetchResult['warnings']
   links?: readonly string[]
   metadata: ScrapeMetadata
@@ -87,6 +93,8 @@ export interface CrawlScrapeOptions {
   onlyMainContent?: boolean
   timeout?: number
   waitFor?: number
+  includeTags?: readonly string[]
+  excludeTags?: readonly string[]
 }
 
 export interface CrawlStartRequest {
@@ -167,9 +175,18 @@ function readDurationMs(value: unknown, name: string, min: number, max: number):
   return Math.round(value)
 }
 
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor', 'debug', 'robotsOverride'] as const
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor', 'debug', 'robotsOverride', 'includeTags', 'excludeTags'] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'includePaths', 'excludePaths', 'scrapeOptions'] as const
-const CRAWL_SCRAPE_KEYS = ['formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor'] as const
+const CRAWL_SCRAPE_KEYS = ['formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor', 'includeTags', 'excludeTags'] as const
+
+/** A list of CSS selectors; whether each one parses is checked where a DOM exists (the API engine). */
+function readSelectors(value: unknown, name: string): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== 'string' || item.trim().length === 0 || item.length > 200)) {
+    throw new RequestError(`${name} must be an array of at most 100 non-empty CSS selectors`)
+  }
+  return (value as string[]).map((item) => item.trim())
+}
 
 function readPathPatterns(value: unknown, name: string): readonly string[] | undefined {
   if (value === undefined) return undefined
@@ -192,12 +209,16 @@ function readCrawlScrapeOptions(value: unknown): CrawlScrapeOptions | undefined 
   const formats = readFormats(rec.formats)
   const timeout = readDurationMs(rec.timeout, 'scrapeOptions.timeout', 1_000, 300_000)
   const waitFor = readDurationMs(rec.waitFor, 'scrapeOptions.waitFor', 0, 30_000)
+  const includeTags = readSelectors(rec.includeTags, 'scrapeOptions.includeTags')
+  const excludeTags = readSelectors(rec.excludeTags, 'scrapeOptions.excludeTags')
   return {
     ...(formats === undefined ? {} : { formats }),
     ...(rec.includeLinks === undefined ? {} : { includeLinks: rec.includeLinks as boolean }),
     ...(rec.onlyMainContent === undefined ? {} : { onlyMainContent: rec.onlyMainContent as boolean }),
     ...(timeout === undefined ? {} : { timeout }),
     ...(waitFor === undefined ? {} : { waitFor }),
+    ...(includeTags === undefined ? {} : { includeTags }),
+    ...(excludeTags === undefined ? {} : { excludeTags }),
   }
 }
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides'] as const
@@ -326,13 +347,13 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const item of value) {
-    if (item === 'markdown' || item === 'links' || item === 'json') {
+    if (item === 'markdown' || item === 'links' || item === 'json' || item === 'html' || item === 'rawHtml') {
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
       formats.push(item)
       continue
     }
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, or a json schema request')
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, html, rawHtml, or a json schema request')
     const rec = item as Record<string, unknown>
     for (const key of Object.keys(rec)) if (!['type', 'schema', 'prompt', 'modelFallback'].includes(key)) throw new RequestError(`unsupported json format option: ${key}`)
     if (rec.type !== 'json' || rec.schema === undefined) throw new RequestError('json format requires type=json and schema')
@@ -368,6 +389,8 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const timeout = readDurationMs(rec.timeout, 'timeout', 1_000, 300_000)
   const waitFor = readDurationMs(rec.waitFor, 'waitFor', 0, 30_000)
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
+  const includeTags = readSelectors(rec.includeTags, 'includeTags')
+  const excludeTags = readSelectors(rec.excludeTags, 'excludeTags')
   return {
     url: readUrl(rec.url),
     mode: readMode(rec.mode),
@@ -379,6 +402,8 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...(waitFor === undefined ? {} : { waitFor }),
     debug: rec.debug as boolean | undefined,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
+    ...(includeTags === undefined ? {} : { includeTags }),
+    ...(excludeTags === undefined ? {} : { excludeTags }),
   }
 }
 
