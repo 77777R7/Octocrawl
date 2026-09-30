@@ -8,6 +8,8 @@ import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } f
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
+import { canonicalRedirect, dailyVisitorId, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
+  requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -25,6 +27,11 @@ export interface PreviewServerOptions {
   localPlatformProxyUrl?: string
   /** Explicit review-only exception; never set in the production launcher. */
   localPlatformRobotsException?: boolean
+  /** The site's public origin (https://domain). Pages are served with it as their canonical address, and page
+   * requests that reach another host are redirected to it. Unset, each page names the host it was requested on. */
+  publicOrigin?: string
+  /** Where page events and anonymous preview outcomes are written; stdout JSON lines by default. */
+  log?: Logger
 }
 
 const MIME: Record<string, string> = {
@@ -32,6 +39,7 @@ const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.xml': 'application/xml; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
 }
 
 function sendJson(res: ServerResponse, status: number, body: PreviewResponse | Record<string, unknown>, headers: Record<string, string> = {}): void {
@@ -92,16 +100,16 @@ function authorizedEvaluation(req: IncomingMessage, configuredToken: string | un
   return timingSafeEqual(expectedHash, providedHash)
 }
 
-async function readRequestBody(req: IncomingMessage): Promise<unknown> {
+async function readRequestBody(req: IncomingMessage, limit = PREVIEW_BODY_BYTES): Promise<unknown> {
   const type = req.headers['content-type'] ?? ''
   if (!type.toLowerCase().startsWith('application/json')) throw new Error('Send a JSON object with a url.')
-  if (Number(req.headers['content-length'] ?? 0) > PREVIEW_BODY_BYTES) throw new Error('The request is too large.')
+  if (Number(req.headers['content-length'] ?? 0) > limit) throw new Error('The request is too large.')
   const chunks: Buffer[] = []
   let length = 0
   for await (const chunk of req) {
     const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     length += next.length
-    if (length > PREVIEW_BODY_BYTES) throw new Error('The request is too large.')
+    if (length > limit) throw new Error('The request is too large.')
     chunks.push(next)
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) }
@@ -118,7 +126,14 @@ function requestOriginAllowed(req: IncomingMessage): boolean {
   return expected.has(origin)
 }
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string): Promise<void> {
+const STATIC_HEADERS = {
+  'content-security-policy': "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+}
+/** Files that may carry the origin token: pages, the sitemap and robots.txt. */
+const ORIGIN_TEXT = new Set(['.html', '.xml', '.txt'])
+
+async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, origin: string): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
   let relativePath: string
@@ -128,22 +143,23 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   let file = requested
   let info = await stat(file).catch(() => null)
   if (info?.isDirectory()) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
-  if (!info?.isFile() && !extname(relativePath) && !relativePath.startsWith('/api/')
-    && relativePath !== '/docs' && !relativePath.startsWith('/docs/')) {
-    file = resolve(root, 'index.html')
+  // The site has no client-side routes: a path without a file is a 404, never the home page answering 200.
+  let status = 200
+  if (!info?.isFile() || relative(root, file).startsWith('..')) {
+    status = 404
+    file = resolve(root, '404.html')
     info = await stat(file).catch(() => null)
+    if (!info?.isFile()) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', ...STATIC_HEADERS }).end('Not found'); return }
   }
-  if (!info?.isFile() || relative(root, file).startsWith('..')) { res.writeHead(404).end(); return }
-  const mime = MIME[extname(file)] ?? 'application/octet-stream'
-  const content = req.method === 'HEAD' ? null : await readFile(file)
-  res.writeHead(200, {
-    'content-type': mime, 'content-length': info.size,
-    'cache-control': extname(file) === '.html' ? 'no-store' : 'public, max-age=3600',
-    'content-security-policy': "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
-    'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+  const extension = extname(file)
+  let content = await readFile(file)
+  if (ORIGIN_TEXT.has(extension) && content.includes(ORIGIN_TOKEN)) content = Buffer.from(content.toString('utf8').replaceAll(ORIGIN_TOKEN, origin))
+  res.writeHead(status, {
+    'content-type': MIME[extension] ?? 'application/octet-stream', 'content-length': content.length,
+    'cache-control': status !== 200 || extension === '.html' ? 'no-store' : 'public, max-age=3600',
+    ...STATIC_HEADERS,
   })
-  if (req.method === 'HEAD') { res.end(); return }
-  res.end(content)
+  res.end(req.method === 'HEAD' ? undefined : content)
 }
 
 export function createPreviewHandler(options: PreviewServerOptions): (req: IncomingMessage, res: ServerResponse) => void {
@@ -152,6 +168,9 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
   if (options.visitorCookieSecret && options.visitorCookieSecret.length < 32) throw new Error('Visitor cookie secret must have at least 32 characters')
   if (options.evalToken && options.evalToken.length < 32) throw new Error('Evaluation token must have at least 32 characters')
   if (options.localPlatformRobotsException && !options.localPlatformProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
+  const publicOrigin = options.publicOrigin ? parsePublicOrigin(options.publicOrigin) : undefined
+  const log = options.log ?? stdoutLogger
+  const visitorId = (req: IncomingMessage) => dailyVisitorId(options.visitorCookieSecret, visitorKey(req, options.visitorCookieSecret))
   return (req, res) => { void (async () => {
     const started = performance.now()
     const deadlineAt = Date.now() + deadlineMs
@@ -173,18 +192,43 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       }
       return
     }
+    if (pathname === '/api/events') {
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
+      if (!requestOriginAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403, { 'cache-control': 'no-store' }).end(); return }
+      let event
+      try { event = parseWebEvent(await readRequestBody(req, EVENT_BODY_BYTES)) } catch { event = null }
+      if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
+      log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req) })
+      res.writeHead(204, { 'cache-control': 'no-store' }).end()
+      return
+    }
     if (pathname !== '/api/preview') {
       if (pathname.startsWith('/api/')) { res.writeHead(404).end(); return }
+      const redirect = canonicalRedirect(req, publicOrigin, pathname)
+      if (redirect) { res.writeHead(301, { location: redirect, 'cache-control': 'public, max-age=300' }).end(); return }
       if (req.method === 'GET' && options.visitorCookieSecret) issueVisitorCookie(req, res, options.visitorCookieSecret)
-      await serveStatic(req, res, options.staticDir, pathname)
+      await serveStatic(req, res, options.staticDir, pathname, requestOrigin(req, publicOrigin))
       return
     }
     if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
+    let submitted = ''
+    let submittedOptions = false
+    // Every anonymous outcome is logged once: its state, the target's host and the time, never the page or its path.
+    // Owner evaluation runs keep their own log line and stay out of these counts.
+    const owner = authorizedEvaluation(req, options.evalToken)
+    const send: typeof sendJson = (target, status, body, headers) => {
+      const outcome = body as PreviewResponse
+      if (!owner) log({
+        event: 'w2l_preview', status: outcome.status, http: status, code: outcome.diagnostic?.code ?? null,
+        host: targetHost(submitted), options: submittedOptions, totalMs: Math.round(outcome.totalMs),
+        vid: visitorId(req), automated: looksAutomated(req),
+      })
+      sendJson(target, status, body, headers)
+    }
     if (!requestOriginAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') {
-      sendJson(res, 403, empty('failed', '', 'Submit links from this site only.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
+      send(res, 403, empty('failed', '', 'Submit links from this site only.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
       return
     }
-    let submitted = ''
     try {
       const body = await readRequestBody(req)
       // Options are checked in full before any network or quota work, so a refused request costs nothing.
@@ -192,34 +236,35 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       try { request = parsePreviewRequest(body) }
       catch (error) {
         const url = body !== null && typeof body === 'object' && typeof (body as Record<string, unknown>).url === 'string' ? (body as { url: string }).url : ''
-        if (!res.destroyed) sendJson(res, 400, empty('invalid_url', url, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started),
+        if (!res.destroyed) send(res, 400, empty('invalid_url', url, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started),
           url ? { code: 'invalid_options', stage: 'input', evidence: 'observed' } : undefined))
         return
       }
       submitted = request.url
+      submittedOptions = hasOptions(request.options)
       const target = normalizePreviewUrl(submitted)
       if (target.amazonAsin !== null && hasOptions(request.options)) {
-        sendJson(res, 400, empty('invalid_url', submitted, 'Amazon.sg product pages return the checked product record and take no options.',
+        send(res, 400, empty('invalid_url', submitted, 'Amazon.sg product pages return the checked product record and take no options.',
           Math.max(0, performance.now() - started), { code: 'invalid_options', stage: 'input', evidence: 'observed' }))
         return
       }
       if (isPreviewTargetStaticallyDenied(target.url)) {
-        sendJson(res, 200, empty('blocked', submitted, 'Private or reserved network targets are not available in the public preview.',
+        send(res, 200, empty('blocked', submitted, 'Private or reserved network targets are not available in the public preview.',
           Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
         return
       }
-      if (options.enabled === false) { sendJson(res, 503, empty('failed', submitted, 'The public preview is temporarily unavailable.', Math.max(0, performance.now() - started))); return }
+      if (options.enabled === false) { send(res, 503, empty('failed', submitted, 'The public preview is temporarily unavailable.', Math.max(0, performance.now() - started))); return }
       if (target.amazonAsin !== null && !options.amazonState) {
-        sendJson(res, 503, empty('incomplete', submitted, 'The Singapore Amazon preview is not configured yet.', Math.max(0, performance.now() - started)))
+        send(res, 503, empty('incomplete', submitted, 'The Singapore Amazon preview is not configured yet.', Math.max(0, performance.now() - started)))
         return
       }
       if (target.amazonAsin !== null && !options.amazonGate) {
-        sendJson(res, 503, empty('failed', submitted, 'Amazon request coordination is not configured yet.', Math.max(0, performance.now() - started)))
+        send(res, 503, empty('failed', submitted, 'Amazon request coordination is not configured yet.', Math.max(0, performance.now() - started)))
         return
       }
       const evaluation = authorizedEvaluation(req, options.evalToken)
       if (req.headers.authorization !== undefined && !evaluation) {
-        sendJson(res, 401, empty('failed', submitted, 'Invalid evaluation credentials.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
+        send(res, 401, empty('failed', submitted, 'Invalid evaluation credentials.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
         return
       }
       const abort = new AbortController()
@@ -234,7 +279,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         } catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt
             || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
-          if (!res.destroyed) sendJson(res, interrupted ? 200 : 503,
+          if (!res.destroyed) send(res, interrupted ? 200 : 503,
             empty(interrupted ? 'timeout' : 'failed', submitted,
               interrupted ? 'The page did not finish loading within the preview time limit.' : 'The preview quota service is temporarily unavailable.',
               Math.max(0, performance.now() - started)))
@@ -242,7 +287,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         }
         if (available !== 'ok') {
           const tomorrow = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1)
-          if (!res.destroyed) sendJson(res, 429,
+          if (!res.destroyed) send(res, 429,
             empty('quota_exceeded', submitted,
               available === 'global_limited' ? 'The public preview has reached its daily limit.' : 'You have used your three previews for today.',
               Math.max(0, performance.now() - started)),
@@ -324,9 +369,9 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         }
       }
       reply.body.totalMs = Math.max(0, performance.now() - started)
-      if (!res.destroyed) sendJson(res, reply.status, reply.body, reply.headers)
+      if (!res.destroyed) send(res, reply.status, reply.body, reply.headers)
     } catch (error) {
-      if (!res.destroyed) sendJson(res, 400, empty('invalid_url', submitted, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started)))
+      if (!res.destroyed) send(res, 400, empty('invalid_url', submitted, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started)))
     }
   })().catch(() => { if (!res.headersSent) sendJson(res, 500, empty('failed', '', 'The preview service is temporarily unavailable.')) }) }
 }

@@ -22,6 +22,11 @@ const pages = [
   { slug: 'reference', file: 'reference.md', title: 'Advanced reference', description: 'Find REST, SDK, and self-hosted entry points after your first W2L result.', group: 'Reference' },
 ]
 
+// The preview server replaces this token with the site's public origin when it serves a page, the sitemap or
+// robots.txt (packages/public-preview/src/site.ts), so absolute URLs follow the domain without a rebuild.
+const ORIGIN = '__W2L_ORIGIN__'
+const OG_IMAGE = `${ORIGIN}/assets/og-card.jpg`
+
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
 const escape = md.utils.escapeHtml
 const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
@@ -127,13 +132,22 @@ function nav(active) {
   }).join('')
 }
 
+/** Canonical address and link-preview card; every page shares the home page's card image. */
+function shareHead(path, title, description) {
+  return `<link rel="canonical" href="${ORIGIN}${path}" /><meta property="og:type" content="article" /><meta property="og:site_name" content="W2L" /><meta property="og:url" content="${ORIGIN}${path}" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:image" content="${OG_IMAGE}" /><meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" /><meta name="twitter:card" content="summary_large_image" /><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />`
+}
+
+function header(inDocs = true) {
+  return `<header class="doc-header"><div class="doc-header-inner"><a class="doc-brand" href="/" aria-label="W2L home"><img src="/assets/octopus-original.webp" width="34" height="34" alt="" /><span>W2L<span class="brand-dot">.</span></span></a><nav aria-label="Top navigation"><a href="/docs/"${inDocs ? ' aria-current="page"' : ''}>Docs</a><a class="try-link" href="/">Try W2L <span aria-hidden="true">↗</span></a></nav></div></header>`
+}
+
 function documentHtml(page, content, index, toc) {
   const previous = pages[index - 1]
   const next = pages[index + 1]
   const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>← Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next →</small>${escape(next.title)}</a>` : '<span></span>'}</nav>`
   return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" /><link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>${escape(page.title)} | W2L Docs</title></head>
-<body><a class="skip-link" href="#main-content">Skip to content</a><header class="doc-header"><div class="doc-header-inner"><a class="doc-brand" href="/" aria-label="W2L home"><img src="/assets/octopus-original.webp" width="34" height="34" alt="" /><span>W2L<span class="brand-dot">.</span></span></a><nav aria-label="Top navigation"><a href="/docs/" aria-current="page">Docs</a><a class="try-link" href="/">Try W2L <span aria-hidden="true">↗</span></a></nav></div></header>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), `${page.title} | W2L Docs`, page.description)}<link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>${escape(page.title)} | W2L Docs</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header()}
 <div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>W2L / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>The page preview runs at this site's URL. MCP setup is local; hosted MCP is pending validation.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
 }
 
@@ -146,4 +160,17 @@ for (const [index, page] of pages.entries()) {
   const content = renderPageContent(page, source, toc)
   await writeFile(target, documentHtml(page, content, index, toc))
 }
-console.log(`Built ${pages.length} W2L documentation pages in ${output}`)
+
+// The page the server answers with, status 404, for any path without a file: in the docs' reading layout, with the
+// docs pages beside it and the two ways back. It is never indexed.
+const notFound = `<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>Page not found | W2L</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header(false)}
+<div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>W2L / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try W2L with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div></body></html>`
+await writeFile(join(root, 'dist', '404.html'), notFound)
+
+// Crawlers may read every page; the API is not for them. The sitemap lists the home page and each docs page.
+await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
+const locations = ['/', ...pages.map(pathFor)]
+await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(path => `  <url><loc>${ORIGIN}${path}</loc></url>`).join('\n')}\n</urlset>\n`)
+console.log(`Built ${pages.length} W2L documentation pages in ${output}, with 404.html, robots.txt and sitemap.xml`)
