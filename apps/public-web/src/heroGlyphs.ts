@@ -1,9 +1,14 @@
-/** Brings the hero artwork to life in its own glyphs: stars twinkle across the night sky and a meteor crosses it
- * now and then, light drifts through the sunset clouds, mist crosses the blue ranges, and on the mountain in the
- * lower right embers twinkle and a band of alpenglow rises. Every so often light climbs the mountain to its summit
- * and the octopus answers it (w2l:summit). Only glyphs that light up are drawn, over their painted twins, so at rest
+/** Brings the hero artwork to life in its own glyphs: light drifts through the sunset clouds, a sea of clouds lies in
+ * the valleys of the blue ranges (heroFog.ts), and on the mountain in the lower right embers twinkle, now and then
+ * let a spark rise (heroEmbers.ts), and a band of alpenglow rises. Every so often light climbs the mountain to its
+ * summit and the octopus answers it (w2l:summit). Above them runs the night sky of heroSky.ts: stars, flares and
+ * meteors. Only glyphs that light up are drawn, over their painted twins, so at rest
  * the artwork shows exactly as painted; the page's text and the octopus keep calm ground behind them. */
-import { ART, BASE, CLOUD, COOL, EMBER, FACE, RIDGE, SUMMIT, position, smooth } from './heroArtwork'
+import { ART, BASE, CLOUD, COOL, EMBER, FACE, RIDGE, SUMMIT, between, hash, position, smooth } from './heroArtwork'
+import { createEmbers, type Embers } from './heroEmbers'
+import { createFog, type Fog, type FogPrep } from './heroFog'
+import type { Analysis } from './heroGlyphsWorker'
+import { createSky } from './heroSky'
 
 // The artwork's glyph cell (natural px); its hand-drawn spacing drifts between about 12 and 13 px.
 const CELL = 12.5
@@ -19,7 +24,6 @@ const CRIMSON = 2
 const ICE = 3
 const ROSE = 4
 const PEACH = 5
-const LAVENDER = 6
 const RAMPS: ReadonlyArray<ReadonlyArray<readonly [number, number, number]>> = [
   [[226, 84, 50], [247, 120, 68], [255, 170, 110]],
   [[255, 214, 150], [255, 236, 196], [255, 250, 236]],
@@ -27,7 +31,6 @@ const RAMPS: ReadonlyArray<ReadonlyArray<readonly [number, number, number]>> = [
   [[120, 160, 255], [175, 202, 255], [228, 238, 255]],
   [[214, 96, 150], [243, 140, 180], [255, 196, 218]],
   [[255, 166, 118], [255, 196, 156], [255, 230, 208]],
-  [[134, 124, 236], [178, 168, 252], [226, 222, 255]],
 ]
 const STEPS = 6
 const STYLES = RAMPS.flatMap((stops) => Array.from({ length: STEPS }, (_, step) => {
@@ -37,8 +40,7 @@ const STYLES = RAMPS.flatMap((stops) => Array.from({ length: STEPS }, (_, step) 
   return `rgba(${mix(0)},${mix(1)},${mix(2)},${(0.35 + (0.65 * step) / (STEPS - 1)).toFixed(2)})`
 }))
 
-// The alpenglow band rises through the mountain, light drifts through the clouds from right to left and mist
-// crosses the ranges from left to right. Each takes its travel time, then rests for a while that is never quite the
+// The alpenglow band rises through the mountain and light drifts through the clouds from right to left. Each takes its travel time, then rests for a while that is never quite the
 // same twice. Now and then light climbs the mountain to its summit in CLIMB_MS; the octopus answers it there.
 const BAND_TRAVEL = 8000
 const BAND_REST = [2500, 7000] as const
@@ -46,29 +48,29 @@ const BAND_WIDTH = 0.11
 const CLOUD_TRAVEL = 8500
 const CLOUD_REST = [2000, 6500] as const
 const CLOUD_WIDTH = 0.09
-const MIST_TRAVEL = 12000
-const MIST_REST = [3000, 9000] as const
-const MIST_WIDTH = 0.09
 const CLIMB_MS = 1500
 const CLIMB_REST = [9000, 15000] as const
 const CLIMB_WIDTH = 0.05
 const FADE_MS = 700
-// Stars over the upper sky, about one per STAR_AREA square px and fainter towards the horizon: most are small points,
-// some carry a soft glow, and the brightest sparkle at the top of their twinkle, in cool white, ice and warm white.
-// None shine through the sunset clouds or the mountain. A meteor crosses now and then.
+// The entrance: when the octopus wakes (its startup's flash, about 1.1 s after it starts) its light carries on into
+// the landscape. The glyphs and the sky light up inside a circle that spreads from the octopus to the hero's corners
+// in REVEAL_MS (less for a hero that comes back), feathered over FEATHER px, the glyphs at its edge RING_LIGHT
+// brighter as the light reaches them: everything is alive about 4 s after the octopus starts.
+const REVEAL_MS = 2700
+const REVEAL_AGAIN_MS = 1400
+const RING = 46
+const RING_LIGHT = 0.22
+const FEATHER = 150
+const RING_RAMP = [GOLD, GOLD, ICE, PEACH, ICE]
+// The starry sky covers the upper part of the hero, down to a little above the summit.
 const STAR_SKY = 0.44
-const STAR_AREA = 9000
-const STAR_COLORS = ['244,247,255', '207,224,255', '255,234,204']
-const STAR_GLOW = [0, 13, 18]
-const METEOR_REST = [14000, 30000] as const
-// Star sprites are drawn once at this size and scaled down onto the canvas.
-const SPRITE = 64
-// The sunset clouds are mapped in cells of this size (css px) to keep stars and meteors off them.
+// The sunset clouds are mapped in cells of this size (css px) to keep the sky's stars and meteors off them.
 const CLOUD_CELL = 24
-// The glyphs wait out the octopus's first seconds, when it decides whether this device can animate at all, and a
-// device too slow to add them gives them up for the visit: the octopus matters more.
-const WARMUP_MS = 6500
+// A device too slow to add the glyphs gives them up for the visit, at once while the octopus is still deciding
+// whether this device can animate at all: the octopus matters more.
 const SLOW_MS = 80
+const EARLY_MS = 5000
+const EARLY_LIMIT = 6
 const SLOW_LIMIT = 12
 // How strongly the alpenglow lights each of the mountain's kinds: the sunlit faces most, its blue dots barely.
 const BAND_GAIN = [0.95, 0.75, 0.3]
@@ -90,70 +92,22 @@ type Glyph = {
   // On the mountain, its height from the artwork's foot (0) to the summit (1), how far ahead of or behind a
   // climbing light it lights, so the light's edge follows no ruler, and how far it has risen out of the dark
   // foreground (0 to 1), where passing light would only speckle the ground; elsewhere its x across the artwork (0 to
-  // 1) and how far down into the ranges it sits (0 to 1).
+  // 1).
   along: number
   lead: number
   rise: number
   across: number
-  low: number
   peak: number
   blink: number
   phase: number
   period: number
 }
-type Star = { x: number; y: number; size: number; base: number; color: number; period: number; phase: number; calm: number }
-type Meteor = { at: number; x: number; y: number; dx: number; dy: number; speed: number; life: number; length: number }
-type Artwork = { width: number; height: number; glyphs: Glyph[] }
+// The sea of clouds' pixel work and the embers that may let sparks go come from the same worker.
+type Artwork = { width: number; height: number; glyphs: Glyph[]; fog: FogPrep; sparks: Int32Array }
 type Box = { l: number; t: number; r: number; b: number }
 type Zone = Box & { strength: number; header: boolean }
-export type HeroGlyphs = { start(): void; dispose(): void }
-
-const hash = (x: number, y: number): number => {
-  const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
-  return v - Math.floor(v)
-}
-const between = ([low, high]: readonly [number, number]): number => low + Math.random() * (high - low)
-/** A small seeded generator, so the stars keep their places for a given hero size. */
-function seeded(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = Math.imul(a ^ (a >>> 15), a | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** A star's soft glow, or the four rays of its sparkle, in one colour, brightest at the centre. */
-function sprite(color: string, sparkle: boolean): HTMLCanvasElement {
-  const canvas = document.createElement('canvas')
-  canvas.width = SPRITE
-  canvas.height = SPRITE
-  const context = canvas.getContext('2d')
-  if (!context) return canvas
-  const mid = SPRITE / 2
-  if (sparkle) {
-    for (const across of [true, false]) {
-      const ray = across ? context.createLinearGradient(0, 0, SPRITE, 0) : context.createLinearGradient(0, 0, 0, SPRITE)
-      ray.addColorStop(0, `rgba(${color},0)`)
-      ray.addColorStop(0.5, `rgba(${color},1)`)
-      ray.addColorStop(1, `rgba(${color},0)`)
-      context.fillStyle = ray
-      if (across) context.fillRect(0, mid - 1.5, SPRITE, 3)
-      else context.fillRect(mid - 1.5, 0, 3, SPRITE)
-    }
-  } else {
-    const glow = context.createRadialGradient(mid, mid, 0, mid, mid, mid)
-    glow.addColorStop(0, `rgba(${color},1)`)
-    glow.addColorStop(0.12, `rgba(${color},0.85)`)
-    glow.addColorStop(0.3, `rgba(${color},0.2)`)
-    glow.addColorStop(0.6, `rgba(${color},0.04)`)
-    glow.addColorStop(1, `rgba(${color},0)`)
-    context.fillStyle = glow
-    context.fillRect(0, 0, SPRITE, SPRITE)
-  }
-  return canvas
-}
+/** start() prepares the layer when the octopus first draws; enter() lights it up when the octopus wakes. */
+export type HeroGlyphs = { start(): void; enter(): void; dispose(): void }
 
 function glyphsFrom(found: Float32Array, width: number): Glyph[] {
   const glyphs: Glyph[] = []
@@ -171,7 +125,6 @@ function glyphsFrom(found: Float32Array, width: number): Glyph[] {
       lead: (hash(x + 7, y + 3) - 0.5) * 0.04,
       rise: smooth(0.16, 0.4, along),
       across: x / width,
-      low: smooth(520, 720, y),
       peak: Math.hypot(x - SUMMIT[0], y - SUMMIT[1]),
       // Whether a glyph twinkles and when are separate draws, so the twinkles never start in step.
       blink: hash(x, y) < BLINK_SHARE[kind] ? BLINK_GAIN[kind] : 0,
@@ -181,6 +134,9 @@ function glyphsFrom(found: Float32Array, width: number): Glyph[] {
   }
   return glyphs
 }
+
+// The glyphs have made their first entrance on this page.
+let introduced = false
 
 let analysis: Promise<Artwork> | undefined
 /** Decodes the artwork off the main thread and finds its glyphs in a worker, once per page, so the page never
@@ -193,12 +149,12 @@ function load(): Promise<Artwork> {
       const { width, height } = bitmap
       const worker = new Worker(new URL('./heroGlyphsWorker.ts', import.meta.url), { type: 'module' })
       try {
-        const found = await new Promise<Float32Array>((resolve, reject) => {
-          worker.onmessage = (event: MessageEvent<Float32Array>) => resolve(event.data)
+        const { found, fog, sparks } = await new Promise<Analysis>((resolve, reject) => {
+          worker.onmessage = (event: MessageEvent<Analysis>) => resolve(event.data)
           worker.onerror = () => reject(new Error('Glyph analysis failed'))
           worker.postMessage(bitmap, [bitmap])
         })
-        return { width, height, glyphs: glyphsFrom(found, width) }
+        return { width, height, glyphs: glyphsFrom(found, width), fog, sparks }
       } finally {
         worker.terminate()
       }
@@ -217,8 +173,11 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   const context = canvas.getContext('2d')
   const backdrop = hero.querySelector<HTMLElement>('.hero-backdrop')
   const mask = document.createElement('canvas')
-  const glows = STAR_COLORS.map((color) => sprite(color, false))
-  const sparkles = STAR_COLORS.map((color) => sprite(color, true))
+  const sky = createSky()
+  // The sea of clouds and the rising sparks, once the artwork's analysis is in.
+  let fog: Fog | undefined
+  let embers: Embers | undefined
+  let sparkSources: number[] = []
   let artwork: { width: number; height: number } | undefined
   let glyphs: Glyph[] = []
   // Each glyph's centre on the canvas (css px), how much of its light the page lets through there, and the shape
@@ -227,7 +186,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let ys = new Float32Array(0)
   let calm = new Float32Array(0)
   let shapes = new Uint8Array(0)
-  let stars: Star[] = []
   let zones: Zone[] = []
   // Where the starry sky ends (css px, above the summit) and the cells the sunset clouds cover.
   let skyline = 0
@@ -252,17 +210,22 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let target = 1
   let started = false
   let warm = false
+  // The entrance's ring: when it set off on the glyphs' clock, how long it takes, where it spreads from (css px),
+  // how far it must go, and each glyph's distance from there.
+  let revealAt = 0
+  let revealMs = REVEAL_MS
+  let source = { x: 0, y: 0 }
+  let ringSpan = 1
+  let far = new Float32Array(0)
   let disposed = false
   let slow = 0
-  let warmup = 0
-  // When each passing light's current pass began (or will begin), on the glyphs' clock.
-  let bandAt = between([0, 2000])
-  let cloudAt = between([1500, 4000])
-  let mistAt = between([2000, 6000])
-  let climbAt = between([3500, 6000])
+  let firstFrame = 0
+  // When each passing light's current pass began (or will begin), on the glyphs' clock: all soon after the start,
+  // so the hero comes alive at once.
+  let bandAt = between([0, 800])
+  let cloudAt = between([300, 1500])
+  let climbAt = between([900, 1500])
   let summitSent = false
-  let meteor: Meteor | null = null
-  let meteorAt = between([8000, 15000])
   const pointer = { x: 0, y: 0, active: false }
   // The hero's size and the form's messages decide the layout; the first report of each is the layout just made.
   let settled = false
@@ -329,39 +292,39 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     zone('#capability-message', 12, 0.95)
     zone(hero.querySelector('.hero-ascii-layer') ? '.hero-ascii-layer' : '#hero-ascii', 0, 0.3)
     zone('.hero-scroll', 12, 0.8)
-    zone('#hero-motion', 8, 0.8)
+    // The entrance spreads from the octopus's middle to the farthest corner of the hero.
+    const octopus = (hero.querySelector('.hero-ascii-layer') ?? hero.querySelector('#hero-ascii'))?.getBoundingClientRect()
+    source = octopus?.width ? { x: octopus.left - box.left + octopus.width / 2, y: octopus.top - box.top + octopus.height / 2 } : { x: width / 2, y: height / 2 }
+    ringSpan = Math.hypot(Math.max(source.x, width - source.x), Math.max(source.y, height - source.y)) + FEATHER
     xs = new Float32Array(glyphs.length)
     ys = new Float32Array(glyphs.length)
     calm = new Float32Array(glyphs.length)
     shapes = new Uint8Array(glyphs.length)
+    far = new Float32Array(glyphs.length)
     glyphs.forEach((g, i) => {
       const x = sx(g.x)
       const y = sy(g.y)
       xs[i] = x
       ys[i] = y
       calm[i] = x > -size && x < width + size && y > -size && y < height + size ? calmAt(x, y) : 0
+      far[i] = Math.hypot(x - source.x, y - source.y)
     })
-    // The stars keep their places for a given size, denser and brighter towards the top of the sky, which ends
-    // above the summit. The sunset clouds hide those behind them.
+    // The night sky ends a little above the summit; the sunset clouds cover part of it.
     skyline = Math.max(0, Math.min(height * STAR_SKY, high - 24))
     clouds = new Set()
     glyphs.forEach((g, i) => {
       if (g.kind === CLOUD && ys[i] < skyline + CLOUD_CELL) clouds.add(Math.floor(xs[i] / CLOUD_CELL) * 4096 + Math.floor(ys[i] / CLOUD_CELL))
     })
-    const random = seeded(Math.round(width) * 7919 + Math.round(height))
-    stars = []
-    for (let n = Math.round((width * skyline) / STAR_AREA); n > 0; n--) {
-      const x = random() * width
-      const y = 6 + random() ** 1.3 * Math.max(0, skyline - 6)
-      const roll = random()
-      const magnitude = roll < 0.07 ? 3 : roll < 0.3 ? 2 : 1
-      const tint = random()
-      const base = (magnitude === 3 ? 0.8 : magnitude === 2 ? 0.5 : 0.32) + random() * 0.25
-      const period = 2600 + random() * 5200
-      const phase = random()
-      const open = calmAt(x, y, true) * (1 - (0.55 * y) / Math.max(1, skyline)) * Math.max(0, 1 - clouded(x, y) / 3)
-      if (open > 0.05) stars.push({ x, y, size: magnitude, base: Math.min(1, base), color: tint < 0.6 ? 0 : tint < 0.85 ? 1 : 2, period, phase, calm: open })
-    }
+    sky.layout({ width, height, skyline, cell: size, calmAt, cloudAt: (x, y) => Math.min(1, clouded(x, y) / 3) })
+    fog?.layout({ width, height, ix, iy, scale, cell: size, calmAt })
+    // Sparks leave twinkling embers in the mountain's dark flank, clear of the page and above its darkened foot.
+    embers?.layout({
+      size,
+      xs,
+      ys,
+      sources: sparkSources.flatMap((i) => (calm[i] > 0.9 && xs[i] > 0 && xs[i] < width && ys[i] > 0 && ys[i] < height * 0.8 ? [{ i, period: glyphs[i].period, phase: glyphs[i].phase }] : [])),
+      calmAt,
+    })
     // The mountain's glow washes over the mountain only: below the ridge, fading in from the left, and clear of
     // the calm zones.
     mask.width = Math.max(1, Math.ceil(width / MASK_SCALE))
@@ -428,30 +391,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     }
   }
 
-  /** A meteor's path: high in the sky, falling gently left or right, clear of the page's text, the octopus and the
-   * sunset clouds, and ending above the mountain. */
-  function spawnMeteor(): Meteor | null {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const angle = ((16 + Math.random() * 18) * Math.PI) / 180
-      const dx = Math.cos(angle) * (Math.random() < 0.7 ? -1 : 1)
-      const dy = Math.sin(angle)
-      const x = width * (0.1 + Math.random() * 0.8)
-      const y = skyline * (0.08 + Math.random() * 0.4)
-      // It burns out before it could reach the sky's lower edge.
-      const travel = Math.min(240 + Math.random() * 200, (skyline - y) / dy)
-      if (travel < 140) continue
-      let clear = true
-      for (let step = 0; step <= 8 && clear; step++) {
-        const px = x + (dx * travel * step) / 8
-        const py = y + (dy * travel * step) / 8
-        if (px < 0 || px > width || clouded(px, py) || calmAt(px, py) < 0.9) clear = false
-      }
-      const speed = 0.55 + Math.random() * 0.3
-      if (clear) return { at: clock, x, y, dx, dy, speed, life: travel / speed, length: travel * (0.35 + Math.random() * 0.2) }
-    }
-    return null
-  }
-
   /** The canvas height of the mountain's light: 0 at the artwork's foot, 1 at the summit. */
   const at = (t: number): number => low + (high - low) * t
 
@@ -507,49 +446,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     context.globalCompositeOperation = 'source-over'
   }
 
-  /** The stars twinkle slowly, each on its own clock; the brightest sparkle at the top of their twinkle. */
-  function sky(context: CanvasRenderingContext2D): void {
-    for (const star of stars) {
-      const wave = 0.5 + 0.5 * Math.sin(((clock / star.period + star.phase) % 1) * Math.PI * 2)
-      const light = star.base * (0.5 + 0.5 * wave) * gain * star.calm
-      if (light < 0.04) continue
-      if (star.size === 1) {
-        context.fillStyle = `rgba(${STAR_COLORS[star.color]},${light.toFixed(2)})`
-        context.fillRect(star.x - 0.6, star.y - 0.6, 1.2, 1.2)
-        continue
-      }
-      const glow = STAR_GLOW[star.size]
-      context.globalAlpha = light
-      context.drawImage(glows[star.color], star.x - glow / 2, star.y - glow / 2, glow, glow)
-      if (star.size === 3 && wave > 0.7) {
-        const spark = 8 + 10 * ((wave - 0.7) / 0.3)
-        context.globalAlpha = light * ((wave - 0.7) / 0.3)
-        context.drawImage(sparkles[star.color], star.x - spark / 2, star.y - spark / 2, spark, spark)
-      }
-      context.globalAlpha = 1
-    }
-    if (!meteor) return
-    // A meteor: a bright head with a tail that grows as it sets off, fading in, then out before it ends.
-    const age = clock - meteor.at
-    const t = age / meteor.life
-    const hx = meteor.x + meteor.dx * meteor.speed * age
-    const hy = meteor.y + meteor.dy * meteor.speed * age
-    const tail = meteor.length * Math.min(1, t * 3)
-    const alpha = gain * Math.min(1, t / 0.12) * Math.min(1, (1 - t) / 0.35)
-    if (alpha <= 0) return
-    const streak = context.createLinearGradient(hx - meteor.dx * tail, hy - meteor.dy * tail, hx, hy)
-    streak.addColorStop(0, 'rgba(255,240,220,0)')
-    streak.addColorStop(1, `rgba(255,246,232,${(0.85 * alpha).toFixed(2)})`)
-    context.strokeStyle = streak
-    context.lineWidth = 1.4
-    context.beginPath()
-    context.moveTo(hx - meteor.dx * tail, hy - meteor.dy * tail)
-    context.lineTo(hx, hy)
-    context.stroke()
-    context.fillStyle = `rgba(255,250,240,${alpha.toFixed(2)})`
-    context.fillRect(hx - 1.2, hy - 1.2, 2.4, 2.4)
-  }
-
   function draw(): void {
     if (!context) return
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
@@ -557,12 +453,14 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     for (const list of lists) list.length = 0
     const band = ((clock - bandAt) / BAND_TRAVEL) * 1.7 - 0.35
     const cloud = 1.25 - ((clock - cloudAt) / CLOUD_TRAVEL) * 1.6
-    const mist = ((clock - mistAt) / MIST_TRAVEL) * 1.4 - 0.2
     const since = clock - climbAt
     const reach = since >= 0 && since < CLIMB_MS * 2 ? (since / CLIMB_MS) * 1.3 - 0.15 : -9
+    // The entrance's ring: how far it has spread, easing out, or -1 once it has passed the hero's corners.
+    const spread = (clock - revealAt) / revealMs
+    const ring = spread < 1 ? (1 - (1 - Math.max(0, spread)) ** 2) * ringSpan : -1
     context.lineCap = 'round'
     wash(context, band, reach)
-    sky(context)
+    sky.draw(context, clock, gain)
     for (let i = 0; i < glyphs.length; i++) {
       const open = calm[i]
       if (!open) continue
@@ -572,7 +470,9 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       let ramp = ORANGE
       if (g.blink) {
         const phase = (clock / g.period + g.phase) % 1
-        const twinkle = phase < 0.14 ? Math.sin((phase / 0.14) * Math.PI) ** 1.5 * g.blink * (kind <= COOL ? 0.55 + 0.45 * g.rise : 1) : 0
+        // Embers near a rising spark hold still, so the spark reads.
+        const still = kind === EMBER && embers ? embers.hush(xs[i], ys[i]) : 0
+        const twinkle = phase < 0.14 ? Math.sin((phase / 0.14) * Math.PI) ** 1.5 * g.blink * (kind <= COOL ? 0.55 + 0.45 * g.rise : 1) * (1 - still) : 0
         if (twinkle > light) {
           light = twinkle
           ramp = BLINK_RAMP[kind]
@@ -605,13 +505,13 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
           light = glow
           ramp = off < -0.02 ? ROSE : off > 0.02 ? PEACH : GOLD
         }
-      } else if (g.low) {
-        // Mist crosses the ranges from left to right, lavender ahead of its icy body.
-        const off = g.across - mist
-        const glow = Math.exp(-((off / MIST_WIDTH) ** 2)) * 0.6 * g.low
-        if (glow > light) {
-          light = glow
-          ramp = off > 0.03 ? LAVENDER : ICE
+      }
+      if (ring >= 0) {
+        // The ring's edge passes: the glyph flares as the light reaches it.
+        const edge = Math.exp(-(((far[i] - ring) / RING) ** 2)) * RING_LIGHT
+        if (edge > light) {
+          light = edge
+          ramp = RING_RAMP[kind]
         }
       }
       if (pointer.active) {
@@ -643,14 +543,28 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       for (const i of list) if (shapes[i] >= CROSS) cross(shapes[i], xs[i], ys[i])
       context.stroke()
     })
+    // The sea of clouds lies in front of the ranges' lit glyphs; the sparks rise over everything.
+    fog?.draw(context, clock, gain)
+    embers?.draw(context, clock, gain)
+    if (ring >= 0) {
+      // Nothing is lit beyond the ring yet.
+      const inside = context.createRadialGradient(source.x, source.y, Math.max(0, ring - FEATHER), source.x, source.y, Math.max(1, ring + RING))
+      inside.addColorStop(0, '#000')
+      inside.addColorStop(1, 'rgba(0,0,0,0)')
+      context.globalCompositeOperation = 'destination-in'
+      context.fillStyle = inside
+      context.fillRect(0, 0, width, height)
+      context.globalCompositeOperation = 'source-over'
+    }
   }
 
   function frame(now: number): void {
     raf = requestAnimationFrame(frame)
     // About 30 fps is plenty for twinkles and slow light.
     if (now - last < 32) return
+    firstFrame ||= now
     slow = now - last > SLOW_MS ? slow + 1 : Math.max(0, slow - 1)
-    if (slow >= SLOW_LIMIT) {
+    if (slow >= (now - firstFrame < EARLY_MS ? EARLY_LIMIT : SLOW_LIMIT)) {
       close()
       return
     }
@@ -660,7 +574,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     gain = target ? Math.min(1, gain + dt / FADE_MS) : Math.max(0, gain - dt / FADE_MS)
     if (clock - bandAt > BAND_TRAVEL) bandAt = clock + between(BAND_REST)
     if (clock - cloudAt > CLOUD_TRAVEL) cloudAt = clock + between(CLOUD_REST)
-    if (clock - mistAt > MIST_TRAVEL) mistAt = clock + between(MIST_REST)
     if (clock - climbAt > CLIMB_MS * 2) {
       climbAt = clock + between(CLIMB_REST)
       summitSent = false
@@ -670,10 +583,13 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       summitSent = true
       hero.dispatchEvent(new CustomEvent('w2l:summit'))
     }
-    if (meteor && clock - meteor.at > meteor.life) meteor = null
-    if (!meteor && clock >= meteorAt) {
-      meteor = spawnMeteor()
-      meteorAt = clock + between(METEOR_REST)
+    sky.step(clock)
+    fog?.step(clock)
+    if (embers) {
+      // No spark leaves an ember the alpenglow is passing over, nor while light climbs to the summit.
+      const band = ((clock - bandAt) / BAND_TRAVEL) * 1.7 - 0.35
+      const climbing = clock - climbAt > -300 && clock - climbAt < CLIMB_MS * 2
+      embers.step(clock, (i) => climbing || Math.exp(-(((glyphs[i].along - band) / BAND_WIDTH) ** 2)) * glyphs[i].rise > 0.15)
     }
     draw()
     // Resting and faded out: the painted artwork is all that shows, so nothing needs to run.
@@ -708,7 +624,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     if (disposed) return
     disposed = true
     stop()
-    window.clearTimeout(warmup)
     resize.disconnect()
     resolution?.removeEventListener('change', layout)
     hero.removeEventListener('w2l:rest', onRest)
@@ -722,10 +637,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     start() {
       if (started || disposed || !context) return
       started = true
-      warmup = window.setTimeout(() => {
-        warm = true
-        run()
-      }, WARMUP_MS)
       // Listening before the artwork is analysed: a rest asked for meanwhile still holds once it is.
       hero.addEventListener('w2l:rest', onRest)
       hero.addEventListener('pointermove', onPointer, { passive: true })
@@ -735,6 +646,10 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
         if (disposed) return
         artwork = { width: result.width, height: result.height }
         glyphs = result.glyphs
+        fog = createFog(result.fog)
+        embers = createEmbers()
+        // Only embers that twinkle let sparks go, at the height of a twinkle.
+        sparkSources = Array.from(result.sparks).filter((i) => glyphs[i].blink > 0)
         layer.append(canvas)
         layout()
         resize.observe(hero)
@@ -744,6 +659,14 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
         }
         run()
       }).catch(() => { /* The painted artwork stays as it is. */ })
+    },
+    enter() {
+      if (!started || disposed || warm) return
+      warm = true
+      revealAt = clock
+      revealMs = introduced ? REVEAL_AGAIN_MS : REVEAL_MS
+      introduced = true
+      run()
     },
     dispose: close,
   }

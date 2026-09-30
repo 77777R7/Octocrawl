@@ -97,6 +97,11 @@ const MOTIF_BANDS = [
 // What the arrival and the octopus's answer to the summit's light are written in.
 const WAVE_GLYPHS = [...'+xX*'];
 const WARM_GLOW = [255, 214, 188];
+// The octopus's own light, when it lights up: its blue lifts to ice white, its warm rim to cream, in LIT_LEVELS
+// steps. Warm light is kept for light it receives: the ripple, the summit's answer, the link.
+const ICE_LIGHT = [232, 241, 255];
+const CREAM_LIGHT = [255, 244, 222];
+const LIT_LEVELS = 5;
 const EYE_COLOR = '#fff3d6';
 // The warm light the eyes catch from the summit, and for how long.
 const EYE_GLINT = '255,208,140';
@@ -105,6 +110,69 @@ const GLINT_MS = 800;
 // head and inner arms are there within ~150 ms and the arm tips within ~0.8 s.
 const ARRIVAL_MS = 1400;
 const WAVE_MS = 900;
+// Starting up, once per page view: while the ripple spreads the octopus is typed dormant, at DORMANT_INK of its ink
+// and a band lighter, eyes shut. At IGNITE_AT the ripple's warm edge has just left the arm tips (arrive - 0.14 = 1 at
+// 1080 ms) and the whole octopus lights up at once: over IGNITE_RISE_MS its glyphs grow a band heavier and warm, its
+// eyes open and catch the light, and the glow dies away over IGNITE_FALL_MS to its own ink and colours. Under the
+// page's text the glow keeps to LETTER_GLOW of its strength. An octopus that comes back later arrives awake.
+const DORMANT_INK = 0.5;
+const DORMANT_TONE = 0.8;
+const IGNITE_AT = 1100;
+const IGNITE_RISE_MS = 100;
+const IGNITE_FALL_MS = 760;
+const IGNITE_DECAY = 3.2;
+const LETTER_GLOW = 0.3;
+const STARTUP_MS = IGNITE_AT + IGNITE_RISE_MS + IGNITE_FALL_MS;
+// An octopus that arrives awake lets the hero know this long after its first frame.
+const REWAKE_MS = 400;
+// The startup has played on this page.
+let ignited = false;
+// Taking: while a preview is extracted the octopus takes the link from the URL card, which its two lowest arms
+// already reach behind (the page names the card in data-reach). The arms lift a little, plunge TAKE_REACH_ROWS rows
+// behind the card's edge, grip (the glyphs at the edge turn hot), and draw back while a warm packet climbs each arm
+// along its own curl to the eyes, which catch its light: TAKE_OPEN_MS in all. While the request runs the arms haul
+// hand over hand, one and then the other, HAUL_MS a round, quieter. When the page has been read a packet runs back
+// down the arms to the card, where the result appears, and the octopus brightens for a moment; when it has not, the
+// arms let go, the ink sinks a little and the octopus blinks slowly.
+// The opening waits TAKE_DELAY_MS for the octopus to come back to full ink from its dimmer, yielding self.
+const TAKE_DELAY_MS = 150;
+const TAKE_LIFT_MS = 140;
+const TAKE_LIFT_ROWS = 0.6;
+const TAKE_PLUNGE_MS = 280;
+const TAKE_REACH_ROWS = 3;
+const TAKE_GRIP_MS = 200;
+const TAKE_PULL_MS = 700;
+const TAKE_CLIMB_MS = 800;
+const TAKE_OPEN_MS = 1500;
+const TAKE_GRIP_AT = TAKE_LIFT_MS + TAKE_PLUNGE_MS;
+const TAKE_PULL_AT = TAKE_GRIP_AT + TAKE_GRIP_MS;
+// A round of the haul: HAUL_MS and HAUL_ROWS, each a little different every time (HAUL_VARY), and slower once the
+// wait has lasted HAUL_LONG_MS.
+const HAUL_MS = 1700;
+const HAUL_DIP_MS = 300;
+const HAUL_DRAW_MS = 700;
+const HAUL_ROWS = 1.3;
+const HAUL_HEAT = 0.55;
+const HAUL_VARY = 0.15;
+const HAUL_LONG_MS = 12000;
+const HAUL_SLOW = 1.5;
+// At the grip the arms' tips curl this many columns inwards.
+const GRIP_CURL = 1.8;
+// The length of arm a packet covers (css px), and how far from the card's edge the grip shows (rows).
+const PACKET = 52;
+const GRIP_ROWS = 3;
+const RELEASE_MS = 420;
+const TAKE_FLASH = 0.45;
+const TAKE_DONE_MS = 700;
+const SIGH_MS = 850;
+const SIGH_INK = 0.78;
+// The arms' reach fades out over ARM_RAMP rows, ARM_SPAN rows above the card's edge, and ARM_WIDTH columns to
+// either side of each arm.
+const ARM_SPAN = 12;
+const ARM_RAMP = 10;
+const ARM_WIDTH = 7;
+const easeOut = value => 1 - (1 - clamp(value, 0, 1)) ** 3;
+const easeInOut = value => { const v = clamp(value, 0, 1); return v < 0.5 ? 4 * v * v * v : 1 - (-2 * v + 2) ** 3 / 2; };
 // The octopus needs only the wave field's slow drift, so it samples the field a few times a second.
 const FIELD_MS = 150;
 // How far the pointer (and its fading trail) pushes glyphs aside.
@@ -383,6 +451,12 @@ class AsciiFilter {
     this.waves = [];
     this.rewrites = 0;
     this.arrivalAt = null;
+    // Whether this octopus starts up with the ceremony, and whether it has woken (the flash has begun).
+    this.ceremony = false;
+    this.awake = false;
+    // The take in progress (see setTake), and how far each arm reaches this frame (rows).
+    this.take = null;
+    this.takeReach = [0, 0];
     this.nextBlink = 4200;
     this.glintAt = null;
     this.dirty = true;
@@ -679,12 +753,18 @@ class AsciiFilter {
     }
     const colors = [];
     const hot = [];
+    const bright = [];
     for (const { r, g, b, n } of buckets.values()) {
       const mean = [r / n, g / n, b / n];
       colors.push(`rgb(${mean.map(Math.round).join(',')})`);
       for (let level = 1; level <= 3; level++) {
         const amount = 0.18 + 0.5 * level / 3;
         hot.push(`rgb(${mean.map((value, c) => Math.round(mix(value, WARM_GLOW[c], amount))).join(',')})`);
+      }
+      const light = mean[0] - mean[2] > 30 ? CREAM_LIGHT : ICE_LIGHT;
+      for (let level = 1; level <= LIT_LEVELS; level++) {
+        const amount = 0.16 + 0.62 * level / LIT_LEVELS;
+        bright.push(`rgb(${mean.map((value, c) => Math.round(mix(value, light[c], amount))).join(',')})`);
       }
     }
     // The eyes stay fixed, cream squares in the cells that hold the source's eyes.
@@ -744,6 +824,163 @@ class AsciiFilter {
         }
       }
     }
+    // Warm light keeps off the page's text: none right under the letters, all of it beyond their feather.
+    const warmth = new Float32Array(count);
+    for (let i = 0; i < count; i++) warmth[i] = ((calm[i] - 0.38) / 0.62) ** 2;
+    // For the take: the two arms that reach the card's edge, how much of their reach each column and row takes, and
+    // how far along the ink every cell lies from where its arm meets the card (css px), so a packet follows each
+    // arm's own curl.
+    let lowest = 0;
+    for (let i = 0; i < count; i++) if (tones[i] >= 0.1) lowest = Math.max(lowest, Math.floor(i / cols));
+    const reachFor = this.container?.closest('[data-reach]')?.getAttribute('data-reach');
+    const target = reachFor && layer ? document.querySelector(reachFor)?.getBoundingClientRect() : null;
+    let edgeRow = target ? Math.floor((target.top - layer.top - this.offsetY) / cellH) : lowest + 1;
+    if (edgeRow < 1 || edgeRow > lowest + 1) edgeRow = lowest + 1;
+    edgeRow = Math.min(rows - 1, edgeRow);
+    // Runs of inked columns at the edge, joined across gaps of up to three columns; the two widest are the arms.
+    const runs = [];
+    let run = null;
+    for (let cx = 0; cx < cols; cx++) {
+      const inked = tones[cx + (edgeRow - 1) * cols] >= 0.1 || tones[cx + edgeRow * cols] >= 0.1;
+      if (!inked) continue;
+      if (run && cx - run.to <= 4) {
+        run.to = cx;
+        run.cells++;
+      } else {
+        run = { from: cx, to: cx, cells: 1 };
+        runs.push(run);
+      }
+    }
+    runs.sort((a, b) => b.cells - a.cells);
+    const arms = runs.slice(0, 2).sort((a, b) => a.from - b.from);
+    if (!arms.length) arms.push({ from: Math.floor(cols * 0.4), to: Math.ceil(cols * 0.6), cells: 0 });
+    if (arms.length < 2) arms.push(arms[0]);
+    const pathTo = arm => {
+      const path = new Float32Array(count).fill(-1);
+      const queue = [];
+      for (let cy = edgeRow - 1; cy <= edgeRow; cy++) {
+        for (let cx = arm.from; cx <= arm.to; cx++) {
+          const i = cx + cy * cols;
+          if (tones[i] >= 0.1 || !arm.cells) {
+            path[i] = 0;
+            queue.push(i);
+          }
+        }
+      }
+      // Dijkstra over the cells that can be drawn, eight neighbours; with a few thousand cells a scanned list will do.
+      const diagonal = Math.hypot(cellW, cellH);
+      while (queue.length) {
+        let best = 0;
+        for (let q = 1; q < queue.length; q++) if (path[queue[q]] < path[queue[best]]) best = q;
+        const i = queue[best];
+        queue[best] = queue[queue.length - 1];
+        queue.pop();
+        const cx = i % cols;
+        const cy = Math.floor(i / cols);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+            const n = nx + ny * cols;
+            if (tones[n] < 0.06 && !eye[n]) continue;
+            const cost = path[i] + (dx && dy ? diagonal : dx ? cellW : cellH);
+            if (path[n] < 0) {
+              path[n] = cost;
+              queue.push(n);
+            } else if (cost < path[n]) path[n] = cost;
+          }
+        }
+      }
+      return path;
+    };
+    const paths = [pathTo(arms[0]), arms[1] === arms[0] ? null : pathTo(arms[1])];
+    const path = new Float32Array(count).fill(-1);
+    const armOf = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+      const left = paths[0][i];
+      const right = paths[1] ? paths[1][i] : -1;
+      if (right >= 0 && (left < 0 || right < left)) {
+        path[i] = right;
+        armOf[i] = 1;
+      } else path[i] = left;
+    }
+    // Cells beside the ink take their nearest neighbour's place (a reach shows them the ink's glyphs); cells the ink
+    // never reaches are far from everything.
+    for (let pass = 0; pass < 2; pass++) {
+      const before = path.slice();
+      for (let i = 0; i < count; i++) {
+        if (before[i] >= 0) continue;
+        const cx = i % cols;
+        const cy = Math.floor(i / cols);
+        let nearest = -1;
+        let arm = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+            const value = before[nx + ny * cols];
+            if (value >= 0 && (nearest < 0 || value < nearest)) {
+              nearest = value;
+              arm = armOf[nx + ny * cols];
+            }
+          }
+        }
+        if (nearest >= 0) {
+          path[i] = nearest;
+          armOf[i] = arm;
+        }
+      }
+    }
+    for (let i = 0; i < count; i++) if (path[i] < 0) path[i] = 1e6;
+    // The way from the card to the eyes, and to the middle of the body. The eyes are islands in the ink: the way to
+    // them is the way to the nearest inked cell, and the gap from there.
+    let pathEye = Infinity;
+    for (const e of eyeIndex) {
+      const ex = this.offsetX + (e % cols + 0.5) * cellW;
+      const ey = this.offsetY + (Math.floor(e / cols) + 0.5) * cellH;
+      for (let i = 0; i < count; i++) {
+        if (tones[i] < 0.1 || path[i] >= 1e6) continue;
+        const way = path[i] + Math.hypot(this.offsetX + (i % cols + 0.5) * cellW - ex, this.offsetY + (Math.floor(i / cols) + 0.5) * cellH - ey);
+        if (way < pathEye) pathEye = way;
+      }
+    }
+    let pathCore = 0;
+    let nearest = Infinity;
+    for (let i = 0; i < count; i++) {
+      if (tones[i] < 0.1 || path[i] >= 1e6) continue;
+      const distance = Math.hypot(this.offsetX + (i % cols + 0.5) * cellW - centreX, this.offsetY + (Math.floor(i / cols) + 0.5) * cellH - centreY);
+      if (distance < nearest) {
+        nearest = distance;
+        pathCore = path[i];
+      }
+    }
+    if (!Number.isFinite(pathEye)) pathEye = pathCore;
+    const armColumns = [new Float32Array(cols), new Float32Array(cols)];
+    const bodyColumn = (centreX - this.offsetX) / cellW;
+    // Which way is inwards for each arm: towards the middle of the body.
+    const armInward = arms.map(arm => Math.sign(bodyColumn - (arm.from + arm.to + 1) / 2));
+    arms.forEach((arm, k) => {
+      const middle = (arm.from + arm.to + 1) / 2;
+      for (let cx = 0; cx < cols; cx++) armColumns[k][cx] = Math.exp(-(((cx + 0.5 - middle) / ARM_WIDTH) ** 2));
+    });
+    // Where both arms are one, each takes half.
+    if (arms[1] === arms[0]) for (let cx = 0; cx < cols; cx++) armColumns[0][cx] = armColumns[1][cx] = armColumns[0][cx] / 2;
+    const armRows = new Float32Array(rows);
+    for (let cy = 0; cy < rows; cy++) armRows[cy] = smoothstep(clamp((cy - (edgeRow - ARM_SPAN)) / ARM_RAMP, 0, 1));
+    this.motifWarmth = warmth;
+    this.motifPath = path;
+    this.motifArm = armOf;
+    const armStagger = new Float32Array(cols);
+    for (let cx = 0; cx < cols; cx++) armStagger[cx] = (cellNoise(cx, 9, variant) - 0.5) * 0.36;
+    this.armColumns = armColumns;
+    this.armInward = armInward;
+    this.armRows = armRows;
+    this.armStagger = armStagger;
+    this.pathEye = pathEye;
+    this.pathCore = pathCore;
     this.motifCalm = calm;
     this.motifMinX = minX;
     this.motifMaxX = maxX;
@@ -762,6 +999,7 @@ class AsciiFilter {
     this.eyeIndex = eyeIndex;
     this.bucketColors = colors;
     this.bucketHot = hot;
+    this.bucketLit = bright;
     this.dirty = true;
     this.updateVeil();
   }
@@ -951,11 +1189,14 @@ class AsciiFilter {
       // Held until the artwork has set the glyph grid and colours, so the octopus never re-grids mid-arrival.
       if (this.scenePending) return;
       this.arrivalAt = this.clock;
+      this.ceremony = !ignited;
+      // A take asked for before the first frame begins once the octopus is awake.
+      if (this.take && this.take.at === null) this.take.at = this.clock + STARTUP_MS;
       this.veil.hidden = false;
       this.onFirstFrame?.();
     }
-    // A requested rest begins once the arrival and any wave have finished, so nothing freezes half-drawn.
-    this.resting = this.restRequested && this.clock - this.arrivalAt >= ARRIVAL_MS && !this.waves.length;
+    // A requested rest begins once the startup and any wave have finished, so nothing freezes half-drawn.
+    this.resting = this.restRequested && !this.take && this.clock - this.arrivalAt >= STARTUP_MS && !this.waves.length;
     const step = this.resting ? 0 : dt;
     this.clock += step;
     const clock = this.clock;
@@ -964,10 +1205,127 @@ class AsciiFilter {
     out.textBaseline = 'middle';
     out.lineCap = 'round';
     const { cellW, cellH, offsetX, offsetY, motifRadius: radius, motifEye: eye, motifBucket: bucket } = this;
-    const { motifPhase: phase, motifPeriod: period, motifBoost: boost, motifDither: dither, motifFloor: floor, motifCalm: calm, bucketColors, bucketHot, ink } = this;
+    const { motifPhase: phase, motifPeriod: period, motifBoost: boost, motifDither: dither, motifFloor: floor, motifCalm: calm, bucketColors, bucketHot, bucketLit, ink } = this;
+    const { motifWarmth: warmth, motifPath: path, motifArm: armOf, armColumns, armInward, armRows, armStagger } = this;
     const t = (clock - this.arrivalAt) / ARRIVAL_MS;
     const arriving = t < 1;
     const arrive = 0.12 + 1.08 * (1 - (1 - Math.min(1, t)) ** 2);
+    // The startup: the ink's level and weight while dormant, and the glow (0 to 1) once lit.
+    const lit = clock - this.arrivalAt - IGNITE_AT;
+    let level = 1;
+    let weight = 1;
+    let flash = 0;
+    if (this.ceremony) {
+      if (lit < 0) {
+        level = DORMANT_INK;
+        weight = DORMANT_TONE;
+      } else if (lit < IGNITE_RISE_MS) {
+        flash = easeOut(lit / IGNITE_RISE_MS);
+        level = mix(DORMANT_INK, 1, flash);
+        weight = mix(DORMANT_TONE, 1, flash);
+      } else if (lit < IGNITE_RISE_MS + IGNITE_FALL_MS) {
+        flash = (Math.exp(-IGNITE_DECAY * (lit - IGNITE_RISE_MS) / IGNITE_FALL_MS) - Math.exp(-IGNITE_DECAY)) / (1 - Math.exp(-IGNITE_DECAY));
+      } else ignited = true;
+    }
+    // The take: how far each arm reaches (rows; a lift is negative), its packets of warm light (where along the
+    // arms, which arm, how warm, and whether they garble the glyphs they pass), the grip at the card's edge, how far
+    // the eyes look down (css px), and the brightening when it ends well or the sigh when it does not.
+    let reach0 = 0;
+    let reach1 = 0;
+    let curl = 0;
+    let grip = 0;
+    let gaze = 0;
+    let landed = 0;
+    const packets = [];
+    const take = this.take;
+    if (take && take.at !== null && clock >= take.at) {
+      const s = clock - take.at + take.skip;
+      if (take.endAt !== null && clock >= take.endAt) {
+        if (!take.ending) {
+          take.ending = true;
+          take.from = [this.takeReach[0], this.takeReach[1]];
+          if (take.outcome !== 'success') this.nextBlink = clock + 200;
+        }
+        const r = clock - take.endAt;
+        const held = 1 - easeOut(r / 300);
+        reach0 = take.from[0] * held;
+        reach1 = take.from[1] * held;
+        if (take.outcome === 'success') {
+          // The packet runs from the body back down the arms to the card, and the arms dip as it lands.
+          if (r < RELEASE_MS) packets.push({ centre: this.pathCore * (1 - easeInOut(r / RELEASE_MS)) + PACKET / 2, arm: -1, gain: 1, garble: true });
+          if (r >= 300) {
+            const dip = r < RELEASE_MS ? 1.5 * easeOut((r - 300) / (RELEASE_MS - 300)) : 1.5 * (1 - easeInOut((r - RELEASE_MS) / 200));
+            reach0 += Math.max(0, dip);
+            reach1 += Math.max(0, dip);
+            if (!take.glinted) {
+              take.glinted = true;
+              this.glintAt = clock;
+            }
+            const q = (r - 300) / (TAKE_DONE_MS - 300);
+            landed = TAKE_FLASH * (q < 0.2 ? q / 0.2 : (1 - Math.min(1, (q - 0.2) / 0.8)) ** 2);
+          }
+          if (r >= TAKE_DONE_MS) {
+            this.rewrites += 1;
+            this.take = null;
+          }
+        } else {
+          const bell = r < 250 ? easeOut(r / 250) : 1 - easeInOut((r - 250) / (SIGH_MS - 250));
+          level *= mix(1, SIGH_INK, bell);
+          if (r >= SIGH_MS) this.take = null;
+        }
+      } else if (s < TAKE_OPEN_MS) {
+        const both = s < TAKE_LIFT_MS ? -TAKE_LIFT_ROWS * easeOut(s / TAKE_LIFT_MS)
+          : s < TAKE_GRIP_AT ? mix(-TAKE_LIFT_ROWS, TAKE_REACH_ROWS, easeInOut((s - TAKE_LIFT_MS) / TAKE_PLUNGE_MS))
+          : s < TAKE_PULL_AT ? TAKE_REACH_ROWS
+          : TAKE_REACH_ROWS * (1 - easeInOut((s - TAKE_PULL_AT) / TAKE_PULL_MS));
+        reach0 = reach1 = both;
+        if (s >= TAKE_GRIP_AT && s < TAKE_PULL_AT) grip = Math.sin(Math.PI * (s - TAKE_GRIP_AT) / TAKE_GRIP_MS) ** 0.5;
+        // The tips curl inwards as they close on the link, and open again as the arms draw back.
+        curl = s < TAKE_LIFT_MS ? 0 : s < TAKE_GRIP_AT ? 0 : s < TAKE_PULL_AT ? GRIP_CURL * easeOut((s - TAKE_GRIP_AT) / TAKE_GRIP_MS) : GRIP_CURL * (1 - easeInOut((s - TAKE_PULL_AT) / (TAKE_PULL_MS / 2)));
+        if (s >= TAKE_PULL_AT && s < TAKE_PULL_AT + TAKE_CLIMB_MS) {
+          const climbed = ((s - TAKE_PULL_AT) / TAKE_CLIMB_MS) ** 2;
+          packets.push({ centre: (this.pathEye + PACKET) * climbed - PACKET / 2, arm: -1, gain: 1, garble: true });
+          if (!take.glinted && (this.pathEye + PACKET) * climbed >= this.pathEye) {
+            take.glinted = true;
+            this.glintAt = clock;
+          }
+        } else if (s >= TAKE_PULL_AT + TAKE_CLIMB_MS) take.glinted = false;
+        gaze = s < TAKE_PULL_AT ? 2 * easeOut(s / 160) : 2 * (1 - easeInOut((s - TAKE_PULL_AT) / 200));
+      } else {
+        // Hand over hand: each arm dips and draws a fainter packet up to the body, the right one half a round after
+        // the left; no two rounds are quite alike, and a long wait slows them.
+        for (let k = 0; k < 2; k++) {
+          let round = take.rounds[k];
+          if (!round || clock >= round.at + round.ms) {
+            const at = round ? round.at + round.ms : take.at - take.skip + TAKE_OPEN_MS + k * HAUL_MS / 2;
+            const slow = at - take.at > HAUL_LONG_MS ? HAUL_SLOW : 1;
+            round = take.rounds[k] = { at, ms: HAUL_MS * slow * (1 + HAUL_VARY * (2 * Math.random() - 1)), rows: HAUL_ROWS * (1 + HAUL_VARY * (2 * Math.random() - 1)) };
+          }
+          const c = (clock - round.at) / (round.ms / HAUL_MS);
+          if (c < 0) continue;
+          const dip = c < HAUL_DIP_MS ? round.rows * easeOut(c / HAUL_DIP_MS) : c < HAUL_DIP_MS + HAUL_DRAW_MS ? round.rows * (1 - easeInOut((c - HAUL_DIP_MS) / HAUL_DRAW_MS)) : 0;
+          if (k) reach1 = dip;
+          else reach0 = dip;
+          if (c >= HAUL_DIP_MS && c < HAUL_DIP_MS + HAUL_DRAW_MS) {
+            const front = this.pathCore * easeInOut((c - HAUL_DIP_MS) / HAUL_DRAW_MS);
+            const fade = front / Math.max(1, this.pathCore);
+            packets.push({ centre: front - PACKET / 2, arm: k, gain: HAUL_HEAT * (1 - smoothstep(clamp((fade - 0.7) / 0.3, 0, 1))), garble: false });
+          }
+        }
+      }
+    }
+    this.takeReach[0] = reach0;
+    this.takeReach[1] = reach1;
+    const reaching = reach0 !== 0 || reach1 !== 0;
+    const gripReach = GRIP_ROWS * cellH;
+    const glow = Math.max(flash, landed);
+    if (!this.awake && clock - this.arrivalAt >= (this.ceremony ? IGNITE_AT : REWAKE_MS)) {
+      // Awake: the eyes open and catch the light, and the hero hears of it.
+      this.awake = true;
+      this.nextBlink = clock + 4200;
+      if (this.ceremony) this.glintAt = clock;
+      this.onAwake?.();
+    }
     let wave = this.waves[0];
     // The answer's radius, spreading from the octopus's side that faces the summit, below its eyes.
     let front = null;
@@ -1011,27 +1369,53 @@ class AsciiFilter {
         // scaling the clock itself, so a glyph changes only when its own count does: at rest it keeps still.
         if (influence > 0.01) boost[dst] += step * 5 * influence / period[dst];
         let src = dst;
-        if (influence > 0.01) {
-          const dx = cellX - this.pushX;
-          const dy = cellY - this.pushY;
-          const distance = Math.hypot(dx, dy);
-          if (distance > 0) {
-            // Soft inverse sampling moves glyphs aside without cutting a hole.
-            const sx = clamp(Math.round(x - (dx / distance) * 18 * influence / cellW), 0, w - 1);
-            const sy = clamp(Math.round(y - (dy / distance) * 18 * influence / cellH), 0, h - 1);
-            src = sx + sy * w;
+        const pull = reaching ? (reach0 * armColumns[0][x] + reach1 * armColumns[1][x]) * armRows[y] : 0;
+        if (influence > 0.01 || pull) {
+          // Soft inverse sampling: a cell shows the glyph from where the push or the reach took it, so glyphs move
+          // aside, or an arm lengthens, without cutting a hole.
+          let fx = x;
+          let fy = y;
+          if (influence > 0.01) {
+            const dx = cellX - this.pushX;
+            const dy = cellY - this.pushY;
+            const distance = Math.hypot(dx, dy);
+            if (distance > 0) {
+              fx -= (dx / distance) * 18 * influence / cellW;
+              fy -= (dy / distance) * 18 * influence / cellH;
+            }
           }
+          // Each column steps at a slightly different moment, whole, so an arm slides, never jumps a row at once and
+          // keeps its outline.
+          if (pull) {
+            fy -= pull * (1 + armStagger[x]);
+            if (curl > 0) fx -= curl * (armInward[0] * armColumns[0][x] + armInward[1] * armColumns[1][x]) * armRows[y];
+          }
+          src = clamp(Math.round(fx), 0, w - 1) + clamp(Math.round(fy), 0, h - 1) * w;
         }
         const shape = tones[src];
         if (shape < 0.06) continue;
         const f = src * 4;
         const gray = field ? (0.3 * field[f] + 0.6 * field[f + 1] + 0.1 * field[f + 2]) / 255 : 0.5;
-        const tone = clamp(shape * (0.86 + 0.14 * gray) + 0.08 * Math.sin(clock * 0.0008 + cellX * 0.011 - cellY * 0.0072) + dither[dst] - 0.29 * influence, 0, 1);
-        if (tone < 0.1) continue;
-        const arrivalHeat = arriving && radius[dst] > arrive - 0.14;
+        const tone = clamp(shape * (0.86 + 0.14 * gray) + 0.08 * Math.sin(clock * 0.0008 + cellX * 0.011 - cellY * 0.0072) + dither[dst] - 0.29 * influence, 0, 1) * weight;
+        if (tone < 0.1 * weight) continue;
+        // The ripple's front is hottest at its edge and cools behind it.
+        const behind = arrive - radius[dst];
+        const arrivalHeat = arriving && behind < 0.14 ? 1 - 0.6 * behind / 0.14 : 0;
         const along = front === null ? 0 : Math.hypot(cellX - originX, cellY - originY);
-        const heat = arrivalHeat ? 1 : front === null ? 0 : clamp(1 - Math.abs(along - front) / reach, 0, 1);
-        if (heat > 0) {
+        const waveHeat = front === null ? 0 : clamp(1 - Math.abs(along - front) / reach, 0, 1);
+        // The take's light: the grip, in the rows on screen just above the card's edge, and the packets that garble;
+        // a haul's packet only warms the glyphs it passes.
+        let takeHeat = grip && path[dst] < gripReach ? grip * (0.7 + 0.3 * cellNoise(dst, tick, 5)) : 0;
+        let haulHeat = 0;
+        for (const packet of packets) {
+          if (packet.arm >= 0 && armOf[src] !== packet.arm) continue;
+          const warm = clamp(1 - Math.abs(path[src] - packet.centre) / (PACKET / 2), 0, 1) * packet.gain;
+          if (packet.garble) takeHeat = Math.max(takeHeat, warm);
+          else haulHeat = Math.max(haulHeat, warm);
+        }
+        // The ripple shows wherever the octopus does; the answer and the take keep off the letters.
+        const heat = Math.max(arrivalHeat, Math.max(waveHeat, takeHeat) * warmth[dst]);
+        if (heat > 0.02) {
           // Arrival garble and the answer's front: warm glyphs from the same plain marks.
           const style = bucketHot[bucket[src] * 3 + (heat > 0.66 ? 2 : heat > 0.33 ? 1 : 0)];
           if (style !== current) {
@@ -1039,23 +1423,31 @@ class AsciiFilter {
             out.strokeStyle = style;
             current = style;
           }
-          out.globalAlpha = Math.min(1, (floor[dst] + 0.62 * Math.max(tone + 0.25 * heat, 0.45) + 0.2 * heat) * ink * calm[dst]);
+          out.globalAlpha = Math.min(1, (floor[dst] + 0.62 * Math.max(tone + 0.25 * heat, 0.45) + 0.2 * heat) * ink * calm[dst] * (arrivalHeat > 0 ? 1 : level));
           out.fillText(WAVE_GLYPHS[Math.floor(cellNoise(dst, tick, 17) * WAVE_GLYPHS.length)], cellX, cellY);
           continue;
         }
         // Each cell re-rolls on its own period, faster under the pointer; waves move every glyph they pass on.
         const slot = Math.floor((clock + phase[dst]) / period[dst] + boost[dst]) + this.rewrites + (front !== null && along < front ? 1 : 0);
+        // The glow lights the body first and its edges after, and keeps most of itself off the page's text. Each
+        // glyph stays itself, a band heavier and in the octopus's own light: that is what tells the glow from the
+        // ripple's warm garble.
+        const lift = glow > 0 ? glow * mix(LETTER_GLOW, 1, warmth[dst]) * (0.55 + 0.45 * shape) : 0;
+        const inked = Math.min(1, tone + 0.18 * lift);
         let band = 1;
-        while (band < 6 && tone >= MOTIF_EDGES[band]) band++;
+        while (band < 6 && inked >= MOTIF_EDGES[band]) band++;
         const set = MOTIF_BANDS[band];
         const glyph = set[Math.floor(cellNoise(dst, slot, band) * set.length)];
-        const style = bucketColors[bucket[src]];
+        const warm = haulHeat * warmth[dst];
+        const style = lift > 0.08 ? bucketLit[bucket[src] * LIT_LEVELS + Math.min(LIT_LEVELS - 1, Math.floor(lift * LIT_LEVELS))]
+          : warm > 0.1 ? bucketHot[bucket[src] * 3 + (warm > 0.66 ? 2 : warm > 0.33 ? 1 : 0)]
+          : bucketColors[bucket[src]];
         if (style !== current) {
           out.fillStyle = style;
           out.strokeStyle = style;
           current = style;
         }
-        out.globalAlpha = Math.min(1, (floor[dst] + 0.62 * tone) * ink * calm[dst]);
+        out.globalAlpha = Math.min(1, (floor[dst] + 0.62 * tone) * ink * calm[dst] * level + 0.22 * lift);
         const mark = ART_MARKS[glyph];
         if (mark) drawArtworkGlyph(out, mark, cellX, cellY, markSize);
         else out.fillText(glyph, cellX, cellY);
@@ -1064,14 +1456,16 @@ class AsciiFilter {
     if (this.eyeIndex.length) {
       const side = Math.max(2, Math.round(Math.min(cellW, cellH) * 0.85));
       const bar = Math.max(1, Math.round(cellH * 0.14));
-      const tall = blinking ? bar : side;
+      // Shut until the octopus is awake.
+      const tall = blinking || !this.awake ? bar : side;
       // The glint swells and fades over 0.8 s.
       const since = this.glintAt === null ? -1 : clock - this.glintAt;
       const glint = since < 0 || since > GLINT_MS ? 0 : Math.sin((since / GLINT_MS) * Math.PI) ** 2;
       for (const e of this.eyeIndex) {
         if (arriving && radius[e] > arrive) continue;
         const ex = offsetX + (e % w + 0.5) * cellW;
-        const ey = offsetY + (Math.floor(e / w) + 0.5) * cellH;
+        // Looking down at the card while the arms reach for it.
+        const ey = offsetY + (Math.floor(e / w) + 0.5) * cellH + gaze;
         if (glint > 0.02) {
           const haloSize = side * 3.2;
           const halo = out.createRadialGradient(ex, ey, 0, ex, ey, haloSize);
@@ -1082,7 +1476,7 @@ class AsciiFilter {
           out.fillRect(ex - haloSize, ey - haloSize, haloSize * 2, haloSize * 2);
         }
         // The eyes sit in the gap between the headline and the description, so they keep their light there.
-        out.globalAlpha = Math.max(0.9, calm[e]);
+        out.globalAlpha = this.awake ? Math.max(0.9, calm[e]) : 0.5;
         out.fillStyle = EYE_COLOR;
         out.fillRect(Math.round(ex - side / 2), Math.round(ey - tall / 2), side, tall);
       }
@@ -1098,6 +1492,23 @@ class AsciiFilter {
     else this.waves[1] = { at: 0, blinked: false };
   }
 
+  /** A preview's extraction starts ('start') or ends ('success' or 'failure'). A take asked for during the startup
+   * waits for it; an octopus that arrives while a request is already under way (late) goes straight to the haul. A
+   * page that was read lets the opening come to its grip first; one that was not lets go at once. */
+  setTake(phase, late) {
+    if (phase === 'start') {
+      // It begins at `at`, never before the octopus is awake; a late one begins `skip` ms into itself, at the haul.
+      this.take = { at: this.arrivalAt === null ? null : Math.max(this.clock + (late ? 0 : TAKE_DELAY_MS), this.arrivalAt + STARTUP_MS), skip: late ? TAKE_OPEN_MS : 0, endAt: null, outcome: null, ending: false, from: [0, 0], rounds: [null, null], glinted: false };
+    } else if (this.take && this.take.endAt === null) {
+      if (this.take.at === null) {
+        this.take = null;
+        return;
+      }
+      this.take.outcome = phase;
+      this.take.endAt = phase === 'success' ? Math.max(this.clock, this.take.at + Math.max(0, TAKE_PULL_AT - this.take.skip)) : Math.max(this.clock, this.take.at);
+    }
+  }
+
   /** The hero asks the octopus to rest while the visitor works with the form, and to wake after. */
   setRest(rest) {
     this.restRequested = rest;
@@ -1108,11 +1519,15 @@ class AsciiFilter {
     return this.resting && !this.dirty && !this.pointerMoved && !this.trail.length && Math.abs((this.pointer.active ? 1 : 0) - this.repel) < 0.01;
   }
 
-  /** Finish the arrival and any wave and come to rest with the eyes open, so a stop never keeps a half-drawn
-   * octopus. False before the first frame, when there is nothing to finish. */
+  /** Finish the startup and any wave and come to rest awake, with the eyes open, so a stop never keeps a
+   * half-drawn octopus. False before the first frame, when there is nothing to finish. */
   settle() {
     if (this.arrivalAt === null) return false;
-    this.arrivalAt = Math.min(this.arrivalAt, this.clock - ARRIVAL_MS);
+    this.arrivalAt = Math.min(this.arrivalAt, this.clock - STARTUP_MS);
+    this.awake = true;
+    ignited = true;
+    this.take = null;
+    this.takeReach = [0, 0];
     this.waves = [];
     this.nextBlink = Infinity;
     this.glintAt = null;
@@ -1339,6 +1754,8 @@ class CanvAscii {
       // The hero's glyphs start once the octopus really draws; the octopus answers when their light reaches the
       // summit, and rests while the hero yields to the form.
       this.filter.onFirstFrame = () => this.pointerTarget.dispatchEvent(new CustomEvent('w2l:octopus', { detail: { state: 'running' } }));
+      // The startup's flash: the hero's glyphs light up from the octopus outwards.
+      this.filter.onAwake = () => this.pointerTarget.dispatchEvent(new CustomEvent('w2l:octopus', { detail: { state: 'awake' } }));
       // A late artwork re-grids the octopus, which clears its canvas: a resting loop must wake to redraw it.
       this.filter.onRegrid = () => this.redraw();
       this.filter.onAnalysisFailed = () => this.halt();
@@ -1346,11 +1763,17 @@ class CanvAscii {
         this.filter.addWave();
         this.load();
       };
+      this.onTake = event => {
+        if (this.stalled) return;
+        this.filter.setTake(event.detail?.phase, event.detail?.late);
+        this.load();
+      };
       this.onRest = event => {
         this.filter.setRest(Boolean(event.detail?.rest));
         this.load();
       };
       this.pointerTarget.addEventListener('w2l:summit', this.onSummit);
+      this.pointerTarget.addEventListener('w2l:take', this.onTake);
       this.pointerTarget.addEventListener('w2l:rest', this.onRest);
     }
     this.pointerTarget.addEventListener('pointermove', this.onMouseMove, { passive: true });
@@ -1530,6 +1953,7 @@ class CanvAscii {
     this.pointerTarget?.removeEventListener('pointermove', this.onMouseMove);
     this.pointerTarget?.removeEventListener('pointerleave', this.onMouseLeave);
     if (this.onSummit) this.pointerTarget?.removeEventListener('w2l:summit', this.onSummit);
+    if (this.onTake) this.pointerTarget?.removeEventListener('w2l:take', this.onTake);
     if (this.onRest) this.pointerTarget?.removeEventListener('w2l:rest', this.onRest);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.clear();

@@ -1,6 +1,9 @@
-type OctopusEvent = CustomEvent<{ state?: 'running' | 'stalled' } | null>
+type OctopusEvent = CustomEvent<{ state?: 'running' | 'awake' | 'stalled' } | null>
 
-const PAUSED_KEY = 'w2l:hero-motion-paused'
+// If the live octopus has not drawn after this long (a slow network), the static one comes up to its own opacity
+// meanwhile, so a dim hero never looks broken.
+const WAIT_MS = 8000
+
 // The octopus renders with three.js, which needs WebGL 2; without it neither chunk is worth loading.
 let webgl: boolean | undefined
 function hasWebGL(): boolean {
@@ -15,11 +18,10 @@ function hasWebGL(): boolean {
 }
 
 /** Load the hero decorations only in the wide desktop layout with a fine pointer, motion allowed and WebGL: the
- * React Bits octopus behind the headline and the artwork's own glyphs lit up around it. They move together or not
- * at all: the glyphs start once the octopus renders, both loop while the hero is on screen and rest while the
- * visitor works with the form, and both stop if the octopus stalls. The motion button pauses them for the rest of
- * the visit. */
-export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero: HTMLElement, toggle: HTMLButtonElement): void {
+ * React Bits octopus behind the headline and the artwork's own glyphs and night sky lit up around it. They move
+ * together or not at all: the glyphs light up from the octopus outwards when it wakes, both loop for as long as the
+ * hero is on screen and rest while the visitor works with the form, and both stop if the octopus stalls. */
+export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero: HTMLElement): void {
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   const pointer = window.matchMedia('(pointer: fine)')
   // Matches the CSS breakpoint below which the hero is one column and shows a static octopus instead.
@@ -31,52 +33,49 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   // Nothing loads before the hero's first intersection report, so a page opened further down (a section link,
   // a restored scroll position) fetches no decoration.
   let visible = false
-  let paused = false
-  // The octopus stalled after it had drawn: nothing moves until it is played again.
-  let still = false
   // The octopus could not start (its chunk, WebGL or source failed, or it was too slow to draw): the hero stays
-  // static for this page view and offers no motion to pause.
+  // static for this page view.
   let failed = false
   // The visitor is working with the form: focus inside it, or a preview in flight.
   let yielding = false
-  try { paused = sessionStorage.getItem(PAUSED_KEY) === '1' } catch { /* Blocked storage only forgets the choice. */ }
-  // Motion has been on screen, or a paused visit can resume it. From then on the button stays for this page view,
-  // so a remount never takes it from under the pointer or keyboard focus.
-  let offered = paused
+  // A preview is in flight: the octopus takes the link.
+  let taking = false
 
   const media = (): boolean => !motion.matches && pointer.matches && !compact.matches
   // Until the WebGL probe has run the hero stays static (see below).
-  const capable = (): boolean => media() && webgl === true && !failed
-  const eligible = (): boolean => visible && !paused && capable()
-  // Never offered for motion that has not started, or cannot run.
-  const label = (): void => {
-    toggle.hidden = !capable() || !offered
-    const text = paused || still ? 'Play motion' : 'Pause motion'
-    toggle.setAttribute('aria-label', text)
-    toggle.title = text
-    toggle.classList.toggle('is-paused', paused || still)
-  }
+  const eligible = (): boolean => visible && media() && webgl === true && !failed
+  // A hero that leaves the screen stops, and starts over when it returns.
   const reconcile = (): void => {
     if (!eligible()) {
       generation++
       dispose?.()
       dispose = null
     } else if (!dispose && !loading) mount()
-    // After the dispose: a hero that left the screen starts over when it returns, so it offers Pause, not Play.
-    label()
   }
+  // The static octopus waits dim where the live one can run (see the styles); it comes up to its own opacity once
+  // the live one is known not to.
   const fail = (): void => {
     failed = true
+    octopus.classList.add('is-static')
     // Deferred: the report can come from inside React's commit, which must not unmount its own root.
     window.setTimeout(reconcile, 0)
   }
-  /** The hero yields while the visitor works with the real form: the octopus dims (see the styles), and it and the
-   * glyphs rest, so nothing moves beside what the visitor is doing. */
+  /** The hero yields while the visitor works with the real form: while they type the octopus dims (see the styles)
+   * and it and the glyphs rest, so nothing moves beside what the visitor is doing. While a preview is extracted the
+   * glyphs still rest, but the octopus comes forward and takes the link (w2l:take); the form's own message says how
+   * it ended. */
   const sync = (): void => {
-    const yields = Boolean(form && (form.contains(document.activeElement) || form.getAttribute('aria-busy') === 'true'))
+    const busy = form?.getAttribute('aria-busy') === 'true'
+    const yields = Boolean(form && (busy || form.contains(document.activeElement)))
+    if (busy !== taking) {
+      taking = busy
+      // The form has set its message before it stops being busy.
+      const unread = Boolean(hero.querySelector('#form-message.is-error'))
+      hero.dispatchEvent(new CustomEvent('w2l:take', { detail: { phase: busy ? 'start' : unread ? 'failure' : 'success' } }))
+    }
+    hero.classList.toggle('is-yielding', yields && !busy)
     if (yields === yielding) return
     yielding = yields
-    hero.classList.toggle('is-yielding', yields)
     hero.dispatchEvent(new CustomEvent('w2l:rest', { detail: { rest: yields } }))
   }
   // focusout fires before focus lands elsewhere; check once it has.
@@ -87,15 +86,18 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   const mount = (): void => {
     loading = true
     const version = ++generation
+    const waiting = window.setTimeout(() => octopus.classList.add('is-static'), WAIT_MS)
     // Each chunk fails on its own; without the octopus nothing animates.
     void Promise.allSettled([import('./asciiReact'), import('./heroGlyphs')]).then(([octo, lights]) => {
       loading = false
       if (version !== generation || !eligible()) {
+        window.clearTimeout(waiting)
         if (eligible()) reconcile()
         return
       }
       // The page remains usable without decoration.
       if (octo.status !== 'fulfilled') {
+        window.clearTimeout(waiting)
         fail()
         return
       }
@@ -104,56 +106,38 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
       const onOctopus = (event: Event): void => {
         const state = (event as OctopusEvent).detail?.state
         if (state === 'running') {
+          window.clearTimeout(waiting)
           drawn = true
-          offered = true
           // The static octopus fades out under the arriving glyphs.
           octopus.classList.add('is-arrived')
           glyphs?.start()
-          // A new octopus and new glyphs learn that the hero is already yielding.
+          // A new octopus and new glyphs learn that the hero is already yielding, or a preview in flight.
+          if (taking) hero.dispatchEvent(new CustomEvent('w2l:take', { detail: { phase: 'start', late: true } }))
           if (yielding) hero.dispatchEvent(new CustomEvent('w2l:rest', { detail: { rest: true } }))
-          label()
+        } else if (state === 'awake') {
+          // The octopus's startup ends in a flash: its light spreads into the landscape.
+          glyphs?.enter()
         } else if (state === 'stalled') {
+          // The octopus keeps its last whole frame; the glyphs go with it.
           glyphs?.dispose()
           glyphs = null
           // A stall before the first frame means the octopus never drew: no WebGL context, no source, too slow.
-          if (!drawn) {
-            fail()
-            return
-          }
-          drawn = false
-          still = true
-          label()
+          if (!drawn) fail()
         }
       }
       hero.addEventListener('w2l:octopus', onOctopus)
       const unmount = octo.value.mountReactBitsAscii(octopus)
       dispose = () => {
+        window.clearTimeout(waiting)
         hero.removeEventListener('w2l:octopus', onOctopus)
         glyphs?.dispose()
         glyphs = null
         unmount()
         octopus.classList.remove('is-arrived')
-        still = false
       }
     })
   }
 
-  toggle.addEventListener('click', () => {
-    if (still && !paused) {
-      // Stopped: remount, so the octopus and the glyphs start over.
-      generation++
-      dispose?.()
-      dispose = null
-      reconcile()
-      return
-    }
-    paused = !paused
-    try {
-      if (paused) sessionStorage.setItem(PAUSED_KEY, '1')
-      else sessionStorage.removeItem(PAUSED_KEY)
-    } catch { /* The choice then lasts until the page reloads. */ }
-    reconcile()
-  })
   const observer = new IntersectionObserver(([entry]) => {
     visible = Boolean(entry?.isIntersecting)
     reconcile()
@@ -162,7 +146,7 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   // Probing WebGL creates and drops a context (3–30 ms), so it waits for the first contentful paint and an idle
   // moment after it, and runs only where the rest of the test passes.
   const probe = (): void => {
-    if (media()) hasWebGL()
+    if (media() && !hasWebGL()) octopus.classList.add('is-static')
     reconcile()
   }
   const soon = (): void => {

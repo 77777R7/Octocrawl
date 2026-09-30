@@ -1,8 +1,16 @@
 /** Finds the hero artwork's painted glyphs off the main thread, where the pixel work can take as long as it
  * needs without costing the page a frame. The artwork is hand-drawn, so its glyphs drift off any regular
  * lattice; each is found where its contrast with the local ground peaks, and classed by where it sits and what it
- * looks like. Replies with [x, y, kind, weight] per glyph. */
+ * looks like. Replies with [x, y, kind, weight] per glyph, with the sea of clouds' pixel work (heroFog.ts) and the
+ * embers a rising spark would show above (those with dark ground three to eight cells up). */
 import { CLOUD, COOL, EMBER, FACE, NIGHT, onMountain } from './heroArtwork'
+import { fogTransfer, prepareFog, type FogPrep } from './heroFog'
+import { darkAt } from './heroMarks'
+
+// The artwork's glyph cell (natural px).
+const CELL = 12.5
+
+export type Analysis = { found: Float32Array; fog: FogPrep; sparks: Int32Array }
 
 // Rows are read in bands to keep the working set small. The blurs and the peak search reach 12 rows, so each band
 // reads 16 more on either side.
@@ -95,10 +103,18 @@ function analyse(bitmap: ImageBitmap): Float32Array {
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<ImageBitmap>) => void) | null
-  postMessage(message: Float32Array, transfer: Transferable[]): void
+  postMessage(message: Analysis, transfer: Transferable[]): void
 }
 scope.onmessage = ({ data: bitmap }) => {
-  const glyphs = analyse(bitmap)
+  const found = analyse(bitmap)
+  const context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d', { willReadFrequently: true })
+  if (!context) throw new Error('No 2D context')
+  context.drawImage(bitmap, 0, 0)
+  const image = context.getImageData(0, 0, bitmap.width, bitmap.height)
   bitmap.close()
-  scope.postMessage(glyphs, [glyphs.buffer])
+  const glyphs: Array<{ x: number; y: number; kind: number }> = []
+  for (let i = 0; i < found.length; i += 4) glyphs.push({ x: found[i], y: found[i + 1], kind: found[i + 2] })
+  const fog = prepareFog(image, glyphs)
+  const sparks = Int32Array.from(glyphs.flatMap((g, i) => (g.kind === EMBER && [3, 4, 5, 6, 7, 8].every((k) => darkAt(image, g.x, g.y - k * CELL)) ? [i] : [])))
+  scope.postMessage({ found, fog, sparks }, [found.buffer, sparks.buffer, ...fogTransfer(fog)])
 }
