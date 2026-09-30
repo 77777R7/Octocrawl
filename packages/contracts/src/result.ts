@@ -216,12 +216,12 @@ export interface FetchResult {
   resumeContext?: unknown | null
   /**
    * The page as Markdown: its main content, or the whole page when
-   * `onlyMainContent` is false. `data:` image URIs are dropped, their alt
-   * text kept. Null unless status is contentful, except on a failed or
-   * blocked result that kept a page as evidence, never content: the page an
-   * error status carried, or the whole page when the extractor found no main
-   * content (`empty_unverified`, and `timeout` when the deadline then ended a
-   * later rung).
+   * `onlyMainContent` is false. `data:` link and image targets are dropped,
+   * the link text and alt text kept. Null unless status is contentful,
+   * except on a failed or blocked result that kept a page as evidence, never
+   * content: the page an error status carried, or the whole page when the
+   * extractor found no main content (`empty_unverified`, and `timeout` when
+   * the deadline then ended a later rung).
    */
   markdown: string | null
   /** HTML-derived page/product facts; never reconstructed from Markdown. */

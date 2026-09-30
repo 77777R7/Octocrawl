@@ -153,6 +153,13 @@ M09–M11 were added on 2026-09-29 for the client-side navigation gap of `scrape
 | M10 | `/fc/v1/scrape` of a page (httpbin.org `/base64`) whose zero-second meta refresh goes to the S03 404 page | `success: false`, `http_error`, the 404 page's `url`, `statusCode` and `contentType`, not a `connection_error` | scrape-formats.metadata-response-status |
 | M11 | Scrape of the spa-github-pages demo's /example, a 404 whose script goes to /?/example, a 200 app that sets its URL back with `history.replaceState` | `success` with the app, final URL /?/example (the last URL requested) with its 200, both URLs in the chain, the URL the page set in the trace | scrape-formats.metadata-response-status |
 
+M12–M13 were added on 2026-09-30 for the two defects that kept `scrape-formats.markdown` and `scrape-formats.only-main-content` weak in [core-status-2026-09-30.md](core-status-2026-09-30.md): the table strategy kept one table, and table cells lost their link targets. W2L extracts both pages by their tables (`document.strategy: "table"`). Both fail on the extractor at `8ae6983` with the HTML fetched that day; M02 stays as frozen. `tableTargets` counts the link and image targets inside GFM table rows.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M12 | Scrape of the EIA Electric Power Annual's table 1.1: a title, two data tables and the notes and sources, each in its own table, no `<h1>` | The default Markdown keeps the title, both data tables with their heading rows and figures, and the notes and sources; every row as wide as its header | scrape-formats.only-main-content |
+| M13 | Scrape of the Hacker News front page | The story table's rows keep their link targets, absolute: at least 60, 30 of them discussion links; the first story row links its story; every row as wide as the first, so each `\|` in a cell is escaped | scrape-formats.markdown |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |
