@@ -62,7 +62,7 @@ export function resolvePreviewCapability(target: { url: string; amazonAsin: stri
   return {
     task: 'readable_page', support: 'conditional', captureMode: 'http',
     access: 'anonymous_public_page', environment: 'cloud_run_public_preview',
-    fields: ['readable Markdown', 'final URL', 'status', 'elapsed time'],
+    fields: ['readable Markdown', 'links (up to 500)', 'page metadata', 'final URL', 'status', 'elapsed time'],
     limitation: 'This route uses restricted HTTP without browser rendering. Access and readable content are checked only during extraction; private targets and redirects are blocked.',
     lastValidatedSourceCommit: PUBLIC_PREVIEW_COMMIT,
   }

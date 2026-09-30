@@ -35,7 +35,8 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 ## Quick Start
 
 For the no-install, single-page web preview and its deployment requirements, see
-[Public preview](docs/public-preview.md). The page is implemented in this branch;
+[Public preview](docs/public-preview.md). Besides Markdown it returns a page's links and metadata,
+and up to 20 fields read from the page without a model. The page is implemented in this branch;
 it does not have a permanent public URL until the Cloud Run deployment and live
 acceptance are complete.
 
