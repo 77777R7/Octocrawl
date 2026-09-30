@@ -3,7 +3,7 @@ import { hostedNetworkPolicy, localNetworkPolicy } from '@w2l/contracts'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { request } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
+import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, isLocalPreviewProxyTarget, MAX_RESPONSE_HEADER_BYTES, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../src/egress.js'
 
 async function* chunks(...parts: Uint8Array[]): AsyncIterable<Uint8Array> {
   for (const part of parts) yield part
@@ -92,6 +92,31 @@ describe('guarded socket lookup', () => {
       const response = await request(`http://safe.test:${address.port}/`, { dispatcher })
       expect(await response.body.text()).toBe('safe')
       expect(seenHost).toBe(`safe.test:${address.port}`)
+    } finally {
+      await dispatcher.close()
+      server.close()
+      await once(server, 'close')
+    }
+  })
+})
+
+describe('response header limit', () => {
+  it('reads a response whose headers exceed the 16 KiB Node default', async () => {
+    // One content-security-policy header of 18 KB, as services.global.ntt serves it.
+    const policy = `default-src 'self' ${'https://cdn.example.test '.repeat(750)}`
+    const server = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/plain', 'content-security-policy': policy }); res.end('served') })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+    const dispatcher = createGuardedDispatcher(localNetworkPolicy())
+    try {
+      expect(policy.length).toBeGreaterThan(16 * 1024)
+      expect(policy.length).toBeLessThan(MAX_RESPONSE_HEADER_BYTES)
+      const response = await request(`http://127.0.0.1:${address.port}/`, { dispatcher })
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-security-policy']).toBe(policy)
+      expect(await response.body.text()).toBe('served')
     } finally {
       await dispatcher.close()
       server.close()

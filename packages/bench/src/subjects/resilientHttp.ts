@@ -14,7 +14,7 @@ import {
 import { collectLinks, extractPdfText, extractTf, htmlToMarkdown, pdfMarkdown, PdfParseError } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Hex, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
+import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, MAX_RESPONSE_HEADER_BYTES, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
 import { describeProxy, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
 import { decodeText, filenameOf, responseShape, saveFileBytes, sniffShape, type ResponseShape } from '../files.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
@@ -66,7 +66,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.dispatcher = createGuardedDispatcher(this.networkPolicy)
-    this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
+    this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent({ uri: validateLocalPreviewProxy(localPreviewProxyUrl), maxHeaderSize: MAX_RESPONSE_HEADER_BYTES }) : null
     this.operatorProxy = operatorProxy
     this.operatorProxyAgent = operatorProxy === null ? null : proxyAgentFor(operatorProxy)
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed, { assertUrl: url => this.assertUrl(url) })

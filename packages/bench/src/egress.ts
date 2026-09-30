@@ -142,6 +142,13 @@ export async function pinnedBrowserHostRules(hosts: readonly string[], policy: N
 }
 
 /**
+ * Response headers W2L reads before giving a response up. undici's default is
+ * Node's 16 KiB, which one content-security-policy header can exceed (an 18 KB
+ * one is served on services.global.ntt); browsers accept far more.
+ */
+export const MAX_RESPONSE_HEADER_BYTES = 64 * 1024
+
+/**
  * Validate the addresses at the socket lookup, then hand Node only the
  * validated address. A separate URL preflight cannot prevent DNS rebinding
  * between validation and connect.
@@ -186,6 +193,7 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
     connect: { lookup: safeLookup },
     keepAliveTimeout: 1_000,
     keepAliveMaxTimeout: 1_000,
+    maxHeaderSize: MAX_RESPONSE_HEADER_BYTES,
   })
 }
 

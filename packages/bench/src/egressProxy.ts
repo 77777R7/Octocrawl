@@ -14,6 +14,7 @@
 
 import { isIP } from 'node:net'
 import { ProxyAgent } from 'undici'
+import { MAX_RESPONSE_HEADER_BYTES } from './egress.js'
 
 export interface OperatorProxy {
   /** `scheme://host:port`, credentials stripped. */
@@ -133,7 +134,7 @@ export function proxyAgentFor(proxy: OperatorProxy): ProxyAgent {
     proxy.username === undefined
       ? undefined
       : `Basic ${Buffer.from(`${proxy.username}:${proxy.password ?? ''}`).toString('base64')}`
-  return new ProxyAgent({ uri: proxy.server, ...(token === undefined ? {} : { token }) })
+  return new ProxyAgent({ uri: proxy.server, maxHeaderSize: MAX_RESPONSE_HEADER_BYTES, ...(token === undefined ? {} : { token }) })
 }
 
 /** Playwright's launch option for the same proxy. */
