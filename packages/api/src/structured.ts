@@ -4,6 +4,7 @@ import type {
   CompactScrapeResponse,
   ExecutionContext,
   FetchResult,
+  ScrapeMetadata,
   JsonFormatRequest,
   JsonSchema,
   JsonValue,
@@ -450,7 +451,26 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeResponse): readonly
     return result?.document?.adapter.id !== undefined && result.document.adapter.id !== 'generic'
       ? ['json'] : ['markdown']
   }
-  return ['markdown', 'links']
+  // Markdown alone is the default everywhere; links are asked for.
+  return ['markdown']
+}
+
+/** Page metadata plus the response facts, the way a client reads them beside the content. */
+export function scrapeMetadata(result: Pick<FetchResult, 'requestedUrl' | 'evidence' | 'document'>): ScrapeMetadata {
+  const page = result.document?.metadata
+  return {
+    title: page?.title ?? result.document?.title ?? null,
+    description: page?.description ?? null,
+    language: page?.language ?? null,
+    keywords: page?.keywords ?? null,
+    robots: page?.robots ?? null,
+    canonical: page?.canonical ?? null,
+    favicon: page?.favicon ?? null,
+    sourceURL: result.requestedUrl,
+    url: result.evidence.finalUrl,
+    statusCode: result.evidence.httpStatus,
+    contentType: result.evidence.contentType,
+  }
 }
 
 function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json'): boolean {
@@ -537,6 +557,7 @@ export function compactScrapeResponse(
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
     ...(next.warnings !== undefined && next.warnings.length > 0 ? { warnings: next.warnings } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
+    metadata: scrapeMetadata(next),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,
       pageType: next.document.pageType,

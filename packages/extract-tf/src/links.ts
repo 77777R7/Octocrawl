@@ -8,6 +8,10 @@
 
 import { parse, qsa } from './dom.js'
 
+// Page assets linked with <a>: not pages a crawl could visit or a reader
+// would cite. Documents (PDF, CSV, XLSX, ZIP) stay: they are the data.
+const ASSET_PATH = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?|css|js|mjs|map|woff2?|ttf|otf|eot|mp3|mp4|m4a|webm|ogg|wav|mov|avi)$/i
+
 export function collectLinks(html: string, baseUrl: string): readonly string[] {
   let base: URL
   try {
@@ -29,6 +33,7 @@ export function collectLinks(html: string, baseUrl: string): readonly string[] {
       continue
     }
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue
+    if (ASSET_PATH.test(resolved.pathname)) continue
     resolved.hash = ''
     const abs = resolved.href
     if (seen.has(abs)) continue

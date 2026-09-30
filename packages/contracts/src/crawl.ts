@@ -66,6 +66,8 @@ export interface CrawlPage {
   lane: Lane | null
   markdown: string | null
   json?: import('./structured.js').StructuredExtractionResult | null
+  /** Outbound links of the page when the crawl asked for them. */
+  links?: readonly string[]
   failureReason: string | null
   blockReason: string | null
   budgetExceeded: BudgetKind | null

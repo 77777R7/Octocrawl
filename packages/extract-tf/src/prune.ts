@@ -10,7 +10,7 @@
  *    trafilatura; our table covers those word families).
  */
 
-import { detach, qsa, tagOf, textOf } from './dom.js'
+import { detach, outerHtml, qsa, tagOf, textOf } from './dom.js'
 import { looksLikePrice } from './product.js'
 
 const MANUALLY_CLEANED = [
@@ -61,6 +61,13 @@ const CLEANED_ATTRIBUTE_SELECTORS = [
 ] as const
 
 const CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...CLEANED_ATTRIBUTE_SELECTORS].join(',')
+
+/** Landmarks a reader keeps when saving the whole page. */
+const PAGE_LANDMARKS: ReadonlySet<string> = new Set([
+  'aside', 'nav', 'footer',
+  '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '[role="complementary"]', '[role="search"]', '[role="menu"]', '[role="menubar"]',
+])
+const WHOLE_PAGE_CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...CLEANED_ATTRIBUTE_SELECTORS].filter((selector) => !PAGE_LANDMARKS.has(selector)).join(',')
 
 /**
  * CMP / ad / junk selectors, applied by id or class token. Matched nodes are
@@ -229,6 +236,19 @@ export function pruneRecommendations(doc: Document): void {
  */
 export function cleanTree(doc: Document): void {
   for (const el of qsa(doc, CLEANED_SELECTOR)) detach(el)
+}
+
+/**
+ * The body as a reader saves the whole page: scripts, controls and hidden
+ * markup gone, navigation, asides and footer kept. Works on a copy, so the
+ * document itself can still be cleaned and pruned for the main region.
+ */
+export function wholePageBody(doc: Document): string {
+  const body = doc.body
+  if (!body) return ''
+  const copy = body.cloneNode(true) as Element
+  for (const el of qsa(copy, WHOLE_PAGE_CLEANED_SELECTOR)) detach(el)
+  return outerHtml(copy)
 }
 
 /** Items of a nav-shaped list. */

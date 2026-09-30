@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseScrapeRequest } from '../src/index.js'
+import { CRAWL_MODES, defaultApiMode, isApiCrawlMode, parseBatchStartRequest, parseCrawlStartRequest, parseFirecrawlScrapeRequest, parseScrapeRequest } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 describe('REST contract: scrape + crawl reuse existing result types', () => {
@@ -40,6 +40,34 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     })
     expect(req.debug).toBe(false)
     expect(req.formats).toHaveLength(3)
+  })
+
+  it('names an unknown option instead of ignoring it', () => {
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', onlyMainContnet: false })).toThrow('unknown scrape option: onlyMainContnet')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', limit: 5 })).toThrow('unknown crawl option: limit')
+    expect(() => parseBatchStartRequest({ urls: ['https://example.com/'], format: ['markdown'] })).toThrow('unknown batch option: format')
+  })
+
+  it('parses onlyMainContent, timeout and waitFor within their bounds', () => {
+    const req = parseScrapeRequest({ url: 'https://example.com/', onlyMainContent: false, timeout: 15000.4, waitFor: 500 })
+    expect(req).toMatchObject({ onlyMainContent: false, timeout: 15000, waitFor: 500 })
+    expect(parseScrapeRequest({ url: 'https://example.com/' })).not.toHaveProperty('timeout')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', timeout: 500 })).toThrow('timeout must be a number of milliseconds between 1000 and 300000')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', waitFor: 60000 })).toThrow('waitFor must be a number of milliseconds between 0 and 30000')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', onlyMainContent: 'no' })).toThrow('onlyMainContent must be a boolean')
+  })
+
+  it('has no fixed cap on the formats array beyond one entry per format', () => {
+    const schema = { type: 'object', properties: { title: { type: 'string' } } }
+    expect(parseScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links', { type: 'json', schema }] }).formats).toHaveLength(3)
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links', 'markdown'] })).toThrow('formats must not contain duplicates')
+    expect(() => parseScrapeRequest({ url: 'https://example.com/', formats: [] })).toThrow('formats must be a non-empty array')
+  })
+
+  it('maps a Firecrawl scrape body onto the served formats and page options', () => {
+    const req = parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['html', 'links', { type: 'markdown' }], onlyMainContent: false, waitFor: 250, timeout: 20000 })
+    expect(req).toMatchObject({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: false, waitFor: 250, timeout: 20000 })
+    expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['screenshot'] }).formats).toBeUndefined()
   })
 
   it('rejects remote JSON schema references', () => {

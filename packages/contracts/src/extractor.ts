@@ -148,6 +148,27 @@ export interface ProductFacts {
   quoteState?: QuoteState
 }
 
+/**
+ * What the page says about itself in its head: read from the raw document
+ * before cleaning, every value null when the page does not state it.
+ */
+export interface PageMetadata {
+  /** The `<title>` element, whitespace-collapsed. */
+  title: string | null
+  /** `<meta name="description">`. */
+  description: string | null
+  /** `<html lang>`, else `<meta http-equiv="content-language">`. */
+  language: string | null
+  /** `<meta name="keywords">`, split on commas. */
+  keywords: readonly string[] | null
+  /** `<meta name="robots">`, as written. */
+  robots: string | null
+  /** `<link rel="canonical">`, resolved against the page URL. */
+  canonical: string | null
+  /** The first `<link rel~="icon">`, resolved against the page URL. */
+  favicon: string | null
+}
+
 export interface DocumentExtraction {
   title: string | null
   pageType: PageType
@@ -157,6 +178,7 @@ export interface DocumentExtraction {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  metadata?: PageMetadata
 }
 
 /** Region returned when no strategy identified a main content region. */
@@ -220,6 +242,8 @@ export interface ExtractorOutput {
   adapter: AdapterDescriptor
   entities: readonly ExtractedEntity[]
   adapterValidation?: AdapterValidation
+  /** Head metadata read from the raw document. */
+  metadata?: PageMetadata
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }
@@ -236,6 +260,12 @@ export interface ExtractorOptions {
   favorRecall?: boolean
   /** Extra CSS selectors to prune from the tree before extraction. */
   pruneSelectors?: readonly string[]
+  /**
+   * False returns the whole cleaned body as mainHtml (navigation and footer
+   * included) instead of the main content region. Routing, confidence and
+   * facts are still computed on the main region.
+   */
+  onlyMainContent?: boolean
 }
 
 export interface Extractor {

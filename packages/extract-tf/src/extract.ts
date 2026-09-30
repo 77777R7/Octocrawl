@@ -13,8 +13,9 @@
 
 import type { ExtractRecovery, Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { outerHtml, parse, textOf } from './dom.js'
-import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree } from './prune.js'
+import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree, wholePageBody } from './prune.js'
 import { detectRenderSignals, rawSignals } from './render.js'
+import { readPageMetadata } from './metadata.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
@@ -93,7 +94,7 @@ function confidenceOf(
 
 export class ExtractTf implements Extractor {
   extract(html: string, options: ExtractorOptions = {}): ExtractorOutput {
-    const { favorPrecision = false, favorRecall = false, pruneSelectors } = options
+    const { favorPrecision = false, favorRecall = false, pruneSelectors, onlyMainContent = true } = options
     const parseStart = performance.now()
     const doc = parse(html)
     const parseMs = Math.max(0, performance.now() - parseStart)
@@ -119,6 +120,11 @@ export class ExtractTf implements Extractor {
     // Rendering signals live in scripts and fallback markup that cleaning
     // removes, so they are read from the raw tree as well.
     const raw = rawSignals(doc.document)
+    const metadata = readPageMetadata(doc.document, options.url)
+
+    // The whole page, when asked for, is copied before cleaning: navigation
+    // and footer stay, scripts and hidden markup do not.
+    const wholeBody = onlyMainContent ? null : wholePageBody(doc.document)
 
     cleanTree(doc.document)
     pruneTree(doc.document, { selectors: pruneSelectors })
@@ -222,7 +228,7 @@ export class ExtractTf implements Extractor {
     const adapter = amazonProduct ? adapterFor(doc.document, options.url, product) : preliminaryAdapter
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
-      mainHtml: main ? outerHtml(main) : '',
+      mainHtml: main === null ? '' : wholeBody ?? outerHtml(main),
       confidence: confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,
@@ -239,6 +245,7 @@ export class ExtractTf implements Extractor {
       escalate: main === null,
       recovery,
       render: detectRenderSignals(raw, doc.document),
+      metadata,
       pageType: decision.type,
       strategy,
       product,

@@ -6,6 +6,7 @@ import {
   type ExecutionContext,
   type FetchResult,
   type NetworkPolicy,
+  type PageOptions,
   type TraceEvent,
 } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
@@ -19,6 +20,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { extractionVerdict } from './extractionVerdict.js'
+import { documentOf, errorPageContent } from './pageContent.js'
 
 /**
  * Resilient HTTP subject: the resilient transport engine (redirect following
@@ -112,7 +114,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return assertSafeUrl(url, this.networkPolicy, { viaProxy: this.viaOperatorProxy(url) })
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], page: PageOptions = {}): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
@@ -122,7 +124,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs)
+      const result = await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, page)
       return scope.signal.reason?.name === 'TimeoutError' || deadlineMs !== undefined && Date.now() >= deadlineMs
         ? { ...result, budgetExceeded: 'time' }
         : result
@@ -139,7 +141,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, page: PageOptions = {}): Promise<FetchResult> {
     const { signal, deadlineAt, onRetryAfter } = execution
     const start = Date.now()
     let robotsMs = 0
@@ -384,7 +386,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
       return blocked(gate)
     }
 
-    if (out.status !== 200) {
+    if (out.status === null || out.status < 200 || out.status >= 300) {
+      // An error page is still evidence: keep what the server said beside
+      // the status, so a consumer sees the page and not only the refusal.
+      const errorPage = errorPageContent(body, out.finalUrl, page)
       return finish({
         ...base,
         status: 'failed',
@@ -393,7 +398,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
         budgetExceeded: null,
         lane: 'http',
         escalations: [],
-        markdown: null,
+        markdown: errorPage?.markdown ?? null,
+        ...(errorPage === null ? {} : {
+          warnings: [{ code: 'http_error', message: `The server answered ${out.status}; the content is that response, not the requested page.` }],
+          links: errorPage.links,
+          document: errorPage.document,
+        }),
       })
     }
 
@@ -401,7 +411,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // extractor found no main content — report failed/empty_unverified and
     // flag the browser lane, never a contentful success.
     const extractStart = performance.now()
-    const extracted = extractTf.extract(body, { url: out.finalUrl })
+    const extracted = extractTf.extract(body, { url: out.finalUrl, onlyMainContent: page.onlyMainContent ?? true })
     const extractionTotalMs = performance.now() - extractStart
     parseMs = extracted.timings.parseMs
     extractMs = Math.max(extracted.timings.extractMs, extractionTotalMs - parseMs)
@@ -487,16 +497,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       markdown,
       ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
       links,
-      document: {
-        title: extracted.title,
-        pageType: extracted.pageType,
-        strategy: extracted.strategy,
-        confidence: extracted.confidence,
-        product: extracted.product ?? null,
-        adapter: extracted.adapter,
-        entities: extracted.entities,
-        adapterValidation: extracted.adapterValidation,
-      },
+      document: documentOf(extracted),
       usage: { ...base.usage, contentTokens },
     })
   }

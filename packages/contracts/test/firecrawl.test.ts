@@ -69,6 +69,9 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       url: 'https://example.com/',
       mode: undefined,
       allowlistedDomains: undefined,
+      formats: ['markdown'],
+      includeLinks: undefined,
+      debug: undefined,
     })
     expect(
       parseFirecrawlCrawlRequest({
@@ -129,7 +132,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       data: {
         markdown: 'Harbour lantern catalog',
         links: ['https://example.com/item/1'],
-        metadata: { sourceURL: 'https://example.com/listing', statusCode: 200 },
+        metadata: { sourceURL: 'https://example.com/listing', url: 'https://example.com/listing', statusCode: 200, contentType: 'text/html' },
       },
     })
     expect(wrapCrawlAccepted({ taskId: 'task-1' }, 'https://example.com/listing')).toEqual({

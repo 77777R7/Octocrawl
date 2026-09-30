@@ -169,7 +169,11 @@ export interface FetchResult {
    * Shape is vendor-specific; it is a credential-free continuation token.
    */
   resumeContext?: unknown | null
-  /** Extracted main content as Markdown. Null unless status is contentful. */
+  /**
+   * Extracted main content as Markdown. Null unless status is contentful,
+   * or the failure is an `http_error` whose response body was readable: an
+   * error page is then returned as evidence, with an `http_error` warning.
+   */
   markdown: string | null
   /** Caveats on a contentful result; absent or empty when there are none. */
   warnings?: readonly FetchWarning[]

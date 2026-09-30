@@ -1,4 +1,4 @@
-import { estimateTokens, type ExecutionContext, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, type ExecutionContext, type FetchResult, type NetworkPolicy, type PageOptions, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -29,6 +29,7 @@ import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { extractionVerdict } from './extractionVerdict.js'
+import { documentOf, errorPageContent } from './pageContent.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
 import {
   BROWSER_FINGERPRINT,
@@ -71,6 +72,19 @@ import {
  * arms, so any score delta against resilient-http is attributable to
  * render-and-execute alone.
  */
+/**
+ * The navigation's redirect hops, requested URL first and the answering URL
+ * last, from Playwright's request chain. Empty when nothing redirected. A
+ * script-driven navigation is not a redirect; when the final URL still
+ * differs from the requested one, both ends are recorded.
+ */
+function redirectChainOf(response: Response | null, requestedUrl: string, finalUrl: string): readonly string[] {
+  const chain: string[] = []
+  for (let request = response?.request() ?? null; request !== null; request = request.redirectedFrom()) chain.unshift(request.url())
+  if (chain.length > 1) return chain
+  return finalUrl !== requestedUrl ? [requestedUrl, finalUrl] : []
+}
+
 export class BrowserLocalSubject implements SubjectAdapter {
   readonly meta = {
     id: 'browser-local',
@@ -172,7 +186,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], pageOptions: PageOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
@@ -202,7 +216,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, pageOptions)
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -221,7 +235,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, pageOptions: PageOptions = {}): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -494,6 +508,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
         await raceWithSignal(waitForRenderedStability(page, { maxMs: remainingTimeout(execution, 2_000) }), signal)
         throwIfExecutionStopped(execution)
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'settled', detail: { networkIdle, settleMs: Date.now() - idleStartedAt } })
+        if (pageOptions.waitForMs !== undefined && pageOptions.waitForMs > 0) {
+          // The caller's own wait, after the page settled: for content a
+          // script fills in on a timer the settle heuristics cannot see.
+          const waitMs = Math.min(pageOptions.waitForMs, remainingTimeout(execution, pageOptions.waitForMs))
+          await abortableSleep(waitMs, signal)
+          throwIfExecutionStopped(execution)
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'wait_for', detail: { waitMs } })
+        }
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({
             selectedAsin: document.querySelector('input[name="ASIN"]')?.getAttribute('value') ?? null,
@@ -584,8 +606,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         evidence: {
           finalUrl,
           httpStatus: status,
-          redirectChain: finalUrl !== url ? [url, finalUrl] : [],
-          contentType: 'text/html; rendered',
+          redirectChain: redirectChainOf(response, url, finalUrl),
+          // The navigation response's own header; the body is the rendered DOM.
+          contentType: response?.headers()['content-type'] ?? null,
           rawBodySha256,
           artifacts: rawArtifacts,
         },
@@ -634,11 +657,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const nonOk = status !== 200 && status !== 0
+      const nonOk = (status < 200 || status >= 300) && status !== 0
       if (nonOk && gate !== null) {
         return blocked(gate)
       }
       if (nonOk) {
+        // An error page is still evidence: keep what the server said beside
+        // the status, so a consumer sees the page and not only the refusal.
+        const errorPage = errorPageContent(body, finalUrl, pageOptions)
         return {
           ...base,
           status: 'failed',
@@ -647,11 +673,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
           budgetExceeded: null,
           lane: 'browser_local',
           escalations: [],
-          markdown: null,
+          markdown: errorPage?.markdown ?? null,
+          ...(errorPage === null ? {} : {
+            warnings: [{ code: 'http_error', message: `The server answered ${status}; the content is that response, not the requested page.` }],
+            links: errorPage.links,
+            document: errorPage.document,
+          }),
         }
       }
 
-      const extracted = extractTf.extract(body, { url: finalUrl })
+      const extracted = extractTf.extract(body, { url: finalUrl, onlyMainContent: pageOptions.onlyMainContent ?? true })
       const links = collectLinks(body, finalUrl)
       trace.push({
         at: wallMs,
@@ -703,16 +734,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         markdown,
         ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
         links,
-        document: {
-          title: extracted.title,
-          pageType: extracted.pageType,
-          strategy: extracted.strategy,
-          confidence: extracted.confidence,
-          product: extracted.product ?? null,
-          adapter: extracted.adapter,
-          entities: extracted.entities,
-          adapterValidation: extracted.adapterValidation,
-        },
+        document: documentOf(extracted),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
       }
     } catch (err) {

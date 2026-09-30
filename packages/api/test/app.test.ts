@@ -47,7 +47,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const res = await app.request('/v1/scrape', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: `${server.url}/crawl/listing` }),
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, includeLinks: true }),
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -81,6 +81,28 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(compact.usage.totalMs).toBeGreaterThanOrEqual(0)
     expect(JSON.parse(debugText).summary.attempts[0].result.markdown).toContain('Harbour lantern catalog')
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
+  })
+
+  it('defaults to markdown alone, carries page and response metadata, and names unknown options', async () => {
+    const app = createApp(engine)
+    const post = (body: unknown) => app.request('/v1/scrape', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })
+    const full = await (await post({ url: `${server.url}/crawl/listing` })).json()
+    expect(full.links).toEqual([])
+    expect(full.document.metadata.title).toEqual(expect.any(String))
+    const compact = await (await post({ url: `${server.url}/crawl/listing`, debug: false })).json()
+    expect(compact.formats).toEqual(['markdown'])
+    expect(compact.metadata).toMatchObject({
+      sourceURL: `${server.url}/crawl/listing`,
+      url: `${server.url}/crawl/listing`,
+      statusCode: 200,
+      contentType: expect.stringContaining('text/html'),
+      title: expect.any(String),
+    })
+    const bad = await post({ url: `${server.url}/crawl/listing`, onlyMainContnet: false })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'unknown scrape option: onlyMainContnet' })
   })
 
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
@@ -157,7 +179,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     try {
       const first = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2`)
       expect(first.status).toBe(200)
-      const firstPage = await first.json() as { items: Array<{ markdown: string | null }>; nextCursor: string | null; hasMore: boolean }
+      const firstPage = await first.json() as { items: Array<{ markdown: string | null; links?: readonly string[] }>; nextCursor: string | null; hasMore: boolean }
+      expect(firstPage.items.every((item) => Array.isArray(item.links))).toBe(true)
       expect(firstPage.items).toHaveLength(2)
       expect(firstPage.items.every((item) => item.markdown !== null)).toBe(true)
       expect(firstPage.hasMore).toBe(true)

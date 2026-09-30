@@ -311,7 +311,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   return {
     async scrape(req, context = {}) {
       const overallStart = performance.now()
-      const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt: context.deadlineAt ?? Date.now() + 300_000})
+      const requestDeadline = Date.now() + (req.timeout ?? 300_000)
+      const budget = createExecutionScope({
+        ...context,
+        signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal,
+        deadlineAt: context.deadlineAt === undefined ? requestDeadline : Math.min(context.deadlineAt, requestDeadline),
+      })
+      const scope: ExecutionContext & { dispose(): void } = {
+        ...budget,
+        page: {
+          ...(req.onlyMainContent === undefined ? {} : { onlyMainContent: req.onlyMainContent }),
+          ...(req.waitFor === undefined ? {} : { waitForMs: req.waitFor }),
+        },
+      }
       const mode = defaultApiMode(req.mode)
       const channels = channelsForUrl(mode, req.url)
       const policy: CrawlPolicy = {
@@ -568,6 +580,7 @@ function toCrawlPage(step: StepRecord): CrawlPage {
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...(result?.json === undefined ? {} : { json: result.json }),
+    ...(result?.links === undefined ? {} : { links: result.links }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,

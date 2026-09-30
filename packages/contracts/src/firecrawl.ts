@@ -29,7 +29,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
-  'creditsUsed is always 0. Formats other than markdown/links are dropped.',
+  'creditsUsed is always 0. Formats other than markdown/links are dropped; onlyMainContent, timeout and waitFor are honoured.',
 ] as const
 
 export interface FirecrawlPage {
@@ -37,7 +37,17 @@ export interface FirecrawlPage {
   links?: string[]
   metadata: {
     sourceURL: string
+    /** The URL that answered, after redirects. */
+    url: string
     statusCode: number | null
+    contentType?: string
+    title?: string
+    description?: string
+    language?: string
+    /** Comma-joined, as Firecrawl reports it. */
+    keywords?: string
+    robots?: string
+    favicon?: string
     error?: string
   }
 }
@@ -66,9 +76,25 @@ export interface FirecrawlCrawlStatus {
   data: FirecrawlPage[]
 }
 
+const FIRECRAWL_SERVED_FORMATS = ['markdown', 'links'] as const
+
 export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
-  return parseScrapeRequest({ url: rec.url })
+  const native: Record<string, unknown> = { url: rec.url }
+  if (Array.isArray(rec.formats)) {
+    // Firecrawl formats are strings or `{ type }` objects. The shim serves
+    // markdown and links; anything else is dropped (see FIRECRAWL_SHIM_DIFFS).
+    const wanted = rec.formats.map((format) =>
+      typeof format === 'string' ? format
+        : format !== null && typeof format === 'object' && typeof (format as { type?: unknown }).type === 'string' ? (format as { type: string }).type
+          : '')
+    const served = FIRECRAWL_SERVED_FORMATS.filter((name) => wanted.includes(name))
+    if (served.length > 0) native.formats = served
+  }
+  if (rec.onlyMainContent !== undefined) native.onlyMainContent = rec.onlyMainContent
+  if (rec.timeout !== undefined) native.timeout = rec.timeout
+  if (rec.waitFor !== undefined) native.waitFor = rec.waitFor
+  return parseScrapeRequest(native)
 }
 
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
@@ -125,12 +151,22 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
           : result.status === 'success' || result.status === 'partial'
             ? undefined
             : result.status
+  const page = result.document?.metadata
+  const title = page?.title ?? result.document?.title ?? null
   return {
     markdown: result.markdown,
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
     metadata: {
       sourceURL: result.requestedUrl,
+      url: result.evidence.finalUrl,
       statusCode: result.evidence.httpStatus,
+      ...(result.evidence.contentType === null ? {} : { contentType: result.evidence.contentType }),
+      ...(title === null ? {} : { title }),
+      ...(page?.description == null ? {} : { description: page.description }),
+      ...(page?.language == null ? {} : { language: page.language }),
+      ...(page?.keywords == null ? {} : { keywords: page.keywords.join(', ') }),
+      ...(page?.robots == null ? {} : { robots: page.robots }),
+      ...(page?.favicon == null ? {} : { favicon: page.favicon }),
       ...(error !== undefined ? { error } : {}),
     },
   }

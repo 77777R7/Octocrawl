@@ -8,7 +8,7 @@
 import type { CrawlMode } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
-import type { DocumentExtraction } from './extractor.js'
+import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -21,8 +21,24 @@ export interface ScrapeRequest {
   formats?: readonly ScrapeFormat[]
   /** Include outbound links. Kept separate from content formats. */
   includeLinks?: boolean
+  /** Main content only (default true); false returns the cleaned whole page. */
+  onlyMainContent?: boolean
+  /** Overall budget for this scrape in milliseconds (1000..300000; default 300000). */
+  timeout?: number
+  /** Extra wait on the browser lane after the page settled, in milliseconds (0..30000). */
+  waitFor?: number
   /** Omitted preserves the legacy full REST/SDK response. MCP sends false by default. */
   debug?: boolean
+}
+
+/** Page metadata plus the response facts a client needs beside the content. */
+export interface ScrapeMetadata extends PageMetadata {
+  /** The URL that was requested. */
+  sourceURL: string
+  /** The URL that answered, after redirects. */
+  url: string
+  statusCode: number | null
+  contentType: string | null
 }
 
 export type ScrapeResponse = FetchResult & LadderRunAudit
@@ -42,6 +58,7 @@ export interface CompactScrapeResponse {
   markdown?: string | null
   warnings?: FetchResult['warnings']
   links?: readonly string[]
+  metadata: ScrapeMetadata
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   json?: StructuredExtractionResult | null
   truncated: boolean
@@ -101,6 +118,24 @@ export class RequestError extends Error {
     this.name = 'RequestError'
   }
 }
+
+/** A misspelt option must not be silently ignored: name it. */
+function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[], request: string): void {
+  const unknown = Object.keys(rec).filter((key) => !known.includes(key))
+  if (unknown.length > 0) throw new RequestError(`unknown ${request} option: ${unknown[0]}`)
+}
+
+function readDurationMs(value: unknown, name: string, min: number, max: number): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+    throw new RequestError(`${name} must be a number of milliseconds between ${min} and ${max}`)
+  }
+  return Math.round(value)
+}
+
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor', 'debug'] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains'] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks'] as const
 
 function asRecord(body: unknown): Record<string, unknown> {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
@@ -177,7 +212,7 @@ function readSchema(value: unknown): import('./structured.js').JsonSchema {
 
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.length === 0 || value.length > 3) throw new RequestError('formats must contain 1 to 3 entries')
+  if (!Array.isArray(value) || value.length === 0) throw new RequestError('formats must be a non-empty array')
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const item of value) {
@@ -216,20 +251,28 @@ function readBound(value: unknown, name: string, min: number): number | null | u
 
 export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, SCRAPE_KEYS, 'scrape')
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
+  if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
+  const timeout = readDurationMs(rec.timeout, 'timeout', 1_000, 300_000)
+  const waitFor = readDurationMs(rec.waitFor, 'waitFor', 0, 30_000)
   return {
     url: readUrl(rec.url),
     mode: readMode(rec.mode),
     allowlistedDomains: readAllowlist(rec.allowlistedDomains),
     formats: readFormats(rec.formats),
     includeLinks: rec.includeLinks as boolean | undefined,
+    ...(rec.onlyMainContent === undefined ? {} : { onlyMainContent: rec.onlyMainContent as boolean }),
+    ...(timeout === undefined ? {} : { timeout }),
+    ...(waitFor === undefined ? {} : { waitFor }),
     debug: rec.debug as boolean | undefined,
   }
 }
 
 export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, CRAWL_KEYS, 'crawl')
   const useCached = rec.useCached
   if (useCached !== undefined && typeof useCached !== 'boolean') {
     throw new RequestError('useCached must be a boolean')
@@ -246,6 +289,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
 
 export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   const rec = asRecord(body)
+  rejectUnknownKeys(rec, BATCH_KEYS, 'batch')
   if (!Array.isArray(rec.urls) || rec.urls.length < 1 || rec.urls.length > 1000) {
     throw new RequestError('urls must contain 1 to 1000 URLs')
   }

@@ -56,7 +56,6 @@ export const TOOLS = [
         formats: {
           type: 'array',
           minItems: 1,
-          maxItems: 3,
           items: {
             anyOf: [
               { type: 'string', enum: ['markdown', 'links', 'json'] },
@@ -75,6 +74,9 @@ export const TOOLS = [
           },
         },
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
+        onlyMainContent: { type: 'boolean', description: 'Main content only (default true); false returns the cleaned whole page, navigation included.' },
+        timeout: { type: 'number', minimum: 1000, maximum: 300000, description: 'Overall budget for this scrape in milliseconds. Default 300000.' },
+        waitFor: { type: 'number', minimum: 0, maximum: 30000, description: 'Extra wait on the browser lane after the page settled, in milliseconds.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
       },
       required: ['url'],
@@ -158,7 +160,7 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, maxItems: 3, items: { anyOf: [
+        formats: { type: 'array', minItems: 1, items: { anyOf: [
           { type: 'string', enum: ['markdown', 'links', 'json'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
@@ -195,6 +197,9 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       allowlistedDomains: req.allowlistedDomains,
       formats: req.formats,
       includeLinks: req.includeLinks,
+      onlyMainContent: req.onlyMainContent,
+      timeout: req.timeout,
+      waitFor: req.waitFor,
       debug: req.debug ?? false,
     })
   }

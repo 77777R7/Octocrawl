@@ -197,7 +197,7 @@ export function buildChannels(
       id: 'http',
       identity: declared,
       fetch: (url, _session, execution) =>
-        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter),
+        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, execution?.page),
       close: async () => {
         await http.teardown()
         await opts.localSubjects?.http?.teardown?.()
@@ -210,7 +210,7 @@ export function buildChannels(
       fetch: (url, _session, execution) =>
         opts.localSubjects?.browser_local !== undefined
           ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter),
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, execution?.page),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -278,7 +278,7 @@ export function buildChannels(
           }
           return skip
         }
-        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter)
+        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, execution?.page)
       },
       close: async () => {
         for (const subject of authedSubjects.values()) await subject.teardown()
