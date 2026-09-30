@@ -27,6 +27,12 @@ cites: `page_check` is `on_cited_page`, `other_page` (found, but not on the
 cited page), `not_found`, `no_page_cited` or `no_pages` (a capture without
 markers). A `found` on a short number (under three significant digits) or a
 year is marked `weak` because such numbers also occur by chance.
+
+Matcher versions (`matcherVersion` in the summary):
+  1  the literal digits, with thousands separators and the decimals as recorded
+  2  also an integer printed with trailing zeros (43 as 43.0) and a large
+     number printed with a scale word (7900000000 as "7.9 billion", "7.9bn",
+     "7.9b", "7,900 million", "79亿"); a single-letter scale (b, m) is weak
 """
 import argparse
 import csv
@@ -38,6 +44,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 CAPTURED = {'success', 'partial'}
+MATCHER_VERSION = 2
 
 
 def norm_url(url):
@@ -62,7 +69,8 @@ def number_forms(value):
     value = abs(value)
     forms = set()
     if isinstance(value, int) or float(value).is_integer():
-        bases = [(str(int(value)), '')]
+        # An integer is also printed with trailing zeros: 43 as 43.0 or 43.00.
+        bases = [(str(int(value)), ''), (str(int(value)), '.0'), (str(int(value)), '.00')]
     else:
         bases = []
         for decimals in range(1, 5):
@@ -88,16 +96,56 @@ def significant_digits(value):
     return len(digits if '.' in text else digits.rstrip('0'))
 
 
+SCALES = (
+    (1_000_000_000_000, ('trillion', 'tn'), False),
+    (1_000_000_000, ('billion', 'bn'), False),
+    (1_000_000_000, ('b',), True),
+    (1_000_000, ('million', 'mn'), False),
+    (1_000_000, ('m',), True),
+    (100_000_000, ('亿',), False),
+    (10_000, ('万',), False),
+)
+
+
+def scaled_patterns(value):
+    """(compiled pattern, weak) for the value written with a scale word: 7900000000 as "7.9 billion"."""
+    out = []
+    if abs(value) < 10_000:
+        return out
+    for factor, words, weak in SCALES:
+        quotient = value / factor
+        if abs(quotient) < 1 or abs(quotient * 10_000 - round(quotient * 10_000)) > 1e-6:
+            continue
+        quotient = round(quotient, 4)
+        quotient = int(quotient) if float(quotient).is_integer() else quotient
+        for form in number_forms(quotient):
+            for word in words:
+                if word.isascii():
+                    pattern = r'(?<![\d.,])' + re.escape(form) + r'\s?' + word + r'(?![A-Za-z])'
+                    out.append((re.compile(pattern, re.IGNORECASE), weak))
+                else:
+                    out.append((re.compile(r'(?<![\d.,])' + re.escape(form) + r'\s?' + word), weak))
+    return out
+
+
 def find_value(text, value):
+    """(occurrences, the first text matched, whether that match is weak) of a recorded number in the text."""
     hits = 0
     first = None
+    weak = False
     for form in number_forms(value):
         pattern = r'(?<![\d.,])' + re.escape(form) + r'(?![\d]|[.,]\d)'
         found = re.findall(pattern, text)
         if found:
             hits += len(found)
             first = first or form
-    return hits, first
+    for pattern, scale_weak in scaled_patterns(value):
+        found = [match.group(0) for match in pattern.finditer(text)]
+        if found:
+            hits += len(found)
+            if first is None:
+                first, weak = found[0], scale_weak
+    return hits, first, weak
 
 
 PAGE_MARKER = re.compile(r'<!-- page (\d+) -->')
@@ -204,16 +252,16 @@ def main():
                 key = id(item)
                 if key not in text_cache:
                     text_cache[key] = norm_text(item['markdown'])
-                hits, form = find_value(text_cache[key], value) if isinstance(value, (int, float)) else (0, None)
+                hits, form, weak_match = find_value(text_cache[key], value) if isinstance(value, (int, float)) else (0, None, False)
                 if best is None or hits > best[2]:
-                    best = (url, item, hits, form)
-            url, item, hits, form = best
+                    best = (url, item, hits, form, weak_match)
+            url, item, hits, form, weak_match = best
             evidence = item.get('evidence') or {}
             row.update(checked_url=url, capture_status=item.get('status'),
                        raw_body_sha256=evidence.get('rawBodySha256') or item.get('contentHash') or '',
                        result='found' if hits else 'not_found', occurrences=hits, matched_text=form or '')
             if hits:
-                weak = significant_digits(value) < 3 or obs['Raw_Unit'] == 'year'
+                weak = significant_digits(value) < 3 or obs['Raw_Unit'] == 'year' or weak_match
                 row['strength'] = 'weak' if weak else 'strong'
             pages = split_pages(item['markdown'])
             page = cited_page(obs['Page_Number'])
@@ -263,6 +311,7 @@ def main():
         'batchTaskId': batch.get('taskId'),
         'operatorCheckoutCommit': batch.get('operatorCheckoutCommit'),
         'pagesChecked': True,
+        'matcherVersion': MATCHER_VERSION,
         'overall': tally(results),
         'byExpectedFormat': {k: tally(v) for k, v in sorted(by_format.items())},
         'bySource': {k: tally(v) for k, v in sorted(by_source.items(), key=lambda kv: -len(kv[1]))},
