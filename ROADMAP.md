@@ -65,6 +65,8 @@ Exit: the 15 PDF-type sources in his manifest are captured with hashes, includin
 
 Feature lists and file-level changes are in [research/parity/plan-to-70.md](research/parity/plan-to-70.md). Order inside each milestone: features already `weak` first, then the cheapest high-tier missing ones.
 
+Status 2026-09-30, M2 week 1: `html` and `rawHtml` formats and `includeTags`/`excludeTags` on scrape, crawl, MCP and the Firecrawl shim (`3bfc3b7`), a `noscript` notice no longer sends a static page to the browser lane (`a183866`); live checks in [research/parity/m2-live-checks-2026-09-30.md](research/parity/m2-live-checks-2026-09-30.md) (Wikipedia loses its edit links with `excludeTags`, the tables sandbox reduces to its tables with `includeTags`, the books sandbox returns cleaned and raw HTML, GOV.UK stays on the http lane), statuses in [reaudit-2026-09-30b.json](research/parity/reaudit-2026-09-30b.json); `node research/parity/score.mjs` reports 26.8%. Next in M2: `headers`, mobile emulation, sitemap modes, domain scope, webhooks, the watcher; with them the redirect target's robots.txt check on the http lane and the check script's page offset for flipbook mirrors.
+
 ## Testing rules
 
 - Live checks run against the frozen public test set in [research/parity/real-site-test-set.md](research/parity/real-site-test-set.md); failed URLs stay in the denominator and are never swapped.
