@@ -166,6 +166,39 @@ function sanitizeResult(result: FetchResult): FetchResult {
   return result
 }
 
+/** How long the ladder waits for a lane's own answer after the budget signal fired. */
+const LANE_GRACE_MS = 1_500
+
+function laneOf(channel: Channel): FetchResult['lane'] {
+  return channel.id === 'provider' ? 'provider' : channel.id === 'authed_session' ? 'browser_local_authed' : channel.id === 'browser_local' ? 'browser_local' : 'http'
+}
+
+function budgetStopped(execution: ExecutionContext): boolean {
+  return execution.signal?.aborted === true || (execution.deadlineAt !== undefined && Date.now() >= execution.deadlineAt)
+}
+
+/** The run's time budget ended before this lane answered: a result, not an exception. */
+function budgetResult(url: string, channel: Channel): FetchResult {
+  const lane = laneOf(channel)
+  return {
+    requestedUrl: url,
+    status: 'failed',
+    failureReason: 'timeout',
+    blockReason: null,
+    budgetExceeded: 'time',
+    lane,
+    escalations: [],
+    handoff: null,
+    markdown: null,
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    usage: { wallMs: 0, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: null },
+    trace: [{ at: 0, lane, event: 'budget_exhausted', detail: { reason: 'the run\'s time budget ended before this lane answered' } }],
+  }
+}
+
 export class LadderRunner {
   constructor(
     /** Channels in escalation order. Providers go after browser_local. */
@@ -201,6 +234,26 @@ export class LadderRunner {
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
     try { return await this.runWithinBudget(url, session, scope) } finally { scope.dispose() }
+  }
+
+  /**
+   * A lane honours the budget itself and answers with a structured timeout.
+   * When the signal fires first, the ladder gives the lane a short grace to
+   * deliver that answer, and only then answers for it.
+   */
+  private async awaitLane(pending: Promise<FetchResult>, execution: ExecutionContext, url: string, channel: Channel): Promise<FetchResult> {
+    try {
+      return await raceWithSignal(pending, execution.signal)
+    } catch (error) {
+      if (execution.signal?.aborted !== true) throw error
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const grace = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), LANE_GRACE_MS) })
+      const settled = await Promise.race([pending.then((result) => result, () => null), grace]).finally(() => clearTimeout(timer))
+      if (settled !== null) return settled
+      const reason = execution.signal.reason as { name?: string } | undefined
+      if (reason?.name === 'TimeoutError') return budgetResult(url, channel)
+      throw error
+    }
   }
 
   private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext): Promise<LadderRunResult> {
@@ -268,7 +321,9 @@ export class LadderRunner {
      *  final result can stamp whether that hop actually improved things. */
     let qualityEscalation: Escalation | null = null
       for (const channel of ordered) {
-        throwIfExecutionStopped(execution)
+        // Out of budget between rungs: answer with the best result so far,
+        // or a structured timeout, never with an exception.
+        if (budgetStopped(execution)) return finish(best ?? last ?? budgetResult(url, channel), false)
         const identityBlock = refuseChannelIdentity(url, channel)
         if (identityBlock !== null) {
           channelsTried.push(channel.id)
@@ -285,7 +340,7 @@ export class LadderRunner {
           return finish(identityBlock, false)
         }
         channelsTried.push(channel.id)
-        const result = await raceWithSignal(channel.fetch(url, effectiveSession, execution), execution.signal)
+        const result = await this.awaitLane(channel.fetch(url, effectiveSession, execution), execution, url, channel)
         attempts.push({ channel: channel.id, result })
       last = result
       if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
@@ -608,7 +663,7 @@ export class LadderRunner {
         summary: summarize([...channelsTried, `${channel.id}(retry)`], attempts),
       }
     }
-    const retry = await raceWithSignal(channel.fetch(url, snapshot, execution), execution.signal)
+    const retry = await this.awaitLane(channel.fetch(url, snapshot, execution), execution, url, channel)
     attempts.push({ channel: `${channel.id}(retry)`, result: retry })
     ladderTrace.push({
       at: retry.usage.wallMs,

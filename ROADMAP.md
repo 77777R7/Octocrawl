@@ -2,9 +2,11 @@
 
 Updated 2026-09-30. Engineering now follows the Firecrawl parity milestones in [research/parity/plan-to-70.md](research/parity/plan-to-70.md); the earlier seed-user phase plan is folded into them below. The Section A/B/C roadmap remains archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md).
 
-## Current milestone: M1 — make the existing core trustworthy
+## Current milestone: S1 — seed-user slice
 
-**This week:** the four failures the first live batch exposed (below), each fixed with a test and re-checked on the URL that exposed it.
+**M1 closed on 2026-09-30** (commits `70681ca`..`62b9c34` plus the ladder budget fix): items 1–5 below each have a dated record; `node research/parity/score.mjs` reports 25.0% tier-weighted (audit 18.7%), with `scrape-formats.markdown` and `scrape-formats.json` kept weak for the gaps named in [`research/parity/reaudit-2026-09-30.json`](research/parity/reaudit-2026-09-30.json). Not yet done from the exit line: the full 12-URL batch re-run at the M1 commit (six URLs were re-checked; the other six and the browser-lane StatCan check wait for the macOS network).
+
+**This week:** S1 (below), then the 12-URL re-run and the seed user's 72-URL manifest.
 
 ## Direction
 
@@ -42,6 +44,8 @@ Order of work. Items 1–4 come from [the first live batch](research/parity/live
 5. The audited M1 features (`research/parity/milestones.json`, key `M1`): markdown fixes (relative URLs, `data:` images, nested `pre`/tables, ordered lists, all tables kept), links in batch and crawl results, page metadata and real response metadata, `onlyMainContent`, formats array (no 3-entry cap, markdown-only default, `/fc` honours formats), JSON extraction (missing required arrays, full-path matching, evidence, deep merge), `timeout` and `waitFor`, crawl start/resume and status counters, `includePaths`/`excludePaths`, crawl scrape options, SDK waiters, error codes, API key handling, robots `Crawl-delay` on the HTTP lane.
 
 Exit: items 1–5 each have a passing check in a dated record; the first live batch re-run at the M1 commit shows the two failures and five partials resolved or explained; `npm test` green; `node research/parity/score.mjs` reports 25.5% with M1 marked solid.
+
+Status 2026-09-30: items 1–4 checked in [live-batch-1-m1-recheck-2026-09-30.md](research/parity/live-batch-1-m1-recheck-2026-09-30.md) (StatCan's browser-lane rendering unverified from the cloud network); item 5 checked in [m1-live-checks-2026-09-30.md](research/parity/m1-live-checks-2026-09-30.md) with per-feature evidence in [reaudit-2026-09-30.json](research/parity/reaudit-2026-09-30.json). Score 25.0%, not 25.5%: markdown and JSON extraction stay weak (largest-table-only on table pages, Wikipedia chrome leftovers; no price mapping on generic pages without a model, no chunked model input). The 12-URL re-run is carried into the S1 week.
 
 ### S1 · Seed-user slice
 

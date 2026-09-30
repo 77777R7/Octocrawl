@@ -106,6 +106,20 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(await bad.json()).toEqual({ error: 'unknown scrape option: onlyMainContnet', code: 'invalid_request' })
   })
 
+  it('answers a request timeout with a structured result inside the asked budget', async () => {
+    const app = createApp(engine)
+    const startedAt = Date.now()
+    const res = await app.request('/v1/scrape', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/timeout/headers`, timeout: 1000, debug: false }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+    expect(body.metadata.statusCode).toBeNull()
+    expect(Date.now() - startedAt).toBeLessThan(6_000)
+  })
+
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {
     const app = createApp(engine)
     const schema = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }

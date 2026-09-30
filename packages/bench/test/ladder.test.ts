@@ -166,6 +166,38 @@ describe('LadderRunner', () => {
   })
 })
 
+describe('LadderRunner — time budget', () => {
+  const URL_ = 'https://example.com/slow'
+
+  it('turns an exhausted budget into a structured timeout, not an exception', async () => {
+    const runner = new LadderRunner(
+      [{ id: 'http', identity: COHERENT, fetch: () => new Promise<FetchResult>(() => {}) }],
+      { mode: 'standard' },
+    )
+    const startedAt = Date.now()
+    const run = await runner.run(URL_, undefined, { deadlineAt: Date.now() + 50 })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', budgetExceeded: 'time', lane: 'http' })
+    expect(run.result.trace.map((event) => event.event)).toEqual(['budget_exhausted'])
+    expect(run.channelsTried).toEqual(['http'])
+    expect(Date.now() - startedAt).toBeLessThan(4_000)
+  })
+
+  it("prefers the lane's own answer when it arrives shortly after the budget signal", async () => {
+    const own: FetchResult = { ...contentfulResult(URL_, 'http'), status: 'failed', failureReason: 'timeout', markdown: null, trace: [{ at: 60, lane: 'http', event: 'lane_timeout' }] }
+    const runner = new LadderRunner(
+      [
+        { id: 'http', identity: COHERENT, fetch: () => new Promise<FetchResult>((resolve) => setTimeout(() => resolve(own), 150)) },
+        { id: 'browser_local', identity: COHERENT, fetch: async () => contentfulResult(URL_, 'browser_local') },
+      ],
+      { mode: 'standard' },
+    )
+    const run = await runner.run(URL_, undefined, { deadlineAt: Date.now() + 50 })
+    expect(run.result.trace.map((event) => event.event)).toEqual(['lane_timeout'])
+    // The budget is spent, so the browser rung is not tried.
+    expect(run.channelsTried).toEqual(['http'])
+  })
+})
+
 describe('LadderRunner — multi-vendor routing', () => {
   it('tries vendors in declaration order with no history', async () => {
     const http = channel('http', [blockedResult('https://example.com/p', 'bot_detected_generic')])
