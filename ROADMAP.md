@@ -1,99 +1,84 @@
 # W2L Roadmap
 
-Updated 2026-09-28. This replaces the Section A/B/C roadmap, which is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md) together with its gates and evidence boundaries.
+Updated 2026-09-30. Engineering now follows the Firecrawl parity milestones in [research/parity/plan-to-70.md](research/parity/plan-to-70.md); the earlier seed-user phase plan is folded into them below. The Section A/B/C roadmap remains archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md).
 
-## Current phase: Phase 0 — seed-test preparation
+## Current milestone: M1 — make the existing core trustworthy
 
-**This week:** freeze the seed user's source manifest, run the current build on it, classify every failure by the capability that would fix it, and check his recorded numbers against what W2L captured. Test set and tools: [research/coos-pilot/](research/coos-pilot/).
+**This week:** the four failures the first live batch exposed (below), each fixed with a test and re-checked on the URL that exposed it.
 
 ## Direction
 
-W2L turns a list of URLs into a table where every row can be traced to its source: *web data you can cite*. It runs locally; when a site blocks automated access, the user's own browser is the fallback, not stealth.
+W2L turns a list of URLs into a table where every row can be traced to its source: *web data you can cite*. It runs locally; when a site blocks automated access, the user's own browser or a proxy the user supplies is the fallback, not stealth.
 
-The first users are researchers: graduate students, academic and policy researchers, data journalists and think-tank analysts who collect figures from public reports and web pages and must show where each number came from. Everything in the next phases serves that one workflow. Commerce and SaaS competitive intelligence come later; sales-lead scraping is out of scope.
+Engineering goal: reach at least 70% of Firecrawl v2's feature set, tier-weighted, as measured by [research/parity/](research/parity/) (18.7% at the audit commit), while making every feature that already exists behave correctly on real sites. A feature counts only after its real-site check passes and is recorded with the command and source commit; a green unit test is not enough.
 
-Success at the end of the plan (week 13, 2026-12-27): three paying users or ten weekly active users. If neither happens, change the audience before adding features.
+The seed user (the data-centre finance dataset in [research/coos-pilot/](research/coos-pilot/)) remains a customer. His sources are the researcher-side test set; because 56% of his recorded numbers come from PDFs, file download and PDF text come directly after M1 instead of waiting for M3.
 
-## Phases
+Commercial goals (pricing, Pro, launch dates) are deferred until M2 is done and will be set from what the milestones actually cost.
 
-| Phase | Weeks | Goal | Exit |
-| --- | --- | --- | --- |
-| 0 · Seed-test preparation | 1 | Replace assumptions with the seed user's real sources | Baseline run, failure table, value check, Phase 1 thresholds recorded |
-| 1 · Seed alpha | 2–3 | URL list → citable output folder; first you run it for him, then he runs it | He confirms the data can go into his analysis and runs the CLI on his own machine |
-| 2 · Self-serve beta | 4–5 | Anyone can install and run it | He runs a regression on W2L data; a non-author installs it unaided |
-| 3 · Lane for blocked sites | 6–8 | Capture pages that block automated access through the user's browser | Public three-lane success rates on 200 URLs; three users used the lane |
-| 4 · Pro and payments | 9–11 | Something to sell beyond the open core | One interviewee pays for a founding membership |
-| 5 · Launch and decision | 12–13 | Public launch | Three paying or ten weekly active users |
+## Milestones
 
-Week numbers are a guide. A phase ends when its exit condition is met, not when its weeks run out.
+Scores are tier-weighted parity from `node research/parity/score.mjs`; days are the audit's estimates, to be replaced by measured time after M1.
 
-### Phase 0 · Seed-test preparation
+| Milestone | Scope | Features | Audit days | Score after |
+| --- | --- | --- | --- | --- |
+| **M1** · Trustworthy core | Fix what exists: markdown, links, JSON extraction, crawl status, formats, timeouts, path filters, errors; plus the four live-batch failures | 21 + 4 | 34 | 25.5% |
+| **S1** · Seed-user slice | File download as received (CSV, XLSX, ZIP, PDF, JSON) with hashes; PDF text with page numbers (text layer only); re-run the 72-URL manifest and the value check | from M3 | ~8 | — |
+| **M2** · Breadth without external services | html/rawHtml/images/screenshot, include/exclude tags, headers, mobile, sitemap modes, domain scope, webhooks, watcher | 50 | 54 | 39.4% |
+| **M3** · Map, actions, cache, upload | `map`, browser actions, `maxAge` cache, parse upload (rest of the PDF items) | 30 | 55 | 50.0% |
+| **M4** · Clients | Publish `@w2l/sdk` and `@w2l/cli`, Python SDK, Firecrawl v2 compatibility routes, complete MCP | 26 | 51 | 57.5% |
+| **M5** · Bring-your-own services | User-supplied LLM (extract, summary), search backend (SearXNG default), proxy and location; local monitors | 52 | 74 | 73.0% |
 
-No new product features in this phase.
+A milestone ends when every feature in it has a passing real-site check in a dated record under `research/parity/`, not when its days run out.
 
-- [ ] Research intake: dependent and explanatory variables, geography, years, unit of analysis, sources, access terms, his operating system and whether Node or Python is installed.
-- [ ] Freeze the manifest ([research/coos-pilot/coos-manifest.v1.json](research/coos-pilot/coos-manifest.v1.json), 72 URLs). First ask him about the two suspect links (the CyrusOne location source reuses a press-release URL; the Equinix green finance framework URL looks truncated). Do not replace failed URLs after freezing.
-- [ ] Baseline run with the current build: `npm run api`, then `node research/coos-pilot/run-baseline.mjs`.
-- [ ] Classify every non-success by the capability that would fix it (file download, PDF text, robots policy, anti-bot or login, JavaScript rendering, table structure), counted both per URL and per affected observation.
-- [ ] Value check: `python3 research/coos-pilot/check-observations.py --workbook <xlsx> --batch <batch-items.json>`.
-- [ ] Record the Phase 1 thresholds in the manifest before Phase 1 work starts.
-- [ ] At least four interviews (eight by the end of Phase 1, six of them researchers); ask each for their current process, time spent, sites that blocked them and a reaction to the price.
-- [ ] Register the npm organisation `@w2l` and the PyPI name `w2l` (the unscoped npm name `w2l` belongs to someone else).
-- [ ] Repository cleanup: stale README statements, root-level scripts moved to `research/` or removed, Render and WorkOS material out of the docs (WorkOS code in `packages/mcp/src/host.ts` stays, marked experimental), live-network tests split into `npm run test:live`.
-- [ ] Send him the link list, the data issues found in his workbook, and ask which sources he plans to add next. Those become the unseen test set for Phase 1.
+### M1 · Trustworthy core
 
-**Decision rule after the failure table:** if file and PDF failures dominate, Phase 1 starts with file download and PDF text. If anti-bot or login failures affect 20% or more of all URLs, move the two-day Phase 3 spike into Phase 1 week 2. The overall success rate alone does not decide anything.
+Order of work. Items 1–4 come from [the first live batch](research/parity/live-batch-1-2026-09-30.md) and are not in the audit's M1 list; they go first because each turns a page that has data into a confident wrong answer.
 
-### Phase 1 · Seed alpha (URL list → citable output folder)
+1. **HTTP 200 with extractable text must never come back as `failed` with `markdown: null`.** A confidence-0 extract on a listing page (books.toscrape.com `art_25`, data.gov.uk homepage) returns `partial` with the markdown and a `low_confidence` warning. Re-check: batch #2 has 60 fetched and 0 failed; #11 homepage is `partial`.
+2. **Detect client-rendered data and escalate.** A table shell with no cells or an empty data container in an otherwise successful HTTP response (StatCan table 18-10-0006-01, OWID grapher `?tab=table`) triggers the browser lane. Re-check: #7 months and values present; #9 has table rows.
+3. **Robots, DNS and connection failures are structured results, and W2L honours a configured proxy.** A robots lookup timeout returns a `FetchResult` with `dns_error`/`timeout`, not HTTP 500; `HTTPS_PROXY`/`W2L_PROXY_URL` apply to both lanes. Re-check: #6 from the macOS network.
+4. **Markdown keeps block boundaries and drops navigation chrome.** Sibling blocks get separators (quotes.toscrape.com: one quote per line); page navigation is excluded (Wikipedia GDP: body starts at `## Table`, no interlanguage list or navboxes).
+5. The audited M1 features (`research/parity/milestones.json`, key `M1`): markdown fixes (relative URLs, `data:` images, nested `pre`/tables, ordered lists, all tables kept), links in batch and crawl results, page metadata and real response metadata, `onlyMainContent`, formats array (no 3-entry cap, markdown-only default, `/fc` honours formats), JSON extraction (missing required arrays, full-path matching, evidence, deep merge), `timeout` and `waitFor`, crawl start/resume and status counters, `includePaths`/`excludePaths`, crawl scrape options, SDK waiters, error codes, API key handling, robots `Crawl-delay` on the HTTP lane.
 
-Week 1, then the first seed test (you run it and hand him the folder):
+Exit: items 1–5 each have a passing check in a dated record; the first live batch re-run at the M1 commit shows the two failures and five partials resolved or explained; `npm test` green; `node research/parity/score.mjs` reports 25.5% with M1 marked solid.
 
-- File download: CSV, XLSX, ZIP, PDF and JSON are saved as received with SHA-256 and size, without escalating to the browser. Today the HTTP lane receives the file and then the browser reports `connection_error`. The size cap becomes configurable (10 MiB today) so large reports such as the canonical Google 2025 PDF can be fetched.
-- PDF text with page numbers, so observations that cite a page can be checked on that page.
-- Evidence Record v1: one versioned JSON Schema for every lane, with an ISO fetch time, redirect chain, lane, robots decision, raw and output hashes, and extractor version and commit.
-- Tables → CSV: one CSV per table with `tableIndex`, caption and source URL; merged cells carry their value; every table on the page is kept.
-- General exporter: a batch becomes a folder with `results.csv`, `evidence.jsonl`, `tables/`, `files/`, `manifest.sha256`, a draft `methods.md`, and the observation check.
-- Fix the structured-extraction false success (a missing required array is reported as complete).
+### S1 · Seed-user slice
 
-Week 2, then the second seed test (he runs it himself on his next sources, frozen before the run):
+- Detect CSV, XLSX, ZIP, PDF and JSON by content type and save them as received with SHA-256 and size; no browser escalation for files; size cap configurable (10 MiB today); other binaries return `unsupported_content_type`.
+- PDF text with page numbers from the text layer; a scanned PDF returns `ocr_required`, never an empty success.
+- Re-run [research/coos-pilot/](research/coos-pilot/): freeze the manifest first (ask him about the two suspect links), then `run-baseline.mjs` and `check-observations.py`; record recall by source format.
 
-- Explicit, per-domain robots override with a recorded reason (default stays compliant); a declared research User-Agent with contact details where a publisher requires it (SEC).
-- `w2l batch urls.txt --out <dir> [--resume]` without a background service, published as `@w2l/cli` under the `alpha` tag; the installed Chrome (or Edge on Windows) is used when present; CI on macOS, Windows and Linux.
-- Guide: "URL list → CSV with evidence", using his sources.
+Exit: the 15 PDF-type sources in his manifest are captured with hashes, including the canonical Google 2025 report; the value check reports found/not-found for all 1,502 observations.
 
-**Exit:** the thresholds recorded in Phase 0 are met on the 72-URL set and reported on his new sources; he confirms the output can go into his analysis or names what is missing; he ran the CLI on his own machine.
+### M2–M5
 
-### Phase 2 · Self-serve beta
+Feature lists and file-level changes are in [research/parity/plan-to-70.md](research/parity/plan-to-70.md). Order inside each milestone: features already `weak` first, then the cheapest high-tier missing ones.
 
-Publish `@w2l/sdk` and `@w2l/mcp` (after splitting the MIT client from the AGPL server), `map` from sitemaps and home-page links, MCP output with the Evidence Record, install robustness (native SQLite, machines without Node), a non-author install test on clean macOS and Windows, a 1,000-URL / 20-domain kill-and-resume test and a throughput benchmark, and the guide "Citing web data in a paper". A Python client only if interviews ask for it or most users lack Node.
+## Testing rules
 
-### Phase 3 · Lane for blocked sites
-
-Start with a two-day spike on the blocked URLs from the Phase 0 table comparing: attaching to the user's running Chrome over CDP (Chrome 144+, user-approved), a visible browser with a W2L profile, and a browser extension. Build the one that works on those sites. Whichever is chosen: loopback only, explicit pairing or native messaging, minimal permissions, one request at a time per domain with jitter, and the same output shape as the other lanes.
-
-### Phase 4 · Pro and payments
-
-A plugin interface in the core (exporters and lanes), `@w2l/pro` in a separate private repository, offline Ed25519 licences built on `packages/attest`, payments through a merchant of record, the full Evidence Pack (snapshots, screenshots, citations, signed manifest), scheduled re-runs with table-row change comparison built on Monitor, xlsx and Parquet export, the vendor lane, and legal review of the terms, privacy policy and acceptable-use policy.
-
-### Phase 5 · Launch and decision
-
-Launch to interviewees first, then the Chrome Web Store (if an extension exists), Show HN, MCP directories and research mailing lists. At week 13: paying users → expand to the second audience; weekly users without payment → test team or per-project pricing; neither → revisit the interviews and change the audience, not the feature list.
+- Live checks run against the frozen public test set in [research/parity/real-site-test-set.md](research/parity/real-site-test-set.md); failed URLs stay in the denominator and are never swapped.
+- Each batch run is a new dated record under `research/parity/`; earlier records are not edited.
+- Real sites are fetched once per check; sandboxes (toscrape.com, scrapethissite.com, webscraper.io) take repeated runs.
+- Raw outputs stay under `.w2l/` (git-ignored).
 
 ## Paused
 
-These are not worked on unless the stated condition occurs.
+Not worked on unless the stated condition occurs.
 
 | Paused | Restart when |
 | --- | --- |
-| Amazon.sg adapter work, the R4 100/100 gate and the 1,000-page gate | Commerce price evidence becomes the active audience |
+| Amazon.sg adapter work, the R4 100/100 gate and the 1,000-page gate | Commerce price evidence becomes an active audience |
 | Hosted MCP (Render, WorkOS) and hosted persistent tasks | Users ask for runs while their computer is off and will pay for it |
-| Public preview UI work | Phase 5 copy change only |
+| Public preview UI work | Copy change at launch only |
 | Monitor → webhook extensions, n8n, task UI | A paying user needs them |
-| B3/B4 session and recipe work beyond what Phase 3 reuses | Phase 3 chooses a lane that needs it |
-| Full Firecrawl parity (search, agent, cross-site extraction) | A paying user asks |
-| Stealth, fingerprinting, proxy pools | Not restarted |
-| Internal gate process (Gate 5 and similar) | Replaced by user signals |
+| B3/B4 session and recipe work | A milestone needs it |
+| Firecrawl autonomous agent, interact sessions, hosted browser sessions | After M5, if users ask |
+| Stealth, fingerprinting, proxy pools, `ignoreRobotsTxt` | Not restarted; explicit 400 for these options |
+| Browser-extension lane | A user's blocked sites are not covered by their own proxy (M5) |
+| Pro packaging, payments, launch plan | After M2, from measured milestone cost |
+| Internal gate process (Gate 5 and similar) | Replaced by real-site checks and user signals |
 
-## Weekly cadence
+## Cadence
 
-Each Monday, set the week's single goal at the top of this file. Talk to users at least twice a week through Phase 2. Each Friday, send early users a short note on what shipped and what is next. Every two weeks, check whether any paused item's restart condition has occurred.
+Each Monday, set the week's goal at the top of this file. After M1 and after S1, run the seed user's manifest and send him the output. Every two weeks, compare measured days with the audit's estimates and re-plan the remaining milestones.
