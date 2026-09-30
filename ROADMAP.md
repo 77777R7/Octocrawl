@@ -82,7 +82,7 @@ Not worked on unless the stated condition occurs.
 | Monitor → webhook extensions, n8n, task UI | A paying user needs them |
 | B3/B4 session and recipe work | A milestone needs it |
 | Firecrawl autonomous agent, interact sessions, hosted browser sessions | After M5, if users ask |
-| Stealth, fingerprinting, proxy pools, `ignoreRobotsTxt` | Not restarted; explicit 400 for these options |
+| Stealth, fingerprinting, proxy pools, a blanket `ignoreRobotsTxt` | Not restarted; explicit 400 for these options. The per-URL `robotsOverride` with a recorded reason (S1, 2026-09-30) is not this: robots.txt is still read and the override is on the record |
 | Browser-extension lane | A user's blocked sites are not covered by their own proxy (M5) |
 | Pro packaging, payments, launch plan | After M2, from measured milestone cost |
 | Internal gate process (Gate 5 and similar) | Replaced by real-site checks and user signals |

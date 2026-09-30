@@ -18,7 +18,7 @@ import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetwo
 import { describeProxy, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
 import { decodeText, filenameOf, responseShape, saveFileBytes, sniffShape, type ResponseShape } from '../files.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
@@ -200,6 +200,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
       }
     }
     const trace: TraceEvent[] = []
+    // Set when a robots disallow was set aside by the caller's recorded
+    // decision; every result of this fetch then carries the warning.
+    let overrideWarning: FetchWarning | null = null
     const honest = recordHttpIdentity(this.prepared, trace, 0)
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
@@ -239,7 +242,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
           event: 'robots_disallowed',
           detail: { url, appliedRules: robotsDecision.appliedRules },
         })
-        return timedDenied('policy_denied')
+        if (page.robotsOverride === undefined) return timedDenied('policy_denied')
+        // The caller's recorded decision sets the rule aside for this one
+        // URL. The verdict stays in the trace above; this says who set it
+        // aside and why, and the result's warnings repeat it.
+        const override = page.robotsOverride
+        trace.push({
+          at: Date.now() - start,
+          lane: 'http',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        overrideWarning = robotsOverrideWarning(robotsDecision, override)
       }
     }
 
@@ -384,6 +398,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       return {
         ...result,
+        ...(overrideWarning === null ? {} : { warnings: [overrideWarning, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,

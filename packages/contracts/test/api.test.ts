@@ -48,6 +48,24 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchStartRequest({ urls: ['https://example.com/'], format: ['markdown'] })).toThrow('unknown batch option: format')
   })
 
+  it('parses a recorded robots override and insists on its reason', () => {
+    const parsed = parseScrapeRequest({ url: 'https://example.test/report.pdf', robotsOverride: { reason: 'linked publicly by the publisher', recordedBy: 'analyst' } })
+    expect(parsed.robotsOverride).toEqual({ reason: 'linked publicly by the publisher', recordedBy: 'analyst' })
+    expect(() => parseScrapeRequest({ url: 'https://example.test/', robotsOverride: true })).toThrow('robotsOverride must be an object with a reason')
+    expect(() => parseScrapeRequest({ url: 'https://example.test/', robotsOverride: { reason: ' ' } })).toThrow('robotsOverride.reason must be a non-empty string')
+    expect(() => parseScrapeRequest({ url: 'https://example.test/', robotsOverride: { reason: 'x', ignoreRobotsTxt: true } })).toThrow('unknown robotsOverride option: ignoreRobotsTxt')
+    expect(() => parseScrapeRequest({ url: 'https://example.test/', ignoreRobotsTxt: true })).toThrow('unknown scrape option: ignoreRobotsTxt')
+  })
+
+  it('binds each batch robots override to one of the batch urls', () => {
+    const urls = ['https://a.test/one.pdf', 'https://b.test/two.pdf']
+    const parsed = parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://b.test/two.pdf', reason: 'publisher link' }] })
+    expect(parsed.robotsOverrides).toEqual([{ url: 'https://b.test/two.pdf', reason: 'publisher link' }])
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://c.test/', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0], reason: 'r' }, { url: urls[0], reason: 'again' }] })).toThrow('robotsOverrides[1].url is overridden twice')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0] }] })).toThrow('robotsOverrides[0].reason must be a non-empty string')
+  })
+
   it('parses onlyMainContent, timeout and waitFor within their bounds', () => {
     const req = parseScrapeRequest({ url: 'https://example.com/', onlyMainContent: false, timeout: 15000.4, waitFor: 500 })
     expect(req).toMatchObject({ onlyMainContent: false, timeout: 15000, waitFor: 500 })

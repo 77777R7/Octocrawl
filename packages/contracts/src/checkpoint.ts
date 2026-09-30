@@ -81,8 +81,8 @@ export interface Task {
   mode: CrawlMode
   status: TaskStatus
   budget: CrawlBudget
-  /** Present only for an explicit URL-array batch. Stored with the checkpoint. */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean }
+  /** Present only for an explicit URL-array batch. Stored with the checkpoint, recorded robots overrides included. */
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly import('./api.js').RobotsUrlOverride[] }
   /** Present for crawls started with this field; older tasks have neither. */
   crawl?: CrawlTaskOptions
   createdAt: string

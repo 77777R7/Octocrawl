@@ -1,3 +1,5 @@
+import type { RobotsOverride } from './compliance.js'
+
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 /** Per-request page handling, carried with the budget so every lane sees it. */
 export interface PageOptions {
@@ -9,6 +11,12 @@ export interface PageOptions {
   onlyMainContent?: boolean
   /** Extra wait on the browser lane after the page settled, before the DOM is read. */
   waitForMs?: number
+  /**
+   * A recorded decision to fetch this one URL although its host's robots.txt
+   * disallows it. robots.txt is still read and its verdict recorded; the
+   * override goes into the trace, the warnings and the compliance record.
+   */
+  robotsOverride?: RobotsOverride
 }
 
 export interface ExecutionContext {

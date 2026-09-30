@@ -9,7 +9,7 @@
  * page fetch into a crash.
  */
 
-import { type NetworkPolicy, type ExecutionContext } from '@w2l/contracts'
+import { type NetworkPolicy, type ExecutionContext, type FetchWarning, type RobotsOverride } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -70,6 +70,20 @@ function lookupFailure(error: unknown, ownDeadlineHit: boolean): RobotsLookupFai
   if (message.startsWith('robots redirect')) return { reason: 'redirect_error', message }
   if (message === 'robots body too large') return { reason: 'body_too_large', message }
   return { reason: 'connection_error', message }
+}
+
+/**
+ * The warning every result of an overridden fetch carries, so a reader who
+ * never opens the trace still sees that a rule was set aside, which one, and
+ * on whose word.
+ */
+export function robotsOverrideWarning(decision: ComplianceRobotsDecision, override: RobotsOverride): FetchWarning {
+  const rules = decision.appliedRules.map((rule) => rule.pattern).join(', ')
+  const who = override.recordedBy === undefined ? '' : ` by ${override.recordedBy}`
+  return {
+    code: 'robots_overridden',
+    message: `${decision.robotsUrl ?? 'robots.txt'} disallows this URL (rule ${rules}); it was fetched under an override recorded${who}: ${override.reason}`,
+  }
 }
 
 export class RobotsOriginCache {

@@ -29,6 +29,19 @@ const FORMATS_SCHEMA = {
   },
 } as const
 
+/** A recorded decision to fetch one URL its host's robots.txt disallows; never a blanket switch. */
+const ROBOTS_OVERRIDE_PROPERTIES = {
+  reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
+  recordedBy: { type: 'string', minLength: 1, maxLength: 200, description: 'Who recorded the decision.' },
+} as const
+const ROBOTS_OVERRIDE_SCHEMA = {
+  type: 'object',
+  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, the warnings and the compliance record.',
+  properties: ROBOTS_OVERRIDE_PROPERTIES,
+  required: ['reason'],
+  additionalProperties: false,
+} as const
+
 /** Per-page options shared by scrape and a crawl's scrapeOptions. */
 const PAGE_OPTION_SCHEMAS = {
   formats: FORMATS_SCHEMA,
@@ -84,6 +97,7 @@ export const TOOLS = [
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
         ...PAGE_OPTION_SCHEMAS,
+        robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
       },
       required: ['url'],
@@ -177,6 +191,11 @@ export const TOOLS = [
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
         formats: FORMATS_SCHEMA,
         includeLinks: { type: 'boolean' },
+        robotsOverrides: {
+          type: 'array', maxItems: 1000,
+          description: 'Recorded robots overrides, each for one URL of urls.',
+          items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
+        },
       },
       required: ['urls'], additionalProperties: false,
     },
@@ -213,6 +232,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       timeout: req.timeout,
       waitFor: req.waitFor,
       debug: req.debug ?? false,
+      ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
     }, request)
   }
   if (name === 'crawl') {
@@ -251,7 +271,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

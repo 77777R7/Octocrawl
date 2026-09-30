@@ -20,7 +20,7 @@ describe('persistent URL-array batch', () => {
     let slowStarted = () => {}
     const seen: string[] = []
     const server = createServer(async (req, res) => {
-      if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nAllow: /'); return }
+      if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nDisallow: /private\nAllow: /'); return }
       seen.push(req.url ?? '')
       if (req.url === '/item/2' && slow) {
         slowStarted()
@@ -37,6 +37,30 @@ describe('persistent URL-array batch', () => {
     cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
     return { origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release() }
   }
+
+  it('fetches only the URL a recorded robots override names, and keeps the override on the item', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const app = createApp(engine)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/private/item/3`]
+    const accepted = await client.batchScrape(urls, { robotsOverrides: [{ url: urls[1]!, reason: 'The publisher links this item publicly; the rule addresses crawlers.', recordedBy: 'analyst' }] })
+    await client.waitBatch(accepted.taskId)
+    const { items } = await client.getBatchItems(accepted.taskId, { debug: true })
+    const byUrl = new Map(items.map(item => [item.url, item]))
+    expect(byUrl.get(urls[0])).toMatchObject({ status: 'success' })
+    expect(byUrl.get(urls[0])?.warnings).toBeUndefined()
+    expect(byUrl.get(urls[1])).toMatchObject({ status: 'success' })
+    expect(byUrl.get(urls[1])?.warnings?.[0]).toMatchObject({ code: 'robots_overridden' })
+    expect(byUrl.get(urls[1])?.trace.find(event => event.event === 'robots_overridden')?.detail).toMatchObject({ reason: 'The publisher links this item publicly; the rule addresses crawlers.', recordedBy: 'analyst' })
+    expect(byUrl.get(urls[2])).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+    expect(f.seen).toContain('/private/item/2')
+    expect(f.seen).not.toContain('/private/item/3')
+    const bad = await app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls, robotsOverrides: [{ url: 'https://elsewhere.test/', reason: 'x' }] }) })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toMatchObject({ error: 'robotsOverrides[0].url is not one of the batch urls' })
+  })
 
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {
     const f = await fixture()

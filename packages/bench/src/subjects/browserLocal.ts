@@ -1,4 +1,4 @@
-import { estimateTokens, type ExecutionContext, type FetchResult, type NetworkPolicy, type PageOptions, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, type ExecutionContext, type FetchResult, type FetchWarning, type NetworkPolicy, type PageOptions, type RobotsDecision, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -24,7 +24,7 @@ import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetwo
 import { describeProxy, playwrightProxyFor, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
 import { extensionKind, responseShape } from '../files.js'
 import type { SubjectAdapter } from '../subject.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { captureRawHtml } from '../rawArtifact.js'
@@ -288,7 +288,25 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const host = this.hostOf(url)
 
-      if (identity.respectsRobots && robotsDecision.decision === 'disallowed') {
+      // A recorded override sets a disallow aside for this one URL: the
+      // verdict, the override and its reason go into the trace, the warnings
+      // and the compliance record, and the fetch goes ahead.
+      let robotsForRecord: RobotsDecision = robotsDecision
+      const overrideWarnings: FetchWarning[] = []
+      if (identity.respectsRobots && robotsDecision.decision === 'disallowed' && pageOptions.robotsOverride !== undefined) {
+        const override = pageOptions.robotsOverride
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'robots_disallowed', detail: { url, appliedRules: robotsDecision.appliedRules } })
+        trace.push({
+          at: Date.now() - start,
+          lane: 'browser_local',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        robotsForRecord = { ...robotsDecision, skippedFetch: false, override }
+        overrideWarnings.push(robotsOverrideWarning(robotsDecision, override))
+      }
+
+      if (identity.respectsRobots && robotsDecision.decision === 'disallowed' && pageOptions.robotsOverride === undefined) {
         const wallMs = Date.now() - start
         const record = this.chain.append({
           recordId: crypto.randomUUID(),
@@ -594,7 +612,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         requestedUrl: url,
         finalUrl,
         requestedAt: new Date(start).toISOString(),
-        robots: robotsDecision,
+        robots: robotsForRecord,
         sentHeaders: { headers: sentHeaders },
         rateLimit: {
           previousRequestAtMs,
@@ -684,7 +702,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           escalations: [],
           markdown: errorPage?.markdown ?? null,
           ...(errorPage === null ? {} : {
-            warnings: [{ code: 'http_error', message: `The server answered ${status}; the content is that response, not the requested page.` }],
+            warnings: [...overrideWarnings, { code: 'http_error', message: `The server answered ${status}; the content is that response, not the requested page.` }],
             links: errorPage.links,
             document: errorPage.document,
           }),
@@ -741,7 +759,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         lane: 'browser_local',
         escalations: [],
         markdown,
-        ...(verdict.warnings.length > 0 ? { warnings: verdict.warnings } : {}),
+        ...(overrideWarnings.length + verdict.warnings.length > 0 ? { warnings: [...overrideWarnings, ...verdict.warnings] } : {}),
         links,
         document: documentOf(extracted),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown) },

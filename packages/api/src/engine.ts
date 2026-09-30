@@ -37,6 +37,7 @@ import {
   type ExecutionContext,
   type CrawlResumeRequest,
   type PageOptions,
+  type RobotsOverride,
   type TaskScrapeOptions,
   type CompactScrapeResponse,
   type ScrapeResponse,
@@ -262,11 +263,22 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const scrapeOptions: TaskScrapeOptions | null = task.batch !== undefined
       ? { formats: task.batch.formats, includeLinks: task.batch.includeLinks }
       : task.crawl?.scrape ?? null
+    // A batch's recorded robots overrides are per URL: only the URL an
+    // override names is fetched past a disallow, never its neighbours.
+    const robotsOverrideFor = (url: string): RobotsOverride | undefined => {
+      const overrides = task.batch?.robotsOverrides
+      if (overrides === undefined) return undefined
+      const target = canonicalizeUrl(url)
+      const match = overrides.find(override => override.url === url || (target !== null && canonicalizeUrl(override.url) === target))
+      return match === undefined ? undefined : { reason: match.reason, ...(match.recordedBy === undefined ? {} : { recordedBy: match.recordedBy }) }
+    }
     const atom: ScrapeAtom = scrapeOptions === null ? ladder : {
       async scrape(url, context) {
+        const robotsOverride = robotsOverrideFor(url)
         const page: PageOptions = {
           ...(scrapeOptions.onlyMainContent === undefined ? {} : { onlyMainContent: scrapeOptions.onlyMainContent }),
           ...(scrapeOptions.waitForMs === undefined ? {} : { waitForMs: scrapeOptions.waitForMs }),
+          ...(robotsOverride === undefined ? {} : { robotsOverride }),
         }
         const pageDeadline = scrapeOptions.timeoutMs === undefined ? undefined : Date.now() + scrapeOptions.timeoutMs
         const scoped: ExecutionContext = {
@@ -367,6 +379,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         page: {
           ...(req.onlyMainContent === undefined ? {} : { onlyMainContent: req.onlyMainContent }),
           ...(req.waitFor === undefined ? {} : { waitForMs: req.waitFor }),
+          ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
         },
       }
       const mode = defaultApiMode(req.mode)
@@ -470,7 +483,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: { urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true },
+        batch: {
+          urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true,
+          ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
+        },
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
@@ -665,6 +681,7 @@ function toCrawlPage(step: StepRecord): CrawlPage {
     status: step.status,
     lane: step.lane,
     markdown: result?.markdown ?? null,
+    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.links === undefined ? {} : { links: result.links }),
     ...(result?.file === undefined || result.file === null ? {} : { file: result.file }),

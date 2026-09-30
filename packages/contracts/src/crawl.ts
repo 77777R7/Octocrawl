@@ -69,6 +69,8 @@ export interface CrawlPage {
   status: StepStatus
   lane: Lane | null
   markdown: string | null
+  /** The fetch's caveats (a recorded robots override, an error page, thin content), when it had any. */
+  warnings?: readonly import('./result.js').FetchWarning[]
   json?: import('./structured.js').StructuredExtractionResult | null
   /** Outbound links of the page when the crawl asked for them. */
   links?: readonly string[]

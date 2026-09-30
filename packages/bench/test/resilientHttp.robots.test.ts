@@ -85,6 +85,42 @@ describe('ResilientHttpSubject robots', () => {
     expect(out.trace.some((t) => t.event === 'robots_disallowed')).toBe(true)
   })
 
+  it('fetches a disallowed path under a recorded override and says so in the trace and the warnings', async () => {
+    const subject = new ResilientHttpSubject()
+    const before = privateHits
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/secret`, undefined, undefined, {}, undefined, {
+        robotsOverride: { reason: 'The publisher links this report from its own site; the host rule addresses crawlers.', recordedBy: 'test researcher' },
+      })
+      expect(privateHits).toBe(before + 1)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Private area')
+      expect(out.trace.find((t) => t.event === 'robots_checked')?.detail).toMatchObject({ decision: 'disallowed' })
+      expect(out.trace.find((t) => t.event === 'robots_disallowed')).toBeDefined()
+      expect(out.trace.find((t) => t.event === 'robots_overridden')?.detail).toMatchObject({
+        appliedRules: [{ pattern: '/private', allow: false }],
+        reason: 'The publisher links this report from its own site; the host rule addresses crawlers.',
+        recordedBy: 'test researcher',
+      })
+      expect(out.warnings?.[0]).toMatchObject({ code: 'robots_overridden' })
+      expect(out.warnings?.[0]?.message).toContain('recorded by test researcher')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('leaves an allowed path untouched by an override: no override event, no warning', async () => {
+    const subject = new ResilientHttpSubject()
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/ok`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'not needed here' } })
+      expect(out.status).toBe('success')
+      expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
+      expect(out.warnings).toBeUndefined()
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('reports the robots Crawl-delay on the http lane so a crawl can pace by it', async () => {
     const subject = new ResilientHttpSubject()
     try {

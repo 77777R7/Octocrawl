@@ -87,6 +87,19 @@ describe('MCP tools', () => {
     expect(JSON.stringify(batch?.inputSchema)).toContain('"schema"')
   })
 
+  it('forwards a recorded robots override to the REST body and still refuses the blanket switch', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(init?.body ? JSON.parse(String(init.body)) : null)
+      return String(input).endsWith('/v1/batches') ? json({ taskId: 'batch-2' }, 202) : json({ status: 'success', markdown: 'ok', requestedUrl: 'https://example.com/r.pdf' })
+    }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/r.pdf', robotsOverride: { reason: 'publisher link' } })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/r.pdf'], robotsOverrides: [{ url: 'https://example.com/r.pdf', reason: 'publisher link', recordedBy: 'analyst' }] })
+    expect(bodies[0]).toMatchObject({ robotsOverride: { reason: 'publisher link' } })
+    expect(bodies[1]).toMatchObject({ robotsOverrides: [{ url: 'https://example.com/r.pdf', reason: 'publisher link', recordedBy: 'analyst' }] })
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', ignoreRobotsTxt: true })).rejects.toThrow('unknown scrape option: ignoreRobotsTxt')
+  })
+
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
