@@ -6,7 +6,7 @@ W2L turns a public web page into readable content and, on supported pages, field
 
 ## Try W2L
 
-Paste `https://docs.firecrawl.dev/introduction` into [the W2L page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. You can switch between Markdown and result JSON, then copy or download the output without another extraction.
+Paste `https://docs.firecrawl.dev/introduction` into [the W2L page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
 
 This is a recorded result from the W2L capture path, not a guaranteed response for every future visit:
 

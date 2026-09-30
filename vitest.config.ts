@@ -23,7 +23,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
