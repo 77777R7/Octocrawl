@@ -19,7 +19,7 @@ import { readPageMetadata } from './metadata.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
-import { pageSignalsFor, routePage, selectList, selectTable } from './route.js'
+import { pageSignalsFor, routePage, selectList, selectTable, selectTableRegion } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 
@@ -158,9 +158,15 @@ export class ExtractTf implements Extractor {
         }
         break
       }
-      case 'table':
-        main = selectTable(doc.document)
+      case 'table': {
+        const table = selectTable(doc.document)
+        main = table === null ? null : selectTableRegion(doc.document, table)
+        // A table that is a fraction of the page (an earnings release with
+        // its statements) gives way to the document around it, and the output
+        // says so: what came out is the document, not a table.
+        if (main !== table) strategy = 'article'
         break
+      }
       case 'product': {
         const blocks = classifyBlocks(doc.document, classifyOptions)
         main = (amazonProduct ? selectAmazonProduct(doc.document) : null) ?? selectProduct(doc.document, blocks)

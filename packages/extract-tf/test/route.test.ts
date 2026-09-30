@@ -409,4 +409,45 @@ describe('extractTf page types', () => {
     expect(out.strategy).toBe('table')
     expect(out.escalate).toBe(false)
   })
+
+  it('keeps the prose and every table of a release whose largest table is a fraction of the page', () => {
+    // An earnings release as EDGAR renders it: no <p>, prose in <div><font>,
+    // financial statements between the paragraphs. The largest table alone
+    // would drop the capacity figures and the financing amounts.
+    const statement = (title: string, rows: number) =>
+      `<div><table><tr><td colspan="4">${title}</td></tr>` +
+      Array.from({ length: rows }, (_, i) => `<tr><td>Line ${i}</td><td>${1000 + i}</td><td>${2000 + i}</td><td>${3000 + i}</td></tr>`).join('') +
+      '</table></div>'
+    const html = wrap(
+      '<div><font>Harbour Compute Reports Fiscal Fourth Quarter 2026 Results</font></div>' +
+      '<div><font>The 400 MW campus at Meridian is fully leased, and the Company closed $1.59 billion of project financing during the quarter.</font></div>' +
+      '<div><font>Construction of the 200 MW second building began in April, funded by the $2.15 billion facility signed in March.</font></div>' +
+      statement('Consolidated Balance Sheets', 6) +
+      '<div><font>Net loss narrowed to $81 million as the hosting segment reached break-even.</font></div>' +
+      statement('Consolidated Statements of Operations', 8) +
+      statement('Reconciliation of GAAP to Non-GAAP Measures', 12),
+    )
+    const out = extractTf.extract(html)
+    expect(out.pageType).toBe('collection')
+    expect(out.strategy).toBe('article')
+    expect(out.mainHtml).toContain('400 MW')
+    expect(out.mainHtml).toContain('$1.59 billion')
+    expect(out.mainHtml).toContain('$2.15 billion')
+    expect(out.mainHtml).toContain('Consolidated Balance Sheets')
+    expect(out.mainHtml).toContain('Reconciliation of GAAP')
+    expect(out.escalate).toBe(false)
+  })
+
+  it('keeps a table page to its table when the table is most of the page', () => {
+    const html = wrap(
+      '<div class="masthead">Harbour Readings Service, updated hourly from the estuary gauges.</div>' +
+      '<main><h1>Readings</h1><table><tr><th>Station</th><th>Flow</th><th>Stage</th></tr>' +
+      Array.from({ length: 12 }, (_, i) => `<tr><td>Station ${i}</td><td>${40 + i}</td><td>${(1.2 + i / 10).toFixed(1)}</td></tr>`).join('') +
+      '</table></main>',
+    )
+    const out = extractTf.extract(html)
+    expect(out.strategy).toBe('table')
+    expect(out.mainHtml).toContain('Station 11')
+    expect(out.mainHtml).not.toContain('updated hourly')
+  })
 })

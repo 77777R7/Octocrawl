@@ -15,7 +15,7 @@
  */
 
 import type { PageType } from '@w2l/contracts'
-import { commonAncestor, qsa } from './dom.js'
+import { commonAncestor, qsa, textOf } from './dom.js'
 
 interface RouterCounts {
   li: number
@@ -346,6 +346,37 @@ export function selectTable(doc: Document): Element | null {
     if (lca && lca !== doc.body && lca !== doc.documentElement) return lca
   }
   return table
+}
+
+/**
+ * Share of the page's visible text the chosen table must carry for the page
+ * to be a table page. Below it the table is one table in a document: an
+ * earnings release with its financial statements, a filing, a report whose
+ * prose runs between its tables.
+ */
+const TABLE_PAGE_MIN_SHARE = 0.5
+
+function visibleChars(el: Element): number {
+  return textOf(el).replace(/\s+/g, ' ').trim().length
+}
+
+/**
+ * The region a table page emits. A table that carries at least half of the
+ * page's visible text is the page (readings, schedules, dashboards) and is
+ * returned as selected. One that carries less is one table in a document,
+ * and the largest table alone would drop the prose and the other tables: the
+ * region widens to the nearest ancestor that holds half of the page's text,
+ * so the prose and every table come out in document order.
+ */
+export function selectTableRegion(doc: Document, table: Element): Element {
+  const body = doc.body
+  if (!body || !body.contains(table)) return table
+  const total = visibleChars(body)
+  let region = table
+  while (region !== body && visibleChars(region) < total * TABLE_PAGE_MIN_SHARE) {
+    region = region.parentElement ?? body
+  }
+  return region
 }
 
 /**
