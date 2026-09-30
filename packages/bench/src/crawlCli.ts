@@ -14,6 +14,7 @@ import type { CrawlPolicy } from '@w2l/http-core'
 import { LadderRunner } from './routing/ladder.js'
 import { MemoryRoutingHistory } from './routing/vendorRouter.js'
 import { buildChannels } from './ladderCli.js'
+import { operatorProxyFromEnv } from './egressProxy.js'
 import { LadderScrapeAtom } from './scrapeAtom.js'
 
 export const CRAWL_USAGE =
@@ -132,7 +133,8 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     }
     if (seedUrl === null) throw new Error(CRAWL_USAGE)
 
-    const channels = buildChannels(args.mode, { headed: args.headed })
+    const operatorProxy = operatorProxyFromEnv()
+    const channels = buildChannels(args.mode, { headed: args.headed, operatorProxy })
     const policy: CrawlPolicy = {
       mode: args.mode,
       ...(args.allowlistedDomains.length > 0 ? { allowlistedDomains: args.allowlistedDomains } : {}),
@@ -148,6 +150,7 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
     console.log(`task dir    : ${taskDir}`)
     console.log(`checkpoint  : ${taskDir}/${CHECKPOINT_FILENAME}`)
     console.log(`headed      : ${args.headed ? 'yes (browser arm only)' : 'no (CI default)'}`)
+    if (operatorProxy !== null) console.log(`egress proxy: ${operatorProxy.server} (${operatorProxy.source})`)
     if (args.resume) console.log(`resume      : ${resumeFrom}`)
     if (args.useCached) console.log('cache       : --use-cached')
 

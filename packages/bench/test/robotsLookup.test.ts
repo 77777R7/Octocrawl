@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { localNetworkPolicy } from '@w2l/contracts'
-import { createGuardedDispatcher } from '../src/egress.js'
+import { createGuardedDispatcher, DnsLookupError } from '../src/egress.js'
 import { RobotsOriginCache } from '../src/robotsLookup.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -67,6 +67,56 @@ describe('RobotsOriginCache reliability boundaries', () => {
     expect(absent.entry?.absent).toBe(true)
     expect(absent.result.decision).toBe('no_robots')
     expect((await decision(async () => response('temporarily unavailable', 503), false)).result.decision).toBe('no_robots')
+  })
+
+  it('records its own deadline as an unreachable robots.txt instead of throwing', async () => {
+    const url = `${origin}/page`
+    // A robots.txt that never answers: the lookup's own budget must end it.
+    vi.stubGlobal('fetch', (_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+    }))
+    const cache = new RobotsOriginCache(undefined, undefined, false, { lookupTimeoutMs: 50 })
+    try {
+      const entry = await cache.lookup(url, 'w2l-test')
+      expect(entry).toMatchObject({ robots: null, absent: false, failure: { reason: 'timeout' } })
+      expect(cache.decision(entry, url, 'w2l-test').decision).toBe('no_robots')
+      const closed = new RobotsOriginCache(undefined, undefined, true, { lookupTimeoutMs: 50 })
+      try { expect(closed.decision(await closed.lookup(url, 'w2l-test'), url, 'w2l-test').decision).toBe('disallowed') }
+      finally { await closed.teardown() }
+    } finally { await cache.teardown() }
+  })
+
+  it('still honours the caller budget and abort ahead of its own deadline', async () => {
+    vi.stubGlobal('fetch', (_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+    }))
+    const cache = new RobotsOriginCache(undefined, undefined, false, { lookupTimeoutMs: 5_000 })
+    try {
+      await expect(cache.lookup(`${origin}/page`, 'w2l-test', { deadlineAt: Date.now() + 20 })).rejects.toMatchObject({ name: 'TimeoutError' })
+      const controller = new AbortController()
+      const pending = cache.lookup(`${origin}/other`, 'w2l-test', { signal: controller.signal })
+      controller.abort(new DOMException('caller left', 'AbortError'))
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    } finally { await cache.teardown() }
+  })
+
+  it('names a resolver failure dns_error and tries again after the failure window', async () => {
+    const url = `${origin}/page`
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed', { cause: new DnsLookupError('robots.example', 'ENOTFOUND', new Error('getaddrinfo ENOTFOUND')) }))
+      .mockResolvedValueOnce(response('User-agent: *\nDisallow: /private\n'))
+    vi.stubGlobal('fetch', fetcher)
+    const cache = new RobotsOriginCache(undefined, undefined, false, { failureTtlMs: 0 })
+    try {
+      const first = await cache.lookup(url, 'w2l-test')
+      expect(first?.failure).toEqual({ reason: 'dns_error', message: 'fetch failed' })
+      const second = await cache.lookup(url, 'w2l-test')
+      expect(second?.failure).toBeNull()
+      expect(second?.robots?.groups).toHaveLength(1)
+      // A readable robots.txt is cached for good.
+      expect(await cache.lookup(url, 'w2l-test')).toBe(second)
+      expect(fetcher).toHaveBeenCalledTimes(2)
+    } finally { await cache.teardown() }
   })
 
   it('treats a redirected robots 404 as unavailable, not as a redirect failure', async () => {

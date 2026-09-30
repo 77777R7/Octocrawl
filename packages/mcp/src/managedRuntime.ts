@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createApp, createApiEngine } from '@w2l/api'
+import { createApp, createApiEngine, type OperatorProxy } from '@w2l/api'
 import type { NetworkPolicy } from '@w2l/contracts'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
@@ -14,6 +14,8 @@ export interface ManagedRuntimeOptions {
   channelPolicy?: (url: string) => 'ladder' | 'http_only' | 'browser_only'
   publicPreferenceState?: string
   browserAllowedHosts?: readonly string[]
+  /** The operator's own egress proxy; the local host reads it from the environment, the hosted host never sets it. */
+  operatorProxy?: OperatorProxy | null
   maxActiveBatches?: number
   batchMaxWallMs?: number | null
   workerCount?: number
@@ -24,7 +26,7 @@ export interface ManagedRuntimeOptions {
 
 /** The REST API stays in-process; both MCP transports share these durable workers. */
 export function createManagedRuntime(options: ManagedRuntimeOptions) {
-  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
+  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,operatorProxy:options.operatorProxy ?? null,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
   const api = createApp(engine)
   const client = new W2L({baseUrl:'http://w2l.internal',fetch:async(input,init)=>api.fetch(new Request(input,init))})
   const deliveryStore = DeliveryStore.open(join(options.taskRoot,'section-b-control.sqlite'))

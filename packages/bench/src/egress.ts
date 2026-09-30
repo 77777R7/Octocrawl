@@ -27,6 +27,48 @@ export class BodyTooLargeError extends Error {
   }
 }
 
+/**
+ * The hostname could not be resolved. Distinct from a policy denial: nothing
+ * about the target was judged, the network simply gave no address.
+ */
+export class DnsLookupError extends Error {
+  override readonly name = 'DnsLookupError'
+  /** The resolver's code (`ENOTFOUND`, `EAI_AGAIN`, ...) when it gave one. */
+  readonly code: string | undefined
+  constructor(
+    readonly hostname: string,
+    code: string | undefined,
+    cause: unknown,
+  ) {
+    super(`dns lookup failed for ${hostname}${code === undefined ? '' : ` (${code})`}`, { cause })
+    this.code = code
+  }
+}
+
+function dnsFailure(hostname: string, error: unknown): DnsLookupError {
+  const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined
+  return new DnsLookupError(hostname, code, error)
+}
+
+/** Undici wraps a connector rejection as the cause of its socket error. */
+export function isErrorNamed(error: unknown, name: string): boolean {
+  let current = error
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
+    if ('name' in current && current.name === name) return true
+    current = 'cause' in current ? current.cause : null
+  }
+  return false
+}
+
+export interface AssertSafeUrlOptions {
+  /**
+   * The connection will be made by a proxy that resolves the hostname
+   * itself, so the local resolution step is skipped. Scheme, port and
+   * literal-address checks still apply.
+   */
+  viaProxy?: boolean
+}
+
 export function defaultNetworkPolicy(): NetworkPolicy {
   return localNetworkPolicy()
 }
@@ -86,7 +128,7 @@ export async function pinnedBrowserHostRules(hosts: readonly string[], policy: N
     } else {
       let records: ResolvedAddress[]
       try { records = await resolve(hostname, { all: true }) }
-      catch (error) { throw new SsrfDeniedError(hostname, error instanceof Error ? error.message : 'dns lookup failed') }
+      catch (error) { throw dnsFailure(hostname, error) }
       const decision = evaluateResolved(hostname, records.map(record => record.address), policy)
       if (!decision.allowed) throw new SsrfDeniedError(hostname, decision.detail ?? decision.violation ?? 'denied')
       pinned = records.find(record => isIP(record.address) === 4)?.address ?? decision.pinnedAddress
@@ -137,7 +179,7 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
       const pinned = { address: selected.address, family: isIP(selected.address) }
       callback(null, options.all ? [pinned] : pinned.address, pinned.family)
     }).catch((error: unknown) => {
-      callback(new SsrfDeniedError(hostname, error instanceof Error ? error.message : 'dns lookup failed'), '')
+      callback(dnsFailure(hostname, error), '')
     })
   }
   return new Agent({
@@ -147,17 +189,18 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
   })
 }
 
-export async function assertSafeUrl(url: string, policy: NetworkPolicy): Promise<void> {
+export async function assertSafeUrl(url: string, policy: NetworkPolicy, options: AssertSafeUrlOptions = {}): Promise<void> {
   const first = evaluateUrl(url, policy)
   if ('allowed' in first) {
     if (!first.allowed) throw new SsrfDeniedError(url, first.detail ?? first.violation ?? 'denied')
     return
   }
+  if (options.viaProxy) return
   let records: readonly { address: string }[]
   try {
     records = await lookup(first.hostname, { all: true })
   } catch (err) {
-    throw new SsrfDeniedError(url, err instanceof Error ? err.message : 'dns lookup failed')
+    throw dnsFailure(first.hostname, err)
   }
   const decision = evaluateResolved(
     first.hostname,

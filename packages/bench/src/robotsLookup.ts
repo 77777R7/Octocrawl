@@ -2,8 +2,11 @@
  * Origin-cached robots.txt lookup shared by the HTTP and browser arms.
  *
  * A 4xx or a non-text/plain body is "no robots.txt". A 5xx or network
- * failure is recorded as unreachable (`absent: false`), so hosted public
- * callers can fail closed without changing the local product's legacy policy.
+ * failure is recorded as unreachable (`absent: false`, with `failure`
+ * saying why), so hosted public callers can fail closed without changing
+ * the local product's legacy policy. The lookup's own deadline is one of
+ * those failures, never an exception: a slow robots.txt must not turn a
+ * page fetch into a crash.
  */
 
 import { type NetworkPolicy, type ExecutionContext } from '@w2l/contracts'
@@ -17,11 +20,25 @@ import {
   sha256Hex,
   type ComplianceRobotsDecision,
 } from '@w2l/http-core'
-import { assertSafeUrl, createGuardedDispatcher, defaultNetworkPolicy } from './egress.js'
+import { assertSafeUrl, createGuardedDispatcher, defaultNetworkPolicy, isErrorNamed } from './egress.js'
 
 function isPlainText(contentType: string | null): boolean {
   if (contentType === null) return true
   return contentType.toLowerCase().trimStart().startsWith('text/plain')
+}
+
+export type RobotsLookupFailureReason =
+  | 'timeout'
+  | 'dns_error'
+  | 'connection_error'
+  | 'policy_denied'
+  | 'redirect_error'
+  | 'body_too_large'
+  | 'http_error'
+
+export interface RobotsLookupFailure {
+  reason: RobotsLookupFailureReason
+  message: string
 }
 
 export interface CachedRobots {
@@ -29,17 +46,48 @@ export interface CachedRobots {
   robots: ReturnType<typeof parseRobotsTxt> | null
   sha256: string | null
   absent: boolean
+  /** Why robots.txt was unreachable; null when it was read or is absent. */
+  failure: RobotsLookupFailure | null
+}
+
+export interface RobotsLookupOptions {
+  /** Wall-clock budget for one robots.txt lookup. */
+  lookupTimeoutMs?: number
+  /** URL guard before each request; defaults to the direct-egress policy check. */
+  assertUrl?: (url: string) => Promise<void>
+  /** How long an unreachable verdict is reused before robots.txt is tried again. */
+  failureTtlMs?: number
+}
+
+const DEFAULT_LOOKUP_TIMEOUT_MS = 5_000
+const DEFAULT_FAILURE_TTL_MS = 60_000
+
+function lookupFailure(error: unknown, ownDeadlineHit: boolean): RobotsLookupFailure {
+  const message = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)
+  if (ownDeadlineHit || isErrorNamed(error, 'TimeoutError')) return { reason: 'timeout', message }
+  if (isErrorNamed(error, 'DnsLookupError')) return { reason: 'dns_error', message }
+  if (isErrorNamed(error, 'SsrfDeniedError')) return { reason: 'policy_denied', message }
+  if (message.startsWith('robots redirect')) return { reason: 'redirect_error', message }
+  if (message === 'robots body too large') return { reason: 'body_too_large', message }
+  return { reason: 'connection_error', message }
 }
 
 export class RobotsOriginCache {
   private readonly byOrigin = new Map<string, CachedRobots>()
+  private readonly failedUntil = new Map<string, number>()
   private readonly pending = new Map<string, { promise: Promise<CachedRobots | null>; controller: AbortController; users: number }>()
   private readonly dispatcher: Dispatcher | ((url: string) => Dispatcher)
   private readonly ownsDispatcher: boolean
+  private readonly lookupTimeoutMs: number
+  private readonly failureTtlMs: number
+  private readonly assertUrl: (url: string) => Promise<void>
   private teardownPromise: Promise<void> | null = null
-  constructor(private readonly networkPolicy: NetworkPolicy = defaultNetworkPolicy(), dispatcher?: Dispatcher | ((url: string) => Dispatcher), private readonly failClosedOnUnreachable = false) {
+  constructor(private readonly networkPolicy: NetworkPolicy = defaultNetworkPolicy(), dispatcher?: Dispatcher | ((url: string) => Dispatcher), private readonly failClosedOnUnreachable = false, options: RobotsLookupOptions = {}) {
     this.ownsDispatcher = dispatcher === undefined
     this.dispatcher = dispatcher ?? createGuardedDispatcher(networkPolicy)
+    this.lookupTimeoutMs = options.lookupTimeoutMs ?? DEFAULT_LOOKUP_TIMEOUT_MS
+    this.failureTtlMs = options.failureTtlMs ?? DEFAULT_FAILURE_TTL_MS
+    this.assertUrl = options.assertUrl ?? ((url) => assertSafeUrl(url, networkPolicy))
   }
 
   async teardown(): Promise<void> {
@@ -62,18 +110,18 @@ export class RobotsOriginCache {
     }
 
     const cached = this.byOrigin.get(origin)
-    if (cached) return cached
+    if (cached && (cached.failure === null || (this.failedUntil.get(origin) ?? 0) > Date.now())) return cached
     let pending = this.pending.get(origin)
     if (pending === undefined) {
       const controller = new AbortController()
       const request = (async (): Promise<CachedRobots | null> => {
-      const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + 5_000 })
-      let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false }
+      const deadlineAt = Date.now() + this.lookupTimeoutMs
+      const scope = createExecutionScope({ signal: controller.signal, deadlineAt })
+      let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false, failure: null }
       try {
-      await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
       let currentUrl = robotsUrl
       for (let hop = 0; hop <= this.networkPolicy.maxRedirects; hop++) {
-        await raceWithSignal(assertSafeUrl(currentUrl, this.networkPolicy), scope.signal)
+        await raceWithSignal(this.assertUrl(currentUrl), scope.signal)
         const res = await fetch(currentUrl, {
         headers: { 'user-agent': userAgent },
         signal: scope.signal,
@@ -92,13 +140,13 @@ export class RobotsOriginCache {
         }
       if (res.status >= 500) {
         await res.body?.cancel()
-        entry = { robotsUrl, robots: null, sha256: null, absent: false }
+        entry = { robotsUrl, robots: null, sha256: null, absent: false, failure: { reason: 'http_error', message: `robots.txt answered ${res.status}` } }
       } else if (res.status >= 400) {
         await res.body?.cancel()
-        entry = { robotsUrl, robots: null, sha256: null, absent: true }
+        entry = { robotsUrl, robots: null, sha256: null, absent: true, failure: null }
       } else if (!isPlainText(res.headers.get('content-type'))) {
         await res.body?.cancel()
-        entry = { robotsUrl, robots: null, sha256: null, absent: true }
+        entry = { robotsUrl, robots: null, sha256: null, absent: true, failure: null }
       } else {
         const reader = res.body?.getReader()
         if (reader === undefined) throw new Error('robots response has no body')
@@ -120,17 +168,23 @@ export class RobotsOriginCache {
           robots: parseRobotsTxt(text),
           sha256: sha256Hex(new TextEncoder().encode(text)),
           absent: false,
+          failure: null,
         }
       }
       break
       }
-    } catch {
-      throwIfExecutionStopped(scope)
-      entry = { robotsUrl, robots: null, sha256: null, absent: false }
+    } catch (error) {
+      // Every waiter left: nobody needs a verdict, and caching one made
+      // under a cancelled budget would be guesswork.
+      if (controller.signal.aborted) throw error
+      // The lookup's own deadline, or the network: robots.txt is unreachable
+      // for now. That is a recorded fact about the origin, not a crash.
+      entry = { robotsUrl, robots: null, sha256: null, absent: false, failure: lookupFailure(error, Date.now() >= deadlineAt) }
     } finally { scope.dispose() }
 
-      throwIfExecutionStopped(scope)
       this.byOrigin.set(origin, entry)
+      if (entry.failure !== null) this.failedUntil.set(origin, Date.now() + this.failureTtlMs)
+      else this.failedUntil.delete(origin)
       return entry
     })()
       pending = { promise: request, controller, users: 0 }

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { hostedNetworkPolicy, localNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
+import { operatorProxyFromEnv, type OperatorProxy } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
@@ -16,6 +17,8 @@ export interface LocalConfig {
   networkPolicy?: NetworkPolicy
   deliveryNetworkPolicy?: NetworkPolicy
   amazonPublicState?: string
+  /** `W2L_PROXY_URL` / `HTTPS_PROXY` / `HTTP_PROXY` with `NO_PROXY`; null goes direct. */
+  operatorProxy?: OperatorProxy | null
 }
 
 export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalConfig {
@@ -31,13 +34,13 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
     : undefined
   const amazonPublicState=env.W2L_AMAZON_PUBLIC_STATE_FILE ? readFileSync(env.W2L_AMAZON_PUBLIC_STATE_FILE,'utf8') : undefined
   if (amazonPublicState !== undefined) validateAmazonPublicState(amazonPublicState)
-  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,deliveryNetworkPolicy,amazonPublicState}
+  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,deliveryNetworkPolicy,amazonPublicState,operatorProxy:operatorProxyFromEnv(env)}
 }
 
 /** Single-user local service. It never binds a public interface or exposes REST. */
 export function createLocalService(config: LocalConfig): {server: HttpServer; close: () => Promise<void>} {
   if (!Number.isSafeInteger(config.port) || config.port < 0 || config.port > 65535) throw new Error('port must be 0..65535')
-  const runtime=createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:config.networkPolicy ?? localNetworkPolicy(),deliveryNetworkPolicy:config.deliveryNetworkPolicy,monitorPollMs:config.monitorPollMs,deliveryPollMs:config.deliveryPollMs,
+  const runtime=createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:config.networkPolicy ?? localNetworkPolicy(),deliveryNetworkPolicy:config.deliveryNetworkPolicy,monitorPollMs:config.monitorPollMs,deliveryPollMs:config.deliveryPollMs,operatorProxy:config.operatorProxy ?? null,
     ...(config.amazonPublicState === undefined ? {} : {publicPreferenceState:config.amazonPublicState,
       browserAllowedHosts:['www.amazon.sg','m.media-amazon.com','images-na.ssl-images-amazon.com','images-eu.ssl-images-amazon.com'],
       channelPolicy:(url:string)=>new URL(url).hostname === 'www.amazon.sg' ? 'browser_only' as const : ['docs.firecrawl.dev','modelcontextprotocol.io'].includes(new URL(url).hostname) ? 'http_only' as const : 'ladder' as const})})

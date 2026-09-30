@@ -19,7 +19,9 @@ import {
   type ComplianceSentHeader,
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { type Agent, type Dispatcher, type ProxyAgent } from 'undici'
+import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
+import { describeProxy, playwrightProxyFor, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -107,6 +109,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * It is never written to a record, a trace, or a log line.
    */
   private readonly accessConfig: AccessConfigInput | null
+  /**
+   * The operator's own egress proxy (local entry points only). Chromium and
+   * the robots.txt fetch both leave through it; a host-pinned (hosted)
+   * browser keeps direct egress because the pinned resolver rules are the
+   * policy there and a proxy would resolve hosts itself.
+   */
+  private readonly operatorProxy: OperatorProxy | null
+  private readonly operatorProxyAgent: ProxyAgent | null
+  private readonly robotsDispatcher: Agent
 
   constructor(
     private readonly mode: CrawlMode = 'standard',
@@ -120,6 +131,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     /** In-memory witness for an explicitly authorized evaluation. Never a persistence path. */
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
     robotsFailClosed = false,
+    operatorProxy: OperatorProxy | null = null,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -133,7 +145,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.accessConfig = access ?? null
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, undefined, robotsFailClosed)
+    this.operatorProxy = browserAllowedHosts === undefined ? operatorProxy : null
+    this.operatorProxyAgent = this.operatorProxy === null ? null : proxyAgentFor(this.operatorProxy)
+    this.robotsDispatcher = createGuardedDispatcher(this.networkPolicy)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.robotsDispatcherFor(url), robotsFailClosed, { assertUrl: url => this.assertUrl(url) })
+  }
+
+  /** Whether this URL leaves through the operator's proxy rather than direct, pinned egress. */
+  private viaOperatorProxy(url: string): boolean {
+    return this.operatorProxy !== null && !proxyBypasses(this.operatorProxy, url)
+  }
+
+  private robotsDispatcherFor(url: string): Dispatcher {
+    return this.operatorProxyAgent !== null && this.viaOperatorProxy(url) ? this.operatorProxyAgent : this.robotsDispatcher
+  }
+
+  private assertUrl(url: string): Promise<void> {
+    return assertSafeUrl(url, this.networkPolicy, { viaProxy: this.viaOperatorProxy(url) })
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -206,7 +234,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     signal?.addEventListener('abort', onAbort, { once: true })
     try {
       throwIfExecutionStopped(execution)
-      await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
+      await raceWithSignal(this.assertUrl(url), signal)
       const managedContext = this.managedProfileDir === null ? null : await raceWithSignal(this.getManagedContext(execution), signal)
       const browser = managedContext?.browser() ?? await raceWithSignal(this.getBrowser(execution), signal)
       throwIfExecutionStopped(execution)
@@ -236,8 +264,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
           crawlDelayMs: robotsDecision.crawlDelayMs,
+          ...(cachedRobots?.failure ? { unreachable: cachedRobots.failure.reason } : {}),
         },
       })
+      if (this.operatorProxy !== null && this.viaOperatorProxy(url)) {
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'proxy_used', detail: describeProxy(this.operatorProxy) })
+      }
 
       const host = this.hostOf(url)
 
@@ -475,7 +507,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             if (followupRobots.decision === 'disallowed') {
               trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'amazon_variant_followup_denied', detail: { url: followupUrl } })
             } else {
-              await raceWithSignal(assertSafeUrl(followupUrl, this.networkPolicy), signal)
+              await raceWithSignal(this.assertUrl(followupUrl), signal)
               variantFollowups++
               navigationUrl = followupUrl
               trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'amazon_variant_followup', detail: { selectedAsin: variant.selectedAsin, requestedAsin: requestedAmazonAsin, url: followupUrl } })
@@ -491,7 +523,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
       if (finalUrl !== url) {
         try {
-          await assertSafeUrl(finalUrl, this.networkPolicy)
+          await this.assertUrl(finalUrl)
         } catch (err) {
           return this.denied(url, start, trace, err)
         }
@@ -686,9 +718,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
     } catch (err) {
       const wallMs = Date.now() - start
       // Playwright surfaces deadline misses as TimeoutError; map them to the
-      // contract's timeout reason so the timeout fixtures match, and leave
-      // every other navigation failure as connection_error.
-      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout' : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied' : 'connection_error'
+      // contract's timeout reason so the timeout fixtures match. A name that
+      // did not resolve (our guard, or Chromium's own resolver) is dns_error;
+      // every other navigation failure stays connection_error.
+      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
+        : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
+          : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
+            : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -809,7 +845,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           `--host-resolver-rules=${await pinnedBrowserHostRules(this.browserAllowedHosts, this.networkPolicy)}`,
         ]
         if (this.activeExecutions === 0) throw new DOMException('Browser startup abandoned', 'AbortError')
-        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? {} : { args }) })
+        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? {} : { args }), ...this.launchProxyOption() })
       }
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {
@@ -828,11 +864,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.browserPromise
   }
 
+  /** The operator's proxy as Chromium's launch option; credentials go to the browser, never to a record. */
+  private launchProxyOption(): { proxy?: ReturnType<typeof playwrightProxyFor> } {
+    return this.operatorProxy === null ? {} : { proxy: playwrightProxyFor(this.operatorProxy) }
+  }
+
   private async getManagedContext(execution: ExecutionContext): Promise<BrowserContext> {
     throwIfExecutionStopped(execution)
     if (this.managedContext !== null) return this.managedContext
     if (this.managedContextPromise === null) {
-      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000 })
+      const pending = chromium.launchPersistentContext(this.managedProfileDir!, { headless: !this.headed, timeout: 30_000, ...this.launchProxyOption() })
         .then(async context => {
           if (this.activeExecutions === 0) {
             if (this.managedContextPromise === pending) this.managedContextPromise = null
@@ -859,5 +900,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.browser = null
     this.browserPromise = null
     await this.robotsCache.teardown()
+    await Promise.all([this.robotsDispatcher.close(), this.operatorProxyAgent?.close()])
   }
 }

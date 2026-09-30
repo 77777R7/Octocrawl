@@ -22,6 +22,12 @@ it('only opts the local delivery worker into loopback egress explicitly',()=>{
   expect(evaluateHostname('169.254.169.254',policy)?.allowed).toBe(false)
 })
 
+it('reads the operator egress proxy from the environment, never inventing one',()=>{
+  expect(localConfigFromEnv({}).operatorProxy).toBeNull()
+  expect(localConfigFromEnv({HTTPS_PROXY:'http://user:secret@127.0.0.1:3128',NO_PROXY:'localhost'}).operatorProxy).toMatchObject({server:'http://127.0.0.1:3128',source:'HTTPS_PROXY',bypass:['localhost'],username:'user',password:'secret'})
+  expect(localConfigFromEnv({W2L_PROXY_URL:'off',HTTPS_PROXY:'http://127.0.0.1:3128'}).operatorProxy).toBeNull()
+})
+
 it('serves all tools on loopback and preserves Monitor state across MCP connections',async()=>{
   const probe=createServer()
   probe.listen(0,'127.0.0.1');await once(probe,'listening')

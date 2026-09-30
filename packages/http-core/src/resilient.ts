@@ -24,13 +24,22 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
 export type UrlGuard = (url: string) => Promise<void>
 
 /** Undici may wrap a connector rejection as the cause of its socket error. */
-function isSsrfDeniedError(error: unknown): boolean {
+function hasErrorNamed(error: unknown, name: string): boolean {
   let current = error
   for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
-    if ('name' in current && current.name === 'SsrfDeniedError') return true
+    if ('name' in current && current.name === name) return true
     current = 'cause' in current ? current.cause : null
   }
   return false
+}
+
+function isSsrfDeniedError(error: unknown): boolean {
+  return hasErrorNamed(error, 'SsrfDeniedError')
+}
+
+/** A resolver failure surfaced by the egress guard (see bench/egress DnsLookupError). */
+function isDnsLookupError(error: unknown): boolean {
+  return hasErrorNamed(error, 'DnsLookupError')
 }
 
 export interface ResilientHttpConfig extends ExecutionBudget {
@@ -81,6 +90,7 @@ export type ResilientFetcher = (
 
 export type ResilientFailureReason =
   | 'timeout'
+  | 'dns_error'
   | 'connection_error'
   | 'http_error'
   | 'redirect_loop'
@@ -150,11 +160,12 @@ function denied(
   attemptCount: number,
   trace: ResilientOutcome['trace'],
   headers: ResilientOutcome['headers'] = null,
+  failureReason: ResilientFailureReason = 'policy_denied',
 ): ResilientOutcome {
   return {
     kind: 'failure',
     status: null,
-    failureReason: 'policy_denied',
+    failureReason,
     finalUrl: current,
     ...emptyOutcomeFields(chain, requestCount, attemptCount, trace),
     headers,
@@ -176,11 +187,14 @@ async function guardUrl(
     await assertUrl(url)
     return null
   } catch (err) {
-    trace.push({
-      at,
-      event: 'ssrf_denied',
-      detail: { to: url, error: err instanceof Error ? err.message : String(err) },
-    })
+    const error = err instanceof Error ? err.message : String(err)
+    // The guard resolves the name before it can judge the address: a name
+    // that does not resolve is a network fact, not a policy verdict.
+    if (isDnsLookupError(err)) {
+      trace.push({ at, event: 'dns_failed', detail: { to: url, error } })
+      return denied(current, chain, requestCount, attemptCount, trace, null, 'dns_error')
+    }
+    trace.push({ at, event: 'ssrf_denied', detail: { to: url, error } })
     return denied(current, chain, requestCount, attemptCount, trace)
   }
 }
@@ -238,9 +252,11 @@ export async function resilientFetch(
             ? 'timeout'
             : isSsrfDeniedError(err)
               ? 'policy_denied'
-              : name === 'BodyTooLargeError'
-                ? 'body_too_large'
-                : 'connection_error'
+              : isDnsLookupError(err)
+                ? 'dns_error'
+                : name === 'BodyTooLargeError'
+                  ? 'body_too_large'
+                  : 'connection_error'
         trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err) } })
         return {
           kind: 'failure',

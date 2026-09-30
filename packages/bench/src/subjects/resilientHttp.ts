@@ -12,6 +12,7 @@ import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
+import { describeProxy, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -44,9 +45,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private readonly dispatcher: Agent
   private readonly localPreviewProxy: ProxyAgent | null
   private readonly localPreviewRobotsException: boolean
+  /** The operator's own egress proxy (local entry points only); see egressProxy.ts. */
+  private readonly operatorProxy: OperatorProxy | null
+  private readonly operatorProxyAgent: ProxyAgent | null
   private teardownPromise: Promise<void> | null = null
 
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, robotsFailClosed = false, localPreviewProxyUrl?: string, localPreviewRobotsException = false) {
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, robotsFailClosed = false, localPreviewProxyUrl?: string, localPreviewRobotsException = false, operatorProxy: OperatorProxy | null = null) {
     this.prepared = prepareHttpIdentity(mode)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
@@ -55,7 +59,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.dispatcher = createGuardedDispatcher(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed)
+    this.operatorProxy = operatorProxy
+    this.operatorProxyAgent = operatorProxy === null ? null : proxyAgentFor(operatorProxy)
+    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url), robotsFailClosed, { assertUrl: url => this.assertUrl(url) })
     const headers = this.prepared.headers
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
     this.fetcherFor = (initialUrl, validators, signal, onBodyRead, onRequestWait) => async (url, init) => {
@@ -92,7 +98,18 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private dispatcherFor(url: string): Dispatcher {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.dispatcher
+    if (this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url)) return this.localPreviewProxy
+    if (this.operatorProxyAgent !== null && this.viaOperatorProxy(url)) return this.operatorProxyAgent
+    return this.dispatcher
+  }
+
+  /** Whether this URL leaves through the operator's proxy rather than direct, pinned egress. */
+  private viaOperatorProxy(url: string): boolean {
+    return this.operatorProxy !== null && !(this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url)) && !proxyBypasses(this.operatorProxy, url)
+  }
+
+  private assertUrl(url: string): Promise<void> {
+    return assertSafeUrl(url, this.networkPolicy, { viaProxy: this.viaOperatorProxy(url) })
   }
 
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter']): Promise<FetchResult> {
@@ -191,6 +208,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           robotsUrl: robotsDecision.robotsUrl,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
+          ...(cached?.failure ? { unreachable: cached.failure.reason } : {}),
         },
       })
       robotsMs = performance.now() - robotsStart
@@ -208,6 +226,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (signal?.aborted) return timedDenied('timeout')
     const host = new URL(url).origin
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
+    if (this.operatorProxy !== null && this.viaOperatorProxy(url)) {
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'proxy_used', detail: describeProxy(this.operatorProxy) })
+    }
     const transportStart = performance.now()
     const out = await resilientFetch(url, this.fetcherFor(url, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
@@ -225,7 +246,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       maxRedirects: this.networkPolicy.maxRedirects,
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
-        await assertSafeUrl(target, this.networkPolicy)
+        await this.assertUrl(target)
       },
     }).catch(error => {
       if (!signal?.aborted && (deadlineAt === undefined || Date.now() < deadlineAt)) throw error
@@ -517,7 +538,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   async teardown(): Promise<void> {
-    this.teardownPromise ??= Promise.all([this.dispatcher.close(), this.localPreviewProxy?.close()]).then(() => {})
+    this.teardownPromise ??= Promise.all([this.dispatcher.close(), this.localPreviewProxy?.close(), this.operatorProxyAgent?.close()]).then(() => {})
     await this.teardownPromise
   }
 }

@@ -14,6 +14,7 @@ import {
   ResilientHttpSubject,
   OriginScheduler,
   type Channel,
+  type OperatorProxy,
 } from '@w2l/bench'
 import {
   defaultApiMode,
@@ -119,6 +120,8 @@ export interface ApiEngineOptions {
   /** Operator-created anonymous marketplace state, scoped by BrowserLocalSubject. */
   publicPreferenceState?: string | null
   browserAllowedHosts?: readonly string[]
+  /** The operator's own egress proxy; local entry points read it from the environment, hosted never sets it. */
+  operatorProxy?: OperatorProxy | null
   /** Hosted single-owner resource ceiling; absent locally for compatibility. */
   maxActiveBatches?: number
   batchMaxWallMs?: number | null
@@ -142,7 +145,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     ...(options.perHostMinDelayMs === undefined ? {} : { perHostMinDelayMs: options.perHostMinDelayMs }),
   }
   const originScheduler = new OriginScheduler(networkPolicy)
-  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler)
+  const operatorProxy = options.operatorProxy ?? null
+  const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, false, undefined, false, operatorProxy)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const inflight = new Map<string, Promise<void>>()
   let batchStartInProgress = false
@@ -151,7 +155,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, operatorProxy })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -534,7 +538,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const access = await sessionBroker.grant({ ...input, origin: input.url })
       if (access.kind !== 'granted') return access
       const session = await sessionBrokerStoreGet(sessionBroker, input.sessionRef)
-      const subject = new BrowserLocalSubject('standard', null, false, networkPolicy, session.profileDir)
+      const subject = new BrowserLocalSubject('standard', null, false, networkPolicy, session.profileDir, undefined, null, undefined, undefined, false, operatorProxy)
       try { return await subject.fetch(input.url) } finally { await subject.teardown() }
     },
 

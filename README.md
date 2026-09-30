@@ -97,6 +97,8 @@ npm run mcp
 
 `npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and defaults crawl `maxPages` to 100.
 
+Local runs (the local MCP, `npm run api`, the ladder and crawl CLIs) follow the operator's egress proxy: `W2L_PROXY_URL` if set, else `HTTPS_PROXY`/`HTTP_PROXY`, with `NO_PROXY` hosts going direct. Only `http://` and `https://` proxies are supported; `W2L_PROXY_URL=off` ignores the shell's proxy variables. The HTTP lane, the browser lane and robots.txt fetches all use it, the trace records `scheme://host:port` (never credentials) as a `proxy_used` event, and hosted mode never reads these variables.
+
 The unified local MCP covers scrape, Crawl, persistent URL-array batches, and
 Monitor/Delivery without separate worker terminals. A unified service also
 implements authenticated Streamable HTTP for the reviewed public-document

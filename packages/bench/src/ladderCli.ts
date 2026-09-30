@@ -36,6 +36,7 @@ import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
 import { defaultNetworkPolicy } from './egress.js'
+import { operatorProxyFromEnv, type OperatorProxy } from './egressProxy.js'
 import { connectVendor } from './vendors/connect.js'
 import { browserbaseOps } from './vendors/browserbase.js'
 import { steelOps } from './vendors/steel.js'
@@ -148,14 +149,17 @@ export function buildChannels(
     localPreviewProxyUrl?: string
     /** Explicit local-review exception for fixed public platform pages only. */
     localPreviewRobotsException?: boolean
+    /** The operator's own egress proxy, read from the environment by local entry points only. */
+    operatorProxy?: OperatorProxy | null
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
   // fetch would be both slow and leaky; the channel's close() is what tears
   // the browser down at the end.
   const originScheduler = opts.originScheduler ?? new OriginScheduler(opts.networkPolicy ?? defaultNetworkPolicy())
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.robotsFailClosed === true, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, opts.robotsFailClosed === true)
+  const operatorProxy = opts.operatorProxy ?? null
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.robotsFailClosed === true, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, operatorProxy)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, opts.robotsFailClosed === true, operatorProxy)
   const declared: IdentityBundle = identityForRoute(mode)
 
   // ----------------------------------------------------------------------
@@ -182,7 +186,7 @@ export function buildChannels(
       }
       if (session.cookies !== undefined) access.session!.cookies = session.cookies
       if (session.storageState !== undefined) access.session!.storageState = session.storageState
-      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler)
+      subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler, null, undefined, undefined, false, operatorProxy)
       authedSubjects.set(session.domain, subject)
     }
     return subject
@@ -517,8 +521,10 @@ export async function runLadder(args: Args): Promise<number> {
       ...(args.liveView ? ['live_view_handoff'] : []),
     ] as const,
   }
+  const operatorProxy = operatorProxyFromEnv()
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    operatorProxy,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),
   })
   const policy: CrawlPolicy = {
@@ -537,6 +543,7 @@ export async function runLadder(args: Args): Promise<number> {
   console.log(
     `vendor policy: ${vendorPolicy.authorized.length > 0 ? vendorPolicy.authorized.join(', ') : 'default (no persistence, no live view)'}`,
   )
+  if (operatorProxy !== null) console.log(`egress proxy : ${operatorProxy.server} (${operatorProxy.source})`)
   if (sessionStore !== null) console.log(`session store: ${args.sessionStoreFile}`)
   if (args.historyFile !== null) console.log(`history file : ${args.historyFile}`)
 

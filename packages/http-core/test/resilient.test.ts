@@ -262,6 +262,26 @@ describe('resilientFetch: transport errors', () => {
     expect(out.failureReason).toBe('connection_error')
   })
 
+  it('maps a resolver failure wrapped by the transport to dns_error', async () => {
+    const lookup = new Error('dns lookup failed for nonexistent.invalid (ENOTFOUND)')
+    lookup.name = 'DnsLookupError'
+    const f = scripted([new TypeError('fetch failed', { cause: lookup })])
+    const out = await resilientFetch(U, f)
+    expect(out.kind).toBe('failure')
+    expect(out.failureReason).toBe('dns_error')
+  })
+
+  it('reports a URL guard that could not resolve the name as dns_error, not policy_denied', async () => {
+    const f = scripted([new Error('must not be called')])
+    const lookup = new Error('dns lookup failed for nonexistent.invalid (ENOTFOUND)')
+    lookup.name = 'DnsLookupError'
+    const out = await resilientFetch(U, f, { assertUrl: async () => { throw lookup } })
+    expect(out.kind).toBe('failure')
+    expect(out.failureReason).toBe('dns_error')
+    expect(out.requestCount).toBe(0)
+    expect(out.trace.map((event) => event.event)).toContain('dns_failed')
+  })
+
   it('maps a socket lookup policy denial wrapped by the transport to policy_denied', async () => {
     const denied = new Error('private address')
     denied.name = 'SsrfDeniedError'

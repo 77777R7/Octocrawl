@@ -2,6 +2,7 @@
 import { serve } from '@hono/node-server'
 import { pathToFileURL } from 'node:url'
 import { createApp } from './app.js'
+import { operatorProxyFromEnv } from '@w2l/bench'
 import { createApiEngine } from './engine.js'
 import { parseListen, parsePort } from './listen.js'
 
@@ -9,10 +10,13 @@ export { parseListen, parsePort }
 
 async function main(): Promise<void> {
   const listen = parseListen(process.argv.slice(2), process.env)
+  // Only the local service follows the operator's proxy; hosted egress stays direct and DNS-pinned.
+  const operatorProxy = listen.mode === 'local' ? operatorProxyFromEnv(process.env) : null
   const engine = createApiEngine({
     taskRoot: process.env.W2L_TASK_ROOT ?? '.w2l/api',
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
+    operatorProxy,
   })
   const app = createApp(engine, { token: listen.token })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
@@ -24,6 +28,7 @@ async function main(): Promise<void> {
     void engine.close({cancelActive: true}).catch((error) => { console.error(error); process.exitCode = 1 })
   })
   console.log(`w2l-api ${listen.mode} listening on http://${listen.host}:${listen.port}`)
+  if (operatorProxy !== null) console.log(`egress proxy ${operatorProxy.server} (${operatorProxy.source})`)
 }
 
 const entry = process.argv[1]
