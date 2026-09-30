@@ -48,6 +48,24 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export PLAYWRIGHT_BROWSERS_PATH=\"$PW_TARGET\"" >> "$CLAUDE_ENV_FILE"
 fi
 
+# The cloud session's egress proxy re-terminates TLS. Node trusts its CA
+# through NODE_EXTRA_CA_CERTS; Chromium reads the user NSS store instead, so
+# without this the browser lane fails every https site with
+# ERR_CERT_AUTHORITY_INVALID. Best effort: a missing tool leaves the http lane.
+PROXY_CA=/root/.ccr/agent-proxy-ca.crt
+if [ -f "$PROXY_CA" ]; then
+  if ! command -v certutil >/dev/null 2>&1; then
+    apt-get install -y libnss3-tools >/dev/null 2>&1 \
+      || { apt-get update >/dev/null 2>&1 && apt-get install -y libnss3-tools >/dev/null 2>&1; } || true
+  fi
+  if command -v certutil >/dev/null 2>&1; then
+    mkdir -p "$HOME/.pki/nssdb"
+    [ -f "$HOME/.pki/nssdb/cert9.db" ] || certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password >/dev/null 2>&1 || true
+    certutil -d "sql:$HOME/.pki/nssdb" -L -n w2l-session-proxy-ca >/dev/null 2>&1 \
+      || certutil -d "sql:$HOME/.pki/nssdb" -A -t "C,," -n w2l-session-proxy-ca -i "$PROXY_CA" >/dev/null 2>&1 || true
+  fi
+fi
+
 PORT=8791
 if ! curl -fsS -o /dev/null "http://127.0.0.1:$PORT/healthz" 2>/dev/null; then
   PLAYWRIGHT_BROWSERS_PATH="$PW_TARGET" W2L_TASK_ROOT="$CLAUDE_PROJECT_DIR/.w2l/api" \
