@@ -20,6 +20,12 @@ const PAGES: Record<string, string> = {
   // Navigation and a footer, no main block: the extractor finds no content.
   '/nav-only': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
     '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav><footer><p>Published by the harbour office</p></footer></body></html>',
+  // A table page: its h1 in a banner, three captioned tables under h2 headings in the content.
+  '/tide-tables': '<!doctype html><html><head><title>Tide tables</title></head><body><header><a href="/">Harbour office</a></header>' +
+    '<div class="banner"><h1>Tide tables 2026</h1></div><div id="content"><p>Heights in metres above chart datum.</p>' +
+    ['North pier', 'South pier', 'Estuary'].map((station, t) => `<h2>${station}</h2><table><caption>Table ${t + 1}: ${station}, high water</caption>` +
+      `<tr><th>Date</th><th>Time</th><th>Height</th></tr>${Array.from({ length: 8 - t }, (_, i) => `<tr><td>2026-10-0${i + 1}</td><td>0${i}:1${t}</td><td>${4 + t}.${i}</td></tr>`).join('')}</table>`).join('') +
+    '</div><footer><p>Published by the harbour office</p></footer></body></html>',
 }
 
 type BrowserStub = { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: unknown, options?: FetchOptions) => Promise<FetchResult> }
@@ -109,6 +115,19 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(full.markdown).not.toContain('never content')
     expect(full).toMatchObject({ status: main.status, lane: 'http', snapshot: main.snapshot })
     expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ onlyMainContent: false }) }))
+  })
+
+  it('the default keeps every table of a table page with its headings and captions, and leaves out its header and footer', async () => {
+    const { origin, post } = await setup(hangingBrowser)
+    const main = (await post('/v1/scrape', { url: `${origin}/tide-tables`, formats: ['markdown'] })).body
+    const full = (await post('/v1/scrape', { url: `${origin}/tide-tables`, formats: ['markdown'], onlyMainContent: false })).body
+    expect(main).toMatchObject({ status: 'success', lane: 'http', document: { strategy: 'table' } })
+    for (const markdown of [main.markdown, full.markdown]) {
+      expect(markdown.match(/^\| --- \| --- \| --- \|$/gm)).toHaveLength(3)
+      for (const text of ['Heights in metres above chart datum.', '## North pier', 'Table 1: North pier, high water', '## South pier',
+        'Table 2: South pier, high water', '## Estuary', 'Table 3: Estuary, high water', '| 2026-10-06 | 05:12 | 6.5 |']) expect(markdown).toContain(text)
+    }
+    for (const chrome of ['Harbour office', 'Published by the harbour office']) expect(main.markdown).not.toContain(chrome)
   })
 
   it('on a page with no main block, false returns the whole page and the default keeps it as evidence', async () => {

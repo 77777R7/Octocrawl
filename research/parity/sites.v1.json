@@ -1810,6 +1810,42 @@
         {"item": "ER", "type": "field", "path": "evidenceRecord.httpStatus", "equals": 200},
         {"item": "ER", "type": "field", "path": "evidenceRecord.redirectChain.complete", "equals": true}
       ]
+    },
+    {
+      "id": "M12",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.eia.gov/electricity/annual/html/epa_01_01.html",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-09-30 for the table strategy, which kept one table. Table 1.1 of the U.S. Energy Information Administration's Electric Power Annual (robots.txt allows it): the title in a one-cell table, two data tables (net generation and consumption of fuels, 40 rows; sales, revenue and average price, 9 rows) and the notes and sources in another one-cell table, with no <h1>. Its tables hold most of its text, so W2L extracts it by its tables (document.strategy 'table'; the field check records it, and if the page stops being routed there the case no longer tests that strategy). On 2026-09-30 the page showed 2024 and 2023; years are matched by pattern because the annual edition replaces them. Before the fix (8ae6983), the extractor turned the HTML fetched that day into the first data table only (5,755 characters of Markdown, strategy 'table', not escalated): no title, no second table, no notes or sources; the case's checks fail there on all but the strategy, the first table and the table shape.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "field", "path": "document.strategy", "equals": "table", "record": true},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^Table 1\\.1\\. Total Electric Power Industry Summary Statistics, 20[0-9]{2} and 20[0-9]{2}$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^\\| Net Generation and Consumption of Fuels for January through December \\|"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^\\| Coal \\| Utility Scale Facilities \\| [0-9][0-9,]* \\| [0-9][0-9,]* \\|"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^\\| Sales, Revenue, and Average Price of Electricity to Ultimate Customers for January through December \\|"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^\\| Residential \\| [0-9][0-9,]* \\| [0-9][0-9,]* \\| -?[0-9.]+% \\|"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "NM = Not meaningful due to large relative standard error."},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^Sources: U\\.S\\. Energy Information Administration"},
+        {"item": "3", "type": "tableShape", "minTables": 2}
+      ]
+    },
+    {
+      "id": "M13",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://news.ycombinator.com",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-09-30 for link targets in table cells (M02 stays as frozen). The Hacker News front page's story list is a table (W2L extracts the page by its tables): each story row links the story and its site, and each subtext row the poster, the discussion and the hide action, with | between them. The Markdown keeps those targets inside the table rows, absolute, and every row as wide as the table's first row, so each | inside a cell is escaped. On 2026-09-30 the page had 30 stories and its table rows 211 absolute targets, 60 of them discussion links (item?id=, two per story); the minimums leave room for job posts, which have no poster or comments link. Before the fix (8ae6983), the extractor turned the HTML fetched that day into a story table with no link target in its rows.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.markdown", "type": "tableTargets", "min": 60, "record": true},
+        {"item": "scrape-formats.markdown", "type": "tableTargets", "pattern": "^https://news\\.ycombinator\\.com/item\\?id=[0-9]+$", "min": 30, "record": true},
+        {"item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^\\| 1\\. \\|[^\\n]*\\]\\(https?://"},
+        {"item": "scrape-formats.markdown", "type": "tableShape", "minTables": 1},
+        {"item": "scrape-formats.markdown", "type": "markdownLinksAbsolute"}
+      ]
     }
   ]
 }

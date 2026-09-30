@@ -259,9 +259,10 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
     return { type: 'article', strategy: 'article' }
   }
 
-  // The table strategy keeps one table, so it is for pages whose text is in
-  // their tables. A page whose text lies mostly outside them (an SEC filing's
-  // paragraphs and notes around its statements) goes on to the rules below.
+  // The table strategy keeps the tables and what lies between them, so it is
+  // for pages whose text is in their tables. A page whose text lies mostly
+  // outside them (an SEC filing's paragraphs and notes around its statements)
+  // goes on to the rules below.
   const textInTables = c.tableChars >= c.textChars * 0.5
 
   // A page whose only structure is one standalone table (readings, schedules,
@@ -430,14 +431,21 @@ export function selectCardList(doc: Document): Element | null {
 }
 
 /**
- * Table strategy: the main data table of a table page. Skips layout tables
- * (single cell, no data cells) and hidden/empty tables. A table whose nested
- * tables hold most of its text is a layout table too (Hacker News lays out its
- * header, story list and footer in one): a data table inside it is preferred,
- * and it is chosen only when no such table qualifies. A data table with a
- * small table in one cell stays the data table. When a lone page heading
- * shares a container with the table (product pages: title + specs), that
- * container is returned instead so the title survives.
+ * Table strategy: the region that holds a table page's data tables. A data
+ * table has at least two rows, four cells and some text: single-cell, empty
+ * and spacer tables are not data. A table whose nested tables hold most of its
+ * text is a layout table (Hacker News lays out its header, story list and
+ * footer in one): the data tables inside it are the page's, and it is chosen
+ * only when no other data table exists, then the largest. The region is the
+ * lowest element that holds the largest data table and every other one that
+ * is not a menu laid out as a table (mostly link text, and no figure outside
+ * its links; a table of links with figures is data), so the headings,
+ * captions and text between them stay and a page's own header, footer and
+ * side column, outside that element, do not; one data table is its own
+ * region, and a table nested in a data table's cell is part of that table.
+ * When a lone page heading shares a container with the region below <body>
+ * (product pages: title + specs), that container is returned instead so the
+ * title survives.
  */
 export function selectTable(doc: Document): Element | null {
   const tables = qsa(doc, 'table')
@@ -445,20 +453,28 @@ export function selectTable(doc: Document): Element | null {
   const dataTables = tables.filter((t) => {
     const rows = qsa(t, 'tr')
     if (rows.length < 2) return false
-    return qsa(t, 'td,th').length >= 4
+    return qsa(t, 'td,th').length >= 4 && (t.textContent ?? '').trim() !== ''
   })
   if (dataTables.length === 0) return null
   const unlaid = dataTables.filter((t) => !isLayoutTable(t))
-  const table = (unlaid.length > 0 ? unlaid : dataTables).sort(
-    (a, b) => qsa(b, 'td,th').length - qsa(a, 'td,th').length,
-  )[0]!
+  const largest = [...(unlaid.length > 0 ? unlaid : dataTables)].sort((a, b) => qsa(b, 'td,th').length - qsa(a, 'td,th').length)[0]!
+  const length = (el: Element): number => (el.textContent ?? '').replace(/\s+/g, '').length
+  const menu = (t: Element): boolean =>
+    qsa(t, 'a').reduce((sum, a) => sum + length(a), 0) * 2 >= length(t) && !/\d/.test(textOutsideLinks(t))
+  let region = largest
+  for (const t of unlaid) {
+    if (t === largest || menu(t) || unlaid.some((other) => other !== t && other.contains(t))) continue
+    // commonAncestor(table, region) is the region itself when it holds the table.
+    region = commonAncestor(t, region) ?? region
+  }
+  if (region === doc.documentElement && doc.body) region = doc.body
 
   const h1s = qsa(doc, 'h1')
-  if (h1s.length === 1 && !table.contains(h1s[0]!)) {
-    const lca = commonAncestor(table, h1s[0]!)
+  if (h1s.length === 1 && !region.contains(h1s[0]!)) {
+    const lca = commonAncestor(region, h1s[0]!)
     if (lca && lca !== doc.body && lca !== doc.documentElement) return lca
   }
-  return table
+  return region
 }
 
 /**

@@ -400,6 +400,73 @@ describe('strategies', () => {
     expect(md).toContain('| North | Harbour | 41 | Cobalt 12 Ash 29 |')
     expect(md).toContain('| West | Quarry | 22 | Tenmoku |')
   })
+
+  // A statistics page: its h1 in a banner, three captioned data tables under h2
+  // headings in the content, page chrome around them.
+  const statsPage = (heading: 'banner' | 'body' | 'none' | 'two' | 'content') => {
+    const rows = (n: number, label: string) => Array.from({ length: n }, (_, i) =>
+      `<tr><td>${label} region ${i + 1}</td><td>${1000 + i * 17}</td><td>${1100 + i * 13}</td></tr>`).join('')
+    const table = (n: number, caption: string, label: string) =>
+      `<table><caption>${caption}</caption><thead><tr><th>Region</th><th>2024 (GWh)</th><th>2025 (GWh)</th></tr></thead><tbody>${rows(n, label)}</tbody></table>`
+    const h1 = '<h1>Energy statistics 2025</h1>'
+    return wrap(`<header>${heading === 'two' ? '<h1>Statistics office</h1>' : ''}<a href="/">Statistics office</a> <a href="/releases">Releases</a></header>` +
+      (heading === 'banner' || heading === 'two' ? `<div class="banner">${h1}</div>` : heading === 'body' ? h1 : '') +
+      `<div id="content">${heading === 'content' ? h1 : ''}<p>Final figures for 2025, published 30 September 2026.</p>` +
+      `<h2>Electricity</h2>${table(10, 'Table 1: Electricity consumption by region', 'Electricity')}` +
+      `<h2>Gas</h2>${table(8, 'Table 2: Gas consumption by region', 'Gas')}` +
+      `<h2>Heat</h2>${table(6, 'Table 3: Heat consumption by region', 'Heat')}</div>` +
+      '<div class="page-footer"><table><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>Statistics office, 2026</div>')
+  }
+
+  it('selectTable keeps every data table of a table page, with the headings, captions and text between them', () => {
+    for (const heading of ['banner', 'body', 'none', 'two', 'content'] as const) {
+      const out = extractTf.extract(statsPage(heading), { url: 'https://stats.fixture.test/energy' })
+      expect(out.strategy).toBe('table')
+      const md = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
+      expect(md.match(/^\| --- \| --- \| --- \|$/gm)).toHaveLength(3)
+      for (const text of ['Final figures for 2025', '## Electricity', 'Table 1: Electricity consumption by region', '| Electricity region 10 |',
+        '## Gas', 'Table 2: Gas consumption by region', '| Gas region 8 |', '## Heat', 'Table 3: Heat consumption by region', '| Heat region 6 |']) {
+        expect(md, heading).toContain(text)
+      }
+      // The page header, the banner and the footer (with its empty spacer table) lie outside the tables' container.
+      for (const chrome of ['Releases', 'Statistics office', '|  |  |']) expect(md, heading).not.toContain(chrome)
+      // A lone h1 in the tables' own container stays with them.
+      expect(md.includes('# Energy statistics 2025'), heading).toBe(heading === 'content')
+    }
+  })
+
+  it('selectTable leaves out a menu of links laid out as a table in the page\'s side column', () => {
+    // NOAA's climate pages: one layout row, a menu table in its left cell, the content in its right cell.
+    const menu = '<table>' + ['Climate Outlooks', 'El Niño/La Niña', 'Teleconnections', 'About Us'].map((item, i) => `<tr><td><a href="/m/${i}">${item}</a></td></tr>`).join('') + '</table>'
+    const index = `<table><tr><th>Year</th><th>DJF</th><th>JFM</th></tr>${Array.from({ length: 6 }, (_, i) =>
+      `<tr><td>${2020 + i}</td><td>-${i}.1</td><td>-${i}.2</td></tr>`).join('')}</table>`
+    // Mostly link text, but with figures: data, not a menu.
+    const stations = `<table><tr><th>Station</th><th>Readings</th></tr>${['North Harbour buoy', 'South Estuary buoy', 'Quarry Point buoy'].map((station, i) =>
+      `<tr><td><a href="/stations/${i}">${station}</a></td><td>${12 + i}</td></tr>`).join('')}</table>`
+    const html = wrap(`<table><tr><td class="menu">${menu}</td><td class="content"><h1>Oceanic Niño Index</h1>` +
+      `<h2>Historical episodes</h2>${index}<h2>Stations</h2>${stations}</td></tr></table>`)
+    const out = extractTf.extract(html, { url: 'https://climate.fixture.test/oni' })
+    expect(out.strategy).toBe('table')
+    const md = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
+    for (const text of ['# Oceanic Niño Index', '## Historical episodes', '| 2025 | -5.1 | -5.2 |', '## Stations', 'Quarry Point buoy', '| 14 |']) expect(md).toContain(text)
+    for (const item of ['Climate Outlooks', 'Teleconnections']) expect(md).not.toContain(item)
+    // Without its h1, the region is the two tables' container, still without the menu.
+    const bare = extractTf.extract(html.replace('<h1>Oceanic Niño Index</h1>', ''), { url: 'https://climate.fixture.test/oni' })
+    const bareMd = htmlToMarkdown(bare.mainHtml, { baseUrl: bare.baseUrl })
+    for (const text of ['## Historical episodes', '| 2025 | -5.1 | -5.2 |', 'Quarry Point buoy']) expect(bareMd).toContain(text)
+    expect(bareMd).not.toContain('Climate Outlooks')
+  })
+
+  it('selectTable takes the tables\' container below <body> with a lone h1 that shares it, and the body when only the body holds them all', () => {
+    const table = (label: string) => `<table><tr><th>Item</th><th>Value</th></tr><tr><td>${label} one</td><td>1</td></tr><tr><td>${label} two</td><td>2</td></tr></table>`
+    const shared = parse(wrap(`<div id="page"><div class="title"><h1>Kiln survey</h1></div><div id="tables">${table('North')}<p>Between the tables.</p>${table('South')}</div></div>`))
+    const region = selectTable(shared.document)!
+    expect(region.id).toBe('page')
+    shared.close()
+    const spread = parse(wrap(`<h1>Kiln survey</h1><div>${table('North')}</div><p>Between the tables.</p><div>${table('South')}</div>`))
+    expect(selectTable(spread.document)).toBe(spread.document.body)
+    spread.close()
+  })
 })
 
 describe('extractTf page types', () => {

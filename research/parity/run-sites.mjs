@@ -110,6 +110,10 @@
 //               closed (the client disconnects) and a probe call scrapes case.probeUrl, on the same host
 //               (doc.probe: it must not wait behind the two dropped calls for the host's two slots).
 //               Each call records elapsedMs, status and failureReason of its result, or its JSON-RPC error.
+// Added for the table strategy and table-cell links (2026-09-30):
+//   checks      tableTargets: the Markdown link and image targets inside GFM table rows (header
+//               rows included) that match spec.pattern (default ^https?://), at least spec.min of them;
+//               the observed value gives how many matched out of all targets in table rows.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -618,6 +622,11 @@ function check(doc, spec, response) {
     case 'markdownLinksAbsolute': {
       const relative = markdownTargets(markdown).filter((target) => !isAbsolute(target))
       return { pass: markdown !== '' && relative.length === 0, actual: markdown === '' ? 'no markdown' : `${relative.length} relative, e.g. ${relative.slice(0, 3).join(' ')}` }
+    }
+    case 'tableTargets': {
+      const targets = gfmTables(markdown).flatMap((table) => [table.header, ...table.rows]).flatMap((cells) => cells.flatMap((cell) => markdownTargets(cell)))
+      const matching = targets.filter((target) => new RegExp(spec.pattern ?? '^https?://').test(target))
+      return { pass: matching.length >= spec.min, actual: markdown === '' ? 'no markdown' : `${matching.length} of ${targets.length} targets in table rows match` }
     }
     case 'linksAbsolute': {
       const links = Array.isArray(doc.links) ? doc.links : null
