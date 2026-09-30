@@ -1,0 +1,36 @@
+{
+  "recordedOn": "2026-09-30",
+  "rule": "One entry per URL, applied only to that URL. W2L still reads the host's robots.txt and records its verdict; the rule set aside, the reason and recordedBy appear in the trace, in a robots_overridden warning on the result and in the compliance record. An entry is added only for a file the publisher itself publishes, fetched once for citation; the check script and every run record keep the override visible.",
+  "overrides": [
+    {
+      "id": "EQ-2025",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:39ee2b33-ca04-460f-a97b-1e92ef62ec05/Equinix-Inc_2025_Data-Summary.pdf",
+      "reason": "Equinix's own 2025 Data Summary, published on its AEM asset host; that host's robots.txt is a blanket Disallow: / for every crawler, not a statement about this report. One file, fetched once, to cite its figures.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    },
+    {
+      "id": "EQ-GFF",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:b04d8496-c8ac-4015-b1bd-02c526ce7f22/Eq_GU_Equinix",
+      "reason": "Equinix's own green-finance document on the same AEM asset host (URL as the seed user recorded it, possibly truncated); the host's blanket Disallow: / addresses crawlers. One file, fetched once.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    },
+    {
+      "id": "EQ-ALLOC25",
+      "url": "https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:500c1bb1-fec2-4101-b518-162282bd3fc9/green-bond-allocation-report-2025.pdf",
+      "reason": "Equinix's own 2025 green bond allocation report on its AEM asset host, whose blanket Disallow: / addresses crawlers. One file, fetched once, to cite its figures.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    },
+    {
+      "id": "MS-2025",
+      "url": "https://aka.ms/SustainabilityFactsheet2025",
+      "reason": "Microsoft's own 2025 sustainability factsheet, published behind Microsoft's aka.ms short link; the short-link host's blanket Disallow: / addresses crawlers of the redirector, and W2L follows the redirect to the file once. The override names the short link only.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    },
+    {
+      "id": "GOOG-2025-CANONICAL",
+      "url": "https://www.gstatic.com/gumdrop/sustainability/google-2025-environmental-report.pdf",
+      "reason": "Google's own 2025 Environmental Report, published on gstatic.com, whose robots.txt allows only listed paths and ends with Disallow: /; the rule addresses crawlers, not this report. One file, fetched once, to cite its figures.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    }
+  ]
+}
