@@ -156,7 +156,16 @@ The image is built from `Dockerfile.public-preview` and includes Chromium. Do no
 
 ### Public domain
 
-Pages, `robots.txt` and `sitemap.xml` carry the site's absolute address (canonical links, Open Graph cards, sitemap entries). The server writes it in at request time: the host the request reached by default, or `W2L_PUBLIC_ORIGIN` when set. Map the domain to the service first ([Cloud Run custom domains](https://docs.cloud.google.com/run/docs/mapping-custom-domains)), confirm `https://DOMAIN/api/health`, and only then add `--update-env-vars=W2L_PUBLIC_ORIGIN=https://DOMAIN`. From then on, page requests on any other host (including `*.run.app`) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL.
+Pages, `robots.txt` and `sitemap.xml` carry the site's absolute address (canonical links, Open Graph cards, sitemap entries). The server writes it in at request time: the host the request reached by default, or `W2L_PUBLIC_ORIGIN` when set.
+
+Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's free plan cannot rewrite the `Host` header, so the domain is served by the Worker in `cloudflare/public-preview-proxy/`. It forwards every request to the `run.app` URL and names the domain in `X-Forwarded-Host`; the server believes that header only when it equals `W2L_PUBLIC_ORIGIN`.
+
+1. Register the domain with Cloudflare Registrar (or add an existing one to Cloudflare as a zone).
+2. In `cloudflare/public-preview-proxy/wrangler.toml`, replace `YOUR_DOMAIN`, then run `npx wrangler login` and `npx wrangler deploy` from that directory. The Worker is attached to the domain as a custom domain; no DNS record for Cloud Run is needed.
+3. Deploy the service with `--update-env-vars=W2L_PUBLIC_ORIGIN=https://DOMAIN`. Until then the domain works but pages name the `run.app` host.
+4. Check `https://DOMAIN/`, `/robots.txt`, `/sitemap.xml`, `/pricing` (404) and a real extraction on the domain, and that `https://…run.app/` now answers 301 to the domain.
+
+With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
 ### Page events
 

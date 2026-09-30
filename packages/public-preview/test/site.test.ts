@@ -83,6 +83,18 @@ describe('public site routes', () => {
     expect(preview.status).toBe(200)
   })
 
+  it('behind the Cloudflare Worker, trusts X-Forwarded-Host only when it names the public domain', async () => {
+    const { url } = await site({ publicOrigin: 'https://w2l.example' })
+    const proxied = await fetch(url, { headers: { 'x-forwarded-host': 'w2l.example' }, redirect: 'manual' })
+    expect(proxied.status).toBe(200)
+    expect(await proxied.text()).toContain('<link rel="canonical" href="https://w2l.example/" />')
+    const forged = await fetch(url, { headers: { 'x-forwarded-host': 'evil.example' }, redirect: 'manual' })
+    expect(forged.headers.get('location')).toBe('https://w2l.example/')
+    const preview = (headers: Record<string, string>) => fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://w2l.example', ...headers }, body: JSON.stringify({ url: 'https://docs.example' }) })
+    expect((await preview({ 'x-forwarded-host': 'w2l.example' })).status).toBe(200)
+    expect((await preview({})).status).toBe(403)
+  })
+
   it('rejects a public origin with a path or plain http', () => {
     expect(parsePublicOrigin('https://w2l.example/')).toBe('https://w2l.example')
     expect(() => parsePublicOrigin('https://w2l.example/app')).toThrow()

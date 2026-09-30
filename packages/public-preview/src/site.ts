@@ -18,6 +18,16 @@ export function parsePublicOrigin(value: string): string {
   return url.origin
 }
 
+/** The host the visitor asked for. Behind the Cloudflare Worker (cloudflare/public-preview-proxy) a request reaches
+ * Cloud Run on its run.app host and names the public domain in X-Forwarded-Host. That header is believed only when it
+ * names the configured domain, so a forged one can never point pages, redirects or the origin check anywhere else. */
+export function siteHost(req: IncomingMessage, configured: string | undefined): string {
+  const host = (req.headers.host ?? '').toLowerCase()
+  const forwarded = req.headers['x-forwarded-host']
+  if (configured && typeof forwarded === 'string' && forwarded.toLowerCase() === new URL(configured).host) return new URL(configured).host
+  return host
+}
+
 /** The origin written into served pages: the configured one, or else the host this request reached. */
 export function requestOrigin(req: IncomingMessage, configured: string | undefined): string {
   if (configured) return configured
@@ -30,7 +40,7 @@ export function requestOrigin(req: IncomingMessage, configured: string | undefin
 export function canonicalRedirect(req: IncomingMessage, configured: string | undefined, pathname: string): string | null {
   if (!configured || (req.method !== 'GET' && req.method !== 'HEAD')) return null
   if (pathname.startsWith('/api/') || pathname === '/healthz') return null
-  const host = (req.headers.host ?? '').toLowerCase()
+  const host = siteHost(req, configured)
   if (!host || host === new URL(configured).host) return null
   return `${configured}${req.url ?? '/'}`
 }

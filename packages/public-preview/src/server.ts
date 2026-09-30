@@ -8,7 +8,7 @@ import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } f
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
-import { canonicalRedirect, dailyVisitorId, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
+import { canonicalRedirect, dailyVisitorId, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 
 export interface PreviewServerOptions {
@@ -116,10 +116,9 @@ async function readRequestBody(req: IncomingMessage, limit = PREVIEW_BODY_BYTES)
   catch { throw new Error('The request body must be valid JSON.') }
 }
 
-function requestOriginAllowed(req: IncomingMessage): boolean {
+function requestOriginAllowed(req: IncomingMessage, host: string): boolean {
   const origin = req.headers.origin
   if (typeof origin !== 'string') return true // CLI / same-host tests need no Origin.
-  const host = req.headers.host
   if (!host) return false
   const expected = new Set([`https://${host}`])
   if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) expected.add(`http://${host}`)
@@ -194,7 +193,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     }
     if (pathname === '/api/events') {
       if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
-      if (!requestOriginAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403, { 'cache-control': 'no-store' }).end(); return }
+      if (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403, { 'cache-control': 'no-store' }).end(); return }
       let event
       try { event = parseWebEvent(await readRequestBody(req, EVENT_BODY_BYTES)) } catch { event = null }
       if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
@@ -225,7 +224,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       })
       sendJson(target, status, body, headers)
     }
-    if (!requestOriginAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') {
+    if (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site') {
       send(res, 403, empty('failed', '', 'Submit links from this site only.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
       return
     }
