@@ -20,7 +20,11 @@ const PAGE_OPTION_PROPERTIES = {
   waitFor: { type: 'integer', minimum: 0, maximum: 60000, description: 'Milliseconds the browser waits after load before capture. Starts at the browser rung and counts toward timeout. Default 0.' },
   timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in milliseconds for the whole scrape (per page for crawl and batch). When it fires the result is partial with the content so far, or failed/timeout. Default 300000.' },
   maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file (PDF, CSV, XLSX, ZIP, JSON, text) to download, in bytes, below the server\'s own cap (W2L_MAX_FILE_BYTES, default 50 MiB). A larger file is failed with body_too_large and not saved.' },
+  includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors naming the only elements to keep: the content is those elements in document order (a named navigation included), whatever onlyMainContent says. Nothing matching is an empty answer. Tag, class, id and attribute selectors, descendant and child combinators, :not(), :is(), :where(), :root and :empty; sibling combinators, :nth-child and the like, and :has() are refused by name.' },
+  excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors removed, with everything inside them, from the main content, the whole page (onlyMainContent false) and an includeTags selection. The same selectors as includeTags.' },
 } as const
+/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content. */
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung.'
 /** A recorded decision to fetch one URL its host's robots.txt disallows; never a blanket switch. */
 const ROBOTS_OVERRIDE_PROPERTIES = {
   reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
@@ -75,9 +79,10 @@ export const TOOLS = [
         formats: {
           type: 'array',
           minItems: 1,
+          description: FORMATS_DESCRIPTION,
           items: {
             anyOf: [
-              { type: 'string', enum: ['markdown', 'links', 'json'] },
+              { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
               {
                 type: 'object',
                 properties: {
@@ -113,8 +118,8 @@ export const TOOLS = [
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
-        formats: { type: 'array', minItems: 1, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json'] },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
+          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
         includeLinks: { type: 'boolean' },
@@ -197,8 +202,8 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json'] },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
+          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
         includeLinks: { type: 'boolean' },
@@ -246,6 +251,8 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       timeout: req.timeout,
       maxFileBytes: req.maxFileBytes,
+      includeTags: req.includeTags,
+      excludeTags: req.excludeTags,
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
     }, request)
   }
@@ -265,6 +272,8 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       timeout: req.timeout,
       maxFileBytes: req.maxFileBytes,
+      includeTags: req.includeTags,
+      excludeTags: req.excludeTags,
     }, request)
   }
   if (name === 'get_crawl') {
@@ -285,7 +294,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

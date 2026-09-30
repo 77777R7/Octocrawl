@@ -271,11 +271,24 @@ export interface ExtractorOptions {
   /** When unsure, prefer more text (loosen thresholds). Mirrors favor_recall. */
   favorRecall?: boolean
   /**
-   * Extra CSS selectors to prune from the tree before extraction, limited to
-   * the selectors that are matched in time proportional to the page
-   * (@w2l/extract-tf `invalidSelector`); any other names nothing.
+   * Extra CSS selectors to prune from the tree before extraction. Like
+   * `includeSelectors`, limited to the selectors that are matched in time
+   * proportional to the page (@w2l/extract-tf `invalidSelector`); any other
+   * names nothing.
    */
   pruneSelectors?: readonly string[]
+  /**
+   * CSS selectors naming the only elements to keep. mainHtml is then a
+   * `<body>` holding those elements in document order, copied from the page
+   * before cleaning and without `pruneSelectors`, and its confidence is 1
+   * when they hold any text or image: what the caller named is the content.
+   * Nothing matching gives an empty mainHtml. The page type, title, metadata
+   * and product facts are still read from the whole page, and `escalate`
+   * stays the page's own signal (the cascade found no main content): a lane
+   * reads it for its block check and its offer to the browser, and does not
+   * fail a selection for it.
+   */
+  includeSelectors?: readonly string[]
 }
 
 export interface Extractor {

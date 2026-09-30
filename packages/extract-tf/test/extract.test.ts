@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf, htmlToMarkdown } from '../src/index.js'
+import { extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -346,5 +346,86 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     const out = extractTf.extract(html, { pruneSelectors: ['.sponsor-note'] })
     expect(out.mainHtml).not.toContain('generous sponsor')
     expect(out.mainHtml).toContain('harbour master recorded the tides')
+  })
+})
+
+// includeSelectors (the API's includeTags), and the whole page as the html format returns it.
+describe('extractTf selection and whole page', () => {
+  const PAGE = `<!doctype html><html class="js"><head><title>Kiln archive | Harbour office</title></head><body class="home">
+<header><h1>Kiln archive</h1><nav><a href="/a">Home</a></nav></header>
+<article><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the harbour office ledger.</p>
+<table id="readings"><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41 <sup class="ref">[1]</sup></td></tr></table>
+<form><label>Search the archive</label><input name="q"><button>Go</button></form></article>
+<table id="legend"><tr><th>Key</th><th>Meaning</th></tr><tr><td>*</td><td>estimate</td></tr></table>
+<footer><p>Copyright 2026</p></footer><script>var never = "shown"</script></body></html>`
+
+  it('reduces the page to the included selectors, in document order, and returns that selection whole', () => {
+    const out = extractTf.extract(PAGE, { includeSelectors: ['table', 'html.js h1'], pruneSelectors: ['#legend', 'td .ref'] })
+    expect(out.mainHtml).toBe('<body><h1>Kiln archive</h1><table id="readings"><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41 </td></tr></table></body>')
+    expect(htmlToMarkdown(out.mainHtml)).toBe('# Kiln archive\n\n| Station | Flow |\n| --- | --- |\n| Meridian | 41 |')
+    // Exclusions are matched against the whole page too: the footer's paragraph is named by where it was.
+    expect(extractTf.extract(PAGE, { includeSelectors: ['p'], pruneSelectors: ['footer p'] }).mainHtml)
+      .toBe('<body><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the harbour office ledger.</p></body>')
+    // The page itself is still read for its type and metadata.
+    expect(out).toMatchObject({ confidence: 1, escalate: false, pageType: 'article', metadata: { title: 'Kiln archive | Harbour office' } })
+    // The same page without the option is unchanged: its main content, not the selection.
+    expect(extractTf.extract(PAGE).mainHtml).toContain('glaze vitrified')
+  })
+
+  it('keeps a named navigation, an element inside another named one once, and everything when the body is named', () => {
+    expect(extractTf.extract(PAGE, { includeSelectors: ['nav'] }).mainHtml).toBe('<body><nav><a href="/a">Home</a></nav></body>')
+    const nested = extractTf.extract(PAGE, { includeSelectors: ['#readings', 'article'] }).mainHtml
+    expect(nested.match(/Meridian/g)).toHaveLength(1)
+    expect(nested).toContain('glaze vitrified')
+    // Scripts and form controls are never shown, in a selection either.
+    expect(nested).toContain('<form><label>Search the archive</label></form>')
+    const everything = extractTf.extract(PAGE, { includeSelectors: ['body'] }).mainHtml
+    for (const text of ['Kiln archive', 'Home', 'Meridian', 'estimate', 'Copyright 2026']) expect(everything).toContain(text)
+    expect(everything).not.toContain('never')
+  })
+
+  it('gives an empty selection as an empty answer, and leaves escalate the page\'s own signal', () => {
+    // The page has main content: nothing named is an empty answer, and nothing asks for a browser render.
+    const none = extractTf.extract(PAGE, { includeSelectors: ['.does-not-exist'] })
+    expect(none).toMatchObject({ mainHtml: '', escalate: false })
+    expect(none.confidence).toBe(extractTf.extract(PAGE).confidence)
+    // A page with no main content says so with or without a selection: a lane blocks it on its gate and offers it to the browser.
+    const shell = '<!doctype html><html><body><div id="root"></div></body></html>'
+    expect(extractTf.extract(shell).escalate).toBe(true)
+    expect(extractTf.extract(shell, { includeSelectors: ['table'] })).toMatchObject({ mainHtml: '', escalate: true })
+    // Its empty root, when named, is returned, and says no more about the page than no match does.
+    expect(extractTf.extract(shell, { includeSelectors: ['#root'] })).toMatchObject({ mainHtml: '<body><div id="root"></div></body>', escalate: true, confidence: 0 })
+  })
+
+  it('wholePageBody keeps header, navigation and footer, and leaves out exclusions and what Markdown never shows', () => {
+    const whole = wholePageBody(PAGE, ['nav', '#legend', 'html.js td .ref'])
+    expect(whole.startsWith('<body class="home">')).toBe(true)
+    for (const text of ['<h1>Kiln archive</h1>', 'glaze vitrified', '<td>41 </td>', '<label>Search the archive</label>', '<footer><p>Copyright 2026</p></footer>']) expect(whole).toContain(text)
+    for (const text of ['Home', 'estimate', '[1]', '<script', '<input', '<button', 'never']) expect(whole).not.toContain(text)
+    // It is the HTML the whole-page Markdown with the same exclusions is written from.
+    expect(htmlToMarkdown(whole)).toBe(htmlToMarkdown(PAGE, { exclude: ['nav', '#legend', 'html.js td .ref'] }))
+    expect(wholePageBody(PAGE)).toContain('<nav><a href="/a">Home</a></nav>')
+  })
+
+  it('returns HTML without the layout markers of a browser capture', () => {
+    const marked = '<!doctype html><html><body><main><div class="quote"><span class="text" data-w2l-display="block">“The world as we have created it.”</span><span>by Albert Einstein</span></div>' +
+      '<p>Open <span>Terminal</span><span data-w2l-hidden="">Git Bash</span>, as the harbour office manual describes for every new workstation.</p></main></body></html>'
+    const main = extractTf.extract(marked).mainHtml
+    expect(main).toContain('data-w2l-display="block"')
+    expect(withoutLayoutMarkers(main)).toBe(main.replace(' data-w2l-display="block"', ''))
+    const whole = wholePageBody(marked)
+    expect(whole).toContain('<span class="text">“The world as we have created it.”</span>')
+    expect(whole).not.toContain('data-w2l')
+    expect(whole).not.toContain('Git Bash')
+    // Text that only mentions a marker is content, and unmarked HTML is returned as it is.
+    const mention = '<p>Set <code>data-w2l-display="block"</code> on the copy.</p>'
+    expect(withoutLayoutMarkers(mention)).toBe(mention)
+  })
+
+  it('reads a selector it cannot use as naming nothing, in includeSelectors and pruneSelectors alike', () => {
+    // The API refuses these by name; a caller that passes one anyway gets no match, never unbounded matching.
+    expect(extractTf.extract(PAGE, { includeSelectors: ['tr:first-child', 'h1 ~ nav', 'div[['] }).mainHtml).toBe('')
+    expect(extractTf.extract(PAGE, { pruneSelectors: ['article p:first-child', 'table:has(sup)'] }).mainHtml).toContain('glaze vitrified')
+    expect(wholePageBody(PAGE, ['header ~ article'])).toContain('glaze vitrified')
   })
 })

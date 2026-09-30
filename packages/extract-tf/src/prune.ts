@@ -10,7 +10,7 @@
  *    trafilatura; our table covers those word families).
  */
 
-import { detach, qsa, tagOf, textOf } from './dom.js'
+import { detach, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
@@ -203,6 +203,116 @@ export function pruneRecommendations(doc: Document): void {
     const attr = `${el.getAttribute('id') ?? ''} ${el.getAttribute('class') ?? ''}`
     if (hasRecommendationToken(attr)) detach(el)
   }
+}
+
+/** What the Markdown converter never emits; the `html` format leaves it out too. */
+const NEVER_SHOWN: ReadonlySet<string> = new Set(LAYOUT_MARKERS.skipTags)
+
+/**
+ * The element that holds the page: its body, or the root element of a page
+ * written without one, as htmlToMarkdown reads it.
+ */
+function pageRoot(doc: Document): Element | null {
+  return doc.body && doc.body.childNodes.length > 0 ? doc.body : (doc.documentElement ?? doc.body)
+}
+
+/**
+ * Removes from `root` what Markdown never shows (the elements the converter
+ * skips: scripts, styles, form controls, embedded media; and what a browser
+ * capture marked hidden) and the elements in `dropped`, each with all it
+ * contains.
+ */
+function stripNeverShown(root: Element, dropped: ReadonlySet<Element> = new Set()): void {
+  for (const el of qsa(root, '*')) {
+    if (dropped.has(el) || NEVER_SHOWN.has(el.localName) || el.hasAttribute(LAYOUT_MARKERS.hidden)) detach(el)
+  }
+}
+
+/**
+ * The whole page as the `html` format returns it for `onlyMainContent: false`:
+ * the body the whole-page Markdown is written from, its header, navigation
+ * and footer kept, without the caller's exclusions, without what Markdown
+ * never shows and without the layout markers of a browser capture.
+ */
+export function wholePageBody(html: string, exclusions: readonly string[] = []): string {
+  const doc = parse(html)
+  for (const el of namedBy(doc.document, exclusions)) detach(el)
+  const root = pageRoot(doc.document)
+  if (root === null) {
+    doc.close()
+    return ''
+  }
+  stripNeverShown(root)
+  for (const el of qsa(root, `[${LAYOUT_MARKERS.display}]`)) el.removeAttribute(LAYOUT_MARKERS.display)
+  const body = outerHtml(root)
+  doc.close()
+  return body
+}
+
+/**
+ * The page reduced to the elements the caller named (`includeTags`): a
+ * `<body>` holding them in document order, an element inside another named
+ * one not repeated. The selectors are matched against the page as it was
+ * received, before any cleaning, so a named navigation stays. The caller's
+ * exclusions, matched against that same page, and what Markdown never shows
+ * are then removed from the named elements. Naming the body, or the root
+ * element, names all it holds. `matched` counts the named elements kept;
+ * with none the HTML is empty. `blank` says that what was kept holds no text
+ * and no image: nothing was named, or only empty elements, such as the root
+ * of an application its scripts have yet to fill.
+ */
+export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = []): { html: string; matched: number; blank: boolean } {
+  const doc = parse(html)
+  const document = doc.document
+  const root = pageRoot(document)
+  const named = namedBy(document, selectors)
+  const excluded = namedBy(document, exclusions)
+  let kept: Node[] = []
+  let matched = 0
+  if (root !== null && (named.has(root) || (document.documentElement !== null && named.has(document.documentElement)))) {
+    kept = Array.from(root.childNodes)
+    matched = 1
+  } else if (root !== null) {
+    // Document order, never below a named element: one pass, without
+    // recursion, so a deep page costs no more than a wide one.
+    let el: Element | null = root.firstElementChild
+    while (el !== null) {
+      const isNamed = named.has(el)
+      if (isNamed) kept.push(el)
+      if (!isNamed && el.firstElementChild !== null) {
+        el = el.firstElementChild
+        continue
+      }
+      while (el !== null && el !== root && el.nextElementSibling === null) el = el.parentElement
+      el = el === null || el === root ? null : el.nextElementSibling
+    }
+    matched = kept.length
+  }
+  const body = document.createElement('body')
+  for (const node of kept) body.appendChild(node)
+  stripNeverShown(body, excluded)
+  const selection = matched === 0 ? '' : outerHtml(body)
+  const blank = textOf(body).trim() === '' && body.querySelector('img') === null
+  doc.close()
+  return { html: selection, matched, blank }
+}
+
+/**
+ * HTML without the layout markers a browser capture set on its copy of the
+ * page (LAYOUT_MARKERS): what it marked hidden is left out, as in the
+ * Markdown, and the marker attributes are removed. The `html` format returns
+ * the page's own markup, never W2L's annotations. HTML that carries no
+ * marker is returned as it is.
+ */
+export function withoutLayoutMarkers(html: string): string {
+  if (!html.includes(LAYOUT_MARKERS.display) && !html.includes(LAYOUT_MARKERS.hidden)) return html
+  const doc = parse(`<!doctype html><html><body>${html}</body></html>`)
+  const body = doc.document.body
+  for (const el of qsa(body, `[${LAYOUT_MARKERS.hidden}]`)) detach(el)
+  for (const el of qsa(body, `[${LAYOUT_MARKERS.display}]`)) el.removeAttribute(LAYOUT_MARKERS.display)
+  const unmarked = body.innerHTML
+  doc.close()
+  return unmarked
 }
 
 /**

@@ -1,5 +1,5 @@
-import type { FetchOptions } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
+import type { FetchOptions, FetchResult } from '@w2l/contracts'
+import { collectLinks, extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers } from '@w2l/extract-tf'
 
 /**
  * Response-status rules shared by every lane. A 2xx answer is judged from
@@ -26,32 +26,76 @@ export interface ErrorPage {
  * Markdown and links of the page an error status carried. Null for a success
  * status, a 304 (it points at a cached representation, it is not one), a
  * missing status, an empty body or a body that is not HTML or text.
- * `onlyMainContent: false` asks for the whole page, as on a success. Link and
- * image targets resolve against the page URL, as on a success.
+ * `onlyMainContent: false` asks for the whole page, and `includeTags` and
+ * `excludeTags` shape it, as on a success. Link and image targets resolve
+ * against the page URL, as on a success.
  */
 export function errorPageEvidence(status: number | null, contentType: string | null, body: string, url: string, options: FetchOptions = {}): ErrorPage | null {
   if (status === null || status < 100 || isSuccessStatus(status) || status === 304) return null
   if (body.trim() === '' || !isTextBody(contentType)) return null
   let markdown: string | null
-  if (options.onlyMainContent === false) markdown = wholePageMarkdown(body, url)
+  if (wholePageAsked(options)) markdown = wholePageMarkdown(body, url, options.excludeTags)
   else {
-    const extracted = extractTf.extract(body, { url })
+    const extracted = extractTf.extract(body, { url, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
     // Error pages are often too small for main-content extraction; then the
-    // whole body is what the server said.
-    markdown = extracted.escalate ? wholePageMarkdown(body, url) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    // whole body is what the server said, unless the caller named the
+    // elements to keep.
+    markdown = extracted.escalate && !selectionAsked(options) ? wholePageMarkdown(body, url, options.excludeTags) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
   }
   return markdown === null || markdown === '' ? null : { markdown, links: collectLinks(body, url) }
 }
 
 /**
  * The whole page as Markdown, through the converter and base URL a page's
- * main content uses; null when it has no text. It is the content that
+ * main content uses, without the elements the caller excluded
+ * (`excludeTags`); null when it has no text. It is the content that
  * `onlyMainContent: false` asks for, and the evidence a failed result keeps
  * when the extractor found no main content.
  */
-export function wholePageMarkdown(html: string, url: string): string | null {
-  const markdown = htmlToMarkdown(html, { baseUrl: url })
+export function wholePageMarkdown(html: string, url: string, exclude?: readonly string[]): string | null {
+  const markdown = htmlToMarkdown(html, { baseUrl: url, exclude })
   return markdown.trim() === '' ? null : markdown
+}
+
+/**
+ * Whether the caller named the elements to keep (`includeTags`). They are
+ * then the answer, even when there are none or the page has no main content:
+ * a lane still blocks such a page on its gate and still offers it to the
+ * browser, but does not fail it as `empty_unverified`.
+ */
+export function selectionAsked(options: FetchOptions): boolean {
+  return options.includeTags !== undefined && options.includeTags.length > 0
+}
+
+/**
+ * Whether the whole page is the content asked for: `onlyMainContent: false`,
+ * unless `includeTags` names the elements to keep, which then are the content.
+ */
+export function wholePageAsked(options: FetchOptions): boolean {
+  return options.onlyMainContent === false && !selectionAsked(options)
+}
+
+/** The caller's `includeTags` and `excludeTags`, for the `extract` trace event of a page they shaped. */
+export function tagOptions(options: FetchOptions): Pick<FetchOptions, 'includeTags' | 'excludeTags'> {
+  return {
+    ...(options.includeTags !== undefined && options.includeTags.length > 0 ? { includeTags: options.includeTags } : {}),
+    ...(options.excludeTags !== undefined && options.excludeTags.length > 0 ? { excludeTags: options.excludeTags } : {}),
+  }
+}
+
+/**
+ * The `html` and `rawHtml` formats of a contentful result, each only when
+ * asked for. `raw` is the page as the lane received it. `page` is the HTML
+ * the lane extracted from: `raw` itself, or in the browser lane its copy
+ * with layout markers, which `html` never carries. `html` is the HTML the
+ * Markdown was written from: `mainHtml` (the main content or the
+ * `includeTags` selection), or the whole page.
+ */
+export function htmlFormats(raw: string, page: string, mainHtml: string, options: FetchOptions): Pick<FetchResult, 'html' | 'rawHtml'> {
+  return {
+    ...(options.includeHtml ? { html: wholePageAsked(options) ? wholePageBody(page, options.excludeTags) : withoutLayoutMarkers(mainHtml) } : {}),
+    ...(options.includeRawHtml ? { rawHtml: raw } : {}),
+  }
 }
 
 function isTextBody(contentType: string | null): boolean {

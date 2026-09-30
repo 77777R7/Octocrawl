@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -504,7 +504,7 @@ export class ProviderSubject implements SubjectAdapter {
       }
     }
 
-    const extracted = extractTf.extract(res.body, { url: res.finalUrl })
+    const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
     const links = collectLinks(res.body, res.finalUrl)
     trace.push({
       at: wallMs,
@@ -517,16 +517,18 @@ export class ProviderSubject implements SubjectAdapter {
         escalate: extracted.escalate,
         linkCount: links.length,
         ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
+        ...tagOptions(options),
       },
     })
 
     // No main content: the whole page stays on the failed result as evidence,
     // never content. onlyMainContent: false asks for the whole page, so there
-    // it is the answer.
+    // it is the answer; so is what includeTags names, on any page that is not
+    // blocked.
     let wholePage: string | null = null
-    if (extracted.escalate) {
-      if (gate !== null) return blocked(gate)
-      wholePage = wholePageMarkdown(res.body, res.finalUrl)
+    if (extracted.escalate && gate !== null) return blocked(gate)
+    if (extracted.escalate && !selectionAsked(options)) {
+      wholePage = wholePageMarkdown(res.body, res.finalUrl, options.excludeTags)
       if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
@@ -549,8 +551,8 @@ export class ProviderSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     // onlyMainContent: false emits the whole page through the same converter and base URL.
-    const markdown = options.onlyMainContent === false
-      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl })
+    const markdown = wholePageAsked(options)
+      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl, exclude: options.excludeTags })
       : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
@@ -595,6 +597,7 @@ export class ProviderSubject implements SubjectAdapter {
         adapterValidation: extracted.adapterValidation,
         labelledValues: extracted.labelledValues,
       },
+      ...htmlFormats(res.body, res.body, extracted.mainHtml, options),
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
     }
   }

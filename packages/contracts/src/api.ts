@@ -27,8 +27,10 @@ export const MAX_WAIT_FOR_MS = 60_000
  * Per-page capture options shared by scrape, batch and crawl (for batch and
  * crawl they apply to every page). A robots override is never one of them:
  * it names one URL (`ScrapeRequest.robotsOverride`, `BatchStartRequest.robotsOverrides`).
+ * Nor are `includeHtml` and `includeRawHtml`: the `html` and `rawHtml`
+ * formats ask for those.
  */
-export interface PageOptions extends Omit<FetchOptions, 'robotsOverride'> {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -83,8 +85,12 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'links' | 'json')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json')[]
   markdown?: string | null
+  /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
+  html?: string | null
+  /** Present when `rawHtml` was asked for, as on the full response; null when the result carries none. */
+  rawHtml?: string | null
   links?: readonly string[]
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   metadata?: FetchResult['metadata']
@@ -210,7 +216,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS] as const
@@ -456,7 +462,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
   return value as import('./structured.js').JsonSchema
 }
 
-const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json']
+const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml']
 
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
@@ -473,13 +479,13 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const [index, item] of value.entries()) {
-    if (item === 'markdown' || item === 'links' || item === 'json') {
+    if (item === 'markdown' || item === 'links' || item === 'json' || item === 'html' || item === 'rawHtml') {
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
       formats.push(item)
       continue
     }
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, or a json schema request')
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, html, rawHtml, or a json schema request')
     const rec = item as Record<string, unknown>
     for (const key of Object.keys(rec)) if (!['type', 'schema', 'prompt', 'modelFallback'].includes(key)) throw new RequestError(`unsupported json format option: ${key}`)
     if (rec.type !== 'json' || rec.schema === undefined) throw new RequestError('json format requires type=json and schema')
@@ -537,18 +543,36 @@ function readMilliseconds(value: unknown, name: string, min: number, max: number
   return value
 }
 
-/** onlyMainContent, waitFor, timeout and maxFileBytes, shared by scrape, batch and crawl. */
+/**
+ * A list of CSS selectors (`includeTags`, `excludeTags`), each trimmed.
+ * Whether a selector can be used (it parses, and is one the extractor
+ * matches) is checked where a DOM is at hand, in the API engine, which
+ * refuses by name one that cannot.
+ */
+function readSelectors(value: unknown, name: string): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== 'string' || item.trim().length === 0 || item.length > 200)) {
+    throw new RequestError(`${name} must be an array of at most 100 CSS selectors of 1 to 200 characters`)
+  }
+  return (value as string[]).map((item) => item.trim())
+}
+
+/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags and excludeTags, shared by scrape, batch and crawl. */
 function readPageOptions(rec: Record<string, unknown>): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
   if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > MAX_FILE_BYTES_CEILING)) {
     throw new RequestError(`maxFileBytes must be an integer number of bytes from 1 to ${MAX_FILE_BYTES_CEILING}`)
   }
+  const includeTags = readSelectors(rec.includeTags, 'includeTags')
+  const excludeTags = readSelectors(rec.excludeTags, 'excludeTags')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
     timeout: readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS),
     ...(maxFileBytes === undefined ? {} : { maxFileBytes: maxFileBytes as number }),
+    ...(includeTags === undefined ? {} : { includeTags }),
+    ...(excludeTags === undefined ? {} : { excludeTags }),
   }
 }
 

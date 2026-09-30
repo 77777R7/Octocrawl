@@ -55,4 +55,31 @@ export interface FetchOptions {
    * `robotsOverrides` entry), never by a batch or crawl for every page.
    */
   robotsOverride?: RobotsOverride
+  /**
+   * CSS selectors naming the only elements to keep. The content is those
+   * elements, in document order, copied from the page before anything is
+   * cleaned away, so a named navigation stays; `onlyMainContent` no longer
+   * chooses the content. Nothing matching is an empty answer. The page's
+   * type, title and metadata are still read from the whole page. The API
+   * refuses a selector the extractor does not match (@w2l/extract-tf
+   * `invalidSelector`); a lane given one reads it as naming nothing.
+   */
+  includeTags?: readonly string[]
+  /**
+   * CSS selectors removed, with everything inside them, before the content
+   * is taken: from the main content, from the whole page
+   * (`onlyMainContent: false`) and from an `includeTags` selection alike.
+   * The same selectors as `includeTags`.
+   */
+  excludeTags?: readonly string[]
+  /**
+   * Carry `html` on a contentful result: the cleaned HTML its Markdown was
+   * written from. Set from the requested formats (`html`), not by a caller.
+   */
+  includeHtml?: boolean
+  /**
+   * Carry `rawHtml` on a contentful result: the page as the lane received
+   * it. Set from the requested formats (`rawHtml`), not by a caller.
+   */
+  includeRawHtml?: boolean
 }

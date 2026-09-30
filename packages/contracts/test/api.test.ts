@@ -122,11 +122,29 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
-      .toThrow('unsupported formats: html, rawHtml (supported: markdown, links, json)')
+    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
+      .toThrow('unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'screenshot' }] })).toThrow('unsupported format: screenshot')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
+  })
+
+  it('accepts the html and rawHtml formats and CSS selector lists on scrape, batch and crawl', () => {
+    const url = 'https://example.com/'
+    const req = parseScrapeRequest({ url, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['main', ' table.wikitable '], excludeTags: ['.mw-editsection'] })
+    expect(req.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(req.includeTags).toEqual(['main', 'table.wikitable'])
+    expect(req.excludeTags).toEqual(['.mw-editsection'])
+    expect(parseBatchStartRequest({ urls: [url], formats: ['html'], includeTags: ['article'] })).toMatchObject({ formats: ['html'], includeTags: ['article'] })
+    expect(parseCrawlStartRequest({ url, formats: ['rawHtml'], excludeTags: ['nav'] })).toMatchObject({ formats: ['rawHtml'], excludeTags: ['nav'] })
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('includeTags')
+    expect(() => parseScrapeRequest({ url, formats: ['html', 'html'] })).toThrow('formats must not contain duplicates')
+    expect(() => parseScrapeRequest({ url, includeTags: 'main' })).toThrow('includeTags must be an array of at most 100 CSS selectors of 1 to 200 characters')
+    expect(() => parseBatchStartRequest({ urls: [url], excludeTags: [' '] })).toThrow('excludeTags must be an array of at most 100 CSS selectors of 1 to 200 characters')
+    expect(() => parseCrawlStartRequest({ url, excludeTags: ['a'.repeat(201)] })).toThrow('excludeTags must be an array of at most 100 CSS selectors')
+    expect(() => parseScrapeRequest({ url, includeTags: Array.from({ length: 101 }, () => 'p') })).toThrow('includeTags must be an array of at most 100 CSS selectors')
+    // The lanes' own switches are not request fields: the formats ask for the HTML.
+    expect(() => parseScrapeRequest({ url, includeHtml: true })).toThrow('unsupported parameter: includeHtml')
   })
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
@@ -226,7 +244,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const url = 'https://example.com/'
     expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
     expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
-    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'html', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'screenshot'] } })
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
     expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
     expect((invalid as { details?: unknown }).details).toBeUndefined()

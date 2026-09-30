@@ -16,7 +16,8 @@
  * it contains. HTML without markers converts by its tags alone.
  */
 
-import { isLayoutTable, parse } from './dom.js'
+import { detach, isLayoutTable, parse } from './dom.js'
+import { namedBy } from './selectors.js'
 import { documentBaseUrl } from './links.js'
 
 export interface MarkdownOptions {
@@ -26,6 +27,11 @@ export interface MarkdownOptions {
    * resolved against it. Without a base, targets stay as written.
    */
   baseUrl?: string | null
+  /**
+   * CSS selectors whose elements are left out with all they contain: the
+   * caller's exclusions on a whole page, which no extraction pruned.
+   */
+  exclude?: readonly string[]
 }
 
 const ELEMENT_NODE = 1
@@ -713,15 +719,16 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
   const whole = /<html[\s>]|<!doctype/i.test(html)
   const doc = parse(whole ? html : `<!doctype html><html><body>${html}</body></html>`)
   const document = doc.document
+  // A whole document may carry its own <base href>; a fragment such as
+  // mainHtml is resolved against the base the caller passes.
+  const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
+  for (const el of namedBy(document, options.exclude ?? [])) detach(el)
   const root =
     document.body && document.body.childNodes.length > 0 ? document.body : (document.documentElement ?? document.body)
   if (!root) {
     doc.close()
     return ''
   }
-  // A whole document may carry its own <base href>; a fragment such as
-  // mainHtml is resolved against the base the caller passes.
-  const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
   const markdown = blocksOf(root, { base, blockMemo: new Map(), layout })
     .map((block) => block.text)

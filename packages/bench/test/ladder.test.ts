@@ -610,13 +610,16 @@ describe('LadderRunner — identity on contentful results', () => {
   })
 
   it('ONLY vendor + mismatch = a clear non-contentful failure, never a success', async () => {
-    const bb = channel('provider', [mismatchedContentful('https://example.com/p')], 'browserbase')
+    // The page came with its html formats: they go with the Markdown.
+    const bb = channel('provider', [{ ...mismatchedContentful('https://example.com/p'), html: '<main>MAIN CONTENT</main>', rawHtml: '<html><body><main>MAIN CONTENT</main></body></html>' }], 'browserbase')
     const runner = new LadderRunner([bb], { mode: 'research' })
 
     const run = await runner.run('https://example.com/p')
     expect(run.result.status).toBe('failed')
     expect(run.result.failureReason).toBe('identity_compromised')
     expect(run.result.markdown).toBeNull()
+    expect(run.result).not.toHaveProperty('html')
+    expect(run.result).not.toHaveProperty('rawHtml')
     expect(CONTENTFUL_STATUS.has(run.result.status)).toBe(false)
   })
 

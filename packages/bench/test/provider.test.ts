@@ -106,6 +106,28 @@ describe('ProviderSubject robots gate', () => {
     expect(full).toMatchObject({ status: 'success', evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
   })
 
+  it('shapes the page by includeTags and excludeTags and carries html and rawHtml when asked, like the local lanes', async () => {
+    const body = PAGE.replace('<body>', '<body><nav><a href="/shop">Shop navigation</a></nav>').replace('</body>', '<footer>Provider footer</footer><script>track()</script></body>')
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const url = 'https://shop.example/dp/B0TEST'
+    const plain = await subject.fetch(url)
+    expect(plain).not.toHaveProperty('html')
+    expect(plain).not.toHaveProperty('rawHtml')
+    const named = await subject.fetch(url, undefined, undefined, undefined, { includeTags: ['nav', 'h1'], includeHtml: true, includeRawHtml: true })
+    expect(named).toMatchObject({
+      status: 'success',
+      markdown: '[Shop navigation](https://shop.example/shop)\n\n# Cobalt ash kettle',
+      html: '<body><nav><a href="/shop">Shop navigation</a></nav><h1>Cobalt ash kettle</h1></body>',
+      rawHtml: body,
+      document: { confidence: 1 },
+    })
+    const whole = await subject.fetch(url, undefined, undefined, undefined, { onlyMainContent: false, excludeTags: ['nav', 'article p'], includeHtml: true })
+    expect(whole.markdown).toBe('# Cobalt ash kettle\n\nProvider footer')
+    expect(whole.html).toBe('<body><article><h1>Cobalt ash kettle</h1></article><footer>Provider footer</footer></body>')
+    expect(whole).not.toHaveProperty('rawHtml')
+  })
+
   it('keeps a page with no main block as evidence, and returns it for onlyMainContent false', async () => {
     const body = '<!doctype html><html><body><nav><a href="/shop">Shop navigation</a></nav><footer>Provider footer</footer></body></html>'
     const { fetcher } = robotsServing(AMAZON_SHAPED)

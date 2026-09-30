@@ -225,8 +225,9 @@ export interface FetchResult {
    */
   resumeContext?: unknown | null
   /**
-   * The page as Markdown: its main content, or the whole page when
-   * `onlyMainContent` is false. `data:` link and image targets are dropped,
+   * The page as Markdown: its main content, the whole page when
+   * `onlyMainContent` is false, or the elements `includeTags` names, in each
+   * case without `excludeTags`. `data:` link and image targets are dropped,
    * the link text and alt text kept. Null unless status is contentful,
    * except on a failed or blocked result that kept a page as evidence, never
    * content: the page an error status carried, or the whole page when the
@@ -243,6 +244,23 @@ export interface FetchResult {
    * the content's title, usually its first heading.
    */
   metadata?: PageMetadata
+  /**
+   * The cleaned HTML the Markdown was written from, present only when the
+   * `html` format was asked for: the main content; with
+   * `onlyMainContent: false` the whole page without what Markdown never
+   * shows (scripts, styles, form controls, embedded media) and without the
+   * caller's `excludeTags`; with `includeTags` a `<body>` holding the named
+   * elements. A lane sets it on a contentful page only; the API returns
+   * null for a file and for a page that was not read as content.
+   */
+  html?: string | null
+  /**
+   * The page as the lane received it, present only when the `rawHtml` format
+   * was asked for: the response body on the HTTP lane, the rendered DOM on a
+   * browser lane, scripts and all. Its UTF-8 bytes hash to
+   * `evidence.rawBodySha256`. Set and returned as `html` is.
+   */
+  rawHtml?: string | null
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
   /**

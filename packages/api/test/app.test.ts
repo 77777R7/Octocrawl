@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -84,6 +85,68 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(compact.usage.totalMs).toBeGreaterThanOrEqual(0)
     expect(JSON.parse(debugText).summary.attempts[0].result.markdown).toContain('Harbour lantern catalog')
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
+  })
+
+  // POST a JSON body to the app and return the status with the parsed answer.
+  const postJson = async (path: string, body: unknown) => {
+    const res = await createApp(engine).request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return { status: res.status, body: await res.json() }
+  }
+
+  it('serves html and rawHtml when asked, without what excludeTags names, and repeats neither in the attempt audit', async () => {
+    const url = `${server.url}/crawl/listing`
+    const excluded = await postJson('/v1/scrape', { url, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['ul'], debug: false })
+    expect(excluded.status).toBe(200)
+    expect(excluded.body.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(excluded.body.markdown).toContain('Harbour lantern catalog')
+    expect(excluded.body.markdown).not.toContain('Harbour lantern teapot 01')
+    // html is what the Markdown was written from; rawHtml is the body as received, the one the evidence hashes.
+    expect(excluded.body.html).toContain('<h1>Harbour lantern catalog</h1>')
+    expect(excluded.body.html).not.toContain('<ul>')
+    expect(excluded.body.rawHtml).toMatch(/^<!doctype html>/)
+    expect(excluded.body.rawHtml).toContain('<ul>')
+    expect(createHash('sha256').update(excluded.body.rawHtml).digest('hex')).toBe(excluded.body.snapshot.rawBodySha256)
+    // The full response carries them once: the attempt audit repeats neither.
+    const full = await postJson('/v1/scrape', { url, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['ul'] })
+    expect(full.body).toMatchObject({ status: 'success', html: excluded.body.html, rawHtml: excluded.body.rawHtml })
+    expect(full.body.summary.attempts[0].result).not.toHaveProperty('html')
+    expect(full.body.summary.attempts[0].result).not.toHaveProperty('rawHtml')
+    expect(full.body.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ excludeTags: ['ul'] }) }))
+  })
+
+  it('keeps only what includeTags names, on a page, on an error page and through /fc', async () => {
+    const url = `${server.url}/crawl/listing`
+    const included = await postJson('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['main ul'], debug: false })
+    expect(included.body.markdown).toBe([1, 2, 3].map((n) => `- [Harbour lantern teapot 0${n}](${server.url}/crawl/item/${n})`).join('\n'))
+    expect(included.body.html).toMatch(/^<body><ul><li><a href="\/crawl\/item\/1">/)
+    expect(included.body).toMatchObject({ status: 'success', lane: 'http', document: { confidence: 1 } })
+    expect(included.body).not.toHaveProperty('rawHtml')
+    // Nothing named on the page is an empty answer from the rung that read it, not a failure.
+    const none = await postJson('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['table'], debug: false })
+    expect(none.body).toMatchObject({ status: 'success', lane: 'http', markdown: '', html: '', channelsTried: ['http'] })
+    // The page an error status carried is evidence, shaped the same way, and gives no html.
+    const missing = `${server.url}/error/404`
+    expect((await postJson('/v1/scrape', { url: missing, formats: ['markdown', 'html'], includeTags: ['h1'], debug: false })).body).toMatchObject({ status: 'failed', failureReason: 'http_error', markdown: '# Not Found', html: null })
+    expect((await postJson('/v1/scrape', { url: missing, formats: ['markdown'], excludeTags: ['h1'], debug: false })).body).toMatchObject({ status: 'failed', failureReason: 'http_error', markdown: null })
+    const shim = await postJson('/fc/v1/scrape', { url, formats: ['html', 'rawHtml'], includeTags: ['h1'] })
+    expect(shim.body).toMatchObject({ success: true, data: { markdown: null, html: '<body><h1>Harbour lantern catalog</h1></body>' } })
+    expect(shim.body.data.rawHtml).toMatch(/^<!doctype html>/)
+  })
+
+  it('refuses by name a selector that does not parse, and one whose matching the page does not bound', async () => {
+    const url = `${server.url}/crawl/listing`
+    const broken = { error: 'includeTags entry is not a valid CSS selector: div[[', code: 'invalid_request' }
+    expect(await postJson('/v1/scrape', { url, includeTags: ['div[['] })).toEqual({ status: 400, body: broken })
+    expect(await postJson('/v1/batches', { urls: [url], includeTags: ['div[['] })).toEqual({ status: 400, body: broken })
+    expect(await postJson('/fc/v1/scrape', { url, includeTags: ['div[['] })).toEqual({ status: 400, body: { success: false, ...broken } })
+    expect(await postJson('/v1/crawl', { url, excludeTags: ['nav', 'p::before'] })).toEqual({ status: 400, body: { error: 'excludeTags entry is not a valid CSS selector: p::before', code: 'invalid_request' } })
+    // What the selector uses, and its place in the request.
+    expect(await postJson('/v1/scrape', { url, excludeTags: ['nav', 'li:nth-child(2)'] })).toEqual({ status: 400, body: {
+      error: 'excludeTags entry uses :nth-child, which W2L does not match: li:nth-child(2) (supported: tag, class, id and attribute selectors, the descendant and child combinators, :root, :empty, and :not(), :is() and :where() around selectors without combinators)',
+      code: 'unsupported_parameter',
+      details: { parameters: ['excludeTags[1]'] },
+    } })
+    expect(await postJson('/v1/batches', { urls: [url], includeTags: ['h2 ~ p'] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('includeTags entry uses the sibling combinator ~'), code: 'unsupported_parameter', details: { parameters: ['includeTags[0]'] } } })
   })
 
   it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {
@@ -357,8 +420,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       return { status: res.status, error: ((await res.json()) as { error?: string }).error }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: html, rawHtml (supported: markdown, links, json)' })
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)' })
     expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], mobile: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: mobile') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })

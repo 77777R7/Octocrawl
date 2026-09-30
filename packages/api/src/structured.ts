@@ -903,7 +903,7 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeResponse): readonly
   return ['markdown', 'links']
 }
 
-function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json'): boolean {
+function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml'): boolean {
   return formats.some(format => typeof format === 'string' ? format === name : name === 'json')
 }
 
@@ -914,9 +914,9 @@ function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRequest |
 function withoutRepeatedBodies(summary: ScrapeResponse['summary']): ScrapeResponse['summary'] {
   return {
     ...summary,
-    attempts: summary.attempts.map(attempt => ({
+    attempts: summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, ...result }, ...attempt }) => ({
       ...attempt,
-      result: { ...attempt.result, markdown: null, links: [] },
+      result: { ...result, markdown: null, links: [] },
     })),
   }
 }
@@ -940,6 +940,9 @@ export async function prepareScrapeResponse(
     ...result,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
+    // Asked for: what the result carries, null when it carries none (a file, a page not read as content).
+    ...(hasFormat(formats, 'html') ? { html: result.html ?? null } : {}),
+    ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
     ...(json === undefined ? {} : { json }),
     summary: req.debug === true ? result.summary : withoutRepeatedBodies(result.summary),
   }
@@ -1014,10 +1017,14 @@ export function compactScrapeResponse(
     lane: next.lane,
     formats: [
       ...(hasFormat(formats, 'markdown') ? ['markdown' as const] : []),
+      ...(hasFormat(formats, 'html') ? ['html' as const] : []),
+      ...(hasFormat(formats, 'rawHtml') ? ['rawHtml' as const] : []),
       ...(includeLinks ? ['links' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
+    ...(hasFormat(formats, 'html') ? { html: next.html ?? null } : {}),
+    ...(hasFormat(formats, 'rawHtml') ? { rawHtml: next.rawHtml ?? null } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,

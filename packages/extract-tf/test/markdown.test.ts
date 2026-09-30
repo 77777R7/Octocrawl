@@ -192,6 +192,14 @@ describe('htmlToMarkdown link and image targets', () => {
     expect(htmlToMarkdown(doc, { baseUrl: BASE })).toBe('[Intro](https://cdn.fixture.test/v2/intro.html)')
     expect(htmlToMarkdown('<a href="intro.html">Intro</a>')).toBe('[Intro](intro.html)')
   })
+
+  it('leaves out the elements the caller excludes, with everything inside, and keeps the document base', () => {
+    const doc = '<!doctype html><html><head><base href="https://cdn.fixture.test/v2/"></head><body><nav><a href="/">Home</a></nav>' +
+      '<main><p>Tides <a href="table.html">table</a><sup class="ref">[1]</sup></p></main><footer><p>Imprint</p></footer></body></html>'
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: ['nav', 'main .ref', 'head'] })).toBe('Tides [table](https://cdn.fixture.test/v2/table.html)\n\nImprint')
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: [] })).toBe(htmlToMarkdown(doc, { baseUrl: BASE }))
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: ['body'] })).toBe('')
+  })
 })
 
 // Markers a browser capture adds to its copy of the rendered page where the

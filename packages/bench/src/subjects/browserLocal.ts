@@ -27,7 +27,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -790,7 +790,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(converted, { url: pageUrl })
+      const extracted = extractTf.extract(converted, { url: pageUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
       const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
@@ -803,16 +803,18 @@ export class BrowserLocalSubject implements SubjectAdapter {
           escalate: extracted.escalate,
           linkCount: links.length,
           ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
+          ...tagOptions(options),
         },
       })
 
       // No main content: the whole rendered page stays on the failed result
       // as evidence, never content. onlyMainContent: false asks for the whole
-      // page, not the main content, so there it is the answer.
+      // page, not the main content, so there it is the answer; so is what
+      // includeTags names, on any page that is not blocked.
       let wholePage: string | null = null
-      if (extracted.escalate) {
-        if (gate !== null) return blocked(gate)
-        wholePage = wholePageMarkdown(converted, pageUrl)
+      if (extracted.escalate && gate !== null) return blocked(gate)
+      if (extracted.escalate && !selectionAsked(options)) {
+        wholePage = wholePageMarkdown(converted, pageUrl, options.excludeTags)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
         if (options.onlyMainContent !== false || wholePage === null) return {
@@ -839,8 +841,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = options.onlyMainContent === false
-        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl })
+      const markdown = wholePageAsked(options)
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
@@ -864,6 +866,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           adapterValidation: extracted.adapterValidation,
           labelledValues: extracted.labelledValues,
         },
+        // rawHtml is the page as rendered; html comes from the copy extraction read, without its layout markers.
+        ...htmlFormats(body, converted, extracted.mainHtml, options),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
       }
     } catch (err) {

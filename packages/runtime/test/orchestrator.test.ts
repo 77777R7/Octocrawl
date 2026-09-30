@@ -198,10 +198,12 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
   })
 
   it('marks a later URL with the same body as duplicate and keeps crawling', async () => {
+    // The crawl asked for the html formats: a duplicate gives them up with its Markdown.
+    const repeated = outcome(ITEM_A, [SEED], 'same-body')
     const atom = new FakeAtom(
       new Map([
         [SEED, outcome(SEED, [ITEM_A, ITEM_B], 'same-body')],
-        [ITEM_A, outcome(ITEM_A, [SEED], 'same-body')],
+        [ITEM_A, { ...repeated, result: { ...repeated.result, html: '<main>same body</main>', rawHtml: '<html><body><main>same body</main></body></html>' } }],
         [ITEM_B, outcome(ITEM_B, [], 'other')],
       ]),
     )
@@ -217,6 +219,8 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(dup?.contentHash).toBe('same-body')
     expect(dup?.result?.failureReason).toBeNull()
     expect(dup?.result?.markdown).toBeNull()
+    expect(dup?.result).not.toHaveProperty('html')
+    expect(dup?.result).not.toHaveProperty('rawHtml')
     // The page's own links stay on the record (an empty list would claim it has none); the crawl does not follow them.
     expect(dup?.result?.links).toEqual([SEED])
     expect(dup?.result?.trace.some((t) => t.event === 'duplicate_content')).toBe(true)

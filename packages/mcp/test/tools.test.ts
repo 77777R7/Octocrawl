@@ -134,6 +134,34 @@ describe('MCP tools', () => {
     }
   })
 
+  it('offers the html and rawHtml formats and forwards includeTags and excludeTags for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { formats: ['markdown', 'html', 'rawHtml'], includeTags: ['article'], excludeTags: ['.ad'] }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...options },
+      { url: 'https://example.com/', ...options },
+      { urls: ['https://example.com/a'], ...options },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml"]')
+      expect(properties).toMatchObject({
+        includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+        excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+      })
+    }
+    // The list's shape is checked before any API call, as for every other option.
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', includeTags: 'article' })).rejects.toThrow('includeTags must be an array of at most 100 CSS selectors')
+    expect(bodies).toHaveLength(3)
+  })
+
   it('declares and forwards a recorded robots override, and still refuses the blanket switch', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

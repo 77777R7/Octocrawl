@@ -484,6 +484,33 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('carries the rendered DOM as rawHtml and html without its layout markers, only when asked', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const plain = await subject.fetch(`${url}/css-layout`)
+      expect(plain).not.toHaveProperty('html')
+      expect(plain).not.toHaveProperty('rawHtml')
+      const out = await subject.fetch(`${url}/css-layout`, undefined, undefined, undefined, { includeHtml: true, includeRawHtml: true })
+      expect(out.status).toBe('success')
+      // The page as rendered, the one the evidence hashes: the quote a script wrote and the platform names the CSS hides.
+      expect(out.rawHtml).toContain('<div class="quote"><span class="text">')
+      expect(out.rawHtml).toContain('Git Bash')
+      expect(sha256Utf8(out.rawHtml!)).toBe(out.evidence.rawBodySha256)
+      // The capture's markers shaped the Markdown; html is the page's own markup, without what the page hides.
+      expect(out.markdown).toContain('thinking.”\n\nby Albert Einstein')
+      expect(out.html).toContain('<span class="text">“The world as we have created it is a process of our thinking.”</span>')
+      expect(out.html).toContain('Open <span class="platform-mac">Terminal</span>.')
+      expect(out.html).not.toContain('data-w2l')
+      const named = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false, includeTags: ['nav', 'footer'], excludeTags: ['footer p'], includeHtml: true })
+      expect(named).toMatchObject({ status: 'success', markdown: `[Navigation entry](${url}/a)`, html: '<body><nav><a href="/a">Navigation entry</a></nav><footer></footer></body>' })
+      const whole = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false, excludeTags: ['nav', 'main'], includeHtml: true })
+      expect(whole.markdown).toBe(`[Site header link](${url}/)\n\nFooter notice text`)
+      expect(whole.html).toBe('<body><header><a href="/">Site header link</a></header><footer><p>Footer notice text</p></footer></body>')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('maps a navigation deadline to failureReason timeout', async () => {
     const subject = new BrowserLocalSubject()
     try {

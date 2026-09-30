@@ -20,7 +20,7 @@ import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -539,9 +539,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // flag the browser lane, never a contentful success. The whole page stays
     // on that result as evidence, never content. onlyMainContent: false asks
     // for the whole page, not the main content, so there it is the answer,
-    // still offered to the browser lane like a thin success.
+    // still offered to the browser lane like a thin success. So is what
+    // includeTags names, which is the answer on any page that is not
+    // blocked; excludeTags is left out of all of these.
     const extractStart = performance.now()
-    const extracted = extractTf.extract(body, { url: out.finalUrl })
+    const extracted = extractTf.extract(body, { url: out.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
     const extractionTotalMs = performance.now() - extractStart
     parseMs = extracted.timings.parseMs
     extractMs = Math.max(extracted.timings.extractMs, extractionTotalMs - parseMs)
@@ -557,14 +559,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
         escalate: extracted.escalate,
         linkCount: links.length,
         ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
+        ...tagOptions(options),
       },
     })
 
     let wholePage: string | null = null
-    if (extracted.escalate) {
-      if (gate !== null) return blocked(gate)
+    if (extracted.escalate && gate !== null) return blocked(gate)
+    if (extracted.escalate && !selectionAsked(options)) {
       const formatStart = performance.now()
-      wholePage = wholePageMarkdown(body, out.finalUrl)
+      wholePage = wholePageMarkdown(body, out.finalUrl, options.excludeTags)
       formatMs = performance.now() - formatStart
       if (options.onlyMainContent !== false || wholePage === null) {
         return finish({
@@ -597,7 +600,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // footer kept) through the same converter and base URL. The quality
     // signal below still reads the main content, so the mode never changes
     // which lane answers.
-    const markdown = options.onlyMainContent === false ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
+    const markdown = wholePageAsked(options) ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags }) : mainMarkdown
     formatMs += performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
     const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
@@ -655,6 +658,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         adapterValidation: extracted.adapterValidation,
         labelledValues: extracted.labelledValues,
       },
+      ...htmlFormats(body, body, extracted.mainHtml, options),
       usage: { ...base.usage, contentTokens },
     })
   }

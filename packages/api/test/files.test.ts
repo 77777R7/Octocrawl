@@ -119,6 +119,15 @@ describe('file download on scrape', () => {
     expect(valid(csv.evidenceRecord)).toMatchObject({ extractor: { name: 'file-text', version: FILE_TEXT_VERSION }, artifacts: [fileArtifact(CSV, 'text/csv', 'csv')] })
   })
 
+  it('has no html to give for a file: html and rawHtml are null, and the tag options leave its text as it is', async () => {
+    const full = await scrape({ url: `${origin}/data.csv`, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['table'], excludeTags: ['p'] })
+    expect(full).toMatchObject({ status: 'success', markdown: CSV, html: null, rawHtml: null, file: { kind: 'csv' } })
+    const compact = await scrape({ url: `${origin}/data.csv`, formats: ['html'], debug: false })
+    expect(compact).toMatchObject({ status: 'success', html: null, formats: ['html'] })
+    const shim = await post('/fc/v1/scrape', { url: `${origin}/data.csv`, formats: ['markdown', 'rawHtml'] })
+    expect(shim.json).toMatchObject({ success: true, data: { markdown: CSV, rawHtml: null } })
+  })
+
   it('takes a lower maxFileBytes per request and refuses one above the operator\'s cap', async () => {
     const small = await scrape({ url: `${origin}/report.pdf`, maxFileBytes: 100 })
     expect(small).toMatchObject({ status: 'failed', failureReason: 'body_too_large', markdown: null })

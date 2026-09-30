@@ -162,8 +162,10 @@ function contentSize(result: FetchResult): number {
  */
 function sanitizeResult(result: FetchResult): FetchResult {
   if (CONTENTFUL_STATUS.has(result.status) && identityCompromised(result.trace)) {
+    // The page goes with its Markdown, in every form the result carried it.
+    const { html: _html, rawHtml: _rawHtml, ...rest } = result
     return {
-      ...result,
+      ...rest,
       status: 'failed',
       failureReason: 'identity_compromised',
       blockReason: null,

@@ -80,6 +80,10 @@ export interface CrawlPage {
   markdown: string | null
   /** The fetch's caveats (a recorded robots override), as on a scrape result; absent when it had none. */
   warnings?: readonly FetchWarning[]
+  /** Present when the task asked for the `html` format, as on a scrape result; null when the page has none. */
+  html?: string | null
+  /** Present when the task asked for the `rawHtml` format, as on a scrape result; null when the page has none. */
+  rawHtml?: string | null
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
