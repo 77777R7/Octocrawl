@@ -31,6 +31,12 @@
       "url": "https://www.gstatic.com/gumdrop/sustainability/google-2025-environmental-report.pdf",
       "reason": "Google's own 2025 Environmental Report, published on gstatic.com, whose robots.txt allows only listed paths and ends with Disallow: /; the rule addresses crawlers, not this report. One file, fetched once, to cite its figures.",
       "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
+    },
+    {
+      "id": "DLR-2025",
+      "url": "https://go2.digitalrealty.com/rs/087-YZJ-646/images/Report_Digital_Realty_2605_Impact_Report.pdf",
+      "reason": "Digital Realty's own 2605 Impact Report, published on its marketing-platform host; that host's robots.txt Disallow: /rs/ is the platform's blanket rule for its asset path, addressed to crawlers, not a statement about this report (in the second run the host answered 404 to both the rule and the file). One file, fetched once, to cite its figures.",
+      "recordedBy": "77777R7 (W2L), decision of 2026-09-30"
     }
   ]
 }
