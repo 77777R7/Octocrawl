@@ -1,0 +1,22 @@
+{
+  "scrape-formats.html": {
+    "status": "solid",
+    "evidence": "3bfc3b7: formats accepts html; the lanes carry extracted.mainHtml as `html` when asked (the whole cleaned page when onlyMainContent is false, null for a file), the compact and full responses, batch items and crawl pages return it, the Firecrawl shim serves it. Live: books.toscrape.com product page returns the cleaned article with its table and no breadcrumb (m2-live-checks-2026-09-30.md C); tests packages/api/test/app.test.ts 'serves html and rawHtml'."
+  },
+  "scrape-formats.raw-html": {
+    "status": "solid",
+    "evidence": "3bfc3b7: formats accepts rawHtml; the http lane carries the wire body and the browser lane the rendered DOM as `rawHtml` when asked, null for a file, absent otherwise so checkpoints keep their size. Live: books.toscrape.com returns 9,275 chars beginning with the DOCTYPE, scripts included, hashing to rawBodySha256 (m2-live-checks-2026-09-30.md C). W2L_CAPTURE_RAW_DIR artifacts are unchanged."
+  },
+  "scrape-formats.include-tags": {
+    "status": "solid",
+    "evidence": "3bfc3b7: includeTags on scrape and crawl scrapeOptions (REST, SDK, MCP, Firecrawl shim); the named elements are copied out in document order before cleaning, the page keeps its own routing and render signals, the selection is returned whole with confidence 1, an empty selection is an empty answer without a browser render, a selector that does not parse is a 400 that names it. Live: webscraper.io tables with ['table'] returns the 10 table rows and nothing else on the http lane (m2-live-checks-2026-09-30.md B); tests extract.test.ts 'reduces the page to the included selectors', app.test.ts."
+  },
+  "scrape-formats.exclude-tags": {
+    "status": "solid",
+    "evidence": "3bfc3b7: excludeTags on scrape and crawl scrapeOptions (REST, SDK, MCP, Firecrawl shim) reaches pruneTree on both lanes, on the main region and on the whole page (onlyMainContent false) alike. Live: Wikipedia GDP with the MediaWiki edit-link and navbox selectors loses [Edit links] and [edit] and keeps its 243 table rows (m2-live-checks-2026-09-30.md A)."
+  },
+  "scrape-formats.markdown": {
+    "status": "solid",
+    "evidence": "Since reaudit-2026-09-30.json: the table strategy keeps the document around a table that is a fraction of the page (9d68407; Applied Digital release, applied-digital-check-2026-09-30.md), and includeTags/excludeTags exist (3bfc3b7). Live at 57232f6 (live-batch-1-rerun-2026-09-30.md): quotes one per line, GOV.UK 9 tables, Wikipedia 243 rows with spanned headers filled, BLS and OWID tables. Known leftover: Wikipedia's single [Edit links] link stays in the default output (removable with excludeTags); removeBase64Images is its own M2 feature."
+  }
+}

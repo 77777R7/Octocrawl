@@ -67,12 +67,18 @@ The 5 not found are unchanged: the Vantage APAC 5 MW figure and the Raxio Angola
 
 The canonical Google 2025 report is captured with its hash. 11 of the 14 file sources are captured with hashes and page-numbered text; the Digital Realty impact report waits on the same kind of decision as the five (its host says `Disallow: /rs/`), and the two mirrors are bot-gated pages whose 185 observations are covered by the canonical PDF. The value check reports found, not found or not captured for all 1,502 observations, with the cited page checked for PDFs.
 
+## Follow-up later the same day: the Digital Realty report under a sixth recorded override
+
+Decision of 2026-09-30, taken after this record was written: the same kind of override for DLR-2025, recorded in [robots-overrides.json](robots-overrides.json). One-URL batch through the same API build and proxy: task `5235b107-693e-4d30-a40a-434a25588eb4`, `operatorCheckoutCommit` `9975018`, 06:49:19 UTC. Result `success`, http lane, HTTP 200, wall 3.5 s; trace `robots_checked {decision: disallowed}` → `robots_disallowed` → `robots_overridden` → `file_received`; the PDF has 97 pages, all with text (8,394,614 bytes, SHA-256 `3bb3a3b8…`, 182,364 chars). `check-observations.py` on this capture: 32 of 32 observations found (27 strong, 5 weak), every one on the cited page.
+
+With it, 12 of the 14 file sources are captured with hashes; the two left are the bot-gated mirrors. Across the third run plus this capture: 1,479 of 1,502 observations found (0.997 of captured sources, 0.985 of all), 5 not found, 18 behind the SEC 403.
+
 ## Fetch count
 
 72 URLs once each in the batch (74 page requests), robots.txt once per host, 12 browser renders. No probe outside the batch; the earlier one-URL batch of the day fetched the Applied Digital release once more ([applied-digital-check-2026-09-30.md](applied-digital-check-2026-09-30.md)).
 
 ## Follow-ups
 
-- Decision: record an override for DLR-2025 (`go2.digitalrealty.com`, `Disallow: /rs/`), or leave the row to the seed user's next manifest.
+- Decision: record an override for DLR-2025 (`go2.digitalrealty.com`, `Disallow: /rs/`), or leave the row to the seed user's next manifest. Taken later the same day, see the follow-up above.
 - W2L: a redirect target's robots.txt is not consulted on the http lane, for any fetch; an override on a short link therefore reaches the target on the short link's record alone. A per-hop robots check is a candidate for M2.
 - Check script: a flipbook mirror's page numbers are not the PDF's physical pages (28 `other_page`); a page-offset per source, or the physical page in the workbook, would close this.
