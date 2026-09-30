@@ -31,7 +31,7 @@ Links and page metadata come with ordinary pages that were read, and fields with
 - **Read**: **Main content** (the default) leaves out headers, menus and footers. **Whole page** keeps them; a page with no clear main content then returns everything instead of failing.
 - **Fields**: up to 20 fields, each a name and a type (text, number, yes / no, or a list of text). Type a name on the add line and press Enter to add it, and set its type beside it. **+ product fields** fills in name, brand, price, currency, availability, SKU, rating and review count. Names use letters, digits, spaces, dots, dashes and underscores.
 
-The **Fields** view lists each field in the order you set them, marked ✓ when the page states it, · when it does not, and : when the page states more than one value. Under each value it shows where on the page it was read, as the downloaded `.fields.json` records it.
+The **Fields** view lists each field in the order you set them, marked ✓ when the page states it, · when it does not, and : when the page states more than one value. Under each value it shows where on the page it was read, as the downloaded `.fields.json` records it. **Links** and **Page info** read the same way: links are numbered and marked · on the page's own site or ↗ elsewhere, and each page-info value names the tag it was read from, or the tag W2L looked for when the page does not declare it.
 
 Fields are read from the page itself: JSON-LD, microdata, meta tags, table rows, definition lists, and a PDF's `Label: value` lines. No AI model is used. A field the page does not state comes back empty with its reason, never guessed. Amazon.sg product pages take no options; they always return their checked product record.
 
