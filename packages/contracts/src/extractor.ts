@@ -270,7 +270,11 @@ export interface ExtractorOptions {
   favorPrecision?: boolean
   /** When unsure, prefer more text (loosen thresholds). Mirrors favor_recall. */
   favorRecall?: boolean
-  /** Extra CSS selectors to prune from the tree before extraction. */
+  /**
+   * Extra CSS selectors to prune from the tree before extraction, limited to
+   * the selectors that are matched in time proportional to the page
+   * (@w2l/extract-tf `invalidSelector`); any other names nothing.
+   */
   pruneSelectors?: readonly string[]
 }
 

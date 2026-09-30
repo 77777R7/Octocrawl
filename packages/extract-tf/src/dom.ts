@@ -46,6 +46,19 @@ export function qs(scope: ParentNode, selector: string): Element | null {
   }
 }
 
+let probe: Document | undefined
+
+/** The DOM layer's complaint about a CSS selector it cannot parse or compile, or null when it can. */
+export function selectorSyntaxError(selector: string): string | null {
+  try {
+    probe ??= parse('<html><body></body></html>').document
+    probe.querySelector(selector)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 /** Serialize an element back to HTML. */
 export function outerHtml(el: Element): string {
   return el.outerHTML

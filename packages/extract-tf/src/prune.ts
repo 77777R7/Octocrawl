@@ -11,6 +11,7 @@
  */
 
 import { detach, qsa, tagOf, textOf } from './dom.js'
+import { namedBy } from './selectors.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
 
@@ -274,9 +275,7 @@ export function pruneTree(doc: Document, options: PruneOptions = {}): void {
 
   // User-provided selectors take precedence: they run last so they can
   // remove anything the built-ins missed.
-  for (const sel of options.selectors ?? []) {
-    for (const el of qsa(doc, sel)) detach(el)
-  }
+  for (const el of namedBy(doc, options.selectors ?? [])) detach(el)
 
   void tagOf
 }
