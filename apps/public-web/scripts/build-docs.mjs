@@ -27,10 +27,13 @@ const escape = md.utils.escapeHtml
 const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 const slug = value => value.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/\s+/g, '-') || 'section'
 
+// A code block is a session sheet: its language as the kicker, a Copy button, and numbered lines. Each line is its own
+// span, with the newlines kept between them, so copying the code (its text) never takes the numbers.
 md.renderer.rules.fence = (tokens, index) => {
   const token = tokens[index]
   const language = token.info.trim().split(/\s+/)[0] || 'text'
-  return `<div class="doc-code"><div class="doc-code-head"><span>${escape(language)}</span><button type="button" class="copy-code" aria-label="Copy ${escape(language)} example">Copy</button></div><pre><code>${escape(token.content)}</code></pre></div>`
+  const lines = token.content.replace(/\n$/, '').split('\n').map(line => `<span class="line">${escape(line)}</span>`).join('\n')
+  return `<div class="doc-code"><div class="doc-code-head"><span class="doc-code-lang">${escape(language)}</span><button type="button" class="copy-code" aria-label="Copy ${escape(language)} example">Copy</button></div><pre><code>${lines}</code></pre></div>`
 }
 md.renderer.rules.link_open = (tokens, index, options, env, self) => {
   const token = tokens[index]
@@ -39,7 +42,9 @@ md.renderer.rules.link_open = (tokens, index, options, env, self) => {
   return self.renderToken(tokens, index, options)
 }
 
-function renderMarkdown(source) {
+/** The page's HTML, with an id on every heading and a number on every section (h2); the sections also go to the
+ * page's table of contents. */
+function renderMarkdown(source, toc = []) {
   const tokens = md.parse(source, {})
   const used = new Set()
   for (let index = 0; index < tokens.length; index++) {
@@ -50,6 +55,10 @@ function renderMarkdown(source) {
     for (let suffix = 2; used.has(id); suffix++) id = `${base}-${suffix}`
     used.add(id)
     tokens[index].attrSet('id', id)
+    if (tokens[index].tag !== 'h2') continue
+    const number = String(toc.length + 1).padStart(2, '0')
+    toc.push({ id, title: value, number })
+    tokens[index].attrSet('data-n', number)
   }
   return md.renderer.render(tokens, md.options, {})
 }
@@ -95,12 +104,18 @@ function mcpClientPicker() {
   return `<div class="mcp-picker"><div class="mcp-picker-head"><div><h2>Set up W2L MCP</h2><p>Connect to the local W2L service on this computer.</p></div><a href="#start-w2l-on-your-computer">Start local service <span aria-hidden="true">→</span></a></div><div class="mcp-client-tabs" role="tablist" aria-label="Choose an MCP client">${tabs}</div>${panels}<div class="mcp-picker-foot"><p>Using another MCP client? Point it at:</p><div class="doc-code mcp-command-row"><pre><code>http://127.0.0.1:8791/mcp</code></pre><button type="button" class="copy-code" aria-label="Copy local MCP endpoint">Copy</button></div><small>Hosted HTTPS and browser login are coming soon.</small></div></div>`
 }
 
-function renderPageContent(page, source) {
-  if (page.slug !== 'connect-mcp') return renderMarkdown(source)
+function renderPageContent(page, source, toc) {
+  if (page.slug !== 'connect-mcp') return renderMarkdown(source, toc)
   const marker = '{{MCP_CLIENT_PICKER}}'
   const parts = source.split(marker)
   if (parts.length !== 2) throw new Error('Connect MCP page must include exactly one client picker marker')
-  return renderMarkdown(parts[0]) + mcpClientPicker() + renderMarkdown(parts[1])
+  return renderMarkdown(parts[0], toc) + mcpClientPicker() + renderMarkdown(parts[1], toc)
+}
+
+/** On this page: the sections, numbered as in the article; docs.js marks the one being read. */
+function tocHtml(toc) {
+  if (toc.length < 2) return ''
+  return `<aside class="doc-toc"><nav aria-label="On this page"><p class="doc-toc-title"><span class="kicker-square" aria-hidden="true"></span>On this page</p><ol>${toc.map(item => `<li><a href="#${escape(item.id)}"><span class="doc-toc-n" aria-hidden="true">${item.number}</span>${escape(item.title)}</a></li>`).join('')}</ol></nav></aside>`
 }
 
 function nav(active) {
@@ -108,18 +123,18 @@ function nav(active) {
   return pages.map(page => {
     const heading = group === page.group ? '' : `<p class="doc-nav-heading">${escape(page.group)}</p>`
     group = page.group
-    return `${heading}<a href="${pathFor(page)}"${page.slug === active.slug ? ' aria-current="page"' : ''}>${escape(page.title)}</a>`
+    return `${heading}<a href="${pathFor(page)}"${page.slug === active.slug ? ' aria-current="page"' : ''}><span class="doc-nav-mark" aria-hidden="true"></span>${escape(page.title)}</a>`
   }).join('')
 }
 
-function documentHtml(page, content, index) {
+function documentHtml(page, content, index, toc) {
   const previous = pages[index - 1]
   const next = pages[index + 1]
-  const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next</small>${escape(next.title)} →</a>` : '<span></span>'}</nav>`
+  const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>← Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next →</small>${escape(next.title)}</a>` : '<span></span>'}</nav>`
   return `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" /><link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>${escape(page.title)} | W2L Docs</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a><header class="doc-header"><div class="doc-header-inner"><a class="doc-brand" href="/" aria-label="W2L home"><img src="/assets/octopus-original.webp" width="34" height="34" alt="" /><span>W2L<span class="brand-dot">.</span></span></a><nav aria-label="Top navigation"><a href="/docs/" aria-current="page">Docs</a><a class="try-link" href="/">Try W2L <span aria-hidden="true">↗</span></a></nav></div></header>
-<div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow">W2L / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>The page preview runs at this site's URL. MCP setup is local; hosted MCP is pending validation.</span><a href="/">Try a page ↗</a></footer></main></div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
+<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>W2L / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>The page preview runs at this site's URL. MCP setup is local; hosted MCP is pending validation.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
 }
 
 await mkdir(output, { recursive: true })
@@ -127,6 +142,8 @@ for (const [index, page] of pages.entries()) {
   const source = await readFile(join(root, 'content', page.file), 'utf8')
   const target = join(output, page.slug, 'index.html')
   await mkdir(dirname(target), { recursive: true })
-  await writeFile(target, documentHtml(page, renderPageContent(page, source), index))
+  const toc = []
+  const content = renderPageContent(page, source, toc)
+  await writeFile(target, documentHtml(page, content, index, toc))
 }
 console.log(`Built ${pages.length} W2L documentation pages in ${output}`)

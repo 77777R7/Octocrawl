@@ -48,3 +48,18 @@ document.addEventListener('keydown', event => {
   event.preventDefault()
   selectMcpTab(tabs[next], true)
 })
+
+// On this page: the section being read is the last whose heading has passed near the top of the window.
+const tocLinks = [...document.querySelectorAll('.doc-toc a')]
+const tocHeads = tocLinks.map(link => document.getElementById(decodeURIComponent(link.hash.slice(1))))
+let tocFrame = 0
+function markSection() {
+  tocFrame = 0
+  let current = 0
+  tocHeads.forEach((head, index) => { if (head && head.getBoundingClientRect().top < 140) current = index })
+  tocLinks.forEach((link, index) => link.setAttribute('aria-current', String(index === current)))
+}
+if (tocLinks.length) {
+  markSection()
+  window.addEventListener('scroll', () => { tocFrame ||= requestAnimationFrame(markSection) }, { passive: true })
+}

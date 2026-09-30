@@ -60,13 +60,16 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
     // Deferred: the report can come from inside React's commit, which must not unmount its own root.
     window.setTimeout(reconcile, 0)
   }
-  /** The hero yields while the visitor works with the real form: while they type the octopus dims (see the styles)
-   * and it and the glyphs rest, so nothing moves beside what the visitor is doing. While a preview is extracted the
+  /** The hero yields while the visitor works with the real form: while they type, or while one of its panels is open,
+   * the octopus dims (see the styles) and it and the glyphs rest, so nothing moves beside what the visitor is doing.
+   * A button that merely keeps focus after a click (the example, or one a panel returns focus to) does not hold it. While a preview is extracted the
    * glyphs still rest, but the octopus comes forward and takes the link (w2l:take); the form's own message says how
    * it ended. */
   const sync = (): void => {
     const busy = form?.getAttribute('aria-busy') === 'true'
-    const yields = Boolean(form && (busy || form.contains(document.activeElement)))
+    const active = document.activeElement
+    const working = Boolean(form && active && form.contains(active) && (active.matches('input, select, textarea') || active.closest('[popover], dialog')))
+    const yields = Boolean(form && (busy || working))
     if (busy !== taking) {
       taking = busy
       // The form has set its message before it stops being busy.

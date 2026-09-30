@@ -78,6 +78,11 @@ const BLINK_SHARE = [0.22, 0.7, 0.1, 0.18, 0.1]
 const BLINK_GAIN = [0.65, 0.9, 0.5, 0.65, 0.6]
 const BLINK_RAMP = [GOLD, ORANGE, ICE, GOLD, ICE]
 const POINTER_RAMP = [GOLD, ORANGE, ORANGE, GOLD, ICE]
+// A click sends a ring of cool light through the artwork's glyphs (gold through the clouds): it spreads RIPPLE_SPEED
+// px a ms for RIPPLE_MS, fading as it goes.
+const RIPPLE_MS = 900
+const RIPPLE_SPEED = 0.42
+const RIPPLE_WIDTH = 28
 // The wash's mask is a blurred shape, so a quarter of the canvas's resolution is plenty.
 const MASK_SCALE = 4
 
@@ -224,6 +229,8 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let climbAt = between([900, 1500])
   let summitSent = false
   const pointer = { x: 0, y: 0, active: false }
+  // Recent clicks (canvas css px), when each was on the glyphs' clock.
+  const clicks: Array<{ x: number; y: number; at: number }> = []
   // The hero's size and the form's messages decide the layout; the first report of each is the layout just made.
   let settled = false
   const resize = new ResizeObserver(() => {
@@ -508,6 +515,16 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
           ramp = POINTER_RAMP[kind]
         }
       }
+      for (const click of clicks) {
+        const age = clock - click.at
+        const off = Math.hypot(xs[i] - click.x, ys[i] - click.y) - age * RIPPLE_SPEED
+        if (off < -RIPPLE_WIDTH * 3 || off > RIPPLE_WIDTH * 3) continue
+        const wave = Math.exp(-((off / RIPPLE_WIDTH) ** 2)) * (1 - age / RIPPLE_MS) ** 1.3
+        if (wave > light) {
+          light = wave
+          ramp = kind === CLOUD ? GOLD : ICE
+        }
+      }
       light *= g.weight * gain * open
       if (light < 0.08) continue
       const step = Math.min(STEPS - 1, Math.floor(light * STEPS))
@@ -570,6 +587,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       summitSent = true
       hero.dispatchEvent(new CustomEvent('w2l:summit'))
     }
+    while (clicks.length && clock - clicks[0]!.at > RIPPLE_MS) clicks.shift()
     sky.step(clock)
     fog?.step(clock)
     if (embers) {
@@ -602,6 +620,12 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     pointer.active = event.pointerType === 'mouse'
   }
   const onLeave = (): void => { pointer.active = false }
+  const onClick = (event: PointerEvent): void => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return
+    clicks.push({ x: event.pageX - origin.x, y: event.pageY - origin.y, at: clock })
+    if (clicks.length > 3) clicks.shift()
+    run()
+  }
   const onVisibility = (): void => {
     if (document.hidden) stop()
     else run()
@@ -616,6 +640,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     hero.removeEventListener('w2l:rest', onRest)
     hero.removeEventListener('pointermove', onPointer)
     hero.removeEventListener('pointerleave', onLeave)
+    hero.removeEventListener('pointerdown', onClick)
     document.removeEventListener('visibilitychange', onVisibility)
     canvas.remove()
   }
@@ -628,6 +653,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       hero.addEventListener('w2l:rest', onRest)
       hero.addEventListener('pointermove', onPointer, { passive: true })
       hero.addEventListener('pointerleave', onLeave)
+      hero.addEventListener('pointerdown', onClick, { passive: true })
       document.addEventListener('visibilitychange', onVisibility)
       void ready.then((result) => {
         if (disposed) return
