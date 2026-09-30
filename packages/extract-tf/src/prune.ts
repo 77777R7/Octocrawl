@@ -34,9 +34,33 @@ const MANUALLY_CLEANED = [
   'canvas',
   'svg',
   'template',
+  'label',
 ] as const
 
-const CLEANED_SELECTOR = MANUALLY_CLEANED.join(',')
+/**
+ * ARIA landmarks and hidden markers that mean the same as the tags above:
+ * a `<div role="navigation">` navbox is navigation, a `[hidden]` element is
+ * not on the page a reader sees.
+ */
+const CLEANED_ATTRIBUTE_SELECTORS = [
+  '[role="navigation"]',
+  '[role="banner"]',
+  '[role="contentinfo"]',
+  '[role="complementary"]',
+  '[role="search"]',
+  '[role="menu"]',
+  '[role="menubar"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[hidden]',
+  '[aria-hidden="true"]',
+  '[style*="display:none"]',
+  '[style*="display: none"]',
+  '[style*="visibility:hidden"]',
+  '[style*="visibility: hidden"]',
+] as const
+
+const CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...CLEANED_ATTRIBUTE_SELECTORS].join(',')
 
 /**
  * CMP / ad / junk selectors, applied by id or class token. Matched nodes are
@@ -207,6 +231,39 @@ export function cleanTree(doc: Document): void {
   for (const el of qsa(doc, CLEANED_SELECTOR)) detach(el)
 }
 
+/** Items of a nav-shaped list. */
+const NAV_LIST_MIN_ITEMS = 15
+const NAV_LIST_MAX_ITEM_LENGTH = 60
+
+/** An item whose whole text is its links: a menu entry, not a list entry. */
+function isLinkOnlyItem(li: Element): boolean {
+  const text = textOf(li).replace(/\s+/g, ' ').trim()
+  if (text.length === 0 || text.length > NAV_LIST_MAX_ITEM_LENGTH) return false
+  const linkText = qsa(li, 'a')
+    .map((a) => textOf(a))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return linkText.length > 0 && linkText.length >= text.length * 0.9
+}
+
+/**
+ * Remove large lists whose items are nothing but links from an article
+ * region: interlanguage menus, category rails and footer link farms that a
+ * page header or content area carries without a `nav` wrapper. Small lists
+ * ("See also") and lists whose items carry text of their own stay. Never run
+ * this on a listing page, where such a list can be the content.
+ */
+export function pruneNavLists(region: Element): void {
+  for (const list of qsa(region, 'ul,ol')) {
+    if (!list.isConnected) continue
+    const items = Array.from(list.children).filter((c) => tagOf(c) === 'li')
+    if (items.length < NAV_LIST_MIN_ITEMS) continue
+    const linkOnly = items.filter(isLinkOnlyItem).length
+    if (linkOnly >= items.length * 0.9) detach(list)
+  }
+}
+
 /**
  * Remove noise by built-in + user selectors. Run after cleanTree.
  */
@@ -244,6 +301,4 @@ export function pruneTree(doc: Document, options: PruneOptions = {}): void {
   for (const sel of options.selectors ?? []) {
     for (const el of qsa(doc, sel)) detach(el)
   }
-
-  void tagOf
 }

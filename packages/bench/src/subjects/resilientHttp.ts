@@ -422,7 +422,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     const formatStart = performance.now()
-    const markdown = htmlToMarkdown(extracted.mainHtml)
+    const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: out.finalUrl })
     formatMs = performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
 

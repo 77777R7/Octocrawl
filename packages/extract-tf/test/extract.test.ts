@@ -97,6 +97,51 @@ describe('extractTf', () => {
     expect(recalled.mainHtml).toContain('Short observation number one')
   })
 
+  it('drops ARIA landmarks and hidden elements like their tag equivalents', () => {
+    const html = `<!doctype html><html><body>
+<div role="banner"><a href="/">Site home</a> <a href="/about">About the site</a></div>
+<main>
+<h1>Kiln temperatures</h1>
+<div role="navigation" class="navbox"><table><tr><td><a href="/a">Related list A</a> <a href="/b">Related list B</a></td></tr></table></div>
+<p aria-hidden="true">Decorative icon label text here.</p>
+<div hidden><p>Hidden draft paragraph that nobody sees on the page.</p></div>
+<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>
+<p>Sediment cores from the estuary date to 1873. Researchers compared them against the almanac kept at the plinth house.</p>
+</main>
+<div role="contentinfo"><p>Copyright 2026 Synthetic Fixture Co. All rights reserved.</p></div>
+</body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('The kiln reached 1240 degrees')
+    expect(out.mainHtml).not.toContain('Related list A')
+    expect(out.mainHtml).not.toContain('Decorative icon')
+    expect(out.mainHtml).not.toContain('Hidden draft')
+    expect(out.mainHtml).not.toContain('About the site')
+    expect(out.mainHtml).not.toContain('Copyright 2026')
+  })
+
+  it('prunes menu-sized bare-link lists from an article region but keeps them on a listing page', () => {
+    const menu = Array.from({ length: 20 }, (_, i) => `<li><a href="/lang/${i}">Language ${i}</a></li>`).join('')
+    const seeAlso = Array.from({ length: 4 }, (_, i) => `<li><a href="/see/${i}">See also ${i}</a></li>`).join('')
+    const article = `<!doctype html><html><body><main>
+<h1>Kiln temperatures</h1>
+<div class="languages"><ul>${menu}</ul></div>
+<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>
+<p>Sediment cores from the estuary date to 1873. Researchers compared them against the almanac kept at the plinth house.</p>
+<p>Later experiments repeated the same steps, and the temperature curve matched the first recording within fifteen degrees.</p>
+<h2>See also</h2><ul>${seeAlso}</ul>
+</main></body></html>`
+    const out = extractTf.extract(article)
+    expect(out.strategy).toBe('article')
+    expect(out.mainHtml).toContain('The kiln reached 1240 degrees')
+    expect(out.mainHtml).not.toContain('Language 7')
+    expect(out.mainHtml).toContain('See also 2')
+
+    const listing = `<!doctype html><html><body><h1>Directory</h1><ul>${menu}</ul></body></html>`
+    const dir = extractTf.extract(listing)
+    expect(dir.pageType).toBe('listing')
+    expect(dir.mainHtml).toContain('Language 7')
+  })
+
   it('applies caller prune selectors', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Report</h1>

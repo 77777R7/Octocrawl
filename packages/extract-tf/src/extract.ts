@@ -13,7 +13,7 @@
 
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { outerHtml, parse, textOf } from './dom.js'
-import { cleanTree, pruneRecommendations, pruneTree } from './prune.js'
+import { cleanTree, pruneNavLists, pruneRecommendations, pruneTree } from './prune.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
@@ -155,6 +155,11 @@ export class ExtractTf implements Extractor {
         main = selectMain(doc.document, blocks)
       }
     }
+
+    // An article region that still carries a menu-sized list of bare links
+    // (interlanguage menus, category rails) loses it; on a listing page that
+    // list is the content, so only the article cascade prunes it.
+    if (main !== null && strategy === 'article') pruneNavLists(main)
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {

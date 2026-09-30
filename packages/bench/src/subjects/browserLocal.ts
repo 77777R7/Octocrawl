@@ -641,7 +641,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       if (decisive !== null) return blocked(decisive)
 
-      const markdown = htmlToMarkdown(extracted.mainHtml)
+      const markdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: finalUrl })
       return {
         ...base,
         status: 'success',
