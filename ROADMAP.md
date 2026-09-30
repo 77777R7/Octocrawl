@@ -53,6 +53,8 @@ Status 2026-09-30: items 1–4 checked in [live-batch-1-m1-recheck-2026-09-30.md
 - PDF text with page numbers from the text layer; a scanned PDF returns `ocr_required`, never an empty success.
 - Re-run [research/coos-pilot/](research/coos-pilot/): freeze the manifest first (ask him about the two suspect links), then `run-baseline.mjs` and `check-observations.py`; record recall by source format.
 
+Status 2026-09-30: file download as received and PDF text with page numbers are in `8467e8e` (tests for PDF, scanned PDF, CSV, JSON, XLSX, ZIP, unsupported binaries, the size cap and the browser lane). Live check on five of the seed user's PDFs in [research/coos-pilot/files-check-2026-09-30.md](research/coos-pilot/files-check-2026-09-30.md): three read in full (3, 12 and 72 pages, table rows kept one per line); two are on CDN hosts whose robots.txt disallows every path and are refused as `policy_denied` with the rule in the trace. The manifest re-run waits for the freeze. Open decision: whether a researcher may record an explicit robots override for a file the publisher links publicly (`ignoreRobotsTxt` is in the Paused table).
+
 Exit: the 15 PDF-type sources in his manifest are captured with hashes, including the canonical Google 2025 report; the value check reports found/not-found for all 1,502 observations.
 
 ### M2–M5
