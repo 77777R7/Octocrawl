@@ -9,7 +9,9 @@
  * paragraph it sits in) or block (starts a new line). Consecutive inline
  * siblings, text nodes included, form one paragraph, so `<div><span>Alpha
  * </span><span>Beta</span></div>` reads "Alpha Beta" and two sibling
- * `<div>`s become two lines rather than one glued word.
+ * `<div>`s become two lines rather than one glued word. A superscript or
+ * subscript of digits and signs keeps its script form (m², H₂O, 10⁻³), so
+ * it never joins the number next to it.
  */
 
 import { parse, tagOf, textOf } from './dom.js'
@@ -24,6 +26,27 @@ const INLINE_TAGS = new Set([
   'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small', 'span', 'strike', 'strong',
   'sub', 'sup', 'time', 'tt', 'u', 'var', 'wbr',
 ])
+
+/** Script forms for `<sup>` and `<sub>`: digits, signs and the few letters Unicode has. */
+const SUPERSCRIPT: Readonly<Record<string, string>> = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ',
+}
+const SUBSCRIPT: Readonly<Record<string, string>> = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎', a: 'ₐ', e: 'ₑ', o: 'ₒ', x: 'ₓ', h: 'ₕ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', p: 'ₚ', s: 'ₛ', t: 'ₜ',
+}
+
+/**
+ * `<sup>`/`<sub>` text in its script form when every character has one
+ * (`m<sup>2</sup>` → m²); other content stays as written. Without this a
+ * unit's superscript joins the number that follows it on the page.
+ */
+function scriptText(text: string, tag: string): string {
+  const map = tag === 'sup' ? SUPERSCRIPT : SUBSCRIPT
+  const mapped = Array.from(text).map((c) => map[c])
+  return mapped.every((c) => c !== undefined) ? mapped.join('') : text
+}
 
 /** Elements whose content never belongs in the text. */
 const SKIPPED_TAGS = new Set([
@@ -74,6 +97,7 @@ function cellText(node: Node): string {
   if (SKIPPED_TAGS.has(tag) || isHidden(el)) return ''
   if (tag === 'br') return ' '
   const inner = Array.from(el.childNodes).map(cellText).join('')
+  if (tag === 'sup' || tag === 'sub') return scriptText(inner.trim(), tag)
   return INLINE_TAGS.has(tag) ? inner : ` ${inner} `
 }
 
@@ -203,6 +227,11 @@ class Renderer {
       case 'samp': {
         const t = inner.trim()
         return t ? `\`${t}\`` : ''
+      }
+      case 'sup':
+      case 'sub': {
+        const t = inner.trim()
+        return t ? scriptText(t, tag) : ''
       }
       case 'a': {
         const href = this.resolve(attr(el, 'href'))

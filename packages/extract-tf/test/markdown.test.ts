@@ -64,6 +64,17 @@ describe('htmlToMarkdown', () => {
     ])
   })
 
+  it('keeps a superscript or subscript in its script form, off the number next to it', () => {
+    const md = htmlToMarkdown(
+      '<div><span>12,000 ft <sup>2</sup></span><span>1,100 m <sup>2</sup></span><span>N+1 Cooling</span></div>' +
+        '<p>H<sub>2</sub>O at 10<sup>-3</sup> bar<sup><a href="#n1">[1]</a></sup></p>' +
+        '<table><tr><th>Site</th><th>Area m<sup>2</sup></th></tr><tr><td>FRA1</td><td>1,100</td></tr></table>',
+    )
+    expect(md).toContain('12,000 ft ²1,100 m ²N+1 Cooling')
+    expect(md).toContain('H₂O at 10⁻³ bar[[1]](#n1)')
+    expect(md).toContain('| Site | Area m² |')
+  })
+
   it('numbers ordered lists and keeps code and tables nested in items', () => {
     const md = htmlToMarkdown(
       '<ol start="3"><li>Step one<pre><code class="language-sh">npm ci</code></pre></li>' +
