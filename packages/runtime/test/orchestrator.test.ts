@@ -131,6 +131,43 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(atom.fetches).toEqual([SEED])
   })
 
+  it('persists the attempt counters after every page, so status is live while the crawl runs', async () => {
+    const store = new MemoryTaskStore()
+    const pages = new Map([
+      [SEED, outcome(SEED, [ITEM_A, ITEM_B])],
+      [ITEM_A, outcome(ITEM_A, [])],
+      [ITEM_B, outcome(ITEM_B, [])],
+    ])
+    const seen: number[] = []
+    const atom: ScrapeAtom = {
+      async scrape(url) {
+        // Before this page is fetched, the store already counts the earlier ones.
+        const [task] = await store.listTasks()
+        const attempts = await store.listAttempts(task!.id)
+        seen.push(attempts.at(-1)?.pagesFetched ?? -1)
+        const hit = pages.get(url)
+        if (hit === undefined) throw new Error(`no page for ${url}`)
+        return hit
+      },
+      async close() {},
+    }
+    const orchestrator = new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1 })
+    const report = await orchestrator.run({ seedUrl: SEED, taskDir: '/tmp/x', mode: 'standard', budget: DEFAULT_CRAWL_BUDGET, maxDepth: null, allowlistedDomains: [], resumeFrom: null, useCached: false })
+    expect(report.pagesFetched).toBe(3)
+    expect(seen).toEqual([0, 1, 2])
+  })
+
+  it('honours includePaths and excludePaths from the spec', async () => {
+    const atom = new FakeAtom(new Map([
+      [SEED, outcome(SEED, [ITEM_A, ITEM_B, 'https://fixture.test/docs/guide'])],
+      ['https://fixture.test/docs/guide', outcome('https://fixture.test/docs/guide', [])],
+    ]))
+    const { go } = runWith(atom, { seedUrl: SEED, taskDir: '/tmp/x', mode: 'standard', budget: DEFAULT_CRAWL_BUDGET, maxDepth: null, allowlistedDomains: [], includePaths: ['^/docs/'], resumeFrom: null, useCached: false })
+    const report = await go()
+    expect(report.pagesFetched).toBe(2)
+    expect(atom.fetches).toEqual([SEED, 'https://fixture.test/docs/guide'])
+  })
+
   it('stops at --max-pages with budget_exceeded: pages', async () => {
     const atom = new FakeAtom(
       new Map([

@@ -6,6 +6,7 @@ import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { identityForRoute } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
+import { SqliteTaskStore } from '@w2l/runtime'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 
@@ -145,6 +146,66 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(report.status).toBe('completed')
   })
 
+  it('honours excludePaths and per-page scrape options on a crawl, and strips the audit unless asked', async () => {
+    const app = createApp(engine)
+    const started = await app.request('/v1/crawl', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, maxPages: 10, excludePaths: ['^/crawl/item/'], scrapeOptions: { includeLinks: true } }),
+    })
+    expect(started.status).toBe(202)
+    const { taskId } = await started.json() as { taskId: string }
+    let report: { status: string; pagesFetched: number } | null = null
+    for (let i = 0; i < 100 && report?.status !== 'completed'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      report = await (await app.request(`/v1/crawl/${taskId}`)).json()
+    }
+    expect(report).toMatchObject({ status: 'completed', pagesFetched: 1 })
+    const pages = await (await app.request(`/v1/crawl/${taskId}/pages`)).json() as { items: Array<{ url: string; links?: string[]; trace: unknown[]; audit?: unknown }> }
+    expect(pages.items.map((item) => item.url)).toEqual([`${server.url}/crawl/listing`])
+    expect(pages.items[0]!.links).toEqual(expect.arrayContaining([`${server.url}/crawl/item/1`]))
+    expect(pages.items[0]!.trace).toEqual([])
+    expect(pages.items[0]).not.toHaveProperty('audit')
+    const debug = await (await app.request(`/v1/crawl/${taskId}/pages?debug=true`)).json() as { items: Array<{ trace: unknown[] }> }
+    expect(debug.items[0]!.trace.length).toBeGreaterThan(0)
+    const resumed = await app.request(`/v1/crawl/${taskId}/resume`, { method: 'POST' })
+    expect(resumed.status).toBe(409)
+    expect(await resumed.json()).toEqual({ error: 'crawl is completed' })
+    expect((await app.request('/v1/crawl/no-such-task/resume', { method: 'POST' })).status).toBe(404)
+  })
+
+  it('resumes a paused crawl from its checkpoint without refetching what it has', async () => {
+    const app = createApp(engine)
+    const started = await app.request('/v1/crawl', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, maxPages: 1 }),
+    })
+    const { taskId } = await started.json() as { taskId: string }
+    let report: { status: string; pagesFetched: number } | null = null
+    for (let i = 0; i < 100 && report?.status !== 'completed'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      report = await (await app.request(`/v1/crawl/${taskId}`)).json()
+    }
+    expect(report?.status).toBe('completed')
+    // Make the finished crawl look interrupted, with room in its budget, the
+    // way a killed process leaves it.
+    const store = SqliteTaskStore.open(join(taskRoot, taskId))
+    const task = (await store.getTask(taskId))!
+    await store.putTask({ ...task, status: 'paused', budget: { ...task.budget, maxPages: 3 } })
+    await store.close()
+    const resumed = await app.request(`/v1/crawl/${taskId}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) })
+    expect(resumed.status).toBe(202)
+    expect(await resumed.json()).toEqual({ taskId })
+    report = null
+    for (let i = 0; i < 100 && report?.status !== 'completed'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      report = await (await app.request(`/v1/crawl/${taskId}`)).json()
+    }
+    const final = report as unknown as { status: string; pagesFetched: number; cachedPages: number }
+    expect(final.status).toBe('completed')
+    expect(final.cachedPages).toBe(1)
+    expect(final.pagesFetched).toBeGreaterThanOrEqual(1)
+  })
+
   it('SDK scrape / crawl / getCrawl talk to the same contract', async () => {
     const app = createApp(engine)
     const client = new W2L({
@@ -180,7 +241,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       const first = await restartedApp.request(`/v1/crawl/${taskId}/pages?limit=2`)
       expect(first.status).toBe(200)
       const firstPage = await first.json() as { items: Array<{ markdown: string | null; links?: readonly string[] }>; nextCursor: string | null; hasMore: boolean }
-      expect(firstPage.items.every((item) => Array.isArray(item.links))).toBe(true)
+      // This crawl did not ask for links, so the listing leaves them out.
+      expect(firstPage.items.every((item) => !('links' in item))).toBe(true)
       expect(firstPage.items).toHaveLength(2)
       expect(firstPage.items.every((item) => item.markdown !== null)).toBe(true)
       expect(firstPage.hasMore).toBe(true)

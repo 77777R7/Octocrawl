@@ -8,7 +8,37 @@ import type { W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+const FORMATS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    anyOf: [
+      { type: 'string', enum: ['markdown', 'links', 'json'] },
+      {
+        type: 'object',
+        properties: {
+          type: { const: 'json' },
+          schema: { type: 'object' },
+          prompt: { type: 'string', maxLength: 4000 },
+          modelFallback: { type: 'boolean' },
+        },
+        required: ['type', 'schema'],
+        additionalProperties: false,
+      },
+    ],
+  },
+} as const
+
+/** Per-page options shared by scrape and a crawl's scrapeOptions. */
+const PAGE_OPTION_SCHEMAS = {
+  formats: FORMATS_SCHEMA,
+  includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
+  onlyMainContent: { type: 'boolean', description: 'Main content only (default true); false returns the cleaned whole page, navigation included.' },
+  timeout: { type: 'number', minimum: 1000, maximum: 300000, description: 'Budget for one page in milliseconds. Default 300000.' },
+  waitFor: { type: 'number', minimum: 0, maximum: 30000, description: 'Extra wait on the browser lane after the page settled, in milliseconds.' },
+} as const
+
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -53,30 +83,7 @@ export const TOOLS = [
         url: { type: 'string', description: 'http(s) URL' },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
-        formats: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            anyOf: [
-              { type: 'string', enum: ['markdown', 'links', 'json'] },
-              {
-                type: 'object',
-                properties: {
-                  type: { const: 'json' },
-                  schema: { type: 'object' },
-                  prompt: { type: 'string', maxLength: 4000 },
-                  modelFallback: { type: 'boolean' },
-                },
-                required: ['type', 'schema'],
-                additionalProperties: false,
-              },
-            ],
-          },
-        },
-        includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
-        onlyMainContent: { type: 'boolean', description: 'Main content only (default true); false returns the cleaned whole page, navigation included.' },
-        timeout: { type: 'number', minimum: 1000, maximum: 300000, description: 'Overall budget for this scrape in milliseconds. Default 300000.' },
-        waitFor: { type: 'number', minimum: 0, maximum: 30000, description: 'Extra wait on the browser lane after the page settled, in milliseconds.' },
+        ...PAGE_OPTION_SCHEMAS,
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
       },
       required: ['url'],
@@ -95,6 +102,9 @@ export const TOOLS = [
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
+        includePaths: { type: 'array', items: { type: 'string' }, description: 'Regular expressions over pathname+search a discovered URL must match. The seed always passes.' },
+        excludePaths: { type: 'array', items: { type: 'string' }, description: 'Regular expressions over pathname+search; a matching discovered URL is skipped.' },
+        scrapeOptions: { type: 'object', properties: PAGE_OPTION_SCHEMAS, additionalProperties: false, description: 'Per-page options applied to every page of the crawl.' },
       },
       required: ['url'],
       additionalProperties: false,
@@ -153,6 +163,11 @@ export const TOOLS = [
     },
   },
   {
+    name: 'resume_crawl',
+    description: 'Continue a paused, interrupted or failed crawl from its checkpoint. useCached (default true) serves pages already fetched from the checkpoint instead of fetching them again.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, useCached: { type: 'boolean' } }, required: ['id'], additionalProperties: false },
+  },
+  {
     name: 'batch_scrape',
     description: 'Persist and run 1-1000 explicit URLs. Returns a taskId; use get_batch_items for paginated results.',
     inputSchema: {
@@ -160,10 +175,7 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json'] },
-          { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
-        ] } },
+        formats: FORMATS_SCHEMA,
         includeLinks: { type: 'boolean' },
       },
       required: ['urls'], additionalProperties: false,
@@ -211,7 +223,15 @@ export async function callTool(client: W2L, name: string, args: unknown): Promis
       maxDepth: req.maxDepth,
       useCached: req.useCached,
       allowlistedDomains: req.allowlistedDomains,
+      includePaths: req.includePaths,
+      excludePaths: req.excludePaths,
+      scrapeOptions: req.scrapeOptions,
     })
+  }
+  if (name === 'resume_crawl') {
+    const rec = args as Record<string, unknown>
+    if (typeof rec.id !== 'string' || Object.keys(rec).some(key => !['id', 'useCached'].includes(key)) || (rec.useCached !== undefined && typeof rec.useCached !== 'boolean')) throw new Error('resume_crawl requires id and an optional boolean useCached')
+    return client.resumeCrawl(rec.id, rec.useCached === undefined ? {} : { useCached: rec.useCached })
   }
   if (name === 'get_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null

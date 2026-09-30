@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { ApiEngine } from './engine.js'
+import { CrawlStateError } from './engine.js'
 import {
   parseCrawlStartRequest,
+  parseCrawlResumeRequest,
   parseBatchStartRequest,
   parseCrawlPageQuery,
   parseFirecrawlCrawlRequest,
@@ -108,6 +110,18 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const result = await engine.getCrawlErrors(c.req.param('id'), parseCrawlPageQuery(c.req.query()))
     if (result === null) return c.json({ error: 'not found' }, 404)
     return c.json(result, 200)
+  })
+
+  app.post('/v1/crawl/:id/resume', async (c) => {
+    const text = await c.req.text()
+    const req = parseCrawlResumeRequest(text.trim().length === 0 ? undefined : JSON.parse(text))
+    try {
+      const accepted = await engine.resumeCrawl(c.req.param('id'), req)
+      return accepted === null ? c.json({ error: 'not found' }, 404) : c.json(accepted, 202)
+    } catch (error) {
+      if (error instanceof CrawlStateError) return c.json({ error: error.message }, 409)
+      throw error
+    }
   })
 
   app.post('/v1/crawl/:id/cancel', async (c) => {

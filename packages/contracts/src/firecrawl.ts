@@ -29,7 +29,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded; Firecrawl defaults are 10000 / 10.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
-  'creditsUsed is always 0. Formats other than markdown/links are dropped; onlyMainContent, timeout and waitFor are honoured.',
+  'creditsUsed and expiresAt are null. Formats other than markdown/links are dropped; onlyMainContent, timeout, waitFor, includePaths and excludePaths are honoured.',
 ] as const
 
 export interface FirecrawlPage {
@@ -70,8 +70,10 @@ export interface FirecrawlCrawlStatus {
   status: FirecrawlCrawlJobStatus
   total: number
   completed: number
-  creditsUsed: number
-  expiresAt: string
+  /** W2L meters no credits: null, never an invented number. */
+  creditsUsed: number | null
+  /** Results do not expire on a local checkpoint: null, never an invented time. */
+  expiresAt: string | null
   next: string | null
   data: FirecrawlPage[]
 }
@@ -102,6 +104,17 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const native: Record<string, unknown> = { url: rec.url }
   if (rec.limit !== undefined) native.maxPages = rec.limit
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
+  if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
+  if (rec.excludePaths !== undefined) native.excludePaths = rec.excludePaths
+  if (rec.scrapeOptions !== null && typeof rec.scrapeOptions === 'object' && !Array.isArray(rec.scrapeOptions)) {
+    const scrape = parseFirecrawlScrapeRequest({ ...(rec.scrapeOptions as Record<string, unknown>), url: rec.url })
+    const options: Record<string, unknown> = {}
+    if (scrape.formats !== undefined) options.formats = scrape.formats
+    if (scrape.onlyMainContent !== undefined) options.onlyMainContent = scrape.onlyMainContent
+    if (scrape.timeout !== undefined) options.timeout = scrape.timeout
+    if (scrape.waitFor !== undefined) options.waitFor = scrape.waitFor
+    if (Object.keys(options).length > 0) native.scrapeOptions = options
+  }
   return parseCrawlStartRequest(native)
 }
 
@@ -126,8 +139,8 @@ export function wrapCrawlStatus(report: CrawlReport, steps: readonly StepRecord[
     status: firecrawlCrawlStatus(report.status),
     total: steps.length,
     completed: report.pagesFetched,
-    creditsUsed: 0,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    creditsUsed: null,
+    expiresAt: null,
     next: null,
     data,
   }

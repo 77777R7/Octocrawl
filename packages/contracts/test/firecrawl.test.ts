@@ -64,6 +64,24 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /refetch|useCached/i.test(d))).toBe(true)
   })
 
+  it('maps includePaths, excludePaths and scrapeOptions onto the native crawl request', () => {
+    const req = parseFirecrawlCrawlRequest({
+      url: 'https://example.com/listing',
+      limit: 4,
+      includePaths: ['^/docs/'],
+      excludePaths: ['\\.pdf$'],
+      scrapeOptions: { formats: ['markdown', 'html'], onlyMainContent: false, waitFor: 100 },
+      allowBackwardLinks: true,
+    })
+    expect(req).toMatchObject({
+      url: 'https://example.com/listing',
+      maxPages: 4,
+      includePaths: ['^/docs/'],
+      excludePaths: ['\\.pdf$'],
+      scrapeOptions: { formats: ['markdown'], onlyMainContent: false, waitFor: 100 },
+    })
+  })
+
   it('maps url + limit + maxDepth and ignores Firecrawl extras', () => {
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown'], actions: [] })).toEqual({
       url: 'https://example.com/',
@@ -177,7 +195,8 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(status.status).toBe('completed')
     expect(status.total).toBe(1)
     expect(status.completed).toBe(1)
-    expect(status.creditsUsed).toBe(0)
+    expect(status.creditsUsed).toBeNull()
+    expect(status.expiresAt).toBeNull()
     expect(status.next).toBeNull()
     expect(status.data[0]?.markdown).toBe('MAIN')
   })

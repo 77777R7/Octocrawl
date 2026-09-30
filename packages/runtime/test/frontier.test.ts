@@ -57,6 +57,20 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.enqueue('https://fixture.test/p', 1).reason).toBe('host_denied')
   })
 
+  it('applies includePaths and excludePaths to discovered URLs, never to the seed', () => {
+    const frontier = new Frontier({
+      seedUrl: 'https://fixture.test/start',
+      includePaths: [/^\/docs\//],
+      excludePaths: [/\.pdf$/, /[?&]print=1/],
+    })
+    expect(frontier.seed().reason).toBe('seeded')
+    expect(frontier.enqueue('https://fixture.test/docs/intro', 1).reason).toBe('enqueued')
+    expect(frontier.enqueue('https://fixture.test/blog/post', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    expect(frontier.enqueue('https://fixture.test/docs/manual.pdf', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    expect(frontier.enqueue('https://fixture.test/docs/intro?print=1', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    expect(frontier.enqueue('https://fixture.test/docs/intro?page=2', 1).reason).toBe('enqueued')
+  })
+
   it('drops URLs past maxDepth', () => {
     const frontier = seeded({ maxDepth: 1 })
     expect(frontier.enqueue('https://fixture.test/a', 1).accepted).toBe(true)

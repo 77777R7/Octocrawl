@@ -36,6 +36,10 @@ export interface CrawlSpec {
   budget: CrawlBudget
   maxDepth: number | null
   allowlistedDomains: readonly string[]
+  /** Path patterns (regular expressions) discovered URLs must match; the seed always passes. */
+  includePaths?: readonly string[]
+  /** Path patterns that exclude discovered URLs. */
+  excludePaths?: readonly string[]
   resumeFrom: string | null
   useCached: boolean
   /** When set, openRun updates this existing task instead of inserting a new id. */

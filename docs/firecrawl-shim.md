@@ -25,4 +25,4 @@ Not covered (will not be added): Search, Interact, Agent, Monitor, Map, Extract.
 - Resume / cache defaults to refetch. A Firecrawl body never sets `useCached`.
 - Omitted `limit` / `maxDepth` stay unbounded. Firecrawl defaults are 10000 / 10.
 - Shim crawl start is HTTP 200 `{success,id,url}`. Native crawl start stays 202 `{taskId}`.
-- `creditsUsed` is always 0. Formats other than markdown / links are dropped.
+- `creditsUsed` and `expiresAt` are `null`: W2L meters no credits and a local checkpoint does not expire. Formats other than markdown / links are dropped; `onlyMainContent`, `timeout`, `waitFor`, `includePaths`, `excludePaths` and `scrapeOptions` are honoured. Responses carry the page's head metadata (`title`, `description`, `language`, `keywords`, `robots`, `favicon`) with `url` and `contentType`.

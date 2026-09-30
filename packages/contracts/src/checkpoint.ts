@@ -51,6 +51,28 @@ export const DEFAULT_CRAWL_BUDGET: CrawlBudget = {
   maxTokens: null,
 }
 
+/** Per-page handling for every page of a crawl or batch. */
+export interface TaskScrapeOptions {
+  formats: readonly ScrapeFormat[]
+  includeLinks: boolean
+  onlyMainContent?: boolean
+  waitForMs?: number
+  /** Budget for one page; the crawl's own wall budget still applies. */
+  timeoutMs?: number
+}
+
+/** What a crawl was started with, kept so a resume follows the same rules. */
+export interface CrawlTaskOptions {
+  maxDepth: number | null
+  allowlistedDomains: readonly string[]
+  useCached: boolean
+  /** Path patterns (regular expressions over pathname + search) a discovered URL must match. The seed always passes. */
+  includePaths: readonly string[]
+  /** Path patterns that exclude a discovered URL. */
+  excludePaths: readonly string[]
+  scrape: TaskScrapeOptions
+}
+
 /** One crawl job. The SQLite file sits next to `taskDir`. */
 export interface Task {
   id: string
@@ -61,6 +83,8 @@ export interface Task {
   budget: CrawlBudget
   /** Present only for an explicit URL-array batch. Stored with the checkpoint. */
   batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean }
+  /** Present for crawls started with this field; older tasks have neither. */
+  crawl?: CrawlTaskOptions
   createdAt: string
   updatedAt: string
 }

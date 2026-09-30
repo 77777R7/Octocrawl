@@ -12,7 +12,7 @@ beforeAll(async () => {
   robotsServer = createServer((req, res) => {
     if (req.url === '/robots.txt') {
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('User-agent: *\nDisallow: /private\nAllow: /private/ok\n')
+      res.end('User-agent: *\nDisallow: /private\nAllow: /private/ok\nCrawl-delay: 2\n')
       return
     }
     if (req.url?.startsWith('/private')) {
@@ -83,6 +83,17 @@ describe('ResilientHttpSubject robots', () => {
     expect(out.failureReason).toBe('policy_denied')
     expect(out.markdown).toBeNull()
     expect(out.trace.some((t) => t.event === 'robots_disallowed')).toBe(true)
+  })
+
+  it('reports the robots Crawl-delay on the http lane so a crawl can pace by it', async () => {
+    const subject = new ResilientHttpSubject()
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/ok`)
+      const robots = out.trace.find((event) => event.event === 'robots_checked')
+      expect(robots?.detail).toMatchObject({ decision: 'allowed', crawlDelayMs: 2000 })
+    } finally {
+      await subject.teardown()
+    }
   })
 
   it('honours a more-specific Allow beneath a Disallow', async () => {

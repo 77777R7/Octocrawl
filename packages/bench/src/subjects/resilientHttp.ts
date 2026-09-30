@@ -210,6 +210,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           robotsUrl: robotsDecision.robotsUrl,
           matchedGroup: robotsDecision.matchedUserAgentGroup,
           ruleCount: robotsDecision.appliedRules.length,
+          crawlDelayMs: robotsDecision.crawlDelayMs,
           ...(cached?.failure ? { unreachable: cached.failure.reason } : {}),
         },
       })

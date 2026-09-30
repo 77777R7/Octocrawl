@@ -132,11 +132,28 @@ export class CrawlOrchestrator {
         seedUrl: task.seedUrl,
         maxDepth: spec.maxDepth,
         allowlistedDomains: spec.allowlistedDomains,
+        includePaths: (spec.includePaths ?? []).map((pattern) => new RegExp(pattern)),
+        excludePaths: (spec.excludePaths ?? []).map((pattern) => new RegExp(pattern)),
         ...this.frontierOptions,
       })
       await this.restoreFrontier(frontier, task, spec)
       const runningTask = task
       const runningAttempt = attempt
+      // Progress is visible while the crawl runs; the final write below is
+      // authoritative, so a failed progress write is not a crawl failure.
+      const persistProgress = async (): Promise<void> => {
+        try {
+          await this.store.putAttempt({
+            ...runningAttempt,
+            pagesFetched,
+            wallMs: this.clock.now() - startedAtMs,
+            costUsd: costUnknown ? null : costUsd,
+            costUnknown,
+            contentTokens,
+            contentTokensUnknown,
+          })
+        } catch { /* the final attempt write reports the outcome */ }
+      }
       let activePages = 0
       let reservedPages = 0
       let stopping = false
@@ -236,6 +253,7 @@ export class CrawlOrchestrator {
                 contentTokensUnknown ||= result.usage.contentTokens === null
               }
             }
+            await persistProgress()
             if (CONTENTFUL_STATUS.has(result.status)) {
               for (const href of links) frontier.enqueue(href, item.depth + 1, item.canonicalUrl)
               wakeWorkers()

@@ -35,6 +35,9 @@ import {
   type Task,
   type CrawlPageQuery,
   type ExecutionContext,
+  type CrawlResumeRequest,
+  type PageOptions,
+  type TaskScrapeOptions,
   type CompactScrapeResponse,
   type ScrapeResponse,
   type ScrapeAtom,
@@ -75,6 +78,8 @@ export interface ApiEngine {
   getCrawlPages(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   getCrawlErrors(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlError> | null>
   cancelCrawl(taskId: string): Promise<CrawlReport | null>
+  /** Continue a paused, interrupted or failed crawl from its checkpoint; null when unknown. */
+  resumeCrawl(taskId: string, options?: CrawlResumeRequest): Promise<CrawlAccepted | null>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -129,6 +134,11 @@ export interface ApiEngineOptions {
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
+}
+
+/** The crawl exists but is not in a state the request applies to. */
+export class CrawlStateError extends Error {
+  override readonly name = 'CrawlStateError'
 }
 
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
@@ -222,8 +232,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         limit: query?.limit ?? 50,
         kind,
       })
+      // A crawl stores every page's links for its own resume; the response
+      // carries them only when the crawl asked for them.
+      const task = await store.getTask(taskId)
+      const wantLinks = task?.crawl === undefined ? true : task.crawl.scrape.includeLinks || task.crawl.scrape.formats.some((format) => format === 'links')
       return {
-        items: page.steps.map((step) => toCrawlPage(step)),
+        items: page.steps.map((step) => {
+          const item = toCrawlPage(step)
+          if (wantLinks) return item
+          const { links: _links, ...rest } = item
+          return rest
+        }),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -232,17 +251,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
-  function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean }): void {
+  function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean; includePaths?: readonly string[]; excludePaths?: readonly string[] }): void {
     const mode = defaultApiMode(task.mode)
-    const runner = new LadderRunner(channelsForUrl(mode, task.seedUrl), { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode))
-    const ladder = new LadderScrapeAtom(runner)
-    const atom: ScrapeAtom = task.batch === undefined ? ladder : {
+    const policy: CrawlPolicy = { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }
+    const ladder = new LadderScrapeAtom(new LadderRunner(channelsForUrl(mode, task.seedUrl), policy, historyFor(mode)))
+    // With a per-host channel policy the lane is chosen for each URL; the
+    // seed's host must not decide for every page the crawl discovers.
+    const atomFor = (url: string): LadderScrapeAtom =>
+      options.channelPolicy === undefined ? ladder : new LadderScrapeAtom(new LadderRunner(channelsForUrl(mode, url), policy, historyFor(mode)))
+    const scrapeOptions: TaskScrapeOptions | null = task.batch !== undefined
+      ? { formats: task.batch.formats, includeLinks: task.batch.includeLinks }
+      : task.crawl?.scrape ?? null
+    const atom: ScrapeAtom = scrapeOptions === null ? ladder : {
       async scrape(url, context) {
-        const outcome = await ladder.scrape(url, context)
-        const formats = task.batch!.formats
+        const page: PageOptions = {
+          ...(scrapeOptions.onlyMainContent === undefined ? {} : { onlyMainContent: scrapeOptions.onlyMainContent }),
+          ...(scrapeOptions.waitForMs === undefined ? {} : { waitForMs: scrapeOptions.waitForMs }),
+        }
+        const pageDeadline = scrapeOptions.timeoutMs === undefined ? undefined : Date.now() + scrapeOptions.timeoutMs
+        const scoped: ExecutionContext = {
+          ...context,
+          page,
+          ...(pageDeadline === undefined ? {} : { deadlineAt: context?.deadlineAt === undefined ? pageDeadline : Math.min(context.deadlineAt, pageDeadline) }),
+        }
+        const outcome = await atomFor(url).scrape(url, scoped)
+        const formats = scrapeOptions.formats
         const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
         const custom = formats.find(format => typeof format === 'object')
-        const json = wants('json') ? await extractStructured(outcome.result, custom, context ?? {}, structuredModelConfigFromEnv()) : undefined
+        const json = wants('json') ? await extractStructured(outcome.result, custom, scoped, structuredModelConfigFromEnv()) : undefined
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
@@ -253,10 +289,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             })),
           },
         }
+        // A crawl keeps every page's links in its checkpoint: a resume
+        // rebuilds the frontier from them. Only the API output gates them.
+        const links = task.batch !== undefined && !(wants('links') || scrapeOptions.includeLinks) ? [] : outcome.result.links
         return { ...outcome, ...(audit === undefined ? {} : { audit }), result: {
           ...outcome.result,
           markdown: wants('markdown') ? outcome.result.markdown : null,
-          links: wants('links') || task.batch!.includeLinks ? outcome.result.links : [],
+          links,
           ...(json === undefined ? {} : { json }),
         } }
       },
@@ -281,6 +320,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       budget: task.budget,
       maxDepth: req.maxDepth,
       allowlistedDomains: req.allowlistedDomains,
+      ...(req.includePaths === undefined ? {} : { includePaths: req.includePaths }),
+      ...(req.excludePaths === undefined ? {} : { excludePaths: req.excludePaths }),
       resumeFrom: req.resume ? task.id : null,
       useCached: req.useCached,
       taskId: task.id,
@@ -304,6 +345,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     void store.getTask(name).then(task => {
       if (task?.batch && ['pending', 'running', 'paused'].includes(task.status)) {
         launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(task.batch.urls.map(url => new URL(url).hostname))], useCached: false, resume: true })
+      } else if (task?.crawl && ['pending', 'running', 'paused'].includes(task.status)) {
+        // A crawl the previous process did not finish continues from its
+        // checkpoint; pages already fetched are served from it, not refetched.
+        launchTask(task, store, { ...task.crawl, useCached: true, resume: true })
       } else void store.close()
     }).catch(() => { void store.close() })
   }
@@ -354,6 +399,21 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       mkdirSync(taskDir, { recursive: true })
       const store = SqliteTaskStore.open(taskDir)
       const now = new Date().toISOString()
+      const scrape = req.scrapeOptions ?? {}
+      const crawl: NonNullable<Task['crawl']> = {
+        maxDepth: req.maxDepth ?? null,
+        allowlistedDomains: req.allowlistedDomains ?? [],
+        useCached: req.useCached === true,
+        includePaths: req.includePaths ?? [],
+        excludePaths: req.excludePaths ?? [],
+        scrape: {
+          formats: scrape.formats ?? ['markdown'],
+          includeLinks: scrape.includeLinks === true,
+          ...(scrape.onlyMainContent === undefined ? {} : { onlyMainContent: scrape.onlyMainContent }),
+          ...(scrape.waitFor === undefined ? {} : { waitForMs: scrape.waitFor }),
+          ...(scrape.timeout === undefined ? {} : { timeoutMs: scrape.timeout }),
+        },
+      }
       const task: Task = {
         id: taskId,
         seedUrl: req.url,
@@ -366,12 +426,31 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxCostUsd: null,
           maxTokens: null,
         },
+        crawl,
         createdAt: now,
         updatedAt: now,
       }
       await store.putTask(task)
-      launchTask(task, store, { maxDepth: req.maxDepth ?? null, allowlistedDomains: req.allowlistedDomains ?? [], useCached: req.useCached === true, resume: false })
+      launchTask(task, store, { ...crawl, resume: false })
       return { taskId }
+    },
+
+    async resumeCrawl(taskId, resume = {}) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      if (inflight.has(taskId)) throw new CrawlStateError('crawl is running')
+      const store = SqliteTaskStore.open(join(taskRoot, taskId))
+      let launched = false
+      try {
+        const task = await store.getTask(taskId)
+        if (task === null || task.batch !== undefined) return null
+        if (task.crawl === undefined) throw new CrawlStateError('crawl predates resume support and cannot be resumed')
+        if (task.status === 'completed' || task.status === 'cancelled') throw new CrawlStateError(`crawl is ${task.status}`)
+        launchTask(task, store, { ...task.crawl, useCached: resume.useCached ?? true, resume: true })
+        launched = true
+        return { taskId }
+      } finally {
+        if (!launched) await store.close()
+      }
     },
 
     async startBatch(req) {
@@ -437,12 +516,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     getCrawlWithSteps: loadCrawlWithSteps,
 
-    getCrawlPages: (taskId, query) => loadCrawlPageList(taskId, query, 'pages'),
+    // The route, trace and audit stay in the checkpoint; the listing carries
+    // them only on request, like batch items.
+    getCrawlPages: async (taskId, query) => {
+      const page = await loadCrawlPageList(taskId, query, 'pages')
+      if (page === null || query?.debug === true) return page
+      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+    },
 
     getCrawlErrors: async (taskId, query) => {
       const page = await loadCrawlPageList(taskId, query, 'errors')
-      if (page === null) return null
-      return page
+      if (page === null || query?.debug === true) return page
+      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => item) }
     },
 
     async cancelCrawl(taskId) {

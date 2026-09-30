@@ -28,6 +28,7 @@ export interface FrontierEnqueueResult {
     | 'malformed'
     | 'depth'
     | 'host_denied'
+    | 'path_denied'
     | 'scheme_denied'
 }
 
@@ -41,6 +42,10 @@ export interface FrontierOptions {
   seedUrl: string
   maxDepth?: number | null
   allowlistedDomains?: readonly string[]
+  /** Discovered URLs must match one of these (pathname + search); seeds always pass. */
+  includePaths?: readonly RegExp[]
+  /** Discovered URLs matching one of these are skipped. */
+  excludePaths?: readonly RegExp[]
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   /** robots.txt Crawl-delay per host, already parsed to milliseconds. */
@@ -52,6 +57,8 @@ export class Frontier {
   private readonly seedHost: string
   private readonly maxDepth: number | null
   private readonly allowlistedDomains: readonly string[]
+  private readonly includePaths: readonly RegExp[]
+  private readonly excludePaths: readonly RegExp[]
   private readonly perHostConcurrency: number
   private readonly perHostMinDelayMs: number
   private crawlDelayMsByHost: ReadonlyMap<string, number>
@@ -67,6 +74,8 @@ export class Frontier {
     this.seedHost = hostOf(seed)
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
+    this.includePaths = options.includePaths ?? []
+    this.excludePaths = options.excludePaths ?? []
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
@@ -170,6 +179,9 @@ export class Frontier {
     if (!this.hostAllowed(host)) {
       return { accepted: false, canonicalUrl, reason: 'host_denied' }
     }
+    if (acceptedReason === 'enqueued' && !this.pathAllowed(canonicalUrl)) {
+      return { accepted: false, canonicalUrl, reason: 'path_denied' }
+    }
     if (this.visited.has(canonicalUrl)) {
       return { accepted: false, canonicalUrl, reason: 'duplicate' }
     }
@@ -183,6 +195,15 @@ export class Frontier {
       return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
     }
     return host === this.seedHost
+  }
+
+  /** The caller's path rules, over pathname + search of the canonical URL. */
+  private pathAllowed(canonicalUrl: string): boolean {
+    if (this.includePaths.length === 0 && this.excludePaths.length === 0) return true
+    const parsed = new URL(canonicalUrl)
+    const path = parsed.pathname + parsed.search
+    if (this.excludePaths.some((pattern) => pattern.test(path))) return false
+    return this.includePaths.length === 0 || this.includePaths.some((pattern) => pattern.test(path))
   }
 }
 

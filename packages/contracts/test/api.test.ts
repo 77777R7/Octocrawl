@@ -70,6 +70,27 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['screenshot'] }).formats).toBeUndefined()
   })
 
+  it('parses crawl path patterns and per-page scrape options, and wants integer bounds', () => {
+    const req = parseCrawlStartRequest({
+      url: 'https://example.com/',
+      maxPages: 5,
+      includePaths: ['^/docs/', '^/blog/\\d{4}/'],
+      excludePaths: ['\\.pdf$'],
+      scrapeOptions: { formats: ['markdown', 'links'], onlyMainContent: false, waitFor: 250 },
+    })
+    expect(req).toMatchObject({
+      includePaths: ['^/docs/', '^/blog/\\d{4}/'],
+      excludePaths: ['\\.pdf$'],
+      scrapeOptions: { formats: ['markdown', 'links'], onlyMainContent: false, waitFor: 250 },
+    })
+    expect(parseCrawlStartRequest({ url: 'https://example.com/' })).not.toHaveProperty('scrapeOptions')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', includePaths: ['('] })).toThrow('includePaths entry is not a valid regular expression: (')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', excludePaths: 'nope' })).toThrow('excludePaths must be an array of at most 100 non-empty strings')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', scrapeOptions: { url: 'https://other.example/' } })).toThrow('unknown scrapeOptions option: url')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', maxPages: 2.5 })).toThrow('maxPages must be an integer >= 1')
+    expect(() => parseCrawlStartRequest({ url: 'https://example.com/', maxDepth: -1 })).toThrow('maxDepth must be an integer >= 0')
+  })
+
   it('rejects remote JSON schema references', () => {
     expect(() => parseScrapeRequest({
       url: 'https://example.com/product',

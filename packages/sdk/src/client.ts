@@ -23,6 +23,7 @@ import type {
   MonitorRun,
   MonitorRunDetail,
   ScrapeRequest,
+  CrawlResumeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
 
@@ -130,6 +131,11 @@ export class W2L {
 
   async getCrawlErrors(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlError>> {
     return this.getPageList<CrawlError>(`/v1/crawl/${encodeURIComponent(id)}/errors`, options, request)
+  }
+
+  /** Continue a paused, interrupted or failed crawl from its checkpoint. */
+  async resumeCrawl(id: string, opts: CrawlResumeRequest = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
+    return this.post<CrawlAccepted>(`/v1/crawl/${encodeURIComponent(id)}/resume`, opts, 202, request)
   }
 
   async cancelCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {

@@ -84,7 +84,8 @@ describe('Firecrawl /scrape /crawl shim', () => {
     const status = await got.json()
     expect(status.status).toBe('completed')
     expect(status.completed).toBeGreaterThanOrEqual(4)
-    expect(status.creditsUsed).toBe(0)
+    expect(status.creditsUsed).toBeNull()
+    expect(status.expiresAt).toBeNull()
     expect(status.data.length).toBeGreaterThanOrEqual(4)
     expect(status.data.some((page: { markdown: string | null }) => page.markdown?.includes('Harbour lantern catalog'))).toBe(
       true,

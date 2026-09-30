@@ -67,6 +67,15 @@ export interface CompactScrapeResponse {
   channelsTried: readonly string[]
 }
 
+/** Per-page options of a crawl: the scrape options minus the URL. */
+export interface CrawlScrapeOptions {
+  formats?: readonly ScrapeFormat[]
+  includeLinks?: boolean
+  onlyMainContent?: boolean
+  timeout?: number
+  waitFor?: number
+}
+
 export interface CrawlStartRequest {
   url: string
   mode?: ApiCrawlMode
@@ -74,6 +83,16 @@ export interface CrawlStartRequest {
   maxDepth?: number | null
   useCached?: boolean
   allowlistedDomains?: readonly string[]
+  /** Regular expressions over pathname + search; a discovered URL must match one. The seed always passes. */
+  includePaths?: readonly string[]
+  /** Regular expressions over pathname + search; a matching discovered URL is skipped. */
+  excludePaths?: readonly string[]
+  scrapeOptions?: CrawlScrapeOptions
+}
+
+export interface CrawlResumeRequest {
+  /** Serve pages already fetched from the checkpoint (default true) instead of fetching them again. */
+  useCached?: boolean
 }
 
 export interface CrawlAccepted {
@@ -134,7 +153,38 @@ function readDurationMs(value: unknown, name: string, min: number, max: number):
 }
 
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor', 'debug'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains'] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'includePaths', 'excludePaths', 'scrapeOptions'] as const
+const CRAWL_SCRAPE_KEYS = ['formats', 'includeLinks', 'onlyMainContent', 'timeout', 'waitFor'] as const
+
+function readPathPatterns(value: unknown, name: string): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 500)) {
+    throw new RequestError(`${name} must be an array of at most 100 non-empty strings`)
+  }
+  for (const pattern of value as string[]) {
+    try { new RegExp(pattern) } catch { throw new RequestError(`${name} entry is not a valid regular expression: ${pattern}`) }
+  }
+  return value as string[]
+}
+
+function readCrawlScrapeOptions(value: unknown): CrawlScrapeOptions | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError('scrapeOptions must be an object')
+  const rec = value as Record<string, unknown>
+  rejectUnknownKeys(rec, CRAWL_SCRAPE_KEYS, 'scrapeOptions')
+  if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('scrapeOptions.includeLinks must be a boolean')
+  if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('scrapeOptions.onlyMainContent must be a boolean')
+  const formats = readFormats(rec.formats)
+  const timeout = readDurationMs(rec.timeout, 'scrapeOptions.timeout', 1_000, 300_000)
+  const waitFor = readDurationMs(rec.waitFor, 'scrapeOptions.waitFor', 0, 30_000)
+  return {
+    ...(formats === undefined ? {} : { formats }),
+    ...(rec.includeLinks === undefined ? {} : { includeLinks: rec.includeLinks as boolean }),
+    ...(rec.onlyMainContent === undefined ? {} : { onlyMainContent: rec.onlyMainContent as boolean }),
+    ...(timeout === undefined ? {} : { timeout }),
+    ...(waitFor === undefined ? {} : { waitFor }),
+  }
+}
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks'] as const
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -243,8 +293,8 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
 function readBound(value: unknown, name: string, min: number): number | null | undefined {
   if (value === undefined) return undefined
   if (value === null) return null
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min) {
-    throw new RequestError(`${name} must be a number >= ${min}`)
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
+    throw new RequestError(`${name} must be an integer >= ${min}`)
   }
   return value
 }
@@ -277,6 +327,9 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   if (useCached !== undefined && typeof useCached !== 'boolean') {
     throw new RequestError('useCached must be a boolean')
   }
+  const includePaths = readPathPatterns(rec.includePaths, 'includePaths')
+  const excludePaths = readPathPatterns(rec.excludePaths, 'excludePaths')
+  const scrapeOptions = readCrawlScrapeOptions(rec.scrapeOptions)
   return {
     url: readUrl(rec.url),
     mode: readMode(rec.mode),
@@ -284,7 +337,18 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     maxDepth: readBound(rec.maxDepth, 'maxDepth', 0),
     useCached,
     allowlistedDomains: readAllowlist(rec.allowlistedDomains),
+    ...(includePaths === undefined ? {} : { includePaths }),
+    ...(excludePaths === undefined ? {} : { excludePaths }),
+    ...(scrapeOptions === undefined ? {} : { scrapeOptions }),
   }
+}
+
+export function parseCrawlResumeRequest(body: unknown): CrawlResumeRequest {
+  if (body === undefined || body === null) return {}
+  const rec = asRecord(body)
+  rejectUnknownKeys(rec, ['useCached'], 'resume')
+  if (rec.useCached !== undefined && typeof rec.useCached !== 'boolean') throw new RequestError('useCached must be a boolean')
+  return rec.useCached === undefined ? {} : { useCached: rec.useCached }
 }
 
 export function parseBatchStartRequest(body: unknown): BatchStartRequest {
