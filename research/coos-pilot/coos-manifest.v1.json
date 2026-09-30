@@ -1,7 +1,13 @@
 {
   "id": "coos-datacentre-finance-v1",
   "cohort": "seed-user-source-list",
-  "frozenOn": null,
+  "frozenOn": "2026-09-30",
+  "frozen": {
+    "urlsFile": "urls.txt",
+    "urlsFileSha256": "0939b85875d761aa97b29d4eb9f4cdfca7bcf9c16f6bdc78654e25ab12f265c6",
+    "sourceCount": 72,
+    "note": "Frozen as given by the seed user on 2026-09-30, before the first S1 run. Nothing was replaced or dropped: the flagged rows of coos-links.csv (two Chinese-language and one Arabic page, a URL that may be truncated (EQ-GFF), one URL shared by two source ids (CYR-FIN24 / CYR-LOC), the SEC filing that needs a declared contact User-Agent, and the two third-party mirrors of the Google report) stay in the denominator; their outcomes are reported, not corrected."
+  },
   "purpose": "Phase 0 baseline: capture every source cited in the seed user's Global AI Data Centre Environmental & Finance Dataset (release 2026-09-28) with the current W2L build, report every URL, classify each failure by the capability needed to fix it.",
   "rules": {
     "denominator": 72,
