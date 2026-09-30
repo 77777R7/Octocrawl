@@ -59,6 +59,8 @@ export interface CompactScrapeResponse {
   warnings?: FetchResult['warnings']
   links?: readonly string[]
   metadata: ScrapeMetadata
+  /** The downloaded file, when the response was one. */
+  file?: FetchResult['file']
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   json?: StructuredExtractionResult | null
   truncated: boolean

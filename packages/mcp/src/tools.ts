@@ -76,7 +76,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit.',
+    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. A file answer (PDF, CSV, XLSX, ZIP, JSON) is saved as received and reported under `file`; a PDF returns its text layer page by page.',
     inputSchema: {
       type: 'object',
       properties: {

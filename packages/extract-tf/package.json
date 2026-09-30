@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@w2l/contracts": "*",
-    "linkedom": "^0.18.13"
+    "linkedom": "^0.18.13",
+    "pdfjs-dist": "^4.10.38"
   }
 }

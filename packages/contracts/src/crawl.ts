@@ -72,6 +72,8 @@ export interface CrawlPage {
   json?: import('./structured.js').StructuredExtractionResult | null
   /** Outbound links of the page when the crawl asked for them. */
   links?: readonly string[]
+  /** The downloaded file, when the response was one. */
+  file?: import('./result.js').FileEvidence | null
   failureReason: string | null
   blockReason: string | null
   budgetExceeded: BudgetKind | null

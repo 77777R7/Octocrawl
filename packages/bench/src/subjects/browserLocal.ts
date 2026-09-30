@@ -22,6 +22,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Response }
 import { type Agent, type Dispatcher, type ProxyAgent } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, pinnedBrowserHostRules } from '../egress.js'
 import { describeProxy, playwrightProxyFor, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
+import { extensionKind, responseShape } from '../files.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import { waitForRenderedStability } from '../browserSettle.js'
@@ -543,6 +544,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const status = response?.status() ?? 0
       const finalUrl = page.url()
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
+      // A file is fetched as received on the http lane; a rendered viewer
+      // of it is not the file, so the browser lane says so and stops.
+      const responseType = response?.headers()['content-type'] ?? null
+      const shape = responseShape(responseType, finalUrl)
+      if (shape.kind === 'file' || shape.kind === 'unsupported') {
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'file_not_rendered', detail: { contentType: responseType, status } })
+        return this.denied(url, start, trace, new Error(`file response (${responseType ?? 'no content type'})`), 'unsupported_content_type')
+      }
       if (finalUrl !== url) {
         try {
           await this.assertUrl(finalUrl)
@@ -746,7 +755,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
         : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
           : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
-            : 'connection_error'
+            // A download is a file, fetched as received on the http lane; the browser reports it as one, not as a dead connection.
+            : err instanceof Error && (err.message.includes('Download is starting') || (err.message.includes('ERR_ABORTED') && extensionKind(url) !== null)) ? 'unsupported_content_type'
+              : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -808,7 +819,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     trace.push({
       at: wallMs,
       lane: 'browser_local',
-      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : 'ssrf_denied',
+      event: reason === 'body_too_large' ? 'body_too_large' : reason === 'timeout' ? 'cancelled' : reason === 'unsupported_content_type' ? 'unsupported_content_type' : 'ssrf_denied',
       detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
     })
     return {

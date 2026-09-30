@@ -43,7 +43,16 @@ function tunedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv): NetworkPolicy
   const delay = env['W2L_PER_HOST_MIN_DELAY_MS'] === undefined ? base.perHostMinDelayMs : Number(env['W2L_PER_HOST_MIN_DELAY_MS'])
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('W2L_PER_HOST_CONCURRENCY must be 1, 2, 3, or 4')
   if (!Number.isInteger(delay) || delay < 1 || delay > 60_000) throw new Error('W2L_PER_HOST_MIN_DELAY_MS must be 1..60000')
-  return { ...base, perHostConcurrency: concurrency, perHostMinDelayMs: delay }
+  return { ...base, perHostConcurrency: concurrency, perHostMinDelayMs: delay, maxFileBytes: maxFileBytesFromEnv(env, base.maxFileBytes) }
+}
+
+/** `W2L_MAX_FILE_BYTES`: the cap for a file downloaded as received, 1 MiB to 1 GiB. */
+export function maxFileBytesFromEnv(env: NodeJS.ProcessEnv, fallback: number): number {
+  const raw = env['W2L_MAX_FILE_BYTES']
+  if (raw === undefined || raw.trim().length === 0) return fallback
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1024 * 1024 || value > 1024 * 1024 * 1024) throw new Error('W2L_MAX_FILE_BYTES must be an integer between 1048576 and 1073741824')
+  return value
 }
 
 export function parsePort(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): number {

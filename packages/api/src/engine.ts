@@ -667,6 +667,7 @@ function toCrawlPage(step: StepRecord): CrawlPage {
     markdown: result?.markdown ?? null,
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.links === undefined ? {} : { links: result.links }),
+    ...(result?.file === undefined || result.file === null ? {} : { file: result.file }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,

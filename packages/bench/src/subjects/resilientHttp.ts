@@ -5,15 +5,18 @@ import {
   type CrawlMode,
   type ExecutionContext,
   type FetchResult,
+  type FetchWarning,
+  type FileEvidence,
   type NetworkPolicy,
   type PageOptions,
   type TraceEvent,
 } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
-import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
+import { collectLinks, extractPdfText, extractTf, htmlToMarkdown, pdfMarkdown, PdfParseError } from '@w2l/extract-tf'
+import { resilientFetch, createExecutionScope, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Hex, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, createGuardedDispatcher, defaultNetworkPolicy, isLocalPreviewProxyTarget, readCappedBody, validateLocalPreviewProxy } from '../egress.js'
 import { describeProxy, proxyAgentFor, proxyBypasses, type OperatorProxy } from '../egressProxy.js'
+import { decodeText, filenameOf, responseShape, saveFileBytes, sniffShape, type ResponseShape } from '../files.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -31,6 +34,9 @@ import { documentOf, errorPageContent } from './pageContent.js'
    * (htmlToMarkdown after extract-tf) are identical to ExtractTfSubject, so
    * any score delta against that arm is attributable to transport alone.
  */
+/** How much of a CSV or JSON file is returned inline as markdown; the file itself is kept whole. */
+const MAX_INLINE_TEXT_CHARS = 1024 * 1024
+
 export class ResilientHttpSubject implements SubjectAdapter {
   readonly meta = {
     id: 'resilient-http',
@@ -78,7 +84,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
         signal: init.signal ?? signal,
       })
       const responseHeaders = response.headers
+      let bytes: Uint8Array | undefined
       let body: string | undefined
+      const readBytes = async (maxBytes: number): Promise<Uint8Array> => {
+        if (bytes !== undefined) return bytes
+        const bodyStart = performance.now()
+        bytes = await readCappedBody(response.body, maxBytes)
+        onBodyRead?.(Math.max(0, performance.now() - bodyStart))
+        return bytes
+      }
       return {
         status: response.statusCode,
         headers: {
@@ -88,12 +102,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
           },
         },
         bodyText: async () => {
-          if (body !== undefined) return body
-          const bodyStart = performance.now()
-          const buf = await readCappedBody(response.body, maxBodyBytes)
-          body = new TextDecoder().decode(buf)
-          onBodyRead?.(Math.max(0, performance.now() - bodyStart))
+          body ??= new TextDecoder().decode(await readBytes(maxBodyBytes))
           return body
+        },
+        bodyBytes: (maxBytes = maxBodyBytes) => readBytes(maxBytes),
+        discardBody: () => {
+          if (bytes !== undefined) return
+          // Destroying an unread undici body raises an abort on the stream; nobody is reading it.
+          response.body.once('error', () => {})
+          response.body.destroy()
         },
       }
     }
@@ -284,16 +301,52 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // just the requested URL is "no redirect" and matches the other arms.
     const redirectChain = out.redirectChain.length > 1 ? out.redirectChain : []
     const bodyReadBeforeFinal = bodyReadMs
-    let body: string
-    try { body = await out.bodyText() }
-    catch (error) {
-      if (signal?.aborted) return timedDenied('timeout', out.retryAt)
-      if (error instanceof BodyTooLargeError) return timedDenied('body_too_large')
-      throw error
+    const contentType = out.headers?.get('content-type') ?? null
+    // What the answer is decides how its body is read: a page as text, a
+    // file as the bytes it is. An error answer is read as a page whatever
+    // its type, so the refusal can be shown.
+    const served = out.kind === 'ok' && out.status !== null && out.status >= 200 && out.status < 300
+    let shape: ResponseShape = served ? responseShape(contentType, out.finalUrl, out.headers?.get('content-disposition') ?? null) : { kind: 'page' }
+    let body = ''
+    let fileBytes: Uint8Array | null = null
+    if (shape.kind === 'unsupported') {
+      out.discardBody()
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'unsupported_content_type', detail: { contentType } })
+    } else if (shape.kind === 'page') {
+      try { body = await out.bodyText() }
+      catch (error) {
+        if (signal?.aborted) return timedDenied('timeout', out.retryAt)
+        if (error instanceof BodyTooLargeError) return timedDenied('body_too_large')
+        throw error
+      }
+    } else {
+      const declaredLength = Number(out.headers?.get('content-length') ?? Number.NaN)
+      if (Number.isFinite(declaredLength) && declaredLength > this.networkPolicy.maxFileBytes) {
+        out.discardBody()
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'file_too_large', detail: { declaredLength, maxFileBytes: this.networkPolicy.maxFileBytes } })
+        return timedDenied('body_too_large')
+      }
+      try { fileBytes = await out.bodyBytes(this.networkPolicy.maxFileBytes) }
+      catch (error) {
+        if (signal?.aborted) return timedDenied('timeout', out.retryAt)
+        if (error instanceof BodyTooLargeError) {
+          trace.push({ at: Date.now() - start, lane: 'http', event: 'file_too_large', detail: { maxFileBytes: this.networkPolicy.maxFileBytes } })
+          return timedDenied('body_too_large')
+        }
+        throw error
+      }
+      if (shape.kind === 'sniff') {
+        const sniffed = sniffShape(fileBytes, shape.hint)
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'content_sniffed', detail: { contentType, shape: sniffed.kind === 'file' ? sniffed.file : sniffed.kind } })
+        shape = sniffed
+        if (sniffed.kind === 'page') { body = decodeText(fileBytes); fileBytes = null }
+      }
     }
     transportMs += Math.max(0, bodyReadMs - bodyReadBeforeFinal)
-    const rawBodySha256 = sha256Utf8(body)
-    const rawArtifacts = await captureRawHtml(body, rawBodySha256)
+    const rawBodySha256 = fileBytes !== null ? sha256Hex(fileBytes) : shape.kind === 'unsupported' ? null : sha256Utf8(body)
+    const rawArtifacts = fileBytes !== null && shape.kind === 'file'
+      ? await saveFileBytes(fileBytes, rawBodySha256!, shape.file).then((path) => path === null ? [] : [path])
+      : shape.kind === 'unsupported' ? [] : await captureRawHtml(body, rawBodySha256!)
 
     const base = {
       requestedUrl: url,
@@ -305,7 +358,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         finalUrl: out.finalUrl,
         httpStatus: out.status,
         redirectChain,
-        contentType: out.headers?.get('content-type') ?? null,
+        contentType,
         rawBodySha256,
         artifacts: rawArtifacts,
         etag: out.headers?.get('etag') ?? null,
@@ -316,8 +369,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
       usage: {
         wallMs,
-        bytesWire: Buffer.byteLength(body),
-        bytesDecompressed: Buffer.byteLength(body),
+        // An unread body has no measured wire size; nothing of it was decoded.
+        bytesWire: shape.kind === 'unsupported' ? null : fileBytes?.byteLength ?? Buffer.byteLength(body),
+        bytesDecompressed: fileBytes?.byteLength ?? Buffer.byteLength(body),
         requestCount: out.requestCount,
         attemptCount: out.attemptCount,
         contentTokens: null as number | null,
@@ -351,6 +405,23 @@ export class ResilientHttpSubject implements SubjectAdapter {
         escalations: [],
         markdown: null,
       })
+    }
+
+    if (shape.kind === 'unsupported') {
+      return finish({
+        ...base,
+        status: 'failed',
+        failureReason: 'unsupported_content_type',
+        blockReason: null,
+        budgetExceeded: null,
+        lane: 'http',
+        escalations: [],
+        markdown: null,
+      })
+    }
+
+    if (shape.kind === 'file' && fileBytes !== null) {
+      return finish(await this.fileResult(base, shape.file, fileBytes, out.headers?.get('content-disposition') ?? null, trace, start))
     }
 
     // Gate classification on the raw body. Non-contentful paths use the full
@@ -501,6 +572,79 @@ export class ResilientHttpSubject implements SubjectAdapter {
       document: documentOf(extracted),
       usage: { ...base.usage, contentTokens },
     })
+  }
+
+  /**
+   * A file kept as received. Its text, when the file has one, is the
+   * markdown: a PDF's text layer page by page, a CSV or JSON as itself. A
+   * PDF without a text layer is `ocr_required`, never an empty success.
+   */
+  private async fileResult(
+    base: Omit<FetchResult, 'status' | 'failureReason' | 'blockReason' | 'budgetExceeded' | 'lane' | 'escalations' | 'markdown'>,
+    kind: FileEvidence['kind'],
+    bytes: Uint8Array,
+    contentDisposition: string | null,
+    trace: TraceEvent[],
+    start: number,
+  ): Promise<FetchResult> {
+    const file: FileEvidence = {
+      kind,
+      contentType: base.evidence.contentType,
+      bytes: bytes.byteLength,
+      sha256: base.evidence.rawBodySha256!,
+      path: base.evidence.artifacts[0] ?? null,
+      filename: filenameOf(contentDisposition, base.evidence.finalUrl),
+    }
+    trace.push({ at: Date.now() - start, lane: 'http', event: 'file_received', detail: { kind, bytes: file.bytes, sha256: file.sha256, path: file.path, filename: file.filename } })
+    let status: FetchResult['status'] = 'success'
+    let failureReason: FetchResult['failureReason'] = null
+    let markdown: string | null = null
+    let truncated = false
+    let truncatedAt: number | null = null
+    const warnings: FetchWarning[] = []
+    if (kind === 'pdf') {
+      try {
+        const text = await extractPdfText(bytes)
+        file.pdf = { pages: text.pages, textPages: text.textPages, textChars: text.textChars }
+        if (text.textPages === 0) {
+          status = 'failed'
+          failureReason = 'ocr_required'
+          trace.push({ at: Date.now() - start, lane: 'http', event: 'pdf_no_text_layer', detail: { pages: text.pages } })
+        } else {
+          markdown = pdfMarkdown(text)
+          if (text.textPages < text.pages) {
+            warnings.push({ code: 'pdf_pages_without_text', message: `${text.pages - text.textPages} of ${text.pages} pages carry no text layer; their content would need OCR.` })
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof PdfParseError)) throw error
+        status = 'failed'
+        failureReason = 'parse_error'
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'pdf_unreadable', detail: { code: error.code, error: error.message } })
+      }
+    } else if (kind === 'csv' || kind === 'json') {
+      const text = decodeText(bytes)
+      const shown = text.length > MAX_INLINE_TEXT_CHARS ? text.slice(0, MAX_INLINE_TEXT_CHARS) : text
+      truncated = text.length > MAX_INLINE_TEXT_CHARS
+      truncatedAt = truncated ? MAX_INLINE_TEXT_CHARS : null
+      markdown = `\`\`\`${kind}\n${shown}${shown.endsWith('\n') ? '' : '\n'}\`\`\``
+    }
+    return {
+      ...base,
+      status,
+      failureReason,
+      blockReason: null,
+      budgetExceeded: null,
+      lane: 'http',
+      escalations: [],
+      markdown,
+      ...(warnings.length > 0 ? { warnings } : {}),
+      links: [],
+      file,
+      truncated,
+      truncatedAt,
+      usage: { ...base.usage, contentTokens: markdown === null ? null : estimateTokens(markdown) },
+    }
   }
 
   private denied(url: string, start: number, trace: TraceEvent[], failureReason: FetchResult['failureReason']): FetchResult {

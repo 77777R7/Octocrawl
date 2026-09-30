@@ -51,6 +51,8 @@ export function hostedNetworkPolicy(): NetworkPolicy {
     ...DEFAULT_NETWORK_POLICY,
     origin: 'operator',
     privateAllowlist: [],
+    // A shared service keeps downloads to the page cap; the local product may raise its own.
+    maxFileBytes: DEFAULT_NETWORK_POLICY.maxBodyBytes,
   }
 }
 

@@ -86,6 +86,24 @@ export interface TraceEvent {
   detail?: Record<string, unknown>
 }
 
+export const FILE_KIND = ['pdf', 'csv', 'xlsx', 'xls', 'zip', 'json'] as const
+export type FileKind = (typeof FILE_KIND)[number]
+
+/** A response kept as the file it was, byte for byte, beside any text read from it. */
+export interface FileEvidence {
+  kind: FileKind
+  contentType: string | null
+  /** Size as received, before any decoding. */
+  bytes: number
+  sha256: string
+  /** Where the bytes were written, or null when saving is disabled. */
+  path: string | null
+  /** From Content-Disposition, else the last URL path segment; null when neither names one. */
+  filename: string | null
+  /** PDF only: what the text layer held. */
+  pdf?: { pages: number; textPages: number; textChars: number }
+}
+
 export interface LadderAttempt {
   channel: string
   result: FetchResult
@@ -181,6 +199,8 @@ export interface FetchResult {
   document?: DocumentExtraction | null
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
+  /** Present when the response was a file (PDF, CSV, XLSX, ZIP, JSON) kept as received. */
+  file?: FileEvidence | null
   /**
    * Outbound http(s) links from the FULL document, collected after extract
    * and before the raw HTML is dropped. Not from `mainHtml` — prune strips

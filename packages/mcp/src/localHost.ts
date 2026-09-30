@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { hostedNetworkPolicy, localNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
-import { operatorProxyFromEnv, type OperatorProxy } from '@w2l/api'
+import { maxFileBytesFromEnv, operatorProxyFromEnv, type OperatorProxy } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
@@ -34,7 +34,8 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
     : undefined
   const amazonPublicState=env.W2L_AMAZON_PUBLIC_STATE_FILE ? readFileSync(env.W2L_AMAZON_PUBLIC_STATE_FILE,'utf8') : undefined
   if (amazonPublicState !== undefined) validateAmazonPublicState(amazonPublicState)
-  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,deliveryNetworkPolicy,amazonPublicState,operatorProxy:operatorProxyFromEnv(env)}
+  const local=localNetworkPolicy()
+  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,networkPolicy:{...local,maxFileBytes:maxFileBytesFromEnv(env,local.maxFileBytes)},deliveryNetworkPolicy,amazonPublicState,operatorProxy:operatorProxyFromEnv(env)}
 }
 
 /** Single-user local service. It never binds a public interface or exposes REST. */

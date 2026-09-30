@@ -36,6 +36,8 @@ export const FAILURE_REASON = [
   'body_too_large',
   'decompressed_too_large',
   'unsupported_content_type',
+  /** A PDF with no text layer: the file was saved, its text needs OCR, which W2L does not do. */
+  'ocr_required',
   'parse_error',
   'loop_detected',
   'policy_denied',

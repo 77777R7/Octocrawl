@@ -24,6 +24,8 @@ export interface NetworkPolicy {
   maxBodyBytes: number
   /** Cap on post-decompression size, to bound zip bombs. */
   maxDecompressedBytes: number
+  /** Cap for a file downloaded as received (PDF, CSV, XLSX, ZIP, JSON); larger files fail with body_too_large. */
+  maxFileBytes: number
   /** Per-host concurrent request ceiling. */
   perHostConcurrency: number
   /** Minimum delay between requests to the same host. */
@@ -37,6 +39,7 @@ export const DEFAULT_NETWORK_POLICY: NetworkPolicy = {
   maxRedirects: 5,
   maxBodyBytes: 10 * 1024 * 1024,
   maxDecompressedBytes: 50 * 1024 * 1024,
+  maxFileBytes: 50 * 1024 * 1024,
   perHostConcurrency: 2,
   perHostMinDelayMs: 250,
   respectRobotsTxt: true,

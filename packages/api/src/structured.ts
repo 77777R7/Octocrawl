@@ -634,6 +634,7 @@ export function compactScrapeResponse(
     ...(next.warnings !== undefined && next.warnings.length > 0 ? { warnings: next.warnings } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
     metadata: scrapeMetadata(next),
+    ...(next.file === undefined || next.file === null ? {} : { file: next.file }),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,
       pageType: next.document.pageType,

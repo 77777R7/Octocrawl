@@ -80,6 +80,10 @@ export interface ResilientResponseLike {
   status: number
   headers: { get(name: string): string | null }
   bodyText(): Promise<string>
+  /** The body as received, under `maxBytes`; a subject that keeps files supplies it. */
+  bodyBytes?(maxBytes?: number): Promise<Uint8Array>
+  /** Drop an unread body so its connection is not held open. */
+  discardBody?(): void
 }
 
 /** One wire request. Throws are mapped by error name inside the engine. */
@@ -115,6 +119,10 @@ export interface ResilientOutcome {
   attemptCount: number
   headers: ResilientResponseLike['headers'] | null
   bodyText(): Promise<string>
+  /** The body as received; falls back to the UTF-8 bytes of bodyText when the fetcher has no byte reader. */
+  bodyBytes(maxBytes?: number): Promise<Uint8Array>
+  /** Drop an unread body so its connection is not held open. */
+  discardBody(): void
   trace: Array<{ at: number; event: string; detail?: Record<string, unknown> }>
 }
 
@@ -149,6 +157,8 @@ function emptyOutcomeFields(chain: string[], requestCount: number, attemptCount:
     requestCount,
     attemptCount,
     bodyText: async () => '',
+    bodyBytes: async () => new Uint8Array(),
+    discardBody: () => {},
     trace,
   }
 }
@@ -281,6 +291,22 @@ export async function resilientFetch(
         })()
         return bodyPromise
       }
+      let bytesPromise: Promise<Uint8Array> | null = null
+      const responseBytes = (maxBytes?: number): Promise<Uint8Array> => {
+        bytesPromise ??= (async () => {
+          const bodyScope = createExecutionScope(cfg)
+          try {
+            throwIfExecutionStopped(bodyScope)
+            const bytes = await raceWithSignal(
+              response.bodyBytes === undefined ? response.bodyText().then((text) => new TextEncoder().encode(text)) : response.bodyBytes(maxBytes),
+              bodyScope.signal,
+            )
+            trace.push({ at: Date.now() - start, event: 'request_complete', detail: { status: response.status, bytes: bytes.byteLength } })
+            return bytes
+          } finally { bodyScope.dispose() }
+        })()
+        return bytesPromise
+      }
       if (response.status === 429 || response.status === 503) {
         const delay = parseRetryAfterMs(response.headers.get('retry-after'), now())
         if (delay !== null) cfg.onRetryAfter?.(current, now() + delay)
@@ -397,6 +423,8 @@ export async function resilientFetch(
         attemptCount,
         headers: response.headers,
         bodyText: responseBody,
+        bodyBytes: responseBytes,
+        discardBody: () => response.discardBody?.(),
         trace,
       }
     }

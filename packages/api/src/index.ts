@@ -3,7 +3,7 @@ export type { AppOptions } from './app.js'
 export { createApiEngine } from './engine.js'
 export type { ApiEngine, ApiEngineOptions, CrawlWithSteps } from './engine.js'
 export { compactScrapeResponse, extractStructured } from './structured.js'
-export { parseListen, parsePort } from './listen.js'
+export { parseListen, parsePort, maxFileBytesFromEnv } from './listen.js'
 export { operatorProxyFromEnv, type OperatorProxy } from '@w2l/bench'
 export type { ApiMode, ListenConfig } from './listen.js'
 export {
