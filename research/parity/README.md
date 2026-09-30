@@ -18,6 +18,8 @@ Scoring: solid = 1, weak = 0.6, partial = 0.4, missing = 0; tier weights core = 
 | `plan-to-70.md` | Milestones M1–M5 to reach 70% tier-weighted parity, with the files each change lands in |
 | `milestones.json` | Feature ids per milestone |
 | `score.mjs` | `node research/parity/score.mjs` recomputes the baseline and each milestone's projected score |
-| `real-site-test-set.md` | Proposed public test sites mapped to features, with a first live batch of 12 URLs; none verified from the audit environment |
+| `real-site-test-set.md` | Proposed public test sites mapped to features, with a first live batch of 12 URLs |
+| `live-batch-1-2026-09-30.md` | Run record of the first live batch through the local MCP service at `c0ab92a`: 4 pass, 5 partial, 2 fail, 1 not testable from that network; nine W2L findings |
+| `live-batch-1-wikipedia-2026-09-30.md` | Re-run of the batch's URL 6 (Wikipedia GDP table) from the cloud session: pass on the applicable criterion; the spanned-header check moves to the second batch |
 
 Statuses describe the code at `97ef3a4`. A feature becomes solid only when its real-site check passes, recorded with the command and source commit.
