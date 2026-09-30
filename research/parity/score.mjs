@@ -10,9 +10,10 @@ const audited = JSON.parse(readFileSync(new URL('feature-audit.json', here), 'ut
 const milestones = JSON.parse(readFileSync(new URL('milestones.json', here), 'utf8'))
 
 // The audit is a record of 2026-09-28 and is not edited. Later dated
-// re-audits (reaudit-YYYY-MM-DD.json: { featureId: { status, evidence } })
-// are applied on top, latest last, to give the current statuses.
-const reaudits = readdirSync(here).filter((name) => /^reaudit-\d{4}-\d{2}-\d{2}\.json$/.test(name)).sort()
+// re-audits (reaudit-YYYY-MM-DD.json, or reaudit-YYYY-MM-DDb.json for a
+// second one on the same day: { featureId: { status, evidence } }) are
+// applied on top, latest last, to give the current statuses.
+const reaudits = readdirSync(here).filter((name) => /^reaudit-\d{4}-\d{2}-\d{2}[a-z]?\.json$/.test(name)).sort()
 const current = new Map(audited.map((f) => [f.id, f.audit.status]))
 for (const name of reaudits) {
   for (const [id, entry] of Object.entries(JSON.parse(readFileSync(new URL(name, here), 'utf8')))) {
