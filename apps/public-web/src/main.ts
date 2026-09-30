@@ -3,7 +3,7 @@ import { mountHeroAscii } from './ascii'
 import { mountHeroClickSpark } from './clickSpark'
 import { mountHowReplay } from './howReplay'
 import { sessionMarkup } from './sessionScript'
-import { fieldsSchema, isAmazonProduct, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
+import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -115,12 +115,12 @@ app.innerHTML = `
                   <button class="sheet-close" type="button" popovertarget="format-panel" popovertargetaction="hide" aria-label="Close format"></button>
                 </div>
                 <div class="sheet-scroll">
-                  <div class="format-rows" role="radiogroup" aria-labelledby="format-title">
-                    <label class="format-row"><input type="radio" name="output-view" value="markdown" checked /><span class="row-mark" aria-hidden="true"></span><span class="row-name">Markdown</span><span class="row-note">the page's readable content</span><span class="row-ext">.md</span></label>
-                    <label class="format-row"><input type="radio" name="output-view" value="links" /><span class="row-mark" aria-hidden="true"></span><span class="row-name">Links</span><span class="row-note">every link on the page, up to 500</span><span class="row-ext">.links.txt</span></label>
-                    <label class="format-row"><input type="radio" name="output-view" value="info" /><span class="row-mark" aria-hidden="true"></span><span class="row-name">Page info</span><span class="row-note">title, description, language; a file's type and pages</span><span class="row-ext">.info.json</span></label>
-                    <label class="format-row"><input type="radio" name="output-view" value="fields" /><span class="row-mark" aria-hidden="true"></span><span class="row-name">Fields</span><span class="row-note">the fields you set in Options</span><span class="row-ext">.fields.json</span></label>
-                    <label class="format-row"><input type="radio" name="output-view" value="json" /><span class="row-mark" aria-hidden="true"></span><span class="row-name">JSON</span><span class="row-note">the whole result, as the server sent it</span><span class="row-ext">.json</span></label>
+                  <div class="format-tiles" role="radiogroup" aria-labelledby="format-title">
+                    <label class="format-tile"><input type="radio" name="output-view" value="markdown" checked /><span class="tile-icon" data-icon="markdown" aria-hidden="true"></span><span class="tile-name">Markdown</span><span class="tile-note">readable text</span><span class="tile-ext">.md</span></label>
+                    <label class="format-tile"><input type="radio" name="output-view" value="links" /><span class="tile-icon" data-icon="links" aria-hidden="true"></span><span class="tile-name">Links</span><span class="tile-note">every link, up to 500</span><span class="tile-ext">.links.txt</span></label>
+                    <label class="format-tile"><input type="radio" name="output-view" value="info" /><span class="tile-icon" data-icon="info" aria-hidden="true"></span><span class="tile-name">Page info</span><span class="tile-note">title, language; a file's pages</span><span class="tile-ext">.info.json</span></label>
+                    <label class="format-tile"><input type="radio" name="output-view" value="fields" /><span class="tile-icon" data-icon="fields" aria-hidden="true"></span><span class="tile-name">Fields</span><span class="tile-note">the fields set in Options</span><span class="tile-ext">.fields.json</span></label>
+                    <label class="format-tile"><input type="radio" name="output-view" value="json" /><span class="tile-icon" data-icon="json" aria-hidden="true"></span><span class="tile-name">JSON</span><span class="tile-note">the whole result</span><span class="tile-ext">.json</span></label>
                   </div>
                   <p class="sheet-note">All from one extraction, so switching never uses another preview.</p>
                 </div>
@@ -160,25 +160,28 @@ app.innerHTML = `
                   <p class="sheet-note">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason.<br />PDFs up to 5 MB · Amazon.sg product pages take no options.</p>
                 </div>
               </div>
-              <dialog class="code-dialog" id="code-dialog" aria-labelledby="code-title">
-                <div class="panel-head">
-                  <h2 class="panel-title" id="code-title">Run it on your computer</h2>
-                  <button class="panel-close" id="code-close" type="button" aria-label="Close"></button>
+              <dialog class="code-dialog" id="code-dialog" aria-labelledby="code-title" aria-describedby="code-lead">
+                <div class="sheet-head">
+                  <p class="sheet-title"><span class="kicker-square" aria-hidden="true"></span>Get code</p>
+                  <span class="sheet-esc" aria-hidden="true">esc</span>
+                  <button class="sheet-close" id="code-close" type="button" aria-label="Close"></button>
                 </div>
-                <p class="code-lead">No daily limit. Both need a checkout of the W2L repository. A local run can also use a local browser, so its result may differ from this preview.</p>
-                <section class="code-block" aria-labelledby="code-rest-title">
-                  <div class="code-block-head"><h3 id="code-rest-title">REST · local API</h3><button class="copy-button" type="button" data-copy="code-rest">Copy</button></div>
-                  <pre tabindex="0"><code id="code-rest"></code></pre>
-                </section>
-                <section class="code-block" aria-labelledby="code-mcp-title">
-                  <div class="code-block-head"><h3 id="code-mcp-title">MCP · w2l-local</h3><button class="copy-button" type="button" data-copy="code-prompt">Copy prompt</button></div>
-                  <p class="code-caption">Ask a client connected to <code>http://127.0.0.1:8791/mcp</code>:</p>
-                  <pre tabindex="0"><code id="code-prompt"></code></pre>
-                  <div class="code-block-head"><p class="code-caption">Or call the tool:</p><button class="copy-button" type="button" data-copy="code-mcp">Copy call</button></div>
-                  <pre tabindex="0"><code id="code-mcp"></code></pre>
-                </section>
-                <p class="code-links"><a href="/docs/reference/">Advanced reference ↗</a><a href="/docs/connect-mcp/">Connect MCP ↗</a></p>
-                <p class="visually-hidden" id="code-status" role="status" aria-live="polite"></p>
+                <div class="code-body">
+                  <h2 class="code-title" id="code-title">Run it on your computer</h2>
+                  <p class="code-lead" id="code-lead">The same page, format and options, with no daily limit. It needs a checkout of the W2L repository. A local run can also use a local browser, so its result may differ from this preview.</p>
+                  <div class="code-bar">
+                    <div class="code-tabs" role="tablist" aria-label="How to run it">
+                      <button class="code-tab" id="code-tab-curl" type="button" role="tab" aria-controls="code-panel" aria-selected="true" data-tab="curl"><span class="row-mark" aria-hidden="true"></span>cURL</button>
+                      <button class="code-tab" id="code-tab-mcp" type="button" role="tab" aria-controls="code-panel" aria-selected="false" tabindex="-1" data-tab="mcp"><span class="row-mark" aria-hidden="true"></span>MCP call</button>
+                      <button class="code-tab" id="code-tab-prompt" type="button" role="tab" aria-controls="code-panel" aria-selected="false" tabindex="-1" data-tab="prompt"><span class="row-mark" aria-hidden="true"></span>Prompt</button>
+                    </div>
+                    <button class="code-copy" id="code-copy" type="button">Copy</button>
+                  </div>
+                  <p class="code-step" id="code-step"></p>
+                  <div class="code-panel" id="code-panel" role="tabpanel" tabindex="0" aria-labelledby="code-tab-curl"><ol class="code-lines" id="code-lines"></ol></div>
+                  <p class="code-links"><a href="/docs/reference/">Advanced reference ↗</a><a href="/docs/connect-mcp/">Connect MCP ↗</a></p>
+                  <p class="visually-hidden" id="code-status" role="status" aria-live="polite"></p>
+                </div>
               </dialog>
             </form>
           </div>
@@ -704,33 +707,83 @@ function pageInfo(result: PreviewResponse): Record<string, unknown> {
   return { url: result.finalUrl ?? result.requestedUrl, title: result.title, ...(result.metadata ? { metadata: result.metadata } : {}), ...(result.file ? { file: result.file } : {}) }
 }
 
+/** What the page declares about itself, as ledger lines: each value with the markup it is read from (nothing is
+ * inferred from the URL, the content or another tag), or, for a file, what was read of it. */
 function renderPageInfo(result: PreviewResponse): HTMLElement {
-  const grid = document.createElement('dl')
-  grid.className = 'product-grid info-grid'
+  const box = document.createElement('div')
+  box.className = 'ledger-view'
   const file = result.file
   if (file) {
-    grid.append(productField('File type', file.kind.toUpperCase()))
-    grid.append(productField('Content type', file.contentType, 'Not declared'))
-    grid.append(productField('Size', formatBytes(file.bytes), 'Not read'))
-    if (file.pdf) grid.append(productField('Pages read', file.pdf.pageCount === null ? String(file.pdf.pagesRead) : `${file.pdf.pagesRead} of ${file.pdf.pageCount}`))
-    grid.append(productField('Text', file.markdownFrom === 'pdf_text' ? 'PDF text layer' : file.markdownFrom === 'text' ? 'Text as received' : null, 'No text'))
-    for (const warning of file.warnings) grid.append(productField('Warning', warning.message || warning.code))
-    return grid
+    const size = formatBytes(file.bytes)
+    const lines: LedgerLine[] = [
+      { name: 'file type', state: 'found', value: file.kind.toUpperCase() },
+      infoLine('content type', file.contentType, 'not declared', undefined, true),
+      size === null ? { name: 'size', state: 'missing', value: 'not read', cite: file.declaredBytes === null ? undefined : `declared ${formatBytes(file.declaredBytes)}, above the ${formatBytes(file.maxBytes)} limit` } : { name: 'size', state: 'found', value: size, code: true },
+      ...(file.pdf ? [{ name: 'pages read', state: 'found', value: file.pdf.pageCount === null ? String(file.pdf.pagesRead) : `${file.pdf.pagesRead} of ${file.pdf.pageCount}`, code: true } as LedgerLine] : []),
+      infoLine('text', file.markdownFrom === 'pdf_text' ? 'the PDF text layer' : file.markdownFrom === 'text' ? 'the text as received' : null, 'no text'),
+      ...file.warnings.map((warning): LedgerLine => ({ name: 'warning', state: 'note', value: warning.message || warning.code })),
+    ]
+    box.append(ledgerMeter(lines, `${lines.filter((line) => line.state === 'found').length} of ${lines.length} read from the file`), ledgerList(lines))
+    return box
   }
   const metadata = result.metadata
-  grid.append(productField('Page title', metadata?.title, 'Not declared'))
-  grid.append(productField('Content title', result.title, 'Not found'))
-  grid.append(productField('Description', metadata?.description, 'Not declared'))
-  grid.append(productField('Language', metadata?.language, 'Not declared'))
-  grid.append(productField('Canonical URL', metadata?.canonicalUrl, 'Not declared'))
-  grid.append(productField('Robots', metadata?.robots, 'Not declared'))
-  grid.append(productField('Keywords', metadata?.keywords, 'Not declared'))
-  grid.append(productField('Icon', metadata?.favicon, 'Not declared'))
-  grid.append(productField('Final URL', result.finalUrl, 'Not available'))
-  return grid
+  const lines: LedgerLine[] = [
+    infoLine('page title', metadata?.title, 'not declared', '<title>'),
+    infoLine('description', metadata?.description, 'not declared', '<meta name="description">'),
+    infoLine('language', metadata?.language, 'not declared', '<html lang>, or a Content-Language meta', true),
+    infoLine('canonical URL', metadata?.canonicalUrl, 'not declared', '<link rel="canonical">', true),
+    infoLine('robots', metadata?.robots, 'not declared', '<meta name="robots">', true),
+    infoLine('keywords', metadata?.keywords, 'not declared', '<meta name="keywords">'),
+    infoLine('icon', metadata?.favicon, 'not declared', '<link rel="icon">', true),
+    infoLine('content title', result.title, 'not found'),
+    infoLine('final URL', result.finalUrl, 'not available', 'the fetch itself, after redirects', true),
+  ]
+  box.append(ledgerMeter(lines, `${lines.filter((line) => line.state === 'found').length} of ${lines.length} found · nothing inferred from the URL or the content`), ledgerList(lines))
+  return box
 }
 
-const LEDGER_MARKS = { found: '✓', missing: '·', ambiguous: ':' } as const
+/** A value the page declares: its line, citing the markup it is read from, or where W2L looked when it is absent. */
+function infoLine(name: string, value: string | null | undefined, missing: string, source?: string, code = false): LedgerLine {
+  if (value === null || value === undefined || value === '') return { name, state: 'missing', value: missing, cite: source ? `looked for ${source}` : undefined }
+  return { name, state: 'found', value, code, cite: source }
+}
+
+/** One line of a ledger: a mark, a name, the value (or why there is none) and where it was read. */
+type LedgerLine = { name: string; state: keyof typeof LEDGER_MARKS; value: string; code?: boolean; cite?: string }
+
+/** The ledger's head: a mark per line, in order, then the count in words (the marks are for sighted readers). */
+function ledgerMeter(lines: readonly LedgerLine[], text: string): HTMLElement {
+  const meter = document.createElement('p')
+  meter.className = 'ledger-meter'
+  if (lines.length) {
+    const cells = document.createElement('span')
+    cells.className = 'meter-cells'
+    cells.setAttribute('aria-hidden', 'true')
+    for (const line of lines) cells.append(textElement('span', LEDGER_MARKS[line.state], `is-${line.state}`))
+    meter.append(cells)
+  }
+  meter.append(textElement('span', text, 'meter-text'))
+  return meter
+}
+
+function ledgerList(lines: readonly LedgerLine[]): HTMLElement {
+  const ledger = document.createElement('dl')
+  ledger.className = 'ledger'
+  for (const line of lines) {
+    const row = document.createElement('div')
+    row.className = `ledger-row is-${line.state}`
+    const term = document.createElement('dt')
+    const mark = textElement('span', LEDGER_MARKS[line.state], 'ledger-mark')
+    mark.setAttribute('aria-hidden', 'true')
+    term.append(mark, textElement('span', line.name, 'ledger-name'))
+    row.append(term, textElement('dd', line.value, `ledger-value${line.state === 'missing' ? ' is-empty' : line.code ? ' is-code' : ''}`))
+    if (line.cite) row.append(textElement('dd', `↳ ${line.cite}`, 'ledger-cite'))
+    ledger.append(row)
+  }
+  return ledger
+}
+
+const LEDGER_MARKS = { found: '✓', missing: '·', ambiguous: ':', note: ':' } as const
 const FIELD_SOURCES: Record<string, string> = {
   jsonld: 'JSON-LD', microdata: 'Microdata', meta: 'Meta tag', dom: 'Page', text: 'Page text', hydration: 'Page data',
   pdf: 'PDF text', fetch: 'The fetch itself', inferred: 'Inferred from the page', model: 'Model',
@@ -748,51 +801,23 @@ function missingReason(issue: PreviewFields['issues'][number] | undefined): stri
  * marks above the ledger count them, one per field. */
 function renderFields(result: PreviewResponse): HTMLElement {
   const box = document.createElement('div')
-  box.className = 'fields-view'
+  box.className = 'ledger-view'
   const json = result.json
   if (!json) return box
   const data = json.data !== null && typeof json.data === 'object' && !Array.isArray(json.data) ? json.data as Record<string, unknown> : {}
   const names = Object.keys(data)
-  const lines = names.map((name) => {
+  const lines = names.map((name): LedgerLine => {
     const value = data[name]
     const issue = json.issues.find((item) => item.path === `/${name}`)
-    const state: keyof typeof LEDGER_MARKS = value !== null && value !== undefined ? 'found' : issue?.code === 'field_ambiguous' ? 'ambiguous' : 'missing'
-    return { name, value, issue, state, evidence: json.evidence.find((item) => item.path === `/${name}`) }
+    if (value === null || value === undefined) return { name, state: issue?.code === 'field_ambiguous' ? 'ambiguous' : 'missing', value: missingReason(issue) }
+    const evidence = json.evidence.find((item) => item.path === `/${name}`)
+    const text = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join(' · ') : typeof value === 'string' ? value : typeof value === 'object' ? JSON.stringify(value) : String(value)
+    const cite = evidence ? [FIELD_SOURCES[evidence.source] ?? evidence.source, evidence.evidencePath, evidence.text ? `read from “${evidence.text}”` : ''].filter(Boolean).join(' · ') : undefined
+    return { name, state: 'found', value: text, code: typeof value === 'number' || typeof value === 'boolean', cite }
   })
   const found = lines.filter((line) => line.state === 'found').length
-  const meter = document.createElement('p')
-  meter.className = 'ledger-meter'
-  if (lines.length) {
-    const cells = document.createElement('span')
-    cells.className = 'meter-cells'
-    cells.setAttribute('aria-hidden', 'true')
-    for (const line of lines) cells.append(textElement('span', LEDGER_MARKS[line.state], `is-${line.state}`))
-    meter.append(cells)
-  }
-  meter.append(textElement('span', lines.length ? `${found} of ${lines.length} stated on the page · read without AI` : 'No fields were read from this page.', 'meter-text'))
-  box.append(meter)
-  if (lines.length) {
-    const ledger = document.createElement('dl')
-    ledger.className = 'ledger'
-    for (const line of lines) {
-      const row = document.createElement('div')
-      row.className = `ledger-row is-${line.state}`
-      const term = document.createElement('dt')
-      term.append(textElement('span', LEDGER_MARKS[line.state], 'ledger-mark'), textElement('span', line.name, 'ledger-name'))
-      term.firstElementChild!.setAttribute('aria-hidden', 'true')
-      row.append(term)
-      if (line.state === 'found') {
-        const value = line.value
-        const code = typeof value === 'number' || typeof value === 'boolean'
-        const text = Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join(' · ') : typeof value === 'string' ? value : typeof value === 'object' ? JSON.stringify(value) : String(value)
-        row.append(textElement('dd', text, code ? 'ledger-value is-code' : 'ledger-value'))
-        const evidence = line.evidence
-        if (evidence) row.append(textElement('dd', `↳ ${[FIELD_SOURCES[evidence.source] ?? evidence.source, evidence.evidencePath, evidence.text ? `read from “${evidence.text}”` : ''].filter(Boolean).join(' · ')}`, 'ledger-cite'))
-      } else row.append(textElement('dd', missingReason(line.issue), 'ledger-value is-empty'))
-      ledger.append(row)
-    }
-    box.append(ledger)
-  }
+  box.append(ledgerMeter(lines, lines.length ? `${found} of ${lines.length} stated on the page · read without AI` : 'No fields were read from this page.'))
+  if (lines.length) box.append(ledgerList(lines))
   const general = json.issues.filter((item) => !item.path || !names.includes(item.path.slice(1)))
   if (general.length) {
     const list = document.createElement('ul')
@@ -803,30 +828,67 @@ function renderFields(result: PreviewResponse): HTMLElement {
   return box
 }
 
+/** A URL's text that wraps after its separators (/ ? & = #) rather than inside a word. */
+function breakable(text: string, className: string): HTMLElement {
+  const span = document.createElement('span')
+  span.className = className
+  text.split(/(?<=[/?&=#])/).forEach((part, index) => {
+    if (index) span.append(document.createElement('wbr'))
+    span.append(part)
+  })
+  return span
+}
+
+/** The page's links as a numbered ledger: · for a link on the page's own site, ↗ for one elsewhere, each written as
+ * its host and path. It scrolls inside its frame, whose corners and rules stay put. */
 function renderLinks(result: PreviewResponse): HTMLElement {
   const box = document.createElement('div')
+  box.className = 'ledger-view'
   const links = result.links ?? []
   const total = result.linksTotal ?? links.length
   if (!links.length) {
     box.append(textElement('p', 'No links were found on this page.', 'empty-content'))
     return box
   }
-  box.append(textElement('p', total > links.length ? `The first ${links.length.toLocaleString()} of ${total.toLocaleString()} links on the page.` : `${total.toLocaleString()} ${total === 1 ? 'link' : 'links'} on the page.`, 'output-explanation'))
+  const siteOf = (host: string): string => host.replace(/^www\./, '')
+  let site = ''
+  try { site = siteOf(new URL(result.finalUrl ?? result.requestedUrl).hostname) } catch { /* No site to compare with. */ }
+  const rows = links.map((link) => {
+    let parsed: URL | null = null
+    try { parsed = new URL(link) } catch { /* Shown as written. */ }
+    return { link, parsed, own: parsed !== null && siteOf(parsed.hostname) === site }
+  })
+  const own = rows.filter((row) => row.own).length
+  const count = total > links.length ? `The first ${links.length.toLocaleString()} of ${total.toLocaleString()} links on the page` : `${total.toLocaleString()} ${total === 1 ? 'link' : 'links'} on the page`
+  const meter = document.createElement('p')
+  meter.className = 'ledger-meter'
+  meter.append(textElement('span', `${count} · ${own.toLocaleString()} on ${site || 'this site'} · ${(rows.length - own).toLocaleString()} elsewhere`, 'meter-text'))
+  box.append(meter)
+  const frame = document.createElement('div')
+  frame.className = 'ledger is-scroll'
   const list = document.createElement('ol')
-  list.className = 'links-list'
-  for (const link of links) {
-    const href = safeWebUrl(link)
+  list.className = 'ledger-scroll'
+  rows.forEach((row, index) => {
     const item = document.createElement('li')
-    if (href) {
-      const anchor = textElement('a', link)
-      anchor.href = href
-      anchor.target = '_blank'
-      anchor.rel = 'noopener noreferrer'
-      item.append(anchor)
-    } else item.append(document.createTextNode(link))
+    item.className = `ledger-row link-row ${row.own ? 'is-own' : 'is-away'}`
+    const number = textElement('span', String(index + 1).padStart(3, '0'), 'link-index')
+    const mark = textElement('span', row.own ? '·' : '↗', 'ledger-mark')
+    number.setAttribute('aria-hidden', 'true')
+    mark.setAttribute('aria-hidden', 'true')
+    const href = safeWebUrl(row.link)
+    const target = href ? textElement('a', '', 'link-target') : textElement('span', '', 'link-target')
+    if (row.parsed) target.append(breakable(row.parsed.host, 'link-host'), breakable(`${row.parsed.pathname}${row.parsed.search}${row.parsed.hash}`, 'link-path'))
+    else target.append(breakable(row.link, 'link-path'))
+    if (href && target instanceof HTMLAnchorElement) {
+      target.href = href
+      target.target = '_blank'
+      target.rel = 'noopener noreferrer'
+    }
+    item.append(number, mark, target)
     list.append(item)
-  }
-  box.append(list)
+  })
+  frame.append(list)
+  box.append(frame)
   return box
 }
 
@@ -1066,6 +1128,8 @@ function finishRun(run: Run, result: PreviewResponse, started: number): void {
  * grows away from the button; either way it scrolls inside once it reaches the edge of the screen. */
 function placePanel(panel: HTMLElement, button: HTMLElement): void {
   for (const name of ['--panel-left', '--panel-top', '--panel-bottom', '--panel-max']) panel.style.removeProperty(name)
+  // A phone's sheet rises from the foot of the screen.
+  panel.dataset.side = 'above'
   if (window.matchMedia('(max-width: 600px)').matches) return
   const box = button.getBoundingClientRect()
   const left = Math.max(12, Math.min(box.left, window.innerWidth - panel.offsetWidth - 12))
@@ -1073,6 +1137,7 @@ function placePanel(panel: HTMLElement, button: HTMLElement): void {
   const roomAbove = box.top - 20
   panel.style.setProperty('--panel-left', `${Math.round(left)}px`)
   if (panel.scrollHeight <= roomBelow || roomBelow >= roomAbove) {
+    panel.dataset.side = 'below'
     panel.style.setProperty('--panel-top', `${Math.round(box.bottom + 8)}px`)
     panel.style.setProperty('--panel-max', `${Math.round(Math.max(160, roomBelow))}px`)
   } else {
@@ -1087,8 +1152,11 @@ for (const [panel, button] of panels) {
     button.classList.toggle('is-open', open)
     // Options closed with no field named: nothing for the Fields view to show.
     if (!open && panel === optionsPanel && outputView === 'fields' && !readFields().fields.length) setOutputView('markdown')
+    panel.classList.toggle('is-placed', false)
     if (!open) return
     placePanel(panel, button)
+    // Hidden until placed, so it never shows where it was; then it unfolds from the button's side (the styles).
+    panel.classList.add('is-placed')
     // The toggle event comes after the panel opened: focus already placed inside it (a new field) stays there.
     if (panel.contains(document.activeElement)) return
     ;(panel.querySelector<HTMLElement>('input:checked') ?? panel.querySelector<HTMLElement>('input, button:not(.sheet-close)'))?.focus()
@@ -1097,10 +1165,39 @@ for (const [panel, button] of panels) {
 for (const type of ['resize', 'scroll'] as const) {
   window.addEventListener(type, () => { for (const [panel, button] of panels) if (panel.matches(':popover-open')) placePanel(panel, button) }, { passive: true })
 }
+/** Each format's icon, drawn on the hero's glyph grid: lit cells (#) over faint dots. Each lit cell comes up at its
+ * own moment as the panel unfolds (--d), like the octopus decoding. */
+const FORMAT_ICONS: Record<OutputView, string[]> = {
+  markdown: ['#####..', '.......', '######.', '#####..', '######.', '.......', '####...'],
+  links: ['...####', '.....##', '....#.#', '...#..#', '..#....', '.#.....', '#......'],
+  info: ['..###..', '.#...#.', '#..#..#', '#.....#', '#..#..#', '.#.#.#.', '..###..'],
+  fields: ['##.####', '.......', '##.###.', '.......', '##.####', '.......', '##.##..'],
+  json: ['..#.#..', '.#...#.', '.#...#.', '#.....#', '.#...#.', '.#...#.', '..#.#..'],
+}
+for (const box of formatPanel.querySelectorAll<HTMLElement>('.tile-icon')) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 49 49')
+  svg.setAttribute('class', 'glyph-icon')
+  FORMAT_ICONS[box.dataset.icon as OutputView].forEach((row, y) => [...row].forEach((cell, x) => {
+    const lit = cell === '#'
+    const mark = document.createElementNS('http://www.w3.org/2000/svg', lit ? 'rect' : 'circle')
+    if (lit) {
+      for (const [name, value] of [['x', x * 7 + 1.2], ['y', y * 7 + 1.2], ['width', 4.6], ['height', 4.6], ['rx', 1]] as const) mark.setAttribute(name, String(value))
+      mark.setAttribute('class', 'on')
+      mark.style.setProperty('--d', `${((x * 5 + y * 3) % 7) * 28}ms`)
+    } else {
+      for (const [name, value] of [['cx', x * 7 + 3.5], ['cy', y * 7 + 3.5], ['r', 0.9]] as const) mark.setAttribute(name, String(value))
+      mark.setAttribute('class', 'off')
+    }
+    svg.append(mark)
+  }))
+  box.append(svg)
+}
+
 // A format chosen with the pointer closes the panel; arrow keys only move the choice, and Enter closes it (and never
 // submits the form around it).
 let pointerChoice = false
-formatPanel.addEventListener('pointerdown', (event) => { pointerChoice = Boolean((event.target as HTMLElement).closest('.format-row')) })
+formatPanel.addEventListener('pointerdown', (event) => { pointerChoice = Boolean((event.target as HTMLElement).closest('.format-tile')) })
 formatPanel.addEventListener('change', (event) => {
   const choice = event.target as HTMLInputElement
   if (choice.name !== 'output-view') return
@@ -1167,6 +1264,7 @@ function relabelFields(): void {
   rows.forEach((row, index) => {
     const name = row.querySelector<HTMLInputElement>('.field-name')!
     row.querySelector('.field-index')!.textContent = String(index + 1).padStart(2, '0')
+    row.style.setProperty('--i', String(index))
     name.setAttribute('aria-label', `Field ${index + 1} name`)
     row.querySelector('.field-type')!.setAttribute('aria-label', `Field ${index + 1} type`)
     row.querySelector('.field-remove')!.setAttribute('aria-label', `Remove field ${index + 1}${name.value.trim() ? ` (${name.value.trim()})` : ''}`)
@@ -1286,34 +1384,78 @@ function previewBody(url: string): Record<string, unknown> {
   return body
 }
 
-/** The same extraction on your own computer: the URL entered (or the example), the chosen view and options. */
+/** The same extraction on your own computer: the URL entered (or the example), the chosen view and options, as a
+ * cURL call to the local API, an MCP tool call, or a prompt for an MCP client. One listing shows at a time. */
+type CodeTab = 'curl' | 'mcp' | 'prompt'
+const codeTabs = [...codeDialog.querySelectorAll<HTMLButtonElement>('.code-tab')]
+const codeLines = codeDialog.querySelector<HTMLOListElement>('#code-lines')!
+const codeStep = codeDialog.querySelector<HTMLElement>('#code-step')!
+const codeCopy = codeDialog.querySelector<HTMLButtonElement>('#code-copy')!
+const codeStatus = codeDialog.querySelector<HTMLElement>('#code-status')!
+let codeTab: CodeTab = 'curl'
+let codeTexts: Record<CodeTab, string> = { curl: '', mcp: '', prompt: '' }
+
+/** What to start before the listing, as a prompt line: plain words with the commands in code. */
+function codeStepFor(tab: CodeTab): Array<string | [string]> {
+  if (tab === 'curl') return ['Start the local API with ', ['npm run api'], ', then run this in another terminal:']
+  if (tab === 'mcp') return ['Start ', ['npm run local:mcp'], ', then call the tool from a client connected to ', [LOCAL_MCP], ':']
+  return ['Ask a client connected to ', [LOCAL_MCP], ':']
+}
+
+/** Show one listing. Each line is printed in turn (the styles stagger them by --i), so a tab reads as typed. */
+function renderCode(): void {
+  for (const tab of codeTabs) {
+    const selected = tab.dataset.tab === codeTab
+    tab.setAttribute('aria-selected', String(selected))
+    tab.tabIndex = selected ? 0 : -1
+    if (selected) codeDialog.querySelector('#code-panel')!.setAttribute('aria-labelledby', tab.id)
+  }
+  codeStep.replaceChildren(textElement('span', '›', 'code-prompt'), ...codeStepFor(codeTab).map((part) => typeof part === 'string' ? document.createTextNode(part) : textElement('code', part[0])))
+  codeLines.replaceChildren(...codeTexts[codeTab].split('\n').map((line, index) => {
+    const item = document.createElement('li')
+    if (line.startsWith('#')) item.className = 'is-comment'
+    item.style.setProperty('--i', String(index))
+    item.append(textElement('span', line || ' ', 'code-text'))
+    return item
+  }))
+  codeCopy.textContent = 'Copy'
+}
+
 codeButton.addEventListener('click', () => {
   let url = 'https://docs.firecrawl.dev/introduction'
   try { url = normalizeUrl(input.value) } catch { /* The example, until a valid URL is entered. */ }
   const request = { url, view: outputView, onlyMainContent: mainContent.checked, fields: readFields().fields }
-  codeDialog.querySelector('#code-rest')!.textContent = restSnippet(request)
-  codeDialog.querySelector('#code-prompt')!.textContent = mcpPrompt(request)
-  codeDialog.querySelector('#code-mcp')!.textContent = mcpSnippet(request)
-  codeDialog.querySelector('#code-status')!.textContent = ''
+  codeTexts = { curl: restSnippet(request), mcp: mcpSnippet(request), prompt: mcpPrompt(request) }
+  codeStatus.textContent = ''
+  renderCode()
   codeDialog.showModal()
+  // Start on the chosen tab rather than the close button.
+  codeTabs.find((tab) => tab.dataset.tab === codeTab)?.focus()
+})
+for (const tab of codeTabs) tab.addEventListener('click', () => { codeTab = tab.dataset.tab as CodeTab; renderCode() })
+// Arrow keys, Home and End move between the tabs, as a tab list does.
+codeDialog.querySelector('.code-tabs')!.addEventListener('keydown', (event) => {
+  const key = (event as KeyboardEvent).key
+  const at = codeTabs.findIndex((tab) => tab.dataset.tab === codeTab)
+  const next = key === 'ArrowRight' ? (at + 1) % codeTabs.length : key === 'ArrowLeft' ? (at + codeTabs.length - 1) % codeTabs.length : key === 'Home' ? 0 : key === 'End' ? codeTabs.length - 1 : -1
+  if (next < 0) return
+  event.preventDefault()
+  codeTab = codeTabs[next]!.dataset.tab as CodeTab
+  renderCode()
+  codeTabs[next]!.focus()
 })
 codeDialog.querySelector('#code-close')!.addEventListener('click', () => codeDialog.close())
 // A click on the backdrop closes it too.
 codeDialog.addEventListener('click', (event) => { if (event.target === codeDialog) codeDialog.close() })
 codeDialog.addEventListener('close', () => codeButton.focus())
-for (const button of codeDialog.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
-  const label = button.textContent ?? 'Copy'
-  button.addEventListener('click', async () => {
-    const source = codeDialog.querySelector(`#${button.dataset.copy}`)?.textContent ?? ''
-    const status = codeDialog.querySelector('#code-status')!
-    try {
-      await navigator.clipboard.writeText(source)
-      button.textContent = 'Copied ✓'
-      status.textContent = 'Copied to the clipboard.'
-      window.setTimeout(() => { button.textContent = label }, 2200)
-    } catch { status.textContent = 'Copy failed. Select the text manually.' }
-  })
-}
+codeCopy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(codeTexts[codeTab])
+    codeCopy.textContent = 'Copied ✓'
+    codeStatus.textContent = 'Copied to the clipboard.'
+    window.setTimeout(() => { codeCopy.textContent = 'Copy' }, 2200)
+  } catch { codeStatus.textContent = 'Copy failed. Select the text manually.' }
+})
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
