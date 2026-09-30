@@ -114,6 +114,10 @@ a { color: inherit; }
 .hero-ascii-layer .w2l-ascii-motif, .hero-ascii-layer .w2l-ascii-veil { transition: opacity .4s ease; }
 .hero.is-yielding .hero-ascii-layer .w2l-ascii-motif { opacity: .42; }
 .hero.is-yielding .hero-ascii-layer .w2l-ascii-veil { opacity: .55; }
+/* Taking the link, it comes back in .25 s, so the octopus is nearly at full ink when its arms lift (the take waits
+   150 ms), and the ground its arms reach into darkens with it. At any other time that second veil is away. */
+.hero.is-taking .hero-ascii-layer .w2l-ascii-motif, .hero.is-taking .hero-ascii-layer .w2l-ascii-veil { transition-duration: .25s; }
+.hero:not(.is-taking) .hero-ascii-layer .w2l-ascii-reach { opacity: 0; }
 /* How it works: a replay of recorded runs, drawn in the artwork's glyph language, shows the steps beside it
    happening. Never put opacity, filter or mask on .session or its ancestors: the veil's backdrop-filter would stop
    blurring the artwork under it. */

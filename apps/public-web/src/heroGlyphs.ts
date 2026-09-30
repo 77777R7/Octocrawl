@@ -54,14 +54,12 @@ const CLIMB_WIDTH = 0.05
 const FADE_MS = 700
 // The entrance: when the octopus wakes (its startup's flash, about 1.1 s after it starts) its light carries on into
 // the landscape. The glyphs and the sky light up inside a circle that spreads from the octopus to the hero's corners
-// in REVEAL_MS (less for a hero that comes back), feathered over FEATHER px, the glyphs at its edge RING_LIGHT
-// brighter as the light reaches them: everything is alive about 4 s after the octopus starts.
+// in REVEAL_MS (less for a hero that comes back), its edge feathered over FEATHER px inside and RING px outside:
+// everything is alive about 4 s after the octopus starts.
 const REVEAL_MS = 2700
 const REVEAL_AGAIN_MS = 1400
 const RING = 46
-const RING_LIGHT = 0.22
 const FEATHER = 150
-const RING_RAMP = [GOLD, GOLD, ICE, PEACH, ICE]
 // The starry sky covers the upper part of the hero, down to a little above the summit.
 const STAR_SKY = 0.44
 // The sunset clouds are mapped in cells of this size (css px) to keep the sky's stars and meteors off them.
@@ -211,12 +209,11 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let started = false
   let warm = false
   // The entrance's ring: when it set off on the glyphs' clock, how long it takes, where it spreads from (css px),
-  // how far it must go, and each glyph's distance from there.
+  // and how far it must go.
   let revealAt = 0
   let revealMs = REVEAL_MS
   let source = { x: 0, y: 0 }
   let ringSpan = 1
-  let far = new Float32Array(0)
   let disposed = false
   let slow = 0
   let firstFrame = 0
@@ -300,14 +297,12 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     ys = new Float32Array(glyphs.length)
     calm = new Float32Array(glyphs.length)
     shapes = new Uint8Array(glyphs.length)
-    far = new Float32Array(glyphs.length)
     glyphs.forEach((g, i) => {
       const x = sx(g.x)
       const y = sy(g.y)
       xs[i] = x
       ys[i] = y
       calm[i] = x > -size && x < width + size && y > -size && y < height + size ? calmAt(x, y) : 0
-      far[i] = Math.hypot(x - source.x, y - source.y)
     })
     // The night sky ends a little above the summit; the sunset clouds cover part of it.
     skyline = Math.max(0, Math.min(height * STAR_SKY, high - 24))
@@ -504,14 +499,6 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
         if (glow > light) {
           light = glow
           ramp = off < -0.02 ? ROSE : off > 0.02 ? PEACH : GOLD
-        }
-      }
-      if (ring >= 0) {
-        // The ring's edge passes: the glyph flares as the light reaches it.
-        const edge = Math.exp(-(((far[i] - ring) / RING) ** 2)) * RING_LIGHT
-        if (edge > light) {
-          light = edge
-          ramp = RING_RAMP[kind]
         }
       }
       if (pointer.active) {

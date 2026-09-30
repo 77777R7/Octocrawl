@@ -74,6 +74,8 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
       hero.dispatchEvent(new CustomEvent('w2l:take', { detail: { phase: busy ? 'start' : unread ? 'failure' : 'success' } }))
     }
     hero.classList.toggle('is-yielding', yields && !busy)
+    // While it takes the link the octopus comes forward quickly and darkens the ground its arms reach into.
+    hero.classList.toggle('is-taking', busy)
     if (yields === yielding) return
     yielding = yields
     hero.dispatchEvent(new CustomEvent('w2l:rest', { detail: { rest: yields } }))
