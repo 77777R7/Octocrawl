@@ -21,9 +21,12 @@ Result values:
   source_not_captured   the batch item for the source did not succeed
   source_not_in_batch   no batch item for any URL of the source
 
-Page numbers are reported but not checked: W2L output has no page boundaries
-yet. A `found` on a short number (under three significant digits) or a year is
-marked `weak` because such numbers also occur by chance.
+When the capture carries page markers (`<!-- page N -->`, as W2L writes for a
+PDF's text layer), the value is also looked for on the page the workbook
+cites: `page_check` is `on_cited_page`, `other_page` (found, but not on the
+cited page), `not_found`, `no_page_cited` or `no_pages` (a capture without
+markers). A `found` on a short number (under three significant digits) or a
+year is marked `weak` because such numbers also occur by chance.
 """
 import argparse
 import csv
@@ -97,6 +100,28 @@ def find_value(text, value):
     return hits, first
 
 
+PAGE_MARKER = re.compile(r'<!-- page (\d+) -->')
+
+
+def split_pages(markdown):
+    """Page number -> normalised page text, from W2L's page markers; empty when there are none."""
+    parts = PAGE_MARKER.split(markdown)
+    pages = {}
+    for index in range(1, len(parts) - 1, 2):
+        pages[int(parts[index])] = norm_text(parts[index + 1])
+    return pages
+
+
+def cited_page(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer():
+        return int(value)
+    if isinstance(value, str):
+        match = re.search(r'\d+', value)
+        if match:
+            return int(match.group())
+    return None
+
+
 def read_sheet(workbook, name):
     rows = workbook[name].iter_rows(values_only=True)
     header = next(rows)
@@ -164,6 +189,7 @@ def main():
             'occurrences': 0,
             'matched_text': '',
             'strength': '',
+            'page_check': '',
         }
         if not matched:
             row['result'] = 'source_not_in_batch'
@@ -189,6 +215,18 @@ def main():
             if hits:
                 weak = significant_digits(value) < 3 or obs['Raw_Unit'] == 'year'
                 row['strength'] = 'weak' if weak else 'strong'
+            pages = split_pages(item['markdown'])
+            page = cited_page(obs['Page_Number'])
+            if not pages:
+                row['page_check'] = 'no_pages'
+            elif page is None:
+                row['page_check'] = 'no_page_cited'
+            elif not hits:
+                row['page_check'] = 'not_found'
+            elif isinstance(value, (int, float)) and page in pages and find_value(pages[page], value)[0]:
+                row['page_check'] = 'on_cited_page'
+            else:
+                row['page_check'] = 'other_page'
         results.append(row)
 
     out_dir = args.out or args.batch.parent
@@ -202,6 +240,7 @@ def main():
         counts = Counter(r['result'] for r in rows)
         strong = sum(1 for r in rows if r['strength'] == 'strong')
         checked = counts['found'] + counts['not_found']
+        pages = Counter(r['page_check'] for r in rows if r['page_check'])
         return {
             'observations': len(rows),
             **{k: counts[k] for k in ('found', 'not_found', 'source_not_captured', 'source_not_in_batch')},
@@ -209,6 +248,9 @@ def main():
             'found_weak': counts['found'] - strong,
             'recall_of_captured': round(counts['found'] / checked, 4) if checked else None,
             'recall_of_all': round(counts['found'] / len(rows), 4) if rows else None,
+            'on_cited_page': pages['on_cited_page'],
+            'other_page': pages['other_page'],
+            'no_page_cited': pages['no_page_cited'],
         }
 
     by_format = defaultdict(list)
@@ -220,7 +262,7 @@ def main():
         'workbook': args.workbook.name,
         'batchTaskId': batch.get('taskId'),
         'operatorCheckoutCommit': batch.get('operatorCheckoutCommit'),
-        'pagesChecked': False,
+        'pagesChecked': True,
         'overall': tally(results),
         'byExpectedFormat': {k: tally(v) for k, v in sorted(by_format.items())},
         'bySource': {k: tally(v) for k, v in sorted(by_source.items(), key=lambda kv: -len(kv[1]))},
@@ -232,6 +274,7 @@ def main():
           f"(strong {overall['found_strong']}, weak {overall['found_weak']}), not found {overall['not_found']}, "
           f"source not captured {overall['source_not_captured']}, source not in batch {overall['source_not_in_batch']}")
     print(f"recall of captured sources: {overall['recall_of_captured']}; recall of all: {overall['recall_of_all']}")
+    print(f"on the cited page: {overall['on_cited_page']}; found on another page: {overall['other_page']}; no page cited: {overall['no_page_cited']}")
     for name, stats in summary['byExpectedFormat'].items():
         print(f"  {name:28} n={stats['observations']:4}  found={stats['found']:4}  not_found={stats['not_found']:4}  "
               f"not_captured={stats['source_not_captured']:4}")

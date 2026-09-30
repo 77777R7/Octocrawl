@@ -6,7 +6,7 @@ Updated 2026-09-30. Engineering now follows the Firecrawl parity milestones in [
 
 **M1 closed on 2026-09-30** (commits `70681ca`..`62b9c34` plus the ladder budget fix): items 1–5 below each have a dated record; `node research/parity/score.mjs` reports 25.0% tier-weighted (audit 18.7%), with `scrape-formats.markdown` and `scrape-formats.json` kept weak for the gaps named in [`research/parity/reaudit-2026-09-30.json`](research/parity/reaudit-2026-09-30.json). Not yet done from the exit line: the full 12-URL batch re-run at the M1 commit (six URLs were re-checked; the other six and the browser-lane StatCan check wait for the macOS network).
 
-**This week:** S1 (below), then the 12-URL re-run and the seed user's 72-URL manifest.
+**This week:** S1 (below): the baseline of the frozen 72-URL manifest is run and recorded; fix what it found (superscript glue, header limit), then the 12-URL re-run.
 
 ## Direction
 
@@ -51,9 +51,11 @@ Status 2026-09-30: items 1–4 checked in [live-batch-1-m1-recheck-2026-09-30.md
 
 - Detect CSV, XLSX, ZIP, PDF and JSON by content type and save them as received with SHA-256 and size; no browser escalation for files; size cap configurable (10 MiB today); other binaries return `unsupported_content_type`.
 - PDF text with page numbers from the text layer; a scanned PDF returns `ocr_required`, never an empty success.
-- Re-run [research/coos-pilot/](research/coos-pilot/): freeze the manifest first (ask him about the two suspect links), then `run-baseline.mjs` and `check-observations.py`; record recall by source format.
+- Re-run [research/coos-pilot/](research/coos-pilot/): freeze the manifest first (as given, flagged rows kept in the denominator), then `run-baseline.mjs` and `check-observations.py`; record recall by source format.
 
-Status 2026-09-30: file download as received and PDF text with page numbers are in `8467e8e` (tests for PDF, scanned PDF, CSV, JSON, XLSX, ZIP, unsupported binaries, the size cap and the browser lane). Live check on five of the seed user's PDFs in [research/coos-pilot/files-check-2026-09-30.md](research/coos-pilot/files-check-2026-09-30.md): three read in full (3, 12 and 72 pages, table rows kept one per line); two are on CDN hosts whose robots.txt disallows every path and are refused as `policy_denied` with the rule in the trace. The manifest re-run waits for the freeze. Open decision: whether a researcher may record an explicit robots override for a file the publisher links publicly (`ignoreRobotsTxt` is in the Paused table).
+Status 2026-09-30: file download as received and PDF text with page numbers are in `8467e8e` (tests for PDF, scanned PDF, CSV, JSON, XLSX, ZIP, unsupported binaries, the size cap and the browser lane). Live check on five of the seed user's PDFs in [research/coos-pilot/files-check-2026-09-30.md](research/coos-pilot/files-check-2026-09-30.md): three read in full (3, 12 and 72 pages, table rows kept one per line); two are on CDN hosts whose robots.txt disallows every path and are refused as `policy_denied` with the rule in the trace. Open decision: whether a researcher may record an explicit robots override for a file the publisher links publicly (`ignoreRobotsTxt` is in the Paused table).
+
+Baseline 2026-09-30 ([research/coos-pilot/baseline-2026-09-30.md](research/coos-pilot/baseline-2026-09-30.md), manifest frozen in `e96a8e9`, run on a build of `8467e8e`): 72 URLs, 57 `success`, 6 `policy_denied` (robots on CDN, marketing and shortlink hosts, the canonical Google report among them), 5 `connection_error` (`services.global.ntt`: an 18 KB `content-security-policy` header overflows undici's default header limit), 1 SEC 403, 3 blocked (rate limit, two third-party mirrors). 6 of the 13 non-HTML sources captured as files with hashes and page-numbered text. Value check: 992 of 1,502 observations found (0.893 of captured sources, 0.661 of all), 119 not found, 391 behind uncaptured sources; 480 of 482 PDF values on the cited page. Of the 119 misses, 90 are one W2L markdown defect (a `<sup>2</sup>` glued to the next number on Digital Realty metro pages), 8 the table-only extraction on a press release, 3 a drawn PUE table, 16 the check script's literal matcher, 2 unexplained. Exit not met: five files stay robots-refused. Next: the `<sup>` fix, the header limit, then the matcher, then re-run.
 
 Exit: the 15 PDF-type sources in his manifest are captured with hashes, including the canonical Google 2025 report; the value check reports found/not-found for all 1,502 observations.
 
