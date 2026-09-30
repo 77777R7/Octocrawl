@@ -1,19 +1,19 @@
 .doc-mobile-pages{display:none}
 @media(max-width:820px){
   .doc-sidebar{display:none}
-  .doc-mobile-pages{display:block;margin:0 0 28px;border:1px solid #cbd8e9;border-radius:8px;background:#eaf1fb}
+  .doc-mobile-pages{display:block;margin:0 0 28px;border:1px solid #dbe3ee;border-radius:6px;background:#fff}
   .doc-mobile-pages summary{padding:13px 15px;cursor:pointer;color:#143c78;font-size:13px;font-weight:700}
   .doc-mobile-pages nav{display:flex;flex-direction:column;padding:0 12px 13px}
-  .doc-mobile-pages .doc-nav-heading{margin:14px 0 5px;color:#5677a9;font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.12em}
-  .doc-mobile-pages a{padding:8px 10px;border-radius:6px;text-decoration:none;color:#465b7d;font-size:13px}
-  .doc-mobile-pages a[aria-current=page]{border-left:0;background:#f3683d;color:#071b4f;font-weight:700}
+  .doc-mobile-pages .doc-nav-heading{margin:14px 0 4px}
+  .doc-mobile-pages a{font-size:13px}
+  
   .mcp-picker-head{padding:25px 25px 27px}
   .mcp-client-tab{min-height:118px}
   .mcp-client-panel{padding:23px 25px 26px}
   .mcp-picker-foot{padding:23px 25px 25px}
 }
 @media(max-width:540px){
-  .mcp-picker{border-radius:14px}
+  .mcp-picker{border-radius:6px}
   .mcp-picker-head{display:block;padding:23px 20px}
   .doc-article .mcp-picker-head h2{font-size:25px}
   .doc-article .mcp-picker-head p{font-size:14px}

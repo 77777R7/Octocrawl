@@ -1,6 +1,6 @@
 import './styles.css'
 import { mountHeroAscii } from './ascii'
-import { mountHeroClickSpark } from './clickSpark'
+import { mountHeroClick } from './heroClick'
 import { mountHowReplay } from './howReplay'
 import { sessionMarkup } from './sessionScript'
 import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
@@ -268,7 +268,7 @@ try {
   if (landing && !hero.contains(landing) && !window.scrollY) landing.scrollIntoView({ behavior: 'instant' })
 } catch { /* A malformed fragment keeps the browser's own handling. */ }
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
-mountHeroClickSpark(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
+mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
@@ -334,7 +334,7 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' |
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   input.value = 'https://docs.firecrawl.dev/introduction'
-  input.focus()
+  // Focus stays on the button (Extract page is the next stop), so the hero keeps moving: nothing is being typed.
   message.textContent = 'Example URL added. Select “Extract page” to begin.'
   message.className = 'form-message'
   scheduleCapability()

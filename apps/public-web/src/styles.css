@@ -59,6 +59,7 @@ a { color: inherit; }
 .hero-glyphs { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
 .hero-glyphs-canvas { position: absolute; top: 0; left: 0; }
 .hero-click-spark { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.hero-click-canvas { display: block; width: 100%; height: 100%; }
 .hero .band { position: relative; z-index: 2; flex: none; }
 /* The top offset comes from the viewport, not the content, so a message under the card only grows downward. It puts
    the middle of the cells and the card at 48% of the screen (the cells are 46% of it, 340 to 500 px) and keeps at
