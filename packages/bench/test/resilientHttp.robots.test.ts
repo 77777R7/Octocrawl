@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { localNetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, type RobotsOverrideApplied } from '@w2l/contracts'
 import { ALL_BOILERPLATE, NAV_MARKER, startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 import { buildChannels } from '../src/ladderCli.js'
@@ -124,9 +124,10 @@ describe('ResilientHttpSubject robots', () => {
     const subject = new ResilientHttpSubject()
     const before = privateHits
     try {
+      const heard: Array<{ applied: RobotsOverrideApplied; pageHits: number }> = []
       const out = await subject.fetch(`${robotsUrl}/private/secret`, undefined, undefined, {}, undefined, {
         robotsOverride: { reason: 'The publisher links this report from its own site; the host rule addresses crawlers.', recordedBy: 'test researcher' },
-      })
+      }, (applied) => heard.push({ applied, pageHits: privateHits }))
       expect(privateHits).toBe(before + 1)
       expect(out.status).toBe('success')
       expect(out.markdown).toContain('Private area')
@@ -145,6 +146,9 @@ describe('ResilientHttpSubject robots', () => {
         code: 'robots_overridden',
         message: `${robotsUrl}/robots.txt disallows this URL (rule /private); it was fetched under an override recorded by test researcher: The publisher links this report from its own site; the host rule addresses crawlers.`,
       }])
+      // The lane said so before its request went out, so a run the deadline cuts short still has the override.
+      expect(heard).toEqual([{ applied: { trace: out.trace.filter((t) => t.event.startsWith('robots_')), warning: out.warnings![0] }, pageHits: before }])
+      expect(heard[0]!.applied.trace.map((t) => t.event)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden'])
     } finally {
       await subject.teardown()
     }
@@ -153,10 +157,12 @@ describe('ResilientHttpSubject robots', () => {
   it('leaves an allowed path untouched by an override: no override event, no warning', async () => {
     const subject = new ResilientHttpSubject()
     try {
-      const out = await subject.fetch(`${robotsUrl}/private/ok`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'not needed here' } })
+      const heard: RobotsOverrideApplied[] = []
+      const out = await subject.fetch(`${robotsUrl}/private/ok`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'not needed here' } }, (applied) => heard.push(applied))
       expect(out.status).toBe('success')
       expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
       expect(out.warnings).toBeUndefined()
+      expect(heard).toEqual([])
     } finally {
       await subject.teardown()
     }

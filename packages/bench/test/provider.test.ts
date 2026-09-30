@@ -151,6 +151,20 @@ describe('ProviderSubject robots gate', () => {
     expect(transport.calls).toEqual([])
   })
 
+  it('takes no recorded robots override: the rule still refuses, and the origin is not touched', async () => {
+    const transport = new CountingTransport()
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl({ declaredUserAgent: 'Scrapy/2.11' }), transport, 'research', null, fetcher)
+    const out = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself.', recordedBy: 'analyst' } })
+    // The override is the caller's decision for a fetch from its own machine; it is never handed to a vendor.
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied', lane: 'provider' })
+    expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', skippedFetch: true })
+    expect(out.compliance!.robots).not.toHaveProperty('override')
+    expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
+    expect(out.warnings).toBeUndefined()
+    expect(transport.calls).toEqual([])
+  })
+
   it('mints a record citing the rule that refused it', async () => {
     const { fetcher } = robotsServing(AMAZON_SHAPED)
     const subject = new ProviderSubject(

@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, TraceEvent } from '@w2l/contracts'
+import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, TraceEvent } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, identityBundleIssues } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -50,7 +50,11 @@ export interface Channel {
    * waits before capture. A request with waitFor skips rungs without it.
    */
   readonly waitsFor?: boolean
-  /** Run the channel against url, optionally with a user session attached. */
+  /**
+   * Run the channel against url, optionally with a user session attached. A
+   * channel that sets a robots.txt rule aside (`options.robotsOverride`) says
+   * so through `execution.onRobotsOverride` before its request goes out.
+   */
   fetch(url: string, session?: SessionSnapshot | null, execution?: ExecutionContext, options?: FetchOptions): Promise<FetchResult>
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
@@ -92,6 +96,8 @@ interface LadderProgress {
   channelsTried: string[]
   ladderTrace: LadderRunResult['ladderTrace'][number][]
   attempts: LadderAttempt[]
+  /** What each rung reported when it set a robots.txt rule aside under the run's recorded override. */
+  robotsOverrides: RobotsOverrideApplied[]
 }
 
 function summarize(channelsTried: readonly string[], attempts: readonly { channel: string; result: FetchResult }[]): LadderExecutionSummary {
@@ -205,19 +211,26 @@ export class LadderRunner {
    * The caller's deadline (a scrape's `timeout`) ends the run with a result,
    * never an error: the best content a rung produced so far as `partial`,
    * or `failed`/`timeout`. Cancellation and shutdown still reject.
+   *
+   * A recorded robots override (`options.robotsOverride`) is for the local
+   * rungs. Whatever result the run ends with says when one of them set a
+   * rule aside (carryRobotsOverride), and such a run never goes on to a
+   * vendor rung.
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [] }
-    try { return await this.runWithinBudget(url, session, scope, options, progress) }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [] }
+    // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
+    const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
+    try { return carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides) }
     catch (error) {
       if (!deadlineReached(scope)) throw error
-      return deadlineOutcome(url, progress, null)
+      return carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides)
     } finally { scope.dispose() }
   }
 
   private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress): Promise<LadderRunResult> {
-    const { startedAt, channelsTried, ladderTrace, attempts } = progress
+    const { startedAt, channelsTried, ladderTrace, attempts, robotsOverrides } = progress
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
     const finish = (result: FetchResult, handoffRequested: boolean): LadderRunResult => {
@@ -303,6 +316,14 @@ export class LadderRunner {
     let qualityEscalation: Escalation | null = null
       for (const channel of ordered) {
         throwIfExecutionStopped(execution)
+        // A recorded robots override is the caller's decision for a fetch
+        // from this machine, and the provider rung takes none. A run that set
+        // a rule aside ends at its local rungs: no vendor session is opened
+        // for that URL, and no vendor refusal replaces the local answer.
+        if (channel.vendorId !== undefined && robotsOverrides.length > 0) {
+          ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a local rung set a robots.txt rule aside under a recorded robots override; a vendor rung takes no override' } })
+          continue
+        }
         const identityBlock = refuseChannelIdentity(url, channel)
         if (identityBlock !== null) {
           channelsTried.push(channel.id)
@@ -715,6 +736,31 @@ export class LadderRunner {
       ...this.governanceRefusal(url, reason),
       trace: [{ at: 0, lane: 'http', event: 'wait_for_unavailable', detail: { reason, waitFor, skipped } }],
     }
+  }
+}
+
+/**
+ * A rung that set a robots.txt rule aside went on to fetch, whatever answer
+ * the run ends with. When that answer is not such a rung's own result (a
+ * later rung's refusal or skip, a timeout built for a rung the deadline cut
+ * before it returned), it still says so: the rungs' robots events open its
+ * trace, each with its lane, and the `robots_overridden` warning leads its
+ * warnings. A result that already carries them is left as it is.
+ */
+function carryRobotsOverride(run: LadderRunResult, applied: readonly RobotsOverrideApplied[]): LadderRunResult {
+  const last = applied.at(-1)
+  if (last === undefined) return run
+  const { result } = run
+  const traced = result.trace.some((event) => event.event === 'robots_overridden')
+  const warned = result.warnings?.some((warning) => warning.code === 'robots_overridden') === true
+  if (traced && warned) return run
+  return {
+    ...run,
+    result: {
+      ...result,
+      ...(warned ? {} : { warnings: [last.warning, ...(result.warnings ?? [])] }),
+      ...(traced ? {} : { trace: [...applied.flatMap((rung) => rung.trace), ...result.trace] }),
+    },
   }
 }
 

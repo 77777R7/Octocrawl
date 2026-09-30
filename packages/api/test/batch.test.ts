@@ -182,6 +182,36 @@ describe('persistent URL-array batch', () => {
     expect((await client2.getBatchItems(taskId)).items).toMatchObject([{ url, status: 'success', warnings: [{ code: 'robots_overridden' }] }])
   })
 
+  it('keeps the override on a scrape and a batch item whose deadline passes while the overridden request is out', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    const engine = f.engine()
+    cleanup.push(() => engine.close({ cancelActive: true }))
+    const app = createApp(engine)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const url = `${f.origin}/private/item/2`
+    const override = { reason: 'The publisher links this item publicly.', recordedBy: 'analyst' }
+    // The HTTP rung is still waiting for the page at the deadline. Whether the ladder then builds the timeout
+    // (the rung returned nothing) or the rung reports its own deadline first, the result says the rule was set aside.
+    const timedOut = {
+      status: 'failed', failureReason: 'timeout', usage: { deadlineExceeded: true },
+      warnings: [{ code: 'robots_overridden', message: expect.stringContaining('it was fetched under an override recorded by analyst') }],
+      evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true } },
+    }
+    const recorded = (trace: readonly { event: string }[]) => trace.map(event => event.event).filter(name => name.startsWith('robots_') || name === 'deadline_exceeded')
+    const events = ['robots_checked', 'robots_disallowed', 'robots_overridden', 'deadline_exceeded']
+    const full = await client.scrape(url, { robotsOverride: override, timeout: 1_000, debug: true })
+    expect(full).toMatchObject(timedOut)
+    expect(recorded(full.trace)).toEqual(events)
+    expect(await client.scrape(url, { robotsOverride: override, timeout: 1_000, debug: false })).toMatchObject(timedOut)
+    const { taskId } = await client.batchScrape([url], { robotsOverrides: [{ url, ...override }], timeout: 1_000 })
+    expect(await client.waitBatch(taskId)).toMatchObject({ requested: 1, completed: 1 })
+    expect((await client.getBatchItems(taskId)).items).toMatchObject([{ url, ...timedOut }])
+    expect(recorded((await client.getBatchItems(taskId, { debug: true })).items[0]!.trace)).toEqual(events)
+    // Each of the three requests went out past the rule before its deadline.
+    expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(3)
+  })
+
   it('pages a 100-URL durable batch without returning the whole result set at once', async () => {
     const f = await fixture()
     const engine = f.engine()

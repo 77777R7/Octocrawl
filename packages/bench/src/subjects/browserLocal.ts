@@ -1,4 +1,4 @@
-import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -23,7 +23,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -186,7 +186,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
@@ -220,7 +220,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (warning) => { robots.overrideWarning = warning })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) })
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -239,7 +239,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (warning: FetchWarning) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -304,7 +304,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
           event: 'robots_overridden',
           detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
         })
-        onRobotsOverride?.(robotsOverrideWarning(robotsDecision, override))
+        // Said now, before the page is opened: the run's answer keeps the
+        // override even when the deadline ends this fetch before it returns.
+        onRobotsOverride?.(robotsOverrideApplied(trace, robotsOverrideWarning(robotsDecision, override)))
       }
       const robotsForRecord = override !== undefined && overridden ? { ...robotsDecision, skippedFetch: false, override } : robotsDecision
 

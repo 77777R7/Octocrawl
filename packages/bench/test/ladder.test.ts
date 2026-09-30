@@ -6,6 +6,7 @@ import {
   type FetchResult,
   type HandoffRequest,
   type IdentityBundle,
+  type RobotsOverrideApplied,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
@@ -823,5 +824,80 @@ describe('LadderRunner — deadline and fetch options', () => {
     expect(http.calls).toEqual([])
     expect(run.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
     expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
+  })
+})
+
+describe('LadderRunner — a recorded robots override', () => {
+  const url = 'https://example.com/report'
+  const robotsOverride = { reason: 'The publisher links this report itself.', recordedBy: 'analyst' }
+  const rules = [{ pattern: '/', allow: false }]
+  /** What the HTTP lane reports the moment it sets a rule aside (ExecutionContext.onRobotsOverride). */
+  function applied(): RobotsOverrideApplied {
+    return {
+      trace: [
+        { at: 1, lane: 'http', event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://example.com/robots.txt', robotsSha256: 'a'.repeat(64), crawlDelayMs: null } },
+        { at: 1, lane: 'http', event: 'robots_disallowed', detail: { url, appliedRules: rules } },
+        { at: 1, lane: 'http', event: 'robots_overridden', detail: { url, appliedRules: rules, ...robotsOverride } },
+      ],
+      warning: { code: 'robots_overridden', message: 'https://example.com/robots.txt disallows this URL (rule /); it was fetched under an override recorded by analyst: The publisher links this report itself.' },
+    }
+  }
+  /** A rung's own result after it set the rule aside: its trace and warnings say so. */
+  const overridden = (result: FetchResult): FetchResult => ({ ...result, trace: [...applied().trace, ...result.trace], warnings: [applied().warning] })
+  /** A rung that sets the rule aside, says so, and answers with `result`; with null it only ends when its execution stops. */
+  function overriding(id: string, result: FetchResult | null): Channel {
+    return {
+      id,
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => {
+        execution?.onRobotsOverride?.(applied())
+        if (result !== null) return Promise.resolve(result)
+        return new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true }))
+      },
+    }
+  }
+  const events = (result: FetchResult) => result.trace.map((event) => event.event)
+
+  it('keeps the override on the timeout it builds for a rung the deadline cut before it answered', async () => {
+    const heard: RobotsOverrideApplied[] = []
+    const run = await new LadderRunner([overriding('http', null)], { mode: 'standard' })
+      .run(url, undefined, { deadlineAt: Date.now() + 100, onRobotsOverride: (report) => heard.push(report) }, { robotsOverride })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', warnings: [applied().warning], usage: { deadlineExceeded: true } })
+    expect(events(run.result)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden', 'deadline_exceeded'])
+    // The rung returned nothing: what it reported is all the run has, and the run's own caller hears it too.
+    expect(run.summary.attempts).toEqual([])
+    expect(heard).toEqual([applied()])
+  })
+
+  it('keeps it on a later rung\'s answer, once, and leaves the result of the rung that applied it as it is', async () => {
+    const skipped: FetchResult = { ...failedResult(url, 'policy_denied'), lane: 'browser_local_authed', trace: [{ at: 0, lane: 'browser_local_authed', event: 'authed_session_skipped', detail: { reason: 'no_local_session' } }] }
+    const run = await new LadderRunner([overriding('http', overridden(blockedResult(url, 'cloudflare_challenge'))), channel('authed_session', [skipped])], { mode: 'authed' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(run.channelsTried).toEqual(['http', 'authed_session'])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied', lane: 'browser_local_authed', warnings: [applied().warning] })
+    expect(events(run.result)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden', 'authed_session_skipped'])
+    expect(run.result.trace.slice(0, 3).every((event) => event.lane === 'http')).toBe(true)
+
+    const own = overridden(contentfulResult(url, 'http'))
+    const answered = await new LadderRunner([overriding('http', own)], { mode: 'standard' }).run(url, undefined, {}, { robotsOverride })
+    expect(answered.result).toEqual(own)
+  })
+
+  it('ends at the local rungs once a rule was set aside: no vendor rung runs, and the answer says why', async () => {
+    const provider = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const run = await new LadderRunner([overriding('http', overridden(blockedResult(url, 'cloudflare_challenge'))), provider], { mode: 'research' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(provider.calls).toEqual([])
+    expect(run.channelsTried).toEqual(['http'])
+    expect(run.result).toMatchObject({ status: 'blocked', lane: 'http', warnings: [applied().warning] })
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider', detail: { vendorId: 'steel', reason: expect.stringContaining('robots override') } }))
+
+    // An override no rung had to apply (robots.txt allowed the URL) changes nothing: the block escalates to the vendor as before.
+    const reached = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const escalated = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), reached], { mode: 'research' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(escalated.channelsTried).toEqual(['http', 'provider'])
+    expect(escalated.result).toMatchObject({ status: 'success', lane: 'provider' })
+    expect(escalated.result.warnings).toBeUndefined()
   })
 })

@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { localNetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 
@@ -249,7 +249,8 @@ describe('BrowserLocalSubject transport', () => {
     const subject = new BrowserLocalSubject()
     const before = privateHits
     try {
-      const out = await subject.fetch(`${url}/private/secret`, undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } })
+      const heard: Array<{ applied: RobotsOverrideApplied; pageHits: number }> = []
+      const out = await subject.fetch(`${url}/private/secret`, undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } }, (applied) => heard.push({ applied, pageHits: privateHits }))
       expect(privateHits).toBe(before + 1)
       expect(out.status).toBe('success')
       expect(out.markdown).toContain('Private area')
@@ -261,6 +262,9 @@ describe('BrowserLocalSubject transport', () => {
       expect(events.indexOf('robots_overridden')).toBe(events.indexOf('robots_disallowed') + 1)
       expect(out.warnings?.[0]).toMatchObject({ code: 'robots_overridden' })
       expect(out.warnings?.[0]?.message).toContain('recorded by test researcher')
+      // The lane said so before it navigated, so a run the deadline cuts short still has the override.
+      expect(heard).toEqual([{ applied: { trace: out.trace.filter((t) => t.event.startsWith('robots_')), warning: out.warnings![0] }, pageHits: before }])
+      expect(heard[0]!.applied.trace.map((t) => t.event)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden'])
       // The override is part of what the record's hash commits to.
       expect(verifyLedger(subject.ledger()).valid).toBe(true)
     } finally {

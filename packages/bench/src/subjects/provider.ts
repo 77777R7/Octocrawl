@@ -45,7 +45,9 @@ import type { Dispatcher } from 'undici'
  * violation. A provider whose product is evasion (captcha solving, CDP
  * patching, fingerprint spoofing, identity rotation) is refused on capability
  * before robots is consulted — buying that layer is the same act as building
- * it.
+ * it. A caller's recorded robots override (`FetchOptions.robotsOverride`) is
+ * for the local lanes and is not read here; the ladder does not reach this
+ * lane in a run where a local lane set a rule aside.
  *
  * The transport itself is injected (`ProviderTransport`), because every vendor
  * has a different API and none of them belong in this file. What belongs here

@@ -17,7 +17,7 @@ import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionS
 import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { RobotsOriginCache, robotsOverrideWarning } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
@@ -126,7 +126,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? null : this.egress.proxyFor(url)?.endpoint ?? null
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
@@ -141,7 +141,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
@@ -156,7 +156,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions): Promise<FetchResult> {
-    const { signal, deadlineAt, onRetryAfter } = execution
+    const { signal, deadlineAt, onRetryAfter, onRobotsOverride } = execution
     const start = Date.now()
     let robotsMs = 0
     let queueMs = initialQueueMs
@@ -272,6 +272,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
           detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
         })
         overrideWarning = robotsOverrideWarning(robotsDecision, override)
+        // Said now, before the request goes out: the run's answer keeps the
+        // override even when the deadline ends this fetch before it returns.
+        onRobotsOverride?.(robotsOverrideApplied(trace, overrideWarning))
       }
     }
 
