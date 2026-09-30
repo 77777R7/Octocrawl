@@ -30,6 +30,12 @@ const JS_FALLBACK_CLASS = /(^|[\s_-])(hide-if-js|hide-if-js-enabled|js-disabled|
 const HYDRATION_SCRIPT = /window\.__[A-Za-z0-9_]+__\s*=|window\._[A-Za-z0-9_]*(?:STATE|CONFIG|DATA)\s*=|__NEXT_DATA__|__NUXT__/
 const APP_ROOT_MAX_TEXT = 200
 const HYDRATION_MIN_CHARS = 2_000
+/**
+ * A `noscript` notice alone is weak evidence: static sites carry a generic
+ * "enable JavaScript" line beside analytics and cookie widgets (GOV.UK, for
+ * one). It counts only on a thin page or beside hydration state.
+ */
+const NOTICE_MAX_TEXT = 1_500
 
 function collapsed(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
@@ -103,7 +109,8 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document): R
   if (emptyTables > 0 && raw.scriptChars >= 1_000) reason = 'empty_table_with_scripts'
   else if (has('app_root_empty') && raw.scriptChars >= 500) reason = 'empty_app_root'
   else if (textChars < 300 && raw.scriptChars >= 2_000) reason = 'script_shell'
-  else if ((has('js_fallback_marker') || has('noscript_notice')) && raw.scriptChars > textChars) reason = 'js_fallback'
+  else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
+  else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
   else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
 
