@@ -28,7 +28,7 @@ const ROBOTS_OVERRIDE_PROPERTIES = {
 } as const
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
-  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside.',
+  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API refuses this field.',
   properties: ROBOTS_OVERRIDE_PROPERTIES,
   required: ['reason'],
   additionalProperties: false,
