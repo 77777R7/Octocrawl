@@ -185,6 +185,8 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 
 With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks, the holdout scripts and the daily Amazon.sg check keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
+Mail for `hello@octocrawl.dev`, the address on the Contact, Privacy and Acceptable use pages, goes through Cloudflare Email Routing on the `octocrawl.dev` zone: the MX and SPF records are Cloudflare's, and one rule forwards that address to the operator's verified inbox. Change the destination with `cf email-routing rules update`, not on the pages. The domain sends no mail of its own.
+
 ### Search engines
 
 The home page carries `WebSite` and `SoftwareApplication` structured data and every docs page `TechArticle` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
