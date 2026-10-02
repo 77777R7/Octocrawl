@@ -21,6 +21,9 @@ const pages = [
   { slug: 'limits', file: 'limits.md', title: 'Limits and result states', description: 'Understand preview quotas, supported sites, incomplete fields, blocks, and timeouts.', group: 'Reference' },
   { slug: 'reference', file: 'reference.md', title: 'Advanced reference', description: 'Find REST, SDK, and self-hosted entry points after your first Octocrawl result.', group: 'Reference' },
   { slug: 'privacy', file: 'privacy.md', title: 'Privacy', description: 'What the public Octocrawl page records about a visit and a preview, what it never records, and how long it keeps it.', group: 'Project' },
+  { slug: 'terms', file: 'terms.md', title: 'Terms of use', description: 'The terms for the free public Octocrawl preview: what it is, its limits, results as they are, and who runs it.', group: 'Project' },
+  { slug: 'acceptable-use', file: 'acceptable-use.md', title: 'Acceptable use', description: 'What the public Octocrawl preview may not be used for, and how to report misuse.', group: 'Project' },
+  { slug: 'contact', file: 'contact.md', title: 'Contact', description: 'How to reach the Octocrawl operator about questions, privacy, security, site owners and misuse.', group: 'Project' },
 ]
 
 // The preview server replaces this token with the site's public origin when it serves a page, the sitemap or

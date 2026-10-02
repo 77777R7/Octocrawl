@@ -35,4 +35,4 @@ Nothing here is sold or shared for advertising.
 
 ## Questions
 
-Open an issue on [GitHub](https://github.com/77777R7/w2l/issues).
+This site is run by Howard Lun. For a question or request about your data, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev); other ways to reach us are on [Contact](/docs/contact/).
