@@ -199,6 +199,11 @@ describe('JobWatcher', () => {
     const watcher = new W2L({ baseUrl: BASE, fetch: fell.fetch }).watcher('task-1', { WebSocket: FakeSocket })
     expect(types(await collect(watcher))).toEqual(['done'])
     expect(watcher.transport).toBe('sse')
+    // Node 22's WebSocket reports a refused handshake with an error and no close event: the watcher moves on all the same.
+    FakeSocket.script = (socket) => socket.fire('error')
+    const silent = new W2L({ baseUrl: BASE, fetch: fell.fetch }).watcher('task-1', { WebSocket: FakeSocket })
+    expect(types(await collect(silent))).toEqual(['done'])
+    expect(silent.transport).toBe('sse')
     // close() ends a watch quietly: no event, the iterator done.
     FakeSocket.script = (socket) => socket.open()
     const closed = new W2L({ baseUrl: BASE, fetch: fell.fetch }).watcher('task-1', { WebSocket: FakeSocket })

@@ -189,9 +189,11 @@ describe('job streams', () => {
       const ws = new WebSocket(url, protocols)
       const frames: JobStreamFrame[] = []
       let protocol = ''
-      ws.addEventListener('open', () => { protocol = ws.protocol })
+      let opened = false
+      ws.addEventListener('open', () => { opened = true; protocol = ws.protocol })
       ws.addEventListener('message', (event) => frames.push(JSON.parse(String(event.data)) as JobStreamFrame))
-      ws.addEventListener('error', () => {})
+      // Node 22's WebSocket reports a refused handshake with an error and no close event; Node 24+ closes with 1006 after it.
+      ws.addEventListener('error', () => { if (!opened) resolve({ frames, code: 1006, protocol }) })
       ws.addEventListener('close', (event) => resolve({ frames, code: event.code, protocol }))
     })
     const wsUrl = `${openUrl.replace('http', 'ws')}/v1/crawl/${taskId}/ws`

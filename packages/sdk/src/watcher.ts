@@ -286,7 +286,8 @@ export class JobWatcher extends EventTarget {
       }
       const onAbort = (): void => { try { socket.close(1000, 'closed') } catch {} ; settle('closed') }
       this.controller.signal.addEventListener('abort', onAbort, { once: true })
-      socket.addEventListener('open', () => { if (!this.stopped) this.transport = 'websocket' })
+      let opened = false
+      socket.addEventListener('open', () => { opened = true; if (!this.stopped) this.transport = 'websocket' })
       socket.addEventListener('message', (event) => {
         const frame = parseSocketFrame(event.data)
         if (frame !== null) this.handle(frame)
@@ -300,7 +301,9 @@ export class JobWatcher extends EventTarget {
         if (event.code === 4400) { this.fail({ code: 'invalid_request', message: event.reason ?? 'cursor is not one this API issued' }); settle('fatal'); return }
         settle('fallback')
       })
-      socket.addEventListener('error', () => { /* the close event that follows decides */ })
+      // A failed handshake is the next transport's turn. Node 22's WebSocket reports a refused handshake with an error
+      // and no close event, so an error before open settles here; after open, the close event that follows decides.
+      socket.addEventListener('error', () => { if (opened) return; try { socket.close() } catch {} ; settle(this.closed ? 'closed' : 'fallback') })
     })
   }
 
