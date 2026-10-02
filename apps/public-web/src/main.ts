@@ -321,19 +321,19 @@ function failureAdvice(result: PreviewResponse): string[] {
   const code = result.diagnostic?.code
   if (code === 'robots_disallowed') return ['Try a page from a different site.']
   if (code === 'robots_unreachable') return ['Try again in a few minutes: the site’s robots.txt may answer then.', 'Or try a page from a different site.']
-  if (code === 'login_required') return ['Try a page that anyone can open without signing in. OctoCrawl does not bypass login walls.']
-  if (code === 'challenge') return ['Try a different public page. OctoCrawl does not solve verification challenges.']
+  if (code === 'login_required') return ['Try a page that anyone can open without signing in. Octocrawl does not bypass login walls.']
+  if (code === 'challenge') return ['Try a different public page. Octocrawl does not solve verification challenges.']
   if (code === 'policy_denied') return ['Use a public http:// or https:// address that anyone can open.']
   // A service-side failure carries no capture diagnostic; its reason already says to retry later.
   if (result.status === 'failed' && code !== 'capture_failed') return []
   return ({
     success: [],
     incomplete: [],
-    blocked: ['Try a different public page. OctoCrawl respects site policy and does not bypass blocks.'],
+    blocked: ['Try a different public page. Octocrawl respects site policy and does not bypass blocks.'],
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run OctoCrawl on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run Octocrawl on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
   })[result.status]
 }
 

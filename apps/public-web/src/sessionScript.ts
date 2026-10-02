@@ -1,4 +1,4 @@
-/** The recorded OctoCrawl runs that How it works replays, and the static frame it shows otherwise.
+/** The recorded Octocrawl runs that How it works replays, and the static frame it shows otherwise.
  * Each run shows one recorded capture, and nothing from any other:
  * - Run 1: apps/public-web/content/introduction.md, a local capture on 2026-09-24 at source commit 936fdf0:
  *   success, title "Introduction", final URL = requested URL, server totalMs 2509, and the recorded Markdown
@@ -75,5 +75,5 @@ const row = ([state, mark, label, detail]: FrameRow): string =>
 /** The static window: the first run's final frame, shown before the replay starts and whenever it cannot run. */
 export function sessionMarkup(): string {
   const corners = ['tl', 'tr', 'bl', 'br'].map((corner) => `<span class="s-corner is-${corner}"></span>`).join('')
-  return `<div class="session"><div class="session-veil"></div><div class="session-window"><p class="session-head"><span class="kicker-square"></span><span>OctoCrawl session</span><span class="session-tag">recorded</span></p><div class="session-body">${finalFrame(0).map(row).join('')}</div>${corners}</div></div>`
+  return `<div class="session"><div class="session-veil"></div><div class="session-window"><p class="session-head"><span class="kicker-square"></span><span>Octocrawl session</span><span class="session-tag">recorded</span></p><div class="session-body">${finalFrame(0).map(row).join('')}</div>${corners}</div></div>`
 }
