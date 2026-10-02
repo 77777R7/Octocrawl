@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createPreviewServer } from '../../packages/public-preview/dist/server.js'
 import { validateAmazonPublicState } from '../../packages/public-preview/dist/preview.js'
+import { quotaStatus } from '../../packages/public-preview/dist/quota.js'
 import { validateLocalPreviewProxy } from '../../packages/bench/dist/index.js'
 
 // Review-only launcher. Production uses Firestore for restart-safe quota and
@@ -29,17 +30,19 @@ if (process.env.W2L_AMAZON_PUBLIC_STATE_FILE) {
 let day = ''
 let total = 0
 const visitors = new Map()
+function today() {
+  const now = new Date().toISOString().slice(0, 10)
+  if (now !== day) { day = now; total = 0; visitors.clear() }
+}
 function decision(visitor, consume) {
-  const today = new Date().toISOString().slice(0, 10)
-  if (today !== day) { day = today; total = 0; visitors.clear() }
-  if (total >= 100) return 'global_limited'
-  const used = visitors.get(visitor) ?? 0
-  if (used >= 3) return 'visitor_limited'
-  if (consume) { visitors.set(visitor, used + 1); total++ }
-  return 'ok'
+  today()
+  const { decision: result } = quotaStatus(total, visitors.get(visitor) ?? 0)
+  if (result === 'ok' && consume) { visitors.set(visitor, (visitors.get(visitor) ?? 0) + 1); total++ }
+  return result
 }
 const quota = {
   check: async visitor => decision(visitor, false),
+  status: async visitor => { today(); return quotaStatus(total, visitors.get(visitor) ?? 0) },
   consume: async visitor => decision(visitor, true),
 }
 

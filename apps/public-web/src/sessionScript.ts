@@ -1,15 +1,14 @@
 /** The recorded W2L runs that How it works replays, and the static frame it shows otherwise.
- * Every value comes from a recorded result:
- * - Run 1: apps/public-web/content/introduction.md (capture 2026-09-24: success, title "Introduction",
- *   totalMs 2509, excerpt "Get Started\n# Introduction", final URL = requested URL);
- *   docs/evidence/r1-amazon-deployment-2026-09-25.md (11,761 characters of Markdown);
- *   research/section-b-firecrawl-monitor-evidence.generated.json (the first sentence after the heading).
- * - Run 2: docs/evidence/amazon-public-fixed-100-audit-2026-09-24.json record 42 (success, JSON complete,
- *   region and currency verified, clientMs 12539) and docs/evidence/dual-flow-mvp-local-100-2026-09-23.json
- *   page 42 (ASIN, Singapore 238823, SGD 290.67, seller Amazon US).
- * - Every preview reads robots.txt before fetching (packages/public-preview/src/preview.ts, robotsFailClosed).
- * The two times are different measurements and say so: run 1 recorded only the server's totalMs, run 2 only
- * the time the browser saw (the page's own "Total time"). */
+ * Each run shows one recorded capture, and nothing from any other:
+ * - Run 1: apps/public-web/content/introduction.md, a local capture on 2026-09-24 at source commit 936fdf0:
+ *   success, title "Introduction", final URL = requested URL, server totalMs 2509, and the recorded Markdown
+ *   excerpt "Get Started\n# Introduction". Its length was not recorded, so the replay does not count characters.
+ * - Run 2: docs/evidence/amazon-holdout-100-2026-09-23.json record 42, a local capture on 2026-09-23 at source
+ *   commit 991097f (stdio MCP → local API → browser): ASIN B000NI69YA selected as requested, title, SGD 290.67,
+ *   seller Amazon US, each matched against the captured page; Singapore 238823 seen on it; clientMs 3998.5.
+ * - Neither record states the robots.txt decision, so the replay says the file was checked, not what it said.
+ *   (Every capture reads robots.txt before the page: packages/bench/src/robotsLookup.ts.)
+ * The two times are different measurements and say so: run 1 recorded the server's totalMs, run 2 the client's. */
 export type Step = { doing: string; done: string; detail: string; ms: number; count?: number }
 export type Out = { text: string; key?: string; check?: boolean }
 export type Run = { typed: string; steps: Step[]; out: Out[]; result: string; time: string; hold: number }
@@ -19,11 +18,11 @@ export const RUNS: readonly Run[] = [
     typed: 'docs.firecrawl.dev/introduction',
     steps: [
       { doing: 'Checking URL', done: 'Checked URL', detail: 'public · https', ms: 320 },
-      { doing: 'Reading robots.txt', done: 'Read robots.txt', detail: 'allowed', ms: 420 },
+      { doing: 'Reading robots.txt', done: 'Read robots.txt', detail: 'checked', ms: 420 },
       { doing: 'Fetching page', done: 'Fetched page', detail: 'no redirect', ms: 640 },
-      { doing: 'Extracting', done: 'Extracted', detail: '11,761 chars', ms: 720, count: 11761 },
+      { doing: 'Extracting', done: 'Extracted', detail: 'Markdown', ms: 720 },
     ],
-    out: [{ text: 'Get Started' }, { text: '# Introduction' }, { text: 'The web data API for AI agents.' }],
+    out: [{ text: 'Get Started' }, { text: '# Introduction' }],
     result: 'success',
     time: 'server 2.51 s',
     hold: 4200,
@@ -32,19 +31,19 @@ export const RUNS: readonly Run[] = [
     typed: 'www.amazon.sg/dp/B000NI69YA',
     steps: [
       { doing: 'Checking URL', done: 'Checked URL', detail: 'product page', ms: 320 },
-      { doing: 'Reading robots.txt', done: 'Read robots.txt', detail: 'allowed', ms: 420 },
+      { doing: 'Reading robots.txt', done: 'Read robots.txt', detail: 'checked', ms: 420 },
       { doing: 'Rendering page', done: 'Rendered page', detail: 'Singapore', ms: 980 },
       { doing: 'Matching product', done: 'Matched product', detail: 'ASIN matches', ms: 460 },
     ],
     out: [
       { key: 'asin', text: 'B000NI69YA', check: true },
       { key: 'region', text: 'Singapore 238823', check: true },
-      { key: 'currency', text: 'SGD', check: true },
       { key: 'price', text: 'SGD 290.67', check: true },
-      { key: 'seller', text: 'Amazon US' },
+      { key: 'seller', text: 'Amazon US', check: true },
+      { key: 'title', text: 'Fluke 116 HVAC Multimeter, Standard', check: true },
     ],
-    result: 'verified',
-    time: 'browser 12.54 s',
+    result: 'complete',
+    time: 'client 4.00 s',
     hold: 4600,
   },
 ]

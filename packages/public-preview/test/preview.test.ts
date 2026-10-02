@@ -213,6 +213,22 @@ describe('anonymous preview contract', () => {
     expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 100)).toMatchObject({ status: 'success', markdown: 'Post by @alice\n\nThe verified post', reason: null })
   })
 
+  it('says when robots.txt could not be read rather than blaming the site\'s rules', () => {
+    const url = 'https://docs.example/page'
+    const outcome = fixture(url)
+    outcome.result.status = 'failed'
+    outcome.result.failureReason = 'policy_denied'
+    outcome.result.trace = [{ at: 0, lane: 'http', event: 'robots_disallowed', detail: { unreachable: 'timeout' } }] as unknown as typeof outcome.result.trace
+    outcome.result.evidence = { ...outcome.result.evidence, httpStatus: null } as typeof outcome.result.evidence
+    outcome.result.usage = { ...outcome.result.usage, requestCount: 0 } as typeof outcome.result.usage
+    expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 10)).toMatchObject({
+      status: 'blocked', reason: 'This site\'s robots.txt could not be read, so W2L did not fetch the page.',
+      diagnostic: { code: 'robots_unreachable', stage: 'policy', evidence: 'observed' },
+      // The page was never requested, so there is no final URL.
+      finalUrl: null,
+    })
+  })
+
   it('distinguishes a robots refusal from an unsafe URL policy refusal', () => {
     const url = 'https://example.com/page'
     const outcome = fixture(url)

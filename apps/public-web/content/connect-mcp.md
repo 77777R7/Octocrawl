@@ -1,6 +1,6 @@
 # Connect W2L MCP
 
-Choose your MCP client below. W2L currently connects through a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) endpoint on the same computer as your client; hosted browser login is not available yet.
+Choose your MCP client below. W2L currently connects through a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) endpoint on the same computer as your client; hosted browser login is paused on the roadmap.
 
 {{MCP_CLIENT_PICKER}}
 
@@ -30,4 +30,4 @@ Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or
 
 ## Hosted connection
 
-**Coming soon.** There is no validated permanent HTTPS MCP URL, hosted login, or copyable remote command yet. A public connection, real task, and monitoring after a server restart must pass separately before this becomes a hosted setup guide.
+**Paused.** There is no permanent HTTPS MCP URL, hosted login, or copyable remote command. The [roadmap](https://github.com/77777R7/w2l/blob/main/ROADMAP.md#paused) puts a hosted API and hosted MCP on hold until people need runs while their computer is off; until then, W2L MCP runs on your own computer as described above.

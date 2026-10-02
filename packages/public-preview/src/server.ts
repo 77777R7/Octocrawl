@@ -3,7 +3,7 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypt
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { extname, relative, resolve } from 'node:path'
-import type { PreviewQuota, QuotaDecision } from './quota.js'
+import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
@@ -56,6 +56,15 @@ function empty(status: PreviewResponse['status'], url: string, reason: string, t
     : status === 'timeout' ? 'acquisition' : 'service'
   return { status, requestedUrl: url, finalUrl: null, title: null, markdown: null, totalMs, reason,
     diagnostic: override ?? { code, stage, evidence: 'unobserved' } }
+}
+
+/** Remaining-preview lookups are capped per instance (each is two quota-store reads), so loading the page cannot
+ * turn into an unbounded stream of reads. A count with previews left is always read fresh, since a preview on another
+ * instance may have used one; only a used-up day is cached, until the next UTC midnight, as it cannot change before. */
+const QUOTA_LOOKUPS_PER_MINUTE = 120
+
+function nextUtcMidnight(now = new Date()): number {
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
 }
 
 function visitorAddress(req: IncomingMessage): string {
@@ -170,6 +179,8 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
   const publicOrigin = options.publicOrigin ? parsePublicOrigin(options.publicOrigin) : undefined
   const log = options.log ?? stdoutLogger
   const visitorId = (req: IncomingMessage) => dailyVisitorId(options.visitorCookieSecret, visitorKey(req, options.visitorCookieSecret))
+  const usedUp = new Map<string, { until: number; status: QuotaStatus }>()
+  let quotaLookups = { windowStart: 0, count: 0 }
   return (req, res) => { void (async () => {
     const started = performance.now()
     const deadlineAt = Date.now() + deadlineMs
@@ -189,6 +200,39 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       } catch (error) {
         sendJson(res, 400, { error: 'invalid_url', reason: error instanceof Error ? error.message : 'Invalid URL.' })
       }
+      return
+    }
+    if (pathname === '/api/quota') {
+      // Read-only: how many previews this visitor has left today. It never counts a preview, sets no cookie and logs
+      // nothing; a count it cannot read is an error, never a guess.
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return }
+      if (req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403, { 'cache-control': 'no-store' }).end(); return }
+      if (requestUrl.search) { sendJson(res, 400, { error: 'invalid_request', reason: 'This endpoint takes no parameters.' }); return }
+      if (options.enabled === false) { sendJson(res, 200, { enabled: false }); return }
+      if (!options.quota.status) { sendJson(res, 501, { error: 'quota_status_unavailable' }); return }
+      const key = visitorKey(req, options.visitorCookieSecret)
+      // One instant for the day the store counts, the cache and the reset time.
+      const now = Date.now()
+      const resetsAt = nextUtcMidnight(new Date(now))
+      const cached = usedUp.get(key)
+      let status = cached !== undefined && now < cached.until ? cached.status : null
+      if (status === null) {
+        if (now - quotaLookups.windowStart >= 60_000) quotaLookups = { windowStart: now, count: 0 }
+        if (quotaLookups.count >= QUOTA_LOOKUPS_PER_MINUTE) { sendJson(res, 503, { error: 'quota_busy' }); return }
+        quotaLookups.count++
+        try { status = await options.quota.status(key, new Date(now), { deadlineAt: now + 5_000 }) }
+        catch { if (!res.destroyed) sendJson(res, 503, { error: 'quota_unavailable' }); return }
+        if (status.decision !== 'ok') {
+          if (usedUp.size >= 5_000) usedUp.clear()
+          usedUp.set(key, { until: resetsAt, status })
+        }
+      }
+      if (!res.destroyed) sendJson(res, 200, {
+        enabled: true, state: status.decision, limit: status.limit, remaining: status.remaining,
+        resetsAt: new Date(resetsAt).toISOString(),
+        // Without the visitor cookie the count belongs to an address that others may share.
+        basis: key.startsWith('visitor:') ? 'visitor' : 'ip',
+      })
       return
     }
     if (pathname === '/api/events') {
@@ -285,7 +329,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
           return
         }
         if (available !== 'ok') {
-          const tomorrow = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1)
+          const tomorrow = nextUtcMidnight()
           if (!res.destroyed) send(res, 429,
             empty('quota_exceeded', submitted,
               available === 'global_limited' ? 'The public preview has reached its daily limit.' : 'You have used your three previews for today.',
@@ -313,7 +357,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
             : { status: 503, body: empty('failed', submitted, 'The preview quota service is temporarily unavailable.') }
         }
         if (quota !== undefined && quota !== 'ok') {
-          const tomorrow = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1)
+          const tomorrow = nextUtcMidnight()
           reply = { status: 429, body: empty('quota_exceeded', submitted, quota === 'global_limited' ? 'The public preview has reached its daily limit.' : 'You have used your three previews for today.'),
             headers: { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) } }
         } else if (quota === 'ok') {

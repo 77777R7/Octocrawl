@@ -26,7 +26,7 @@ a { color: inherit; }
 ::selection { background: #fd966c; color: #071b4f; }
 :focus-visible { outline: 3px solid #fa935f; outline-offset: 3px; }
 /* The light sections need a darker ring: #fa935f is 2.1:1 on #f7f8fb, #b8461d is 5:1. */
-.runs-section :focus-visible, .how-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible { outline-color: #b8461d; }
+.runs-section :focus-visible, .how-section :focus-visible, .examples-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible, .status-section :focus-visible, .faq-section :focus-visible { outline-color: #b8461d; }
 
 .page-shell { overflow: clip; }
 
@@ -122,7 +122,7 @@ a { color: inherit; }
 /* How it works: a replay of recorded runs, drawn in the artwork's glyph language, shows the steps beside it
    happening. Never put opacity, filter or mask on .session or its ancestors: the veil's backdrop-filter would stop
    blurring the artwork under it. */
-.session { --row: 1.66em; position: relative; width: min(100%, 34em); color: #b7c8e6; font: 500 clamp(11.5px, .98vw, 14px)/1.66 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: none; }
+.session { --row: 1.66em; position: relative; width: min(100%, 34em); color: #b7c8e6; font: 500 clamp(12.5px, 1.05vw, 14.5px)/1.66 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: none; }
 /* A feathered veil, not a card: it softens the artwork's glyphs under the text only. Its feather scales with the
    type (30 by 34 px at 14 px), so a small window never sits in a large dark halo. */
 .session-veil { position: absolute; inset: -2.15em -2.45em; background: rgba(4, 16, 50, .36); -webkit-backdrop-filter: blur(3px) brightness(.72); backdrop-filter: blur(3px) brightness(.72); -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); mask-composite: intersect; }
@@ -135,7 +135,7 @@ a { color: inherit; }
 .s-corner.is-tr { top: -5px; right: -5px; }
 .s-corner.is-bl { bottom: -5px; left: -5px; }
 .s-corner.is-br { bottom: -5px; right: -5px; }
-.session-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 2px 0 9px; color: #a9bfe6; font-size: 10px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
+.session-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 2px 0 9px; color: #a9bfe6; font-size: 11px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
 .session-head .kicker-square { width: 6px; height: 6px; }
 .session-tag { margin-left: auto; color: #9aafd4; }
 /* Text changes never resize the rows, so layout and paint stay inside the body. */
@@ -220,6 +220,8 @@ a { color: inherit; }
 .capability-message { width: fit-content; max-width: 100%; min-height: 1.4em; margin: 10px 0 0; padding: 4px 8px; border-radius: 6px; color: #f1f6ff; background: rgba(7, 27, 79, .58); font-size: 12px; line-height: 1.5; }
 .capability-message:empty { display: none; }
 /* The quota note keeps the capability hint's line while there is no hint, so the hero's height never changes. */
+.url-help-link { color: #fff; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; }
+.url-help-link:hover { color: #ffc2a4; }
 .url-help { width: fit-content; max-width: 100%; min-height: 1.4em; margin: 10px 0 0; padding: 4px 8px; color: rgba(232, 240, 255, .82); font-size: 12px; line-height: 1.5; }
 
 /* The Format and Options panels are session sheets, drawn like the How it works replay on the hero's navy: dotted
@@ -522,37 +524,95 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px); border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
 .how-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
-/* Why W2L: a recorded honest failure beside the claim, then the four points. White, between the two pale sections. */
-.why-section { border-top: 1px solid var(--line); background: #fff; }
-.why-grid, .selfhost-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: center; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
-.why-grid { padding-bottom: 40px; }
-.why-intro h2, .selfhost-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
-.why-lead, .selfhost-lead { max-width: 52ch; margin: 22px 0 0; color: var(--muted); font-size: 16px; line-height: 1.65; text-wrap: pretty; }
-.why-specimen, .selfhost-specimen { min-width: 0; margin: 0; }
-.why-specimen .ledger { margin: 0; }
+/* The sections after How it works share one rhythm: a kicker, a heading, a lead, then the specimen. White and pale
+   bands alternate so each section reads as its own sheet. */
+.examples-section, .why-section, .status-section { border-top: 1px solid var(--line); background: #fff; }
+.selfhost-section, .faq-section { border-top: 1px solid var(--line); }
+.examples-intro h2, .why-head h2, .selfhost-intro h2, .status-head h2, .faq-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
+.section-lead { max-width: 52ch; margin: 22px 0 0; color: var(--muted); font-size: 16px; line-height: 1.65; text-wrap: pretty; }
+.section-lead code, .why-point code, .status-col code, .faq-item code, .selfhost-note code { font: .92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Tabs: the run marks of the Get code sheet, on a light sheet or on the dark terminal. */
+.tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 6px; background: #eef3f9; }
+.tab { display: inline-flex; align-items: center; gap: 1ch; min-height: 38px; padding: 0 14px; border: 0; border-radius: 4px; color: #4f6587; background: transparent; font: 650 13px/1 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.tab:hover { color: #14254a; }
+.tab[aria-selected="true"] { color: #14254a; background: #fff; box-shadow: 0 1px 3px rgba(20, 37, 74, .12); }
+.tab[aria-selected="true"] .row-mark { background: var(--orange); transform: scale(.875); }
+/* Inside the ring: a tab list can scroll sideways on a phone, which would clip a ring drawn outside it. */
+.tab:focus-visible { outline-offset: -3px; }
+.tabs.is-dark { background: rgba(255, 255, 255, .05); }
+.tabs.is-dark .tab { min-height: 32px; padding: 0 11px; color: #9fb3d6; font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.tabs.is-dark .tab:hover { color: #e3edff; }
+.tabs.is-dark .tab[aria-selected="true"] { color: #fff; background: rgba(251, 123, 76, .16); box-shadow: none; }
+.tab-panel { margin: 0; }
+.tab-panel[hidden] { display: none; }
+
+/* Recorded results: the three records, each exactly as it was captured. */
+.examples-grid, .selfhost-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: center; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
+.examples-grid { align-items: start; }
+.examples-specimen { min-width: 0; }
+.examples-specimen .ledger-view { margin-top: 18px; }
+.examples-specimen .ledger { margin: 0; }
 .ledger-row.is-blocked .ledger-mark, .ledger-row.is-blocked .ledger-value { color: #b8461d; }
-.why-specimen figcaption, .selfhost-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.why-specimen figcaption code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.why-points { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 32px; padding: 0 32px 104px; list-style: none; }
+.examples-specimen .ledger-cite { display: block; }
+.examples-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.examples-specimen figcaption code, .proof code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Why W2L: three pillars, then the measured numbers with where each came from. */
+.why-head { padding: 96px 32px 40px; }
+.why-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; padding: 0 32px 56px; list-style: none; }
 .why-point { padding: 20px 0 0; border-top: 1px solid #e0e8f2; }
 .why-point .step-number { display: block; padding: 0; }
-.why-point h3 { margin: 12px 0 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
-.why-point p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.why-point h3 { margin: 12px 0 0; color: #14254a; font-size: 18px; line-height: 1.35; letter-spacing: -.02em; }
+.why-point p { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; line-height: 1.6; text-wrap: pretty; }
+.proof { margin-bottom: 104px; padding: 26px 32px 24px; border-radius: 16px; background: #f4f7fb; box-shadow: inset 0 0 0 1px #e3eaf3; }
+.proof-title { margin: 0; color: #2f6ba8; font: 650 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+.proof-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 40px; margin: 18px 0 0; }
+.proof-item dt { color: #142a57; font-size: clamp(26px, 2.4vw, 34px); font-weight: 600; line-height: 1.1; letter-spacing: -.04em; }
+.proof-item dd { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.proof-source { display: block; margin-top: 8px; color: #6a7b95; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.proof-note { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #e0e8f2; color: var(--muted); font-size: 13px; }
+.proof-note a, .status-never a, .faq-item a { color: #1d64ac; font-weight: 650; text-underline-offset: 3px; }
+.proof-note a:hover, .status-never a:hover, .faq-item a:hover { color: #b8461d; }
 
-/* Run it yourself: the open-source way past the daily limit, with the terminal session that starts it. */
-.selfhost-section { border-top: 1px solid var(--line); }
+/* Run it yourself: the open-source way past the daily limit, one terminal per way in. */
+.selfhost-specimen { min-width: 0; margin: 0; }
 .selfhost-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; margin: 30px 0 0; }
 .cta-primary { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; color: #081b42; background: var(--orange); font-size: 15px; font-weight: 760; text-decoration: none; transition: background .18s ease, transform .18s ease; }
 .cta-primary:hover { background: #ff9365; transform: translateY(-1px); }
 .cta-primary svg { width: 16px; height: 16px; flex: none; }
 .cta-secondary { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #1d64ac; font-size: 14px; font-weight: 650; text-underline-offset: 3px; }
 .cta-secondary:hover { color: #b8461d; }
-.selfhost-sheet { padding: 16px 0 18px; border-radius: 20px; color: #d7e8ff; background: linear-gradient(180deg, rgba(7, 27, 79, .84), rgba(6, 22, 52, .94)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 30px 60px -32px rgba(7, 27, 79, .6); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.selfhost-head { display: flex; align-items: center; gap: 8px; margin: 0 22px 12px; padding-bottom: 10px; color: #a9bfe6; font-size: 10px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .45) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
-.selfhost-head .kicker-square { width: 6px; height: 6px; }
+.selfhost-sheet { padding: 14px 0 16px; border-radius: 20px; color: #d7e8ff; background: linear-gradient(180deg, rgba(7, 27, 79, .84), rgba(6, 22, 52, .94)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 30px 60px -32px rgba(7, 27, 79, .6); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.selfhost-head { display: flex; align-items: center; gap: 8px; margin: 0 16px 12px; padding-bottom: 12px; background: radial-gradient(circle, rgba(176, 200, 240, .45) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
 .selfhost-copy { margin-left: auto; min-height: 32px; padding: 0 12px; border: 1px solid rgba(176, 200, 240, .26); border-radius: 4px; color: #d7e8ff; background: transparent; font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; }
 .selfhost-copy:hover { border-color: var(--orange); color: #ffc2a4; }
-.selfhost-sheet .code-lines { font-size: 12.5px; }
+.selfhost-sheet .code-lines { min-height: 13.6em; font-size: 12.5px; }
+.selfhost-note { margin: 12px 22px 0; padding-top: 10px; color: #a9bfe6; font: 12px/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif; background: radial-gradient(circle, rgba(176, 200, 240, .3) 1px, transparent 1.45px) 0 0 / 8px 3px repeat-x; }
+.selfhost-note code { color: #e3edff; }
+
+/* What works today: four columns, with what is usable now set apart, and a plain line on what will not be built. */
+.status-head { padding: 96px 32px 40px; }
+.status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 32px; padding: 0 32px; }
+.status-col { padding-top: 18px; border-top: 2px solid #e0e8f2; }
+.status-col.is-now { border-top-color: #087b50; }
+.status-col h3 { margin: 0; color: #14254a; font-size: 16px; letter-spacing: -.01em; }
+.status-col ul { margin: 12px 0 0; padding: 0; list-style: none; }
+.status-col li { position: relative; padding: 7px 0 7px 18px; color: #3d5075; font-size: 14px; line-height: 1.5; }
+.status-col li::before { content: "·"; content: "·" / ""; position: absolute; left: 4px; color: #8fa3c0; font-weight: 700; }
+.status-col.is-now li::before { content: "✓"; left: 0; color: #087b50; font-size: 12px; }
+.status-never { margin-top: 40px; margin-bottom: 104px; padding: 18px 32px 0; border-top: 1px solid #e0e8f2; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.status-never strong { color: #14254a; }
+
+/* FAQ: native disclosure, no script. */
+.faq-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
+.faq-list { border-top: 1px solid #e0e8f2; }
+.faq-item { border-bottom: 1px solid #e0e8f2; }
+.faq-item summary { position: relative; display: block; padding: 20px 40px 20px 0; color: #14254a; font-size: 17px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; cursor: pointer; list-style: none; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after { content: "+"; content: "+" / ""; position: absolute; top: 18px; right: 4px; color: #b8461d; font: 500 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.faq-item[open] summary::after { content: "−"; content: "−" / ""; }
+.faq-item p { max-width: 64ch; margin: -4px 0 0; padding: 0 0 22px; color: #3d5075; font-size: 15px; line-height: 1.7; text-wrap: pretty; }
 
 /* Footer */
 .site-footer { color: #d8e5f6; background: var(--navy-deep); }
@@ -566,6 +626,9 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .footer-cards { display: grid; align-content: center; gap: 12px; padding: 44px 32px; }
 .footer-card { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 22px; border: 1px solid rgba(216, 229, 246, .18); border-radius: 12px; color: #eef6ff; background: rgba(255, 255, 255, .03); font-size: 15px; font-weight: 600; text-decoration: none; }
 .footer-card:hover { color: #ffae86; border-color: rgba(255, 174, 134, .5); }
+.footer-card.is-primary { color: #081b42; border-color: var(--orange); background: var(--orange); font-weight: 700; }
+.footer-card.is-primary:hover { color: #081b42; background: #ff9365; }
+.footer-card-mark { width: 18px; text-align: center; font-size: 18px; line-height: 1; }
 .footer-card svg { width: 18px; height: 18px; flex: none; }
 .footer-card .card-arrow { margin-left: auto; }
 .footer-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -596,9 +659,13 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 /* Below 1000 px the two-column specimen would squeeze the JSON pane under its 26-character lines. */
 @media (max-width: 999px) {
   .how-grid { grid-template-columns: minmax(0, 1fr); gap: 48px; padding: 72px 32px 80px; }
-  .why-grid, .selfhost-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; padding: 72px 32px 80px; }
-  .why-grid { padding-bottom: 32px; }
-  .why-points { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; padding-bottom: 80px; }
+  .examples-grid, .selfhost-grid, .faq-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 72px 32px 80px; }
+  .why-head, .status-head { padding: 72px 32px 32px; }
+  .why-points { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-bottom: 48px; }
+  .proof { margin-bottom: 80px; }
+  .proof-list { grid-template-columns: minmax(0, 1fr); }
+  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+  .status-never { margin-bottom: 80px; }
 }
 
 @media (max-width: 800px) {
@@ -610,6 +677,19 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .footer-top { grid-template-columns: 1fr; }
   .footer-cards { padding-top: 0; }
   .footer-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Below 820px one row cannot hold every control, so the toolbar always takes two: Format, Options and Get code
+   together, then the example and the primary action. A zero-height break, ordered between them, makes the second
+   row regardless of font metrics; the halved row gap keeps the space between the rows at 10px. */
+@media (max-width: 820px) {
+  .url-toolbar { flex-wrap: wrap; row-gap: 5px; }
+  .url-toolbar::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+  .url-tools { margin-right: 0; }
+  #code-button { margin-right: auto; }
+  .example-button, .submit-button { order: 2; }
+  .example-button { flex: 1; }
+  .submit-button { flex: 1.4; min-width: 0; gap: 12px; }
 }
 
 @media (max-width: 600px) {
@@ -632,10 +712,8 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .hero-form-row { padding: 28px 12px 32px; }
   .url-entry { padding: 10px 12px; }
   .url-entry input { font-size: 15px; }
-  .url-toolbar { flex-wrap: wrap; padding: 12px; }
-  /* Two rows: Format, Options and Get code (its icon alone, its name kept for screen readers); then the example
-   * and the primary action. */
-  .url-tools { flex: 1 1 calc(100% - 54px); min-width: 0; }
+  .url-toolbar { padding: 12px; }
+  /* On a phone Get code shows its icon alone; its name stays for screen readers. */
   #code-button { justify-content: center; width: 44px; padding: 0; }
   #code-button .tool-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .url-help { font-size: 11px; }
@@ -660,8 +738,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .code-bar { flex-wrap: nowrap; gap: 8px; }
   .code-tab { padding: 0 9px; }
   .code-copy { padding: 0 10px; }
-  .example-button { flex: 1; }
-  .submit-button { flex: 1.4; min-width: 0; gap: 12px; }
   .runs-head { display: block; padding: 44px 18px 22px; }
   .runs-note { margin-top: 10px; }
   .runs-aside { text-align: left; }
@@ -683,13 +759,20 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .readable-content { font-size: 14px; }
   .how-grid { gap: 40px; padding: 56px 18px 64px; }
   .how-replay { min-height: 0; padding: 32px 14px; border-radius: 16px; }
-  .why-grid, .selfhost-grid { gap: 32px; padding: 56px 18px 64px; }
-  .why-grid { padding-bottom: 28px; }
-  .why-points { grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 0 18px 64px; }
-  .why-specimen .ledger { padding: 12px 16px; }
-  .why-specimen .ledger-row { grid-template-columns: minmax(0, 1fr); }
-  .why-specimen .ledger dd { grid-column: 1; padding-left: 2.4ch; }
+  .examples-grid, .selfhost-grid, .faq-grid { gap: 28px; padding: 56px 18px 64px; }
+  .why-head, .status-head { padding: 56px 18px 28px; }
+  .why-points { padding: 0 18px 40px; }
+  .proof { margin: 0 18px 64px; width: auto; padding: 22px 18px; }
+  .status-grid { grid-template-columns: minmax(0, 1fr); padding: 0 18px; }
+  .status-never { margin-bottom: 64px; padding: 18px 18px 0; }
+  /* One row of tabs on a phone: they share the width, and scroll sideways rather than wrap if they cannot. */
+  .tabs { display: flex; flex-wrap: nowrap; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .tab { flex: 1 0 auto; justify-content: center; padding: 0 10px; }
   .selfhost-sheet { border-radius: 16px; }
+  .selfhost-head { flex-wrap: wrap; margin-inline: 12px; }
+  .tabs.is-dark { flex: 1 1 100%; order: 2; }
+  .tabs.is-dark .tab { padding: 0 9px; }
+  .faq-item summary { font-size: 16px; }
   /* Commands keep their lines on a phone: the sheet scrolls sideways instead of breaking a command mid-word. */
   .selfhost-sheet .code-lines { overflow-x: auto; font-size: 11.5px; }
   .selfhost-sheet .code-lines li { width: max-content; min-width: 100%; }
@@ -700,6 +783,16 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .footer-card { padding: 0 18px; }
   .footer-col { padding: 8px 18px 28px; }
 }
+
+/* The narrowest phones: slimmer tool buttons keep Get code on the first row beside Options. */
+@media (max-width: 360px) {
+  .hero-form-row { padding-inline: 6px; }
+  .url-toolbar { padding-inline: 8px; }
+  .url-tools { gap: 6px; }
+  .tool-button { gap: 6px; padding: 0 8px; }
+  .tool-caret { display: none; }
+}
+
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

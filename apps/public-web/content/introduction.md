@@ -2,7 +2,7 @@
 
 W2L turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 
-> **Availability:** Try the page preview at the URL where you are reading this. The MCP walkthrough below is verified on the same computer as the client. A permanent HTTPS MCP address and browser login are still pending validation. A hosted page preview does not include hosted MCP or persistent Monitor tasks.
+> **Availability:** Try the page preview at the URL where you are reading this. The MCP walkthrough below is verified on the same computer as the client. A hosted MCP address and browser login are paused on the roadmap. A hosted page preview does not include hosted MCP or persistent Monitor tasks.
 
 ## Try W2L
 

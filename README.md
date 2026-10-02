@@ -28,7 +28,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which W2L finds no main content (`failed`/`empty_unverified` with the whole page's Markdown)
 2. **Five false-success checks** — challenge text, wrong-page content, missing facts, truncation, yield-below-floor
 3. **Execution ladder** — HTTP → browser → user auth → proxy, with automatic routing, per-attempt trace, and task-level cost accounting
-4. **Ground-truth benchmark** — 30 adversarial fixtures (soft 404s, challenge pages, SPAs, timeouts, zip bombs) with verified false-success rates
+4. **Ground-truth benchmark** — a 56-case fixture suite (soft 404s, challenge pages, SPAs, timeouts, zip bombs, tables) with verified false-success rates
 5. **Honest evidence** — `artifacts: []` is an explicit empty artifact list, not a promise that every failed page has a screenshot or DOM snapshot; browser `bytesWire: null` means wire bytes were not measured
 6. **One Evidence Record** — every scrape result, batch item and crawl page carries `evidenceRecord` (final URL, redirect chain, fetch time, status and reason, lane, robots.txt decision, raw and output hashes, field evidence), stated the same way in every lane and described by a versioned [JSON Schema](packages/contracts/schemas/evidence-record.v1.json); see the [reference](apps/public-web/content/reference.md#evidence-record)
 
@@ -111,7 +111,8 @@ The unified local MCP covers scrape, Crawl, persistent URL-array batches, and
 Monitor/Delivery without separate worker terminals. A unified service also
 implements authenticated Streamable HTTP for the reviewed public-document
 Monitor and anonymous Amazon.sg product JSON/batch flows; its permanent Render
-URL and final hosted acceptance are pending. For both flows on one Mac, run
+URL and final hosted acceptance are paused on the roadmap
+([ROADMAP.md](ROADMAP.md#paused)). For both flows on one Mac, run
 `npm run first-use:local` after `npm ci`; see the
 [two-flow first-use guide](docs/dual-flow-first-use.md),
 [MCP first-use walkthrough](docs/mcp-first-use.md) and
@@ -302,7 +303,7 @@ The bare HTTP baseline intentionally has a high false-success rate (no content e
 ```
 packages/
   contracts/       TypeScript types and ground-truth schema
-  fixtures/        HTTP server with 30 ground-truth test cases
+  fixtures/        HTTP server with 56 ground-truth test cases
   http-core/       robots.txt parser (ReDoS-resistant)
   runtime/         TaskStore, frontier, bounded crawl orchestrator
   bench/           Benchmark runner, scrape/crawl CLI, scoring
@@ -331,7 +332,7 @@ docs/
 ## Roadmap
 
 - [x] Contracts and ground-truth schema
-- [x] Fixture server with 30 adversarial cases
+- [x] Fixture server with 56 ground-truth cases
 - [x] robots.txt ReDoS fix (token-based glob matcher)
 - [x] Benchmark pipeline with bare HTTP baseline
 - [x] extract-tf + HTML→Markdown after extract

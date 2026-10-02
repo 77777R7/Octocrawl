@@ -42,6 +42,8 @@ The gate treats a comparator as `ready` only when both its version command succe
 
 ## Current Blocker
 
+> Superseded the same day by run `35423895294` (see Valid Run Evidence below). Kept as the record of why the first attempt could not produce comparator evidence.
+
 On the current macOS runner:
 
 - Docker is not installed, so Firecrawl `v2.11.162` cannot be started.
