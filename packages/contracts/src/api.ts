@@ -121,8 +121,13 @@ export interface RobotsUrlOverride extends RobotsOverride {
   url: string
 }
 
-/** One scrape as the ladder ran it, before the API shapes the response: the result, its routing audit and the request's hints. */
-export type ScrapeRun = FetchResult & LadderRunAudit & { agentHints?: AgentHints }
+/** One scrape as the ladder ran it, before the API shapes the response: the result, its routing audit, the request's hints and, once shaped, the `warning` string. */
+export type ScrapeRun = FetchResult & LadderRunAudit & { agentHints?: AgentHints; warning?: string }
+
+/** The `warnings` as one string, their messages joined with a space (Firecrawl's `warning`); undefined when there are none. */
+export function warningOf(warnings: readonly FetchWarning[] | undefined): string | undefined {
+  return warnings === undefined || warnings.length === 0 ? undefined : warnings.map((warning) => warning.message).join(' ')
+}
 
 /**
  * The full scrape response: the run, its `scrapeId`, `metadata` carrying the
@@ -192,8 +197,10 @@ export interface CompactScrapeResponse {
   json?: StructuredExtractionResult | null
   /** The file the response was, as on the full response; absent for a web page. */
   file?: FetchResult['file']
-  /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell), as on the full response; absent when it had none. */
+  /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell, a thin http answer kept), as on the full response; absent when it had none. */
   warnings?: FetchResult['warnings']
+  /** The warnings' messages joined with a space, present exactly when `warnings` is (Firecrawl's `warning`). */
+  warning?: string
   /** Present when the request itself left something on the table (`fastMode` declined a browser hop the http lane asked for), as on the full response. */
   agentHints?: AgentHints
   truncated: boolean

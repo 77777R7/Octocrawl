@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, TraceEvent } from '@w2l/contracts'
+import type { ExecutionContext, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, TraceEvent } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, identityBundleIssues } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -155,6 +155,43 @@ const QUALITY_ESCALATION_EVENTS: ReadonlySet<string> = new Set(['quality_low_yie
 
 function qualityEscalationEvent(result: FetchResult): string | null {
   return result.trace.find((t) => QUALITY_ESCALATION_EVENTS.has(t.event))?.event ?? null
+}
+
+/**
+ * The caveat a thin http answer carries when it stays the run's answer: the
+ * http lane raised a quality event on it (`quality_low_yield`, or
+ * `quality_client_rendered`), and the browser lane either answered without
+ * improving on it (or failed), or was not available to the request
+ * (`fastMode`, an http-only policy, no browser rung). The count and the
+ * confidence are the http lane's own, from its trace; a shell on which the
+ * extractor found no main content says so instead of a count. Read by the
+ * API's agent hints.
+ */
+function lowContentYieldWarning(result: FetchResult, browserTried: boolean): FetchWarning {
+  const quality = result.trace.find((t) => t.event === 'quality_low_yield')?.detail
+  const extract = result.trace.find((t) => t.event === 'extract')?.detail
+  const confidence = typeof quality?.confidence === 'number' ? quality.confidence : typeof extract?.confidence === 'number' ? extract.confidence : null
+  const tokens = typeof quality?.contentTokens === 'number' ? quality.contentTokens : result.usage.contentTokens
+  const at = confidence === null ? '' : ` at confidence ${confidence}`
+  const yield_ = CONTENTFUL_STATUS.has(result.status) && tokens !== null ? `extracted ${tokens} tokens${at}` : `found no main content${at}`
+  return {
+    code: 'low_content_yield',
+    message: `The http lane ${yield_}; the browser lane ${browserTried ? 'did not improve it' : 'was not available to this request'}.`,
+  }
+}
+
+/**
+ * The run's answer with the `low_content_yield` warning after its own, when
+ * it is the http lane's result that the http lane itself offered to the
+ * browser lane: a contentful one, or the whole page it kept as evidence when
+ * it found no main content. Any other answer is returned as it is.
+ */
+function withLowContentYield(result: FetchResult, channelsTried: readonly string[]): FetchResult {
+  if (result.lane !== 'http' || qualityEscalationEvent(result) === null) return result
+  const evidence = result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null
+  if (!CONTENTFUL_STATUS.has(result.status) && !evidence) return result
+  if (result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
+  return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => channel !== 'http'))] }
 }
 
 /** Content size as the ladder's improvement metric: main-content tokens,
@@ -563,9 +600,10 @@ export class LadderRunner {
         // Infrastructure failure or a terminal refusal, and the subject did
         // not ask for anything higher. If an earlier channel produced real
         // content, that content is still the answer — the failure does not
-        // erase it. Otherwise stop and report honestly.
+        // erase it. Otherwise stop and report honestly; the http evidence
+        // kept here says the browser lane did not improve on it.
         if (best !== null) break
-        return finish(failedAnswer(result), false)
+        return finish(withLowContentYield(failedAnswer(result), channelsTried), false)
       }
 
       if (cls !== null && !LADDER_CONTINUES_FAILURE_CLASS.has(cls) && !subjectAsked) {
@@ -604,11 +642,13 @@ export class LadderRunner {
         channel: bestChannel.id,
         detail: { channel: bestChannel.id, vendorId: bestChannel.vendorId ?? null, size: bestSize },
       })
-      return finish({ ...best, escalations: finalEscalations }, false)
+      // A thin http answer kept over the later rungs says so in its warnings.
+      return finish(withLowContentYield({ ...best, escalations: finalEscalations }, channelsTried), false)
     }
 
+    // A thin http answer with no further rung to offer it to says so too.
     const final = best ?? (last === null ? null : failedAnswer(last)) ?? this.governanceRefusal(url, 'no permitted channel was configured')
-    return finish(sanitizeResult(final), false)
+    return finish(withLowContentYield(sanitizeResult(final), channelsTried), false)
   }
 
   // -------------------------------------------------------------------------

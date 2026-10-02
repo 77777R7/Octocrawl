@@ -7,7 +7,7 @@
  */
 
 import type { AgentHints, CrawlAccepted, CrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
-import { parseCrawlStartRequest, parseScrapeRequest, refusalHint, RequestError } from './api.js'
+import { parseCrawlStartRequest, parseScrapeRequest, refusalHint, RequestError, warningOf } from './api.js'
 import type { CrawlReport } from './crawl.js'
 import type { FetchResult } from './result.js'
 import type { StepRecord, StepStatus, TaskStatus } from './checkpoint.js'
@@ -27,7 +27,7 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
 export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
   'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
-  'A page whose server HTML is a shell for data its scripts fill in is fetched again on the browser rung, and the rendered page is the answer when it holds more; otherwise the HTTP page is returned with a client_rendered_suspected warning on the native response, which /fc does not pass through. Firecrawl renders every page in a browser.',
+  'A page whose server HTML is a shell for data its scripts fill in is fetched again on the browser rung, and the rendered page is the answer when it holds more; otherwise the HTTP page is returned with client_rendered_suspected and low_content_yield warnings on the native response, whose messages /fc passes through as data.warning (one string, joined with a space), as it does every native warning. Firecrawl renders every page in a browser.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
@@ -64,6 +64,8 @@ export interface FirecrawlPage {
   images?: string[]
   /** Present when an `attributes` entry was asked for and the page was read as content: per selector, the attribute's values as written. */
   attributes?: Array<{ selector: string; attribute: string; values: string[] }>
+  /** The native `warnings` as one string, their messages joined with a space; present when the result has any. */
+  warning?: string
   /** What to change about the request next time, one sentence each (the native `agentHints`); present when W2L has any. */
   agent_hints?: string[]
   /** Page fields appear only when the page declares them (W2L's `metadata`, null values left out). */
@@ -366,6 +368,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
           : result.status === 'success' || result.status === 'partial'
             ? undefined
             : result.status
+  const warning = warningOf(result.warnings)
   // Firecrawl's page fields, only those the page declares.
   const declared: Record<string, string | string[]> = {}
   for (const key of SHIM_PAGE_FIELDS) {
@@ -386,6 +389,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
     ...(result.images === undefined ? {} : { images: [...result.images] }),
     ...(result.attributes === undefined ? {} : { attributes: result.attributes.map((entry) => ({ selector: entry.selector, attribute: entry.attribute, values: [...entry.values] })) }),
+    ...(warning === undefined ? {} : { warning }),
     ...(agentHints === undefined || agentHints.length === 0 ? {} : { agent_hints: [...agentHints] }),
     metadata: {
       ...(declared as Partial<FirecrawlPage['metadata']>),

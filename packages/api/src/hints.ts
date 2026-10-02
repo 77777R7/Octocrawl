@@ -8,10 +8,22 @@
  * response (`agentHints`) only when there is one.
  */
 
-import type { Evidence, FetchResult, LadderRunAudit, ScrapeRequest } from '@w2l/contracts'
+import { MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type ScrapeRequest } from '@w2l/contracts'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
+
+/** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance. */
+export function lowContentYieldHint(browserTried: boolean): string {
+  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet`
+}
+
+/** The hint a file result carries: what its markdown is. */
+export function fileHint(file: NonNullable<FetchResult['file']>): string {
+  const kept = file.path === null ? 'not saved' : `kept at ${file.path}`
+  const markdown = file.markdownFrom === 'pdf_text' ? 'markdown is its text layer' : file.markdownFrom === 'text' ? 'markdown is its text as received' : 'it has no markdown'
+  return `the response was a ${file.kind} file ${kept}; ${markdown}`
+}
 
 /** Quality events the http lane raises as an offer to the browser lane (see the ladder's QUALITY_ESCALATION_EVENTS). */
 const QUALITY_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
@@ -20,7 +32,7 @@ const QUALITY_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quali
 const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
 
 /** What a hint is read from: the result's verdict, caveats and trace, and the lanes the run tried. */
-export type HintedResult = Pick<FetchResult, 'status' | 'failureReason' | 'blockReason' | 'retryAt' | 'truncated' | 'truncatedAt' | 'warnings' | 'markdown' | 'escalations' | 'trace' | 'lane' | 'requestedUrl'> & {
+export type HintedResult = Pick<FetchResult, 'status' | 'failureReason' | 'blockReason' | 'retryAt' | 'truncated' | 'truncatedAt' | 'warnings' | 'markdown' | 'escalations' | 'trace' | 'lane' | 'requestedUrl' | 'file'> & {
   evidence: Pick<Evidence, 'finalUrl' | 'httpStatus'>
 }
 
@@ -88,13 +100,16 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: Pick<La
   }
   // Under fastMode the one hint below says what was declined; otherwise the page's caveat says whether the browser lane had its turn.
   const fastModeDeclined = req.fastMode === true && result.lane === 'http' && httpLaneAskedForBrowser(result)
+  const browserTried = run.channelsTried.some((channel) => channel !== 'http')
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'client_rendered_suspected')) {
-    const browserTried = run.channelsTried.some((channel) => channel !== 'http')
     hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : 'was not tried'}`)
   }
+  // A thin http answer the browser lane did not improve on, or could not be offered to.
+  if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(lowContentYieldHint(browserTried))
   if (fastModeDeclined) hints.push(FAST_MODE_DECLINED_HINT)
   if (result.status === 'failed' && result.failureReason === 'http_error' && result.markdown !== null) {
     hints.push(`the server answered ${result.evidence.httpStatus ?? 'an error status'}; the markdown is that error page, not the requested page`)
   }
+  if (result.file !== undefined) hints.push(fileHint(result.file))
   return hints
 }

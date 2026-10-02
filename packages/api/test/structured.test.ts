@@ -136,6 +136,29 @@ describe('scrape response metadata', () => {
   })
 })
 
+describe('warning string', () => {
+  const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
+
+  it('joins the warnings into one warning string on the full and compact responses, and leaves it out with them', async () => {
+    const warnings = [
+      { code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell.' },
+      { code: 'low_content_yield', message: 'The http lane extracted 12 tokens at confidence 0.2; the browser lane was not available to this request.' },
+    ]
+    const run = { ...result, warnings, channelsTried: ['http'], ladderTrace: [], summary }
+    const joined = 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell. The http lane extracted 12 tokens at confidence 0.2; the browser lane was not available to this request.'
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact).toMatchObject({ warnings, warning: joined })
+    const full = await prepareScrapeResponse(run, { url: result.requestedUrl }, {}, null, performance.now()) as ScrapeResponse
+    expect(full).toMatchObject({ warnings, warning: joined })
+    const clean = { ...result, channelsTried: ['http'], ladderTrace: [], summary }
+    for (const response of [await prepareScrapeResponse(clean, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()), await prepareScrapeResponse(clean, { url: result.requestedUrl }, {}, null, performance.now())]) {
+      expect(response).not.toHaveProperty('warning')
+      expect(response).not.toHaveProperty('warnings')
+      expect(response).not.toHaveProperty('agentHints')
+    }
+  })
+})
+
 describe('format entries by type', () => {
   const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
   const attributes = { type: 'attributes' as const, selectors: [{ selector: 'a', attribute: 'href' }] }

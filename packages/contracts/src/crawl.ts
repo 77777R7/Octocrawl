@@ -83,6 +83,8 @@ export interface CrawlPage {
   markdown: string | null
   /** The fetch's caveats (a recorded robots override), as on a scrape result; absent when it had none. */
   warnings?: readonly FetchWarning[]
+  /** The warnings' messages joined with a space, present exactly when `warnings` is, as on a scrape response. */
+  warning?: string
   /** What to change about the request next time (a login wall, a robots.txt rule, a cut), as on a scrape response; absent when nothing applies. */
   agentHints?: AgentHints
   /** Present when the task asked for the `html` format, as on a scrape result; null when the page has none. */

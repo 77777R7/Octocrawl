@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, FAST_MODE_DECLINED_HINT, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -71,5 +71,21 @@ describe('agent hints', () => {
     expect(hints(result({ lane: 'browser_local' }), ['http', 'browser_local'], { fastMode: true })).toEqual([])
     // Several hints keep the table's order: the block before the wait, the wait before the cut.
     expect(hints(result({ status: 'blocked', blockReason: 'rate_limit', markdown: null, retryAt: Date.UTC(2026, 0, 1), truncated: true, truncatedAt: 10 })).map((hint) => hint.split(' ')[0])).toEqual(['wait', 'the'])
+  })
+
+  it('suggests waitFor or a longer timeout for a thin http answer the browser lane did not improve or could not be offered to, and says what a file\'s markdown is', () => {
+    const thin = (message: string) => result({ warnings: [{ code: 'low_content_yield', message }], trace: [{ at: 1, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 20, confidence: 0.1 } }] })
+    expect(hints(thin('The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.'), ['http', 'browser_local'])).toEqual([lowContentYieldHint(true)])
+    expect(hints(thin('The http lane extracted 20 tokens at confidence 0.1; the browser lane was not available to this request.'), ['http'])).toEqual([lowContentYieldHint(false)])
+    expect(lowContentYieldHint(false)).toBe("the http lane's content was thin and the browser lane was not available; pass waitFor (up to 60000 ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet")
+    // Under fastMode the one fastMode sentence says what was declined; the warning's own hint is left out.
+    expect(hints(thin('…'), ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
+    // A shell carries the client-rendered sentence first, then the thin-content one.
+    const shell = result({ status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'low_content_yield', message: 'thin' }], trace: [{ at: 1, lane: 'http', event: 'quality_client_rendered' }] })
+    expect(hints(shell, ['http'])).toEqual(['the page fills its data with JavaScript; the browser lane was not tried', lowContentYieldHint(false)])
+    const file = (kind: 'pdf' | 'csv' | 'xlsx', markdownFrom: 'pdf_text' | 'text' | null, path: string | null) => result({ file: { kind, detectedBy: 'content_type', contentType: null, declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path, markdownFrom, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']> })
+    expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
+    expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
+    expect(hints(file('xlsx', null, null))).toEqual(['the response was a xlsx file not saved; it has no markdown'])
   })
 })

@@ -26,7 +26,7 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
+import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
 import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
@@ -958,10 +958,13 @@ export async function prepareScrapeResponse(
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
+  const warning = warningOf(result.warnings)
   const next: ScrapeRun = {
     ...result,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
+    // The warnings as one string too, Firecrawl's `warning`, present exactly when they are.
+    ...(warning === undefined ? {} : { warning }),
     // Asked for: what the result carries, null when it carries none (a file, a page not read as content).
     ...(hasFormat(formats, 'html') ? { html: result.html ?? null } : {}),
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
@@ -1121,6 +1124,7 @@ export function compactScrapeResponse(
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
     ...(next.file === undefined ? {} : { file: next.file }),
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
+    ...(warningOf(next.warnings) === undefined ? {} : { warning: warningOf(next.warnings) }),
     ...(next.agentHints === undefined ? {} : { agentHints: next.agentHints }),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,

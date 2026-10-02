@@ -398,6 +398,31 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
+  it('carries low_content_yield, the warning string and the hints for a shell on an http-only engine, through /fc too, and none on the listing fixture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-api-yield-'))
+    const httpOnly = createApiEngine({ taskRoot: root, channelsFor: (mode) => httpOnlyChannels(mode).filter((channel) => channel.id === 'http') })
+    try {
+      const app = createApp(httpOnly)
+      const post = async (path: string, body: unknown) => (await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()
+      const shell = await post('/v1/scrape', { url: `${server.url}/spa/shell`, debug: false })
+      expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', channelsTried: ['http'] })
+      expect(shell.warnings.map((warning: { code: string }) => warning.code)).toEqual(['client_rendered_suspected', 'low_content_yield'])
+      expect(shell.warnings[1].message).toMatch(/^The http lane found no main content at confidence [0-9.]+; the browser lane was not available to this request\.$/)
+      expect(shell.warning).toBe(shell.warnings.map((warning: { message: string }) => warning.message).join(' '))
+      expect(shell.agentHints).toEqual(['the page fills its data with JavaScript; the browser lane was not tried', expect.stringContaining('pass waitFor (up to 60000 ms)')])
+      const full = await post('/v1/scrape', { url: `${server.url}/spa/shell` })
+      expect(full).toMatchObject({ warning: shell.warning, agentHints: shell.agentHints })
+      const shim = await post('/fc/v1/scrape', { url: `${server.url}/spa/shell` })
+      expect(shim).toMatchObject({ success: false, data: { warning: shell.warning, agent_hints: shell.agentHints } })
+      const plain = await post('/v1/scrape', { url: `${server.url}/crawl/listing`, debug: false })
+      expect(plain.status).toBe('success')
+      for (const key of ['warning', 'warnings', 'agentHints']) expect(plain).not.toHaveProperty(key)
+    } finally {
+      await httpOnly.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('limits the requests that start work per bearer token, answers 429 with Retry-After and the wait, and leaves status reads free', async () => {
     const url = `${server.url}/crawl/listing`
     const app = createApp(engine, { tokens: ['alpha', 'beta'], rateLimit: { perMinute: 2 } })

@@ -71,7 +71,7 @@ describe('Firecrawl /scrape /crawl shim', () => {
       status: 400,
       body: {
         success: false,
-        error: 'unsupported parameter: proxy; unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)',
+        error: 'unsupported parameter: proxy; unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml, images)',
         code: 'unsupported_parameter',
         details: { parameters: ['proxy'], formats: ['screenshot'] },
       },

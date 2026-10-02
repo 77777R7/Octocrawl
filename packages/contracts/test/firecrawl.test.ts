@@ -319,6 +319,17 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /ogTitle/.test(d) && /publishedTime/.test(d) && /no date normalisation/.test(d))).toBe(true)
   })
 
+  it('passes the warnings through as one warning string, on a scrape and on a crawl status page, and leaves it out when there are none', () => {
+    const url = 'https://example.com/'
+    const warnings = [{ code: 'client_rendered_suspected', message: 'This HTTP capture may be a shell.' }, { code: 'low_content_yield', message: 'The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.' }]
+    const result = page({ requestedUrl: url, status: 'success', markdown: 'Thin', warnings })
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Thin', warnings })).data.warning).toBe('This HTTP capture may be a shell. The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.')
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data).not.toHaveProperty('warning')
+    const step: StepRecord = { id: 'step-1', taskId: 'task-1', attemptId: 'attempt-1', url, canonicalUrl: url, depth: 0, status: 'success', lane: 'http', contentHash: 'abc', cached: false, result, createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z' }
+    expect(wrapCrawlStatus({ status: 'completed' }, [step], { completed: 1, total: 1 }).data[0]?.warning).toBe('This HTTP capture may be a shell. The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /low_content_yield/.test(d) && /data\.warning/.test(d))).toBe(true)
+  })
+
   it('names the final URL after a redirect and leaves an unknown content type out', () => {
     const moved = wrapScrape(scrape({
       requestedUrl: 'http://example.com/old',

@@ -63,6 +63,7 @@ import {
   type MonitorPreview,
   type MonitorRun,
   type MonitorRunDetail,
+  warningOf,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
@@ -1008,7 +1009,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...askedHtmlFormats(task, result),
-    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
+    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings, warning: warningOf(result.warnings) }),
     ...(agentHints.length === 0 ? {} : { agentHints }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
