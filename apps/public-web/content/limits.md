@@ -12,7 +12,7 @@ Typing a URL on the [Try OctoCrawl page](/) shows a short note when the address 
 
 ## How the preview identifies itself
 
-The hosted preview names OctoCrawl in every request it sends to a site: robots.txt, the page, and the Amazon.sg browser's requests. Its User-Agent is a Chrome User-Agent followed by OctoCrawl's product token. The Chrome version varies:
+The hosted preview identifies itself in every request it sends to a site: robots.txt, the page, and the Amazon.sg browser's requests. Its User-Agent is a Chrome User-Agent followed by the product token `W2L-Preview/1.0`, the project's earlier name, which it still sends. The Chrome version varies:
 
 ```text
 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 W2L-Preview/1.0 (+https://github.com/77777R7/w2l)

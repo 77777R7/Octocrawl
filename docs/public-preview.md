@@ -141,10 +141,12 @@ gcloud builds submit . --config=cloudbuild.public-preview.yaml --region="$W2L_RE
 gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --service-account="$W2L_RUNTIME_SA" --allow-unauthenticated \
   --cpu=1 --memory=2Gi --concurrency=1 --min-instances=0 --max-instances=2 --timeout=60s \
-  --set-env-vars="W2L_FIRESTORE_PROJECT_ID=${W2L_PROJECT_ID},W2L_AMAZON_PUBLIC_STATE_FILE=/var/secrets/amazon-state.json,W2L_PREVIEW_ENABLED=true,W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}" \
-  --update-secrets='/var/secrets/amazon-state.json=w2l-amazon-state:latest,W2L_QUOTA_HASH_KEY=w2l-quota-hash-key:latest,W2L_EVAL_TOKEN=w2l-eval-token:latest'
+  --set-env-vars="W2L_FIRESTORE_PROJECT_ID=${W2L_PROJECT_ID},W2L_AMAZON_PUBLIC_STATE_FILE=/var/secrets/amazon-state.json,W2L_PREVIEW_ENABLED=true,W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_PUBLIC_ORIGIN=https://octocrawl.dev" \
+  --update-secrets='/var/secrets/amazon-state.json=w2l-amazon-state:latest,W2L_QUOTA_HASH_KEY=w2l-quota-hash-key:latest,W2L_EVAL_TOKEN=w2l-eval-token:latest,W2L_PROXY_SECRET=w2l-proxy-secret:latest'
 gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='value(status.url)'
 ```
+
+That first deploy sets every variable. For a later release, deploy the new image with only `--update-env-vars=W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}`: `--set-env-vars` replaces all variables, and losing `W2L_PUBLIC_ORIGIN` makes every preview on the domain fail its origin check.
 
 The `--allow-unauthenticated` flag is intentional for this limited, public trial. The Secret Manager grants are restricted to the dedicated runtime service account. Secret versions referenced as environment variables are resolved at instance startup; after rotating those secrets, deploy a new revision so every instance uses the new value. Verify the actual `/api/health` and preview behavior on the returned HTTPS URL before sharing it.
 
@@ -171,7 +173,7 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 1. Create the shared secret once, keep it under `.w2l/`, and store it in both places:
 
    ```sh
-   openssl rand -hex 32 > .w2l/public-preview/proxy-secret && chmod 600 .w2l/public-preview/proxy-secret
+   openssl rand -hex 32 | tr -d '\n' > .w2l/public-preview/proxy-secret && chmod 600 .w2l/public-preview/proxy-secret
    gcloud secrets create w2l-proxy-secret --replication-policy=automatic --data-file=.w2l/public-preview/proxy-secret --project="$W2L_PROJECT_ID"
    gcloud secrets add-iam-policy-binding w2l-proxy-secret --member="serviceAccount:${W2L_RUNTIME_SA}" --role='roles/secretmanager.secretAccessor' --project="$W2L_PROJECT_ID"
    (cd cloudflare/public-preview-proxy && npx wrangler secret put PROXY_SECRET < ../../.w2l/public-preview/proxy-secret)

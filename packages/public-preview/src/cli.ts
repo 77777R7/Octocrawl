@@ -24,7 +24,7 @@ const server = createPreviewServer({
   // Set only once the domain serves this service: page requests on any other host are then redirected to it.
   publicOrigin: process.env.W2L_PUBLIC_ORIGIN || undefined,
   // Shared with the Cloudflare Worker, so only it can name the domain and the visitor's address.
-  proxySecret: process.env.W2L_PROXY_SECRET || undefined,
+  proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
