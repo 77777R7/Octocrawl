@@ -1,4 +1,6 @@
 export { chunkUrls, SDK_ORIGIN, W2L, W2LError, WaitTimeoutError } from './client.js'
+export { DEFAULT_WATCH_POLL_INTERVAL_MS, JobWatcher, MIN_WATCH_POLL_INTERVAL_MS, pageCursor, parseSseBlock } from './watcher.js'
+export type { WatchKind, WatchOptions, WatchTransport, WatcherClient, WatcherError, WatcherEvent, WatcherWebSocket, WatcherWebSocketConstructor } from './watcher.js'
 export { SDK_VERSION } from './version.js'
 export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
 export type { AppendToBatchOptions, ChunkedBatchJob, ChunkedBatchOptions, ChunkedBatchResult } from './client.js'
@@ -60,6 +62,9 @@ export type {
   CrawlPageList,
   CrawlPageQuery,
   CrawlStartRequest,
+  JobStreamEventType,
+  JobStreamFrame,
+  JobStreamReport,
   SitemapMode,
   SitemapDiscovery,
   SitemapFileRecord,

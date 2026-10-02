@@ -32,6 +32,7 @@ import type {
 } from '@w2l/contracts'
 import { DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
 import { SDK_VERSION } from './version.js'
+import { JobWatcher, type WatchOptions, type WatcherClient } from './watcher.js'
 
 export interface W2LOptions {
   baseUrl: string
@@ -458,6 +459,47 @@ export class W2L {
 
   async cancelBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
     return this.post<BatchStatusResponse>(`/v1/batches/${encodeURIComponent(id)}/cancel`, undefined, 200, request)
+  }
+
+  /**
+   * Watches a crawl (`kind: 'crawl'`, the default) or a batch (`kind: 'batch'`)
+   * as it runs: `document` events with each page as it is recorded, `snapshot`
+   * events with the report, one `done` with the terminal report, or `error`.
+   * `transport: 'auto'` (default) tries the WebSocket route, then server-sent
+   * events, then polling (`pollIntervalMs`, default 2000, at least 250), each
+   * taking over from the last document seen; `timeoutMs` ends the watch with a
+   * `watcher_timeout` error while the job keeps running. `close()` stops
+   * watching only; cancelCrawl / cancelBatch stay explicit.
+   */
+  watcher(jobId: string, options: WatchOptions = {}): JobWatcher {
+    return new JobWatcher(this.watcherClient(), jobId, options)
+  }
+
+  /** Starts a crawl and returns its watcher (as `crawl()` then `watcher(taskId, { kind: 'crawl' })`). */
+  async crawlAndWatch(url: string, opts: Omit<CrawlStartRequest, 'url'> = {}, watch: Omit<WatchOptions, 'kind'> = {}, request: RequestOptions = {}): Promise<JobWatcher> {
+    const { taskId } = await this.crawl(url, opts, request)
+    return this.watcher(taskId, { ...watch, kind: 'crawl' })
+  }
+
+  /** Starts a batch and returns its watcher (as `batchScrape()` then `watcher(taskId, { kind: 'batch' })`). */
+  async batchScrapeAndWatch(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, watch: Omit<WatchOptions, 'kind'> = {}, request: RequestOptions = {}): Promise<JobWatcher> {
+    const { taskId } = await this.batchScrape(urls, opts, request)
+    return this.watcher(taskId, { ...watch, kind: 'batch' })
+  }
+
+  /** What a watcher needs of this client: the server, the token and fetch it was given, and the routes it polls, each carrying the bearer header. */
+  private watcherClient(): WatcherClient {
+    return {
+      baseUrl: this.baseUrl,
+      token: this.token,
+      fetch: this.fetchImpl,
+      headers: (extra) => this.headers(extra),
+      getCrawl: (id, request) => this.getCrawl(id, request),
+      getBatch: (id, request) => this.getBatch(id, request),
+      getCrawlPages: (id, options, request) => this.getCrawlPages(id, options, request),
+      getCrawlErrors: (id, options, request) => this.getCrawlErrors(id, options, request),
+      getBatchItems: (id, options, request) => this.getBatchItems(id, options, request),
+    }
   }
 
   async getCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {
