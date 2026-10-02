@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_RESILIENT_CONFIG,
+  isTlsError,
   resilientFetch,
   type ResilientFetcher,
   type ResilientResponseLike,
@@ -380,5 +381,28 @@ describe('resilientFetch execution budget', () => {
   it('retains deadline protection while reading a deferred response body', async () => {
     const out = await resilientFetch(U, async () => ({ ...res(200), bodyText: async () => new Promise<string>(() => {}) }), { deadlineAt: Date.now() + 40 })
     await expect(out.bodyText()).rejects.toMatchObject({ name: 'TimeoutError' })
+  })
+})
+
+describe('resilientFetch: certificate failures', () => {
+  it('maps a thrown certificate or handshake error to tls_error and records its code', async () => {
+    const expired = Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' })
+    const out = await resilientFetch(U, scripted([expired]))
+    expect(out).toMatchObject({ kind: 'failure', failureReason: 'tls_error', status: null, finalUrl: U })
+    expect(out.trace).toContainEqual({ at: expect.any(Number), event: 'request_failed', detail: { reason: 'tls_error', error: 'Error', code: 'CERT_HAS_EXPIRED' } })
+    // Node's fetch wraps the socket's error as a cause; an EPROTO names SSL in its message.
+    const wrapped = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('self-signed certificate'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' }) })
+    expect((await resilientFetch(U, scripted([wrapped]))).failureReason).toBe('tls_error')
+    const eproto = Object.assign(new Error('write EPROTO 0A000410:SSL routines:ssl3_read_bytes:sslv3 alert handshake failure'), { code: 'EPROTO' })
+    expect((await resilientFetch(U, scripted([eproto]))).failureReason).toBe('tls_error')
+    expect(isTlsError(Object.assign(new Error('bad name'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }))).toBe(true)
+    expect(isTlsError(Object.assign(new Error('bad version'), { code: 'ERR_SSL_WRONG_VERSION_NUMBER' }))).toBe(true)
+    // Other transport errors stay connection errors, with their code on the record too.
+    const refused = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })
+    const connection = await resilientFetch(U, scripted([refused]))
+    expect(connection.failureReason).toBe('connection_error')
+    expect(connection.trace[0]?.detail).toMatchObject({ reason: 'connection_error', code: 'ECONNREFUSED' })
+    expect(isTlsError(refused)).toBe(false)
+    expect(isTlsError(Object.assign(new Error('write EPROTO: protocol error on a plain socket'), { code: 'EPROTO' }))).toBe(false)
   })
 })

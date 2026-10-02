@@ -37,7 +37,20 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
    * rung produced so far, or `failed` with `timeout`, never an error.
    */
   timeout?: number
+  /**
+   * The http lane alone, no browser escalation: a page that needs script
+   * execution returns the http lane's own verdict (a shell is
+   * `failed`/`empty_unverified`, never rendered), the ladder audit records
+   * the rungs it dropped (`ladder_channels_filtered`), and `agentHints` says
+   * when the http lane asked for the browser lane. Not a lane option: the
+   * engine selects channels by it. Default false. A URL the server binds to
+   * the browser lane refuses it with HTTP 400.
+   */
+  fastMode?: boolean
 }
+
+/** The caveats a scrape response may carry for an agent: what to change about the request, in one sentence each. */
+export type AgentHints = readonly string[]
 
 export interface ScrapeRequest extends PageOptions {
   url: string
@@ -64,7 +77,7 @@ export interface RobotsUrlOverride extends RobotsOverride {
 }
 
 /** `evidenceRecord` is set on every response the API sends (see evidenceRecord.ts). */
-export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord }
+export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord; agentHints?: AgentHints }
 
 export interface CompactScrapeResponse {
   requestedUrl: string
@@ -99,6 +112,8 @@ export interface CompactScrapeResponse {
   file?: FetchResult['file']
   /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell), as on the full response; absent when it had none. */
   warnings?: FetchResult['warnings']
+  /** Present when the request itself left something on the table (`fastMode` declined a browser hop the http lane asked for), as on the full response. */
+  agentHints?: AgentHints
   truncated: boolean
   truncatedAt: number | null
   usage: FetchResult['usage'] & { totalMs: number }
@@ -216,7 +231,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS] as const
@@ -557,7 +572,69 @@ function readSelectors(value: unknown, name: string): readonly string[] | undefi
   return (value as string[]).map((item) => item.trim())
 }
 
-/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags and excludeTags, shared by scrape, batch and crawl. */
+/** Largest number of custom request headers, and the longest value, a request may carry. */
+export const MAX_REQUEST_HEADERS = 32
+export const MAX_REQUEST_HEADER_VALUE_LENGTH = 4096
+/** An RFC 7230 token: the characters a header name may hold. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/
+/** Headers that are the lane's own: the declared identity, credentials and the transport. */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization', 'cookie'])
+const TRANSPORT_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'connection', 'transfer-encoding', 'te', 'trailer', 'upgrade', 'keep-alive', 'proxy-connection', 'expect', 'accept-encoding'])
+
+/**
+ * Why a request header (lower-cased name) cannot be sent on a caller's
+ * behalf, or null when it can. The User-Agent and the client hints are
+ * W2L's declared identity, which no option overrides; credentials belong to
+ * the authed session path, which the record names; transport headers are
+ * the lane's. The lanes apply the same rule to what reaches them.
+ */
+export function headerRefusal(name: string): string | null {
+  if (name === 'user-agent' || name.startsWith('sec-ch-') || name.startsWith('sec-fetch-')) return `headers.${name} is refused: the User-Agent and client hints are W2L's declared identity`
+  if (CREDENTIAL_HEADERS.has(name)) return `headers.${name} is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record`
+  if (TRANSPORT_HEADERS.has(name)) return `headers.${name} is refused: transport headers are set by the lane`
+  return null
+}
+
+/**
+ * Custom request headers: an object of at most 32 string values, each name
+ * an RFC 7230 token given once (lower-cased here), each value at most 4096
+ * characters without CR, LF or NUL. A name the lane cannot send on the
+ * caller's behalf (headerRefusal) is refused by name.
+ */
+export function readHeaders(value: unknown, name = 'headers'): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some((item) => typeof item !== 'string')) {
+    throw new RequestError(`${name} must be an object of string values`)
+  }
+  const entries = Object.entries(value as Record<string, string>)
+  if (entries.length > MAX_REQUEST_HEADERS) throw new RequestError(`${name} must contain at most ${MAX_REQUEST_HEADERS} entries`)
+  const headers: Record<string, string> = {}
+  for (const [given, item] of entries) {
+    if (!HEADER_NAME.test(given)) throw new RequestError(`${name}.${given} is not a valid header name`)
+    const lower = given.toLowerCase()
+    const refusal = headerRefusal(lower)
+    if (refusal !== null) throw new RequestError(name === 'headers' ? refusal : refusal.replace(/^headers\./, `${name}.`))
+    if (lower in headers) throw new RequestError(`${name}.${lower} is given twice`)
+    if (item.length > MAX_REQUEST_HEADER_VALUE_LENGTH || /[\r\n\0]/.test(item)) {
+      throw new RequestError(`${name}.${lower} must be a string of at most ${MAX_REQUEST_HEADER_VALUE_LENGTH} characters without control characters`)
+    }
+    headers[lower] = item
+  }
+  return headers
+}
+
+function readBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'boolean') throw new RequestError(`${name} must be a boolean`)
+  return value
+}
+
+/** The mobile identity is a browser's; the research identity declares a bot and has no device to emulate. */
+function checkMobileMode(mode: ApiCrawlMode | undefined, mobile: boolean | undefined): void {
+  if (mode === 'research' && mobile === true) throw new RequestError('mobile is not available in research mode: the research identity declares a bot, not a device')
+}
+
+/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode and blockAds, shared by scrape, batch and crawl. */
 function readPageOptions(rec: Record<string, unknown>): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
@@ -566,6 +643,11 @@ function readPageOptions(rec: Record<string, unknown>): PageOptions {
   }
   const includeTags = readSelectors(rec.includeTags, 'includeTags')
   const excludeTags = readSelectors(rec.excludeTags, 'excludeTags')
+  const headers = readHeaders(rec.headers)
+  const mobile = readBoolean(rec.mobile, 'mobile')
+  const skipTlsVerification = readBoolean(rec.skipTlsVerification, 'skipTlsVerification')
+  const fastMode = readBoolean(rec.fastMode, 'fastMode')
+  const blockAds = readBoolean(rec.blockAds, 'blockAds')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -573,6 +655,11 @@ function readPageOptions(rec: Record<string, unknown>): PageOptions {
     ...(maxFileBytes === undefined ? {} : { maxFileBytes: maxFileBytes as number }),
     ...(includeTags === undefined ? {} : { includeTags }),
     ...(excludeTags === undefined ? {} : { excludeTags }),
+    ...(headers === undefined ? {} : { headers }),
+    ...(mobile === undefined ? {} : { mobile }),
+    ...(skipTlsVerification === undefined ? {} : { skipTlsVerification }),
+    ...(fastMode === undefined ? {} : { fastMode }),
+    ...(blockAds === undefined ? {} : { blockAds }),
   }
 }
 
@@ -582,14 +669,17 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
+  const mode = readMode(rec.mode)
+  const page = readPageOptions(rec)
+  checkMobileMode(mode, page.mobile)
   return {
     url: readUrl(rec.url),
-    mode: readMode(rec.mode),
+    mode,
     allowlistedDomains: readAllowlist(rec.allowlistedDomains),
     formats: readFormats(rec.formats),
     includeLinks: rec.includeLinks as boolean | undefined,
     debug: rec.debug as boolean | undefined,
-    ...readPageOptions(rec),
+    ...page,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
   }
 }
@@ -602,9 +692,12 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     throw new RequestError('useCached must be a boolean')
   }
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
+  const mode = readMode(rec.mode)
+  const page = readPageOptions(rec)
+  checkMobileMode(mode, page.mobile)
   return {
     url: readUrl(rec.url),
-    mode: readMode(rec.mode),
+    mode,
     maxPages: readBound(rec.maxPages, 'maxPages', 1),
     maxDepth: readBound(rec.maxDepth, 'maxDepth', 0),
     useCached,
@@ -613,7 +706,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     includeLinks: rec.includeLinks as boolean | undefined,
     includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
     excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
-    ...readPageOptions(rec),
+    ...page,
   }
 }
 
@@ -627,9 +720,12 @@ export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   if (new Set(urls.map(url => new URL(url).href)).size !== urls.length) throw new RequestError('urls must be unique')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
+  const mode = readMode(rec.mode)
+  const page = readPageOptions(rec)
+  checkMobileMode(mode, page.mobile)
   return {
-    urls, mode: readMode(rec.mode), formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
-    ...readPageOptions(rec),
+    urls, mode, formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
+    ...page,
     ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
   }
 }

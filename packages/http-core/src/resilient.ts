@@ -13,8 +13,9 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
  *    maxRetries times; 429 and every other status never retry
  *  - honour Retry-After seconds / HTTP-date without shortening server waits
  *  - map thrown transport errors by name: undici HeadersTimeoutError /
- *    BodyTimeoutError -> timeout, DnsLookupError -> dns_error, everything
- *    else -> connection_error
+ *    BodyTimeoutError -> timeout, DnsLookupError -> dns_error, a certificate
+ *    or handshake failure (by error code, isTlsError) -> tls_error,
+ *    everything else -> connection_error
  *
  * Counting semantics: `attemptCount` counts logical attempts (the outer
  * loop; one attempt may contain a whole redirect chain), `requestCount`
@@ -32,6 +33,32 @@ function hasErrorNamed(error: unknown, name: 'SsrfDeniedError' | 'DnsLookupError
     current = 'cause' in current ? current.cause : null
   }
   return false
+}
+
+/** The first `code` (Node's `ERR_*`, OpenSSL's `CERT_*`, undici's `UND_ERR_*`) on an error or up its cause chain. */
+function errorCode(error: unknown): string | null {
+  let current = error
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
+    const code = (current as { code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code
+    current = 'cause' in current ? current.cause : null
+  }
+  return null
+}
+
+/** The certificate and handshake failures Node and OpenSSL report by code; a bad certificate is a fact about the host, not a connection error. */
+const TLS_ERROR_CODES: ReadonlySet<string> = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'ERR_TLS_CERT_ALTNAME_INVALID',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT', 'CERT_UNTRUSTED', 'CERT_REVOKED',
+  'HOSTNAME_MISMATCH', 'ERR_TLS_HANDSHAKE_TIMEOUT',
+])
+
+/** Whether a thrown transport error is a TLS failure: a listed code, an `ERR_SSL_*` code, or an `EPROTO` whose message names SSL or TLS. */
+export function isTlsError(error: unknown): boolean {
+  const code = errorCode(error)
+  if (code === null) return false
+  if (TLS_ERROR_CODES.has(code) || code.startsWith('ERR_SSL_')) return true
+  return code === 'EPROTO' && /\b(ssl|tls)\b/i.test(error instanceof Error ? error.message : String(error))
 }
 
 export interface ResilientHttpConfig extends ExecutionBudget {
@@ -93,6 +120,7 @@ export type ResilientFailureReason =
   | 'timeout'
   | 'dns_error'
   | 'connection_error'
+  | 'tls_error'
   | 'http_error'
   | 'redirect_loop'
   | 'redirect_limit'
@@ -273,8 +301,11 @@ export async function resilientFetch(
                 ? 'dns_error'
                 : name === 'BodyTooLargeError'
                   ? 'body_too_large'
-                  : 'connection_error'
-        trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err) } })
+                  : isTlsError(err)
+                    ? 'tls_error'
+                    : 'connection_error'
+        const code = errorCode(err)
+        trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err), ...(code === null ? {} : { code }) } })
         return {
           kind: 'failure',
           status: null,

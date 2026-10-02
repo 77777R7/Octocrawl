@@ -114,10 +114,10 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)')
-    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], mobile: true, waitFor: 500 })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
-    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], headers: {}, waitFor: 1 } }))
-      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.headers; unsupported format: screenshot')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: screenshot')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
@@ -323,5 +323,19 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(firecrawlCrawlCounts('running', counts, 3)).toEqual({ completed: 3, total: 8 })
     expect(firecrawlCrawlCounts('paused', counts, null)).toEqual({ completed: 3, total: null })
     expect(firecrawlCrawlCounts('cancelled', counts, 3)).toEqual({ completed: 3, total: 5 })
+  })
+
+  it('maps headers, mobile, skipTlsVerification, fastMode and blockAds for scrape and for a crawl\'s scrapeOptions, with the native refusals', () => {
+    const url = 'https://example.com/'
+    const options = { headers: { 'X-Test': 'w2l' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
+    expect(parseFirecrawlScrapeRequest({ url, ...options })).toEqual({ url, ...options, headers: { 'x-test': 'w2l' } })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: options })).toMatchObject({ ...options, headers: { 'x-test': 'w2l' } })
+    expect(() => parseFirecrawlScrapeRequest({ url, headers: { 'User-Agent': 'curl/8' } })).toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
+    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { headers: { Cookie: 'sid=1' } } })).toThrow('headers.cookie is refused')
+    expect(() => parseFirecrawlScrapeRequest({ url, mobile: 'yes' })).toThrow('mobile must be a boolean')
+    expect(() => parseFirecrawlScrapeRequest({ url, mode: 'research', mobile: true })).toThrow('unsupported parameter: mode')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /skipTlsVerification/.test(d) && /hosted/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /blockAds/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /headers never override/.test(d))).toBe(true)
   })
 })

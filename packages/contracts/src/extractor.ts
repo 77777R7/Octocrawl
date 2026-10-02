@@ -327,6 +327,14 @@ export interface ExtractorOptions {
    * fail a selection for it.
    */
   includeSelectors?: readonly string[]
+  /**
+   * Remove ad containers (id or class tokens such as `ad`, `advertisement`,
+   * `sponsored`, `promo`) and cookie-consent banners before the cascade
+   * runs. Default true, which is what every extraction did before the
+   * switch existed; false keeps them. The structural cleaning (scripts,
+   * styles, navigation, forms) is not affected.
+   */
+  blockAds?: boolean
 }
 
 export interface Extractor {

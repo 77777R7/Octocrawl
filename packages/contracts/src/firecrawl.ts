@@ -35,7 +35,12 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Formats other than markdown/links/html/rawHtml and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode and blockAds; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false.',
+  'headers never override the User-Agent, the client hints, a credential (authorization, cookie) or a transport header: such a header is HTTP 400 naming it, where Firecrawl sends it. The headers go to the requested origin after the declared identity and are on the record (the trace, the browser lane\'s signed sentHeaders); the http rung withholds them from a cross-origin redirect hop, the browser rung\'s Chromium carries them through a server redirect as a browser does and records that.',
+  'mobile selects a declared Android Chrome identity (User-Agent, client hints, 412x915 viewport, touch) that robots.txt is evaluated against and the record carries; the page is whatever the site serves to it, with no DOM rewriting. It is refused with mode research.',
+  'skipTlsVerification relaxes certificate verification for one local request and its robots.txt lookup, recorded in the trace (tls_verification_skipped) and a tls_unverified warning the native response carries; a hosted W2L refuses it with HTTP 400. Without it a bad certificate is success: false with failed: tls_error. Firecrawl\'s Python SDK sends true by default; W2L verifies by default.',
+  'fastMode keeps the http rung alone: a page that needs scripts is success: false with failed: empty_unverified, never rendered; waitFor has no effect under it. Firecrawl\'s fast mode still renders.',
+  'blockAds (default true) aborts requests to a bundled list of about 50 ad-serving hosts on the local browser rung and removes ad and cookie-banner elements before extraction; false keeps them. The list is curated, not EasyList: ads from hosts outside it are not blocked.',
   'html is the cleaned HTML the markdown is written from: the main content, the whole page without scripts, styles, form controls and embedded media when onlyMainContent is false, or a <body> holding the includeTags elements. rawHtml is the page as the answering rung received it: the response body on the HTTP rung, the rendered DOM on a browser rung. Both are null for a file and for a page that is success: false.',
   'includeTags keeps only the named elements, in document order, whatever onlyMainContent says; excludeTags removes elements from the main content, the whole page and an includeTags selection. A selector that does not parse, or that uses a sibling combinator, a positional pseudo-class, :has() or another pseudo-class W2L does not match, is rejected with HTTP 400.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
@@ -131,7 +136,7 @@ const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
 /** W2L page metadata fields that Firecrawl's `metadata` also has. */
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
-const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags'] as const
+const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
 
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
@@ -174,7 +179,7 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   return parseCrawlStartRequest(native)
 }
 
-/** The scrape options the shim maps: formats (markdown, links, html, rawHtml), onlyMainContent, waitFor, timeout, includeTags and excludeTags; removeBase64Images only as true, which W2L always does. */
+/** The scrape options the shim maps: formats (markdown, links, html, rawHtml), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode and blockAds; removeBase64Images only as true, which W2L always does. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
   checkShimKeys(rec, prefix, [...keys, 'formats', 'removeBase64Images', ...SHIM_PAGE_OPTIONS], problems)
   checkShimFixedValue(rec, prefix, 'removeBase64Images', problems)

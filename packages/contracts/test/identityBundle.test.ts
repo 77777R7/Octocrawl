@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   BROWSER_FINGERPRINT,
+  MOBILE_BROWSER_FINGERPRINT,
   assertIdentityBundle,
+  browserUserAgentMetadata,
+  checkIdentityHonesty,
+  serializeBrands,
   formatIdentitySummary,
   headersFromIdentity,
   identityBundleFrom,
@@ -180,5 +184,45 @@ describe('identityForRoute — changing IP is not changing identity', () => {
     expect(() => identityForRoute('proxy', { proxy }, 128, { locale: 'en-GB' })).toThrow(
       /not changing identity/,
     )
+  })
+})
+
+describe('the mobile identity', () => {
+  it('is coherent, differs from the desktop one only in UA, mobile hint, platform, viewport, screen, scale and touch, and passes the honesty check', () => {
+    const desktop = identityForRoute('standard', null, 128)
+    const mobile = identityForRoute('standard', null, 128, undefined, 'mobile')
+    expect(identityBundleIssues(mobile)).toEqual([])
+    expect(mobile.userAgent).toBe('Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36')
+    expect(mobile.clientHints).toEqual({ ...desktop.clientHints, 'sec-ch-ua-mobile': '?1', 'sec-ch-ua-platform': '"Android"' })
+    expect(mobile).toMatchObject({ locale: desktop.locale, timezoneId: desktop.timezoneId, viewport: { width: 412, height: 915 }, screen: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true })
+    expect(mobile).toMatchObject(MOBILE_BROWSER_FINGERPRINT)
+    expect(desktop).toMatchObject(BROWSER_FINGERPRINT)
+    const differing = (Object.keys(mobile) as Array<keyof typeof mobile>).filter((key) => JSON.stringify(mobile[key]) !== JSON.stringify(desktop[key]))
+    expect(differing.sort()).toEqual(['clientHints', 'deviceScaleFactor', 'hasTouch', 'isMobile', 'screen', 'userAgent', 'viewport'])
+    const identity = modeIdentity('standard', 128, null, null, 'mobile')
+    expect(identity.device).toBe('mobile')
+    expect(modeIdentity('standard', 128).device).toBe('desktop')
+    const sent = Object.entries(headersFromIdentity(mobile)).map(([name, value]) => ({ name, value }))
+    expect(checkIdentityHonesty(identity, { headers: sent })).toEqual({ honest: true, mismatches: [] })
+    // A mobile hint on a desktop UA, or the reverse, is a contradiction, not a device.
+    expect(identityBundleIssues({ ...desktop, clientHints: { ...desktop.clientHints, 'sec-ch-ua-mobile': '?1' } }).some((i) => i.includes('mobile mismatch'))).toBe(true)
+    expect(identityBundleIssues({ ...mobile, isMobile: false }).some((i) => i.includes('mobile mismatch'))).toBe(true)
+    // Research declares a bot: no device, whatever is asked.
+    expect(modeIdentity('research', 128, null, null, 'mobile')).not.toHaveProperty('device')
+    expect(identityForRoute('research', null, 128, undefined, 'mobile').userAgent).toContain('w2l-research')
+    expect(formatIdentitySummary(mobile)).toBe('Chrome/128 · Android · en-US · mobile')
+  })
+
+  it('backs each declared identity with user-agent metadata whose brands, platform and mobile flag are the declared hints', () => {
+    for (const device of ['desktop', 'mobile'] as const) {
+      const hints = modeIdentity('standard', 128, null, null, device).clientHints
+      const metadata = browserUserAgentMetadata(128, device)
+      expect(serializeBrands(metadata.brands)).toBe(hints['sec-ch-ua'])
+      expect(`"${metadata.platform}"`).toBe(hints['sec-ch-ua-platform'])
+      expect(metadata.mobile ? '?1' : '?0').toBe(hints['sec-ch-ua-mobile'])
+      expect(metadata.fullVersionList.map((entry) => entry.version)).toEqual(['128.0.0.0', '128.0.0.0', '24.0.0.0'])
+    }
+    expect(browserUserAgentMetadata(128, 'mobile')).toMatchObject({ model: 'Pixel 7', platformVersion: '14.0.0', mobile: true })
+    expect(browserUserAgentMetadata(128)).toMatchObject({ model: '', platform: 'macOS', mobile: false })
   })
 })
