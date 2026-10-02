@@ -20,6 +20,8 @@ export { routePage, pageSignalsFor, selectCardList, selectList, selectTable, sel
 export type { RouteDecision } from './route.js'
 export { htmlToMarkdown, LAYOUT_MARKERS } from './markdown.js'
 export type { MarkdownOptions } from './markdown.js'
+export { detectRenderSignals, rawSignals, countEmptyTables } from './render.js'
+export type { RawRenderSignals } from './render.js'
 export { EXTRACTOR_VERSION } from './version.js'
 export { collectLinks } from './links.js'
 export { collectLabelledValues } from './labels.js'

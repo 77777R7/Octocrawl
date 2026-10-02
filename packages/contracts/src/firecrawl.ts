@@ -27,6 +27,7 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
 export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
   'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
+  'A page whose server HTML is a shell for data its scripts fill in is fetched again on the browser rung, and the rendered page is the answer when it holds more; otherwise the HTTP page is returned with a client_rendered_suspected warning on the native response, which /fc does not pass through. Firecrawl renders every page in a browser.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',

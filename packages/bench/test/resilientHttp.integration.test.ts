@@ -255,6 +255,40 @@ describe('HTTP lane on a page with no main content', () => {
   })
 })
 
+describe('HTTP lane on a client-rendered shell', () => {
+  it('keeps the success, warns that the capture may be a shell, and says why in the trace', async () => {
+    const { createServer } = await import('node:http')
+    // A data page whose grid a script fills in: prose the lane extracts as a
+    // success, and a table with a row but no cells beside the grid's script.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Monthly index</title></head><body><main><h1>Monthly index</h1>' +
+          '<p>The monthly index is published for every gauge station in the survey area, and revised when late readings arrive.</p>' +
+          '<table id="grid"><thead><tr></tr></thead><tbody></tbody></table>' +
+          `<script>/* ${'grid loader '.repeat(120)} */ document.getElementById('grid').innerHTML = '<tr><td>Ravine gauge station</td><td>1.10</td></tr>'</script>` +
+          '</main></body></html>',
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/index`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Monthly index')
+      expect(out.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (empty_table_with_scripts); this HTTP capture may be a shell.' }])
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'empty_table_with_scripts', markers: [], emptyTables: 1, scriptChars: expect.any(Number), textChars: expect.any(Number) }) }))
+      // The table has a row, so it is not one of the row-less shells quality_low_yield counts: this signal stands on its own.
+      expect(out.trace.some((event) => event.event === 'quality_low_yield')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
 describe('hosted network policy on the HTTP arm', () => {
   it('denies cloud metadata before a wire request', async () => {
     const hosted = new ResilientHttpSubject('standard', hostedNetworkPolicy())

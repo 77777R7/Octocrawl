@@ -205,6 +205,37 @@ export interface DocumentExtraction {
   labelledValues?: readonly LabelledValue[]
 }
 
+/** The rule that decided a page's data is most likely rendered client-side (see RenderSignals). */
+export type RenderReason = 'empty_table_with_scripts' | 'empty_app_root' | 'script_shell' | 'js_fallback' | 'hydration_shell' | 'aria_busy'
+
+/** A client-side rendering marker found in the page as received (see RenderSignals). */
+export type RenderMarker = 'hydration_state' | 'app_root_empty' | 'noscript_notice' | 'js_fallback_marker' | 'aria_busy'
+
+/**
+ * Evidence that a page fills its data in with JavaScript after load, read
+ * from the server HTML. A shell with an empty app root, a table with no
+ * cells beside kilobytes of script, or an explicit "enable JavaScript"
+ * fallback all mean the HTTP capture is not the page a browser shows.
+ */
+export interface RenderSignals {
+  /** Visible text characters after boilerplate cleaning. */
+  textChars: number
+  /** Characters of inline script in the raw document. */
+  scriptChars: number
+  /** `<table>` elements with no data cells. */
+  emptyTables: number
+  /** Markers found in the page as received. */
+  markers: readonly RenderMarker[]
+  /** True when the signals say the data is most likely rendered client-side. */
+  clientRendered: boolean
+  /**
+   * The rule that decided `clientRendered`, null when false. Every rule pairs
+   * a structural gap with script presence; a `noscript` notice alone counts
+   * only on a thin page or beside hydration state.
+   */
+  reason: RenderReason | null
+}
+
 export interface ExtractorOutput {
   /** Page title, or null when none could be found. */
   title: string | null
@@ -254,6 +285,13 @@ export interface ExtractorOutput {
    * a table or a chart, is not in this HTML.
    */
   fetchPreloads?: number
+  /**
+   * Client-side rendering signals read from the page as received: whether
+   * its data is most likely filled in by scripts after load, and why. A lane
+   * that cannot run scripts reads `clientRendered` as a caveat on its
+   * capture; one that rendered the page has no use for it.
+   */
+  render?: RenderSignals
   /** Label/value pairs of the main content (see LabelledValue). */
   labelledValues?: readonly LabelledValue[]
   /** Monotonic extractor stage timings. */

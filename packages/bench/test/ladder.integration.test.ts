@@ -76,6 +76,22 @@ beforeAll(async () => {
           'rows.map((row) => "<tr><td>" + row[0] + "</td><td>" + row[1] + "</td></tr>").join("") + "</table>" })</script>' +
           '</main></body></html>',
       )
+    } else if (req.url === '/spa/table-shell') {
+      // A data page whose grid a script fills in: prose the http lane
+      // extracts as a success, and a table with a row but no cells beside a
+      // script heavy enough to count. The http lane flags the shell and the
+      // ladder offers the page to the browser, which captures the grid.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Monthly index</title></head><body><main><h1>Monthly index</h1>' +
+          '<p>The monthly index is published for every gauge station in the survey area.</p>' +
+          '<p>Values are revised when late readings arrive from the field offices.</p>' +
+          '<h2>Notes</h2><p>Stations that reported fewer than twenty days in a month are shown without a value.</p>' +
+          '<table id="grid"><thead><tr></tr></thead><tbody></tbody></table>' +
+          `<script>/* ${'grid loader '.repeat(120)} */ document.getElementById('grid').innerHTML = ` +
+          `'<tr><th>Station</th><th>Index</th></tr><tr><td>Ravine gauge station</td><td>1.10</td></tr>'</script>` +
+          '</main></body></html>',
+      )
     } else if (req.url === '/fetched-table.json') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify([['Canada', '13.42 t'], ['Kenya', '0.41 t'], ['World', '4.73 t']]))
@@ -203,6 +219,35 @@ describe('ladder with real subjects on a real server', () => {
         channel: 'http',
         detail: { escalate: 'quality_low_yield', status: 'success' },
       })
+    } finally {
+      await browser.teardown()
+    }
+  })
+
+  it('client-rendered table shell: http succeeds on the prose, flags the shell, and the browser returns the grid', async () => {
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const runner = new LadderRunner(
+        [
+          { id: 'http', identity: IDENTITY, fetch: (url) => new ResilientHttpSubject().fetch(url) },
+          { id: 'browser_local', identity: IDENTITY, fetch: (url) => browser.fetch(url) },
+        ],
+        { mode: 'authed' },
+      )
+
+      const run = await runner.run(`${base}/spa/table-shell`)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      const steps = run.ladderTrace.filter((t) => t.event === 'ladder_step')
+      expect(steps[0]).toMatchObject({
+        channel: 'http',
+        detail: { escalate: 'quality_client_rendered', status: 'success' },
+      })
+      expect(run.result.status).toBe('success')
+      expect(run.result.lane).toBe('browser_local')
+      expect(run.result.markdown).toMatch(/\| Ravine gauge station \| 1\.10 \|/)
+      // The browser's capture is the rendered page: it carries no shell warning.
+      expect(run.result.warnings ?? []).toEqual([])
+      expect(run.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: true }])
     } finally {
       await browser.teardown()
     }

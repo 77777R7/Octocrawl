@@ -97,7 +97,7 @@ export interface CompactScrapeResponse {
   json?: StructuredExtractionResult | null
   /** The file the response was, as on the full response; absent for a web page. */
   file?: FetchResult['file']
-  /** The fetch's caveats (a recorded robots override), as on the full response; absent when it had none. */
+  /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell), as on the full response; absent when it had none. */
   warnings?: FetchResult['warnings']
   truncated: boolean
   truncatedAt: number | null

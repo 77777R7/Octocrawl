@@ -14,6 +14,7 @@
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
+import { detectRenderSignals, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
@@ -117,6 +118,10 @@ export class ExtractTf implements Extractor {
     const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
       (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('preload') &&
       (link.getAttribute('as') ?? '').trim().toLowerCase() === 'fetch').length
+    // Rendering signals live in scripts and fallback markup that cleaning
+    // removes, so they are read from the raw tree as well; the visible text
+    // they are weighed against is the cleaned page's (detectRenderSignals).
+    const raw = rawSignals(doc.document)
 
     // The caller's exclusions (pruneSelectors) are matched here, against
     // the page as it was received: cleaning unwraps a form and removes a
@@ -236,6 +241,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
+      render: detectRenderSignals(raw, doc.document),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

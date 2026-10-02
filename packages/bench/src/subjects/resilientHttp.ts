@@ -636,6 +636,34 @@ export class ResilientHttpSubject implements SubjectAdapter {
       })
     }
 
+    // Client-side rendering: the page as received looks like a shell for
+    // data its scripts fill in (a table with no cells beside scripts, an
+    // empty app root, an "enable JavaScript" fallback; extract-tf's
+    // render.ts). The status stays what the content earned; the result says
+    // so in a warning, and the ladder reads the event as it reads
+    // quality_low_yield: an offer to the browser lane, which captures the
+    // rendered page and never raises it.
+    const render = extracted.render
+    const warnings: FetchWarning[] = []
+    if (render !== undefined && render.clientRendered) {
+      warnings.push({
+        code: 'client_rendered_suspected',
+        message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
+      })
+      trace.push({
+        at: wallMs,
+        lane: 'http',
+        event: 'quality_client_rendered',
+        detail: {
+          reason: render.reason,
+          markers: render.markers,
+          emptyTables: render.emptyTables,
+          textChars: render.textChars,
+          scriptChars: render.scriptChars,
+        },
+      })
+    }
+
     return finish({
       ...base,
       status: 'success',
@@ -645,6 +673,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       lane: 'http',
       escalations: [],
       markdown,
+      ...(warnings.length > 0 ? { warnings } : {}),
       links,
       metadata: extracted.metadata,
       document: {

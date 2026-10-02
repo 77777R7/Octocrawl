@@ -295,6 +295,52 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     expect(extractTf.extract(ARTICLE).fetchPreloads).toBe(0)
   })
 
+  it('flags a table shell beside scripts as client-rendered, not a static empty table', () => {
+    // A statistics table viewer (StatCan): prose, a table whose rows a script
+    // fills in after load, and the viewer's scripts.
+    const prose = '<p>The table below lists the monthly consumer price index by geography and product group for the reference period.</p>'
+    const shell = `<!doctype html><html><body><main><h1>Table 18-10-0006-01</h1>${prose}<table id="grid"><thead><tr></tr></thead><tbody><tr></tr></tbody></table><script>${'y'.repeat(1_500)}</script></main></body></html>`
+    expect(extractTf.extract(shell).render).toMatchObject({ clientRendered: true, reason: 'empty_table_with_scripts', emptyTables: 1, scriptChars: 1_500 })
+
+    const stat = `<!doctype html><html><body><article><h1>Empty table</h1>${prose}<table></table><p>Text after the table.</p></article></body></html>`
+    expect(extractTf.extract(stat).render).toMatchObject({ clientRendered: false, reason: null, emptyTables: 1, scriptChars: 0, markers: [] })
+  })
+
+  it('flags an explicit JavaScript fallback when script outweighs text', () => {
+    // ourworldindata.org's grapher: a fallback picture the page hides once
+    // its scripts run, beside the chart's configuration blob.
+    const html = `<!doctype html><html><body><main><h1>Emissions per capita</h1>
+<p>Carbon dioxide emissions per person, measured in tonnes per year across the selected countries.</p>
+<figure class="GrapherWithFallback__fallback"><picture class="js--hide-if-js-enabled"><img src="/fallback.png" alt=""></picture></figure>
+<script>window._OWID_GRAPHER_CONFIG = {${'"k":1,'.repeat(300)}"tab":"table"}</script>
+</main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.render).toMatchObject({ clientRendered: true, reason: 'js_fallback', markers: ['hydration_state', 'js_fallback_marker'] })
+    expect(out.escalate).toBe(false)
+  })
+
+  it('still escalates a script shell and flags it as client-rendered', () => {
+    const html = `<!doctype html><html><body><div id="root">Loading…</div><script>${'x'.repeat(3_000)}</script></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.escalate).toBe(true)
+    expect(out.mainHtml).toBe('')
+    expect(out.render).toMatchObject({ clientRendered: true, reason: 'empty_app_root', markers: ['app_root_empty'] })
+  })
+
+  it('does not take a long static page with a noscript notice for a shell', () => {
+    // GOV.UK's reports carry a generic "enable JavaScript" line beside their
+    // analytics scripts: a notice alone counts only on a thin page.
+    const paragraph = (i: number) => `<p>Paragraph ${i}: household consumption in the region rose in the quarter, led by spending on transport and recreation, while spending on housing was flat.</p>`
+    const page = (paragraphs: number) => `<!doctype html><html><body><noscript><p>Please enable JavaScript to use this site.</p></noscript>
+<main><h1>Subnational consumption</h1>${Array.from({ length: paragraphs }, (_, i) => paragraph(i + 1)).join('\n')}</main>
+<script>${'z'.repeat(6_000)}</script></body></html>`
+    const report = extractTf.extract(page(30)).render
+    expect(report).toMatchObject({ clientRendered: false, reason: null, markers: ['noscript_notice'], scriptChars: 6_000 })
+    expect(report?.textChars).toBeGreaterThan(1_500)
+    // The same notice on a thin page is what a script-filled shell looks like.
+    expect(extractTf.extract(page(3)).render).toMatchObject({ clientRendered: true, reason: 'js_fallback' })
+  })
+
   it('filters link-farm paragraphs by link density', () => {
     const html = `<!doctype html><html><body><article>
 <h1>Directory</h1>

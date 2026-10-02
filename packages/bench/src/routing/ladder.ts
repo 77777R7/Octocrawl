@@ -136,14 +136,25 @@ function summarize(channelsTried: readonly string[], attempts: readonly { channe
 /**
  * Whether a result is asking to escalate: the subject itself flagged the
  * escalation (escalations carries an unresolved hop) or — the quality case —
- * a successful HTTP extraction was thin and low-confidence. The ladder
- * honours the subject's own ask rather than re-deriving it.
+ * a successful HTTP extraction was thin and low-confidence, or read as a
+ * client-rendered shell. The ladder honours the subject's own ask rather
+ * than re-deriving it.
  */
 function resultRequestsEscalation(result: FetchResult): boolean {
-  return (
-    result.escalations.some((e) => e.improved === null) ||
-    result.trace.some((t) => t.event === 'quality_low_yield')
-  )
+  return result.escalations.some((e) => e.improved === null) || qualityEscalationEvent(result) !== null
+}
+
+/**
+ * Quality signals the http lane attaches to a contentful result: the content
+ * is thin and low-confidence (`quality_low_yield`), or the page looks
+ * client-rendered, so the HTTP capture may be a shell
+ * (`quality_client_rendered`). Either is an offer to the next lane, not a
+ * rewritten verdict; the first one in the trace names the hop.
+ */
+const QUALITY_ESCALATION_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
+
+function qualityEscalationEvent(result: FetchResult): string | null {
+  return result.trace.find((t) => QUALITY_ESCALATION_EVENTS.has(t.event))?.event ?? null
 }
 
 /** Content size as the ladder's improvement metric: main-content tokens,
@@ -204,8 +215,10 @@ export class LadderRunner {
    *   2. the result's own `escalations` array — empty_unverified /
    *      extract_low_confidence requests from the subject are honoured as
    *      asks, not re-derived;
-   *   3. `quality_low_yield` — a thin, low-confidence success from the http
-   *      lane gets offered to a higher lane instead of being the answer.
+   *   3. `quality_low_yield` / `quality_client_rendered` — a thin,
+   *      low-confidence success from the http lane, or one whose page reads
+   *      as a shell its scripts fill in, gets offered to a higher lane
+   *      instead of being the answer.
    * All of it lands in `ladderTrace`. The signed compliance record remains
    * the winning subject's own; the ladder audit travels alongside it,
    * unrewritten and unsigned — that boundary is deliberate.
@@ -413,12 +426,13 @@ export class LadderRunner {
           })
         }
 
-        // Quality escalation: a thin, low-confidence http success is offered
-        // to the next lane rather than accepted as the answer. The status is
-        // NOT rewritten — the record keeps the real success and its real
-        // token count; the ladder just isn't done yet.
-        const thinHttp =
-          channel.id === 'http' && result.trace.some((t) => t.event === 'quality_low_yield')
+        // Quality escalation: a thin, low-confidence http success, or one
+        // whose page reads as a client-rendered shell, is offered to the next
+        // lane rather than accepted as the answer. The status is NOT
+        // rewritten — the record keeps the real success and its real token
+        // count; the ladder just isn't done yet.
+        const qualityEvent = channel.id === 'http' ? qualityEscalationEvent(result) : null
+        const thinHttp = qualityEvent !== null
 
         // Worse-than-best: a later channel DID answer, but with less content
         // than an earlier one already produced. That is not an improvement —
@@ -435,7 +449,7 @@ export class LadderRunner {
             qualityEscalation = {
               from: 'http',
               to: 'browser_local',
-              trigger: 'quality_low_yield',
+              trigger: qualityEvent,
               improved: null,
             }
           }
@@ -446,7 +460,7 @@ export class LadderRunner {
             detail: {
               vendorId: channel.vendorId ?? null,
               status: result.status,
-              escalate: thinHttp ? 'quality_low_yield' : emptyConfirmed ? null : 'worse_than_best',
+              escalate: thinHttp ? qualityEvent : emptyConfirmed ? null : 'worse_than_best',
               ...(emptyConfirmed ? { confirmsEmpty: bestChannel?.id ?? null } : {}),
             },
           })

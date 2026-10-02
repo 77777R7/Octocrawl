@@ -191,7 +191,12 @@ export interface HandoffRequest {
  * a failure reason, which `status` and its reason fields carry.
  */
 export interface FetchWarning {
-  /** Machine-readable code. `robots_overridden`: a robots.txt rule was set aside by a recorded override. */
+  /**
+   * Machine-readable code. `robots_overridden`: a robots.txt rule was set
+   * aside by a recorded override. `client_rendered_suspected`: the HTTP
+   * lane's page looks like a shell for data its scripts fill in (see
+   * RenderSignals), so the capture may not be the page a browser shows.
+   */
   code: string
   message: string
 }
@@ -279,8 +284,10 @@ export interface FetchResult {
   links?: readonly string[]
   /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
-   * warning first when a recorded override set a robots.txt rule aside. Kept
-   * on batch items and the compact scrape response too.
+   * warning first when a recorded override set a robots.txt rule aside, then
+   * `client_rendered_suspected` when the HTTP lane read the page as a shell
+   * its scripts fill in. Kept on batch items and the compact scrape response
+   * too.
    */
   warnings?: readonly FetchWarning[]
   /** True when content was cut to fit a token budget. */

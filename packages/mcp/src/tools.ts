@@ -69,7 +69,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit.',
+    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden, or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better.',
     inputSchema: {
       type: 'object',
       properties: {

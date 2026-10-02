@@ -375,6 +375,33 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
   })
 
+  function clientRenderedHttpSuccess(url: string): FetchResult {
+    const r = contentfulResult(url, 'http')
+    return {
+      ...r,
+      warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (empty_table_with_scripts); this HTTP capture may be a shell.' }],
+      trace: [...r.trace, { at: 10, lane: 'http', event: 'quality_client_rendered', detail: { reason: 'empty_table_with_scripts', markers: [], emptyTables: 1, textChars: 180, scriptChars: 1_500 } }],
+    }
+  }
+
+  it('offers a client-rendered http success to the browser and keeps whichever answer holds more', async () => {
+    const url = 'https://example.com/p'
+    const rendered = { ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }
+    const better = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [rendered])], { mode: 'authed' }).run(url)
+    expect(better.channelsTried).toEqual(['http', 'browser_local'])
+    expect(better.result).toMatchObject({ status: 'success', lane: 'browser_local' })
+    expect(better.result.warnings).toBeUndefined()
+    expect(better.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: true }])
+    expect(better.ladderTrace[0]).toMatchObject({ event: 'ladder_step', channel: 'http', detail: { status: 'success', escalate: 'quality_client_rendered' } })
+
+    // The browser found less: the http page stays the answer, warning and all, and the hop did not pay off.
+    const thinner = { ...contentfulResult(url, 'browser_local'), markdown: 'LESS', usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 3 } }
+    const kept = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [thinner])], { mode: 'authed' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', warnings: [{ code: 'client_rendered_suspected' }] })
+    expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: false }])
+    expect(kept.ladderTrace.at(-1)).toMatchObject({ event: 'ladder_best_kept', channel: 'http' })
+  })
+
   it('accepts the browser result even when it is also thin — one quality pass, not a loop', async () => {
     const http = channel('http', [thinHttpSuccess('https://example.com/p')])
     const browser = channel('browser_local', [thinHttpSuccess('https://example.com/p')])
