@@ -35,4 +35,10 @@
   .mcp-picker-foot{padding:18px 20px 22px}
   .doc-article .mcp-picker-foot p{font-size:14px}
   .mcp-picker-foot .mcp-command-row pre{font-size:11px}
+  /* The longer name: a smaller wordmark and a nav that never wraps, so the header stays one row on 320px phones. */
+  .doc-header-inner{gap:12px;padding:0 14px}
+  .doc-brand img{width:28px;height:28px}
+  .doc-brand span{font-size:22px}
+  .doc-header nav{gap:12px;white-space:nowrap}
+  .try-link{padding:10px 12px}
 }

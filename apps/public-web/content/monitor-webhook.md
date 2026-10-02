@@ -7,7 +7,7 @@ The local MCP service can watch a public documentation page, keep its baseline a
 Complete [Connect MCP](/docs/connect-mcp/) on a Mac. `npm run first-use:local` also prepares the local HTTPS sample receiver and its signing secret in ignored files. Keep the secret value out of your conversation; MCP accepts the configured environment-variable **name**. Start with this Codex request:
 
 ```text
-Preview W2L's firecrawl-introduction preset. If its sample is valid, create the Monitor paused, configure the locally installed HTTPS receiver, then resume it. Show the run, eventId, delivery state, and receiver receipt. Pause the Monitor when the check is complete.
+Preview OctoCrawl's firecrawl-introduction preset. If its sample is valid, create the Monitor paused, configure the locally installed HTTPS receiver, then resume it. Show the run, eventId, delivery state, and receiver receipt. Pause the Monitor when the check is complete.
 ```
 
 The tool sequence is `preview_monitor` → `create_monitor` → `create_delivery_destination` → `resume_monitor` → `get_monitor` / `get_monitor_run` → `list_deliveries`. For the sample local receiver, the destination URL is `https://127.0.0.1:8788/webhook` and `secretEnv` is `W2L_WEBHOOK_SECRET_DEMO`. That loopback address is reachable only on the same Mac. A different HTTPS receiver needs its own registered URL and server-side secret configuration.
@@ -16,7 +16,7 @@ The tool sequence is `preview_monitor` → `create_monitor` → `create_delivery
 
 MCP creation starts **paused**, giving you time to register the destination. On resume, a run becomes due. The first valid observation initializes a baseline and can create an event. Compare its `eventId` with the delivery record and the receiver's stored receipt. A sent event, a `delivered` record, and one accepted receiver receipt are separate checks. A later unchanged page may produce no new change event.
 
-An event's `reason` says where a change came from. `source_changed` means the fetched page differed from the one behind the baseline, or could not be compared with it. After a W2L upgrade that reads the same page differently, a run can show `change: changed` with `changeReason: extraction_reprocessed` and a new baseline version, but no event and no delivery: the page itself did not change.
+An event's `reason` says where a change came from. `source_changed` means the fetched page differed from the one behind the baseline, or could not be compared with it. After an OctoCrawl upgrade that reads the same page differently, a run can show `change: changed` with `changeReason: extraction_reprocessed` and a new baseline version, but no event and no delivery: the page itself did not change.
 
 `run_monitor` returns a durable `runId` immediately. Use `get_monitor_run` to inspect it later; disconnecting Codex does not cancel the queued run. `pause_monitor` stops future scheduling. Local service and receiver status can be checked with:
 
