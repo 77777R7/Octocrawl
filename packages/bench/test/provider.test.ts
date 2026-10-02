@@ -128,6 +128,26 @@ describe('ProviderSubject robots gate', () => {
     expect(whole).not.toHaveProperty('rawHtml')
   })
 
+  it('carries the images and attributes formats when asked, read from the page the vendor returned, like the local lanes', async () => {
+    const body = PAGE.replace('<body>', '<head><meta property="og:image" content="/og/kettle.png"></head><body><nav><a href="/shop">Shop navigation</a></nav>')
+      .replace('</article>', '<figure><img src="/media/kettle.jpg" srcset="/media/kettle-2x.jpg 2x" alt="Kettle"><img src="data:image/gif;base64,R0lGOD" alt="Spacer"></figure></article>')
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const url = 'https://shop.example/dp/B0TEST'
+    const plain = await subject.fetch(url)
+    expect(plain.status).toBe('success')
+    expect(plain).not.toHaveProperty('images')
+    expect(plain).not.toHaveProperty('attributes')
+    expect(plain.trace.some((t) => t.event === 'images_collected' || t.event === 'attributes_extracted')).toBe(false)
+    const asked = await subject.fetch(url, undefined, undefined, undefined, { includeImages: true, attributes: [{ selector: 'nav a', attribute: 'href' }, { selector: 'figure img', attribute: 'alt' }] })
+    expect(asked).toMatchObject({ status: 'success', lane: 'provider', evidence: { rawBodySha256: plain.evidence.rawBodySha256 } })
+    // The whole page as received, navigation included, absolute and in document order; the data: image is counted and left out.
+    expect(asked.images).toEqual(['https://shop.example/og/kettle.png', 'https://shop.example/media/kettle.jpg', 'https://shop.example/media/kettle-2x.jpg'])
+    expect(asked.attributes).toEqual([{ selector: 'nav a', attribute: 'href', values: ['/shop'] }, { selector: 'figure img', attribute: 'alt', values: ['Kettle', 'Spacer'] }])
+    expect(asked.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'images_collected', detail: { count: 3, srcsetCandidates: 1, lazy: 0, dataUrisDropped: 1 } }))
+    expect(asked.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'attributes_extracted', detail: { selectors: 2, counts: [1, 2] } }))
+  })
+
   it('keeps a page with no main block as evidence, and returns it for onlyMainContent false', async () => {
     const body = '<!doctype html><html><body><nav><a href="/shop">Shop navigation</a></nav><footer>Provider footer</footer></body></html>'
     const { fetcher } = robotsServing(AMAZON_SHAPED)
