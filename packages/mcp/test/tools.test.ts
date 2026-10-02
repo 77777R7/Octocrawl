@@ -151,7 +151,7 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml"]')
+      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images"]')
       expect(properties).toMatchObject({
         includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
         excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
@@ -159,6 +159,31 @@ describe('MCP tools', () => {
     }
     // The list's shape is checked before any API call, as for every other option.
     await expect(callTool(client, 'scrape', { url: 'https://example.com/', includeTags: 'article' })).rejects.toThrow('includeTags must be an array of at most 100 CSS selectors')
+    expect(bodies).toHaveLength(3)
+  })
+
+  it('offers the images format and an attributes entry, and forwards them with removeBase64Images for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { formats: ['markdown', 'images', { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }] }], removeBase64Images: false }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(JSON.stringify(properties.formats)).toContain('"attributes"')
+      expect(properties).toMatchObject({ removeBase64Images: { type: 'boolean' } })
+    }
+    // The entry's shape is checked before any API call, as for every other option.
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', formats: ['attributes'] })).rejects.toThrow('attributes format requires selectors')
     expect(bodies).toHaveLength(3)
   })
 

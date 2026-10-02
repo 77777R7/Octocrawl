@@ -89,6 +89,10 @@ export interface CrawlPage {
   html?: string | null
   /** Present when the task asked for the `rawHtml` format, as on a scrape result; null when the page has none. */
   rawHtml?: string | null
+  /** Present when the task asked for the `images` format and the page was read as content, as on a scrape result. */
+  images?: readonly string[]
+  /** Present when the task asked for an `attributes` format and the page was read as content, as on a scrape result. */
+  attributes?: FetchResult['attributes']
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */

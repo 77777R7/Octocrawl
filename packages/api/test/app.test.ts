@@ -136,6 +136,54 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(shim.body.data.rawHtml).toMatch(/^<!doctype html>/)
   })
 
+  it('serves the images and attributes formats when asked, on the full and compact responses, /fc and crawl pages, and refuses an attributes selector by name', async () => {
+    const page = (n: number) => `<!doctype html><html><head><title>Gallery ${n}</title><meta property="og:image" content="/og/${n}.png"></head><body><main><h1>Gallery ${n}</h1><p>${PROSE}</p>` +
+      `<figure><img src="/media/${n}.jpg" srcset="/media/${n}-2x.jpg 2x" alt="Plate ${n}"><img src="data:image/gif;base64,R0lGOD" alt="Spacer"></figure>${n === 1 ? '<p><a href="/gallery/2">Next</a></p>' : ''}</main></body></html>`
+    const local = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(req.url === '/gallery/2' ? 2 : 1))
+    })
+    await new Promise<void>((resolve) => local.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(local.address() as AddressInfo).port}`
+    const images = (n: number) => [`${origin}/og/${n}.png`, `${origin}/media/${n}.jpg`, `${origin}/media/${n}-2x.jpg`]
+    try {
+      const attributes = { type: 'attributes', selectors: [{ selector: 'main ul a', attribute: 'href' }, { selector: 'main h1', attribute: 'id' }] }
+      const listing = `${server.url}/crawl/listing`
+      // Values as written, in request then document order; a selector that matches nothing gives []; no json extraction runs.
+      const compact = await postJson('/v1/scrape', { url: listing, formats: ['markdown', attributes], debug: false })
+      expect(compact.body).toMatchObject({ status: 'success', formats: ['markdown', 'attributes'], attributes: [{ selector: 'main ul a', attribute: 'href', values: ['/crawl/item/1', '/crawl/item/2', '/crawl/item/3'] }, { selector: 'main h1', attribute: 'id', values: [] }] })
+      expect(compact.body).not.toHaveProperty('json')
+      expect(compact.body).not.toHaveProperty('images')
+      const full = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown', 'images'] })
+      expect(full.body.images).toEqual(images(1))
+      expect(full.body.trace).toContainEqual(expect.objectContaining({ event: 'images_collected', detail: { count: 3, srcsetCandidates: 1, lazy: 0, dataUrisDropped: 1 } }))
+      expect(full.body.summary.attempts[0].result).not.toHaveProperty('images')
+      // The default Markdown leaves the data: image out and keeps its alt text.
+      expect(full.body.markdown).toContain('Spacer')
+      expect(full.body.markdown).not.toContain('data:image')
+      const kept = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown'], removeBase64Images: false, debug: false })
+      expect(kept.body.markdown).toContain('![Spacer](data:image/gif;base64,R0lGOD)')
+      expect(kept.body.usage.contentTokens).toBeGreaterThan(full.body.usage.contentTokens)
+      const shim = await postJson('/fc/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown', 'images', attributes] })
+      expect(shim.body.data).toMatchObject({ images: images(1), attributes: [{ selector: 'main ul a', attribute: 'href', values: [] }, { selector: 'main h1', attribute: 'id', values: [] }] })
+      const plain = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown'], debug: false })
+      expect(plain.body.formats).toEqual(['markdown'])
+      expect(plain.body).not.toHaveProperty('images')
+      expect(await postJson('/v1/scrape', { url: listing, formats: ['markdown', { type: 'attributes', selectors: [{ selector: 'div[[', attribute: 'id' }] }] }))
+        .toMatchObject({ status: 400, body: { error: 'attributes selectors[0].selector is not a valid CSS selector: div[[', code: 'invalid_request' } })
+      expect(await postJson('/v1/scrape', { url: listing, formats: [{ type: 'attributes', selectors: [{ selector: 'li:nth-child(2)', attribute: 'id' }] }] }))
+        .toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['formats[0].selectors[0]'] } } })
+      // A crawl carries images on each of its pages.
+      const crawl = await postJson('/v1/crawl', { url: `${origin}/gallery`, formats: ['markdown', 'images'], maxPages: 2 })
+      await engine.close()
+      const pages = await (await createApp(engine).request(`/v1/crawl/${crawl.body.taskId}/pages`)).json()
+      expect(pages.items.map((item: { url: string; images?: string[] }) => [new URL(item.url).pathname, item.images]).sort()).toEqual([['/gallery', images(1)], ['/gallery/2', images(2)]])
+    } finally {
+      local.closeAllConnections()
+      await new Promise<void>((resolve) => local.close(() => resolve()))
+    }
+  })
+
   it('refuses by name a selector that does not parse, and one whose matching the page does not bound', async () => {
     const url = `${server.url}/crawl/listing`
     const broken = { error: 'includeTags entry is not a valid CSS selector: div[[', code: 'invalid_request' }
@@ -596,7 +644,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
     const url = `${server.url}/crawl/listing`
     expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)' })
+      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml, images, attributes)' })
     expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], proxy: 'auto' })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: proxy') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })

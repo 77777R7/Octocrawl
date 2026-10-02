@@ -133,7 +133,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
-    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml, images)')
     expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
     expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
@@ -142,11 +142,26 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
-    // W2L always drops data: image URIs, which is Firecrawl's removeBase64Images default.
-    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url })
-    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: true } })).toMatchObject({ url })
-    expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: false })).toThrow('removeBase64Images: false is not supported')
-    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toThrow('scrapeOptions.removeBase64Images: false is not supported')
+    // removeBase64Images is mapped with its value: true is W2L's default, false keeps the data: images.
+    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, removeBase64Images: true })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toMatchObject({ url, removeBase64Images: false })
+    expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: 'no' })).toThrow('removeBase64Images must be a boolean')
+  })
+
+  it('maps the images format and an attributes entry for scrape and a crawl\'s scrapeOptions, and serves both on data when the result carries them', () => {
+    const url = 'https://example.com/'
+    const attributes = { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }] }
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'images', attributes] })).toEqual({ url, formats: ['markdown', 'images', attributes] })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['images', 'images'] } })).toMatchObject({ formats: ['images'] })
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', { type: 'json', schema: {} }] })).toThrow('unsupported format: json (the /fc shim supports markdown, links, html, rawHtml, images)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [] }] })).toThrow('attributes format requires selectors')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [42] })).toThrow('formats must be an array of strings or { type } objects')
+    const served = wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', images: ['https://example.com/a.png'], attributes: [{ selector: 'a', attribute: 'href', values: ['/x', '/y'] }] })).data
+    expect(served).toMatchObject({ images: ['https://example.com/a.png'], attributes: [{ selector: 'a', attribute: 'href', values: ['/x', '/y'] }] })
+    const plain = wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data
+    expect(plain).not.toHaveProperty('images')
+    expect(plain).not.toHaveProperty('attributes')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /data\.images/.test(d) && /Base64-Image-Removed/.test(d))).toBe(true)
   })
 
   it('gives shim rejections a code and names what was rejected in details', () => {

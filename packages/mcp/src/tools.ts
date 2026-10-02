@@ -27,13 +27,43 @@ const PAGE_OPTION_PROPERTIES = {
   skipTlsVerification: { type: 'boolean', description: 'Local only: load a site with an invalid or self-signed certificate; recorded in the trace and a tls_unverified warning; refused in hosted mode.' },
   fastMode: { type: 'boolean', description: 'http lane only, no browser escalation: a page that needs script execution returns the http lane\'s verdict (a shell is failed/empty_unverified, never rendered). Default false.' },
   blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
+  removeBase64Images: { type: 'boolean', description: 'Leave an image whose src is a data: URI out of the Markdown, keeping its alt text (default true, Firecrawl\'s default). false keeps it as ![alt](data:…), which contentTokens then counts. html and rawHtml are never rewritten.' },
 } as const
 /** The caller's own label for its integration; `origin` is not a tool option: the server records the client's name and version. */
 const INTEGRATION_PROPERTY = {
   integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
 } as const
-/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content. */
-const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung.'
+/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then. */
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules.'
+/** One entry of `formats`: a format name, a json schema request, or an attributes request. */
+const FORMAT_ITEMS = {
+  anyOf: [
+    { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml', 'images'] },
+    {
+      type: 'object',
+      properties: {
+        type: { const: 'json' },
+        schema: { type: 'object' },
+        prompt: { type: 'string', maxLength: 4000 },
+        modelFallback: { type: 'boolean' },
+      },
+      required: ['type', 'schema'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        type: { const: 'attributes' },
+        selectors: {
+          type: 'array', minItems: 1, maxItems: 50,
+          items: { type: 'object', properties: { selector: { type: 'string', minLength: 1, maxLength: 200 }, attribute: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[A-Za-z_][A-Za-z0-9_:.-]*$' } }, required: ['selector', 'attribute'], additionalProperties: false },
+        },
+      },
+      required: ['type', 'selectors'],
+      additionalProperties: false,
+    },
+  ],
+} as const
 /** A recorded decision to fetch one URL its host's robots.txt disallows; never a blanket switch. */
 const ROBOTS_OVERRIDE_PROPERTIES = {
   reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
@@ -89,22 +119,7 @@ export const TOOLS = [
           type: 'array',
           minItems: 1,
           description: FORMATS_DESCRIPTION,
-          items: {
-            anyOf: [
-              { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
-              {
-                type: 'object',
-                properties: {
-                  type: { const: 'json' },
-                  schema: { type: 'object' },
-                  prompt: { type: 'string', maxLength: 4000 },
-                  modelFallback: { type: 'boolean' },
-                },
-                required: ['type', 'schema'],
-                additionalProperties: false,
-              },
-            ],
-          },
+          items: FORMAT_ITEMS,
         },
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
@@ -133,10 +148,7 @@ export const TOOLS = [
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
-        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
-          { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
-        ] } },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: FORMAT_ITEMS },
         includeLinks: { type: 'boolean' },
         includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a discovered link must match; the start URL is always fetched.' },
         excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that skip a discovered link; they win over includePaths.' },
@@ -218,10 +230,7 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
-          { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
-        ] } },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: FORMAT_ITEMS },
         includeLinks: { type: 'boolean' },
         ...PAGE_OPTION_PROPERTIES,
         robotsOverrides: {
@@ -377,14 +386,15 @@ function integrationOf(req: RequestAttribution): Pick<RequestAttribution, 'integ
   return req.integration === undefined ? {} : { integration: req.integration }
 }
 
-/** The execution options of a parsed request, those that were set: headers, mobile, skipTlsVerification, fastMode and blockAds. */
-function executionOptions(req: Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'>): Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'> {
+/** The execution options of a parsed request, those that were set: headers, mobile, skipTlsVerification, fastMode, blockAds and removeBase64Images. */
+function executionOptions(req: Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds' | 'removeBase64Images'>): Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds' | 'removeBase64Images'> {
   return {
     ...(req.headers === undefined ? {} : { headers: req.headers }),
     ...(req.mobile === undefined ? {} : { mobile: req.mobile }),
     ...(req.skipTlsVerification === undefined ? {} : { skipTlsVerification: req.skipTlsVerification }),
     ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }),
     ...(req.blockAds === undefined ? {} : { blockAds: req.blockAds }),
+    ...(req.removeBase64Images === undefined ? {} : { removeBase64Images: req.removeBase64Images }),
   }
 }
 

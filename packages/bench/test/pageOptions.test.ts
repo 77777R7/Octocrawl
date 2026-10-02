@@ -37,6 +37,11 @@ function handler(label: string) {
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
     if (req.url === '/app.js') { res.writeHead(200, { 'content-type': 'text/javascript' }).end('// nothing to run'); return }
     if (req.url === '/echo-headers') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(echoPage(req, 'Echo')); return }
+    if (req.url === '/gallery') {
+      // Images in the navigation, the article and the head; one inline data: image.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>Gallery</title><meta property="og:image" content="/og/card.png"></head><body><nav><a href="/">Home</a><img src="/nav/logo.svg" alt="Logo"></nav><article><h1>Gallery</h1><p>${PROSE}</p><figure><img src="/media/1.jpg" srcset="/media/1-2x.jpg 2x" alt="Plate"><img src="data:image/gif;base64,R0lGOD" alt="Spacer"></figure></article></body></html>`)
+      return
+    }
     if (req.url === '/moved-away') { res.writeHead(302, { location: `${otherOrigin}/echo-headers` }).end(); return }
     if (req.url === '/moved-here') { res.writeHead(302, { location: '/echo-headers' }).end(); return }
     if (req.url === '/device') {
@@ -121,6 +126,29 @@ describe('ResilientHttpSubject wire options', () => {
       expect(sentTo('a', '/echo-headers').at(-1)!.headers['user-agent']).toBe(browserUserAgent(CHROME_MAJOR_FLOOR))
     } finally { await subject.teardown() }
   })
+
+  it('collects images and attributes from the whole page only when asked, with their trace events, and keeps data: images only with removeBase64Images false', async () => {
+    const subject = new ResilientHttpSubject('standard', localNetworkPolicy())
+    try {
+      const plain = await subject.fetch(`${origin}/gallery`)
+      expect(plain.status).toBe('success')
+      expect(plain).not.toHaveProperty('images')
+      expect(plain).not.toHaveProperty('attributes')
+      expect(plain.markdown).toContain('Spacer')
+      expect(plain.markdown).not.toContain('data:image')
+      expect(plain.trace.some((t) => t.event === 'images_collected' || t.event === 'attributes_extracted')).toBe(false)
+      const asked = await subject.fetch(`${origin}/gallery`, undefined, undefined, {}, undefined, { includeImages: true, attributes: [{ selector: 'nav a', attribute: 'href' }, { selector: 'figure img', attribute: 'alt' }], removeBase64Images: false })
+      expect(asked.status).toBe('success')
+      // The whole page as received, navigation included, absolute and in document order; the data: image is counted and left out.
+      expect(asked.images).toEqual([`${origin}/og/card.png`, `${origin}/nav/logo.svg`, `${origin}/media/1.jpg`, `${origin}/media/1-2x.jpg`])
+      expect(asked.attributes).toEqual([{ selector: 'nav a', attribute: 'href', values: ['/'] }, { selector: 'figure img', attribute: 'alt', values: ['Plate', 'Spacer'] }])
+      expect(asked.trace).toContainEqual(expect.objectContaining({ event: 'images_collected', detail: { count: 4, srcsetCandidates: 1, lazy: 0, dataUrisDropped: 1 } }))
+      expect(asked.trace).toContainEqual(expect.objectContaining({ event: 'attributes_extracted', detail: { selectors: 2, counts: [1, 2] } }))
+      expect(asked.markdown).toContain('![Spacer](data:image/gif;base64,R0lGOD)')
+      expect(asked.usage.contentTokens!).toBeGreaterThan(plain.usage.contentTokens!)
+      expect(asked.evidence.rawBodySha256).toBe(plain.evidence.rawBodySha256)
+    } finally { await subject.teardown() }
+  })
 })
 
 describe('BrowserLocalSubject wire options', () => {
@@ -179,6 +207,18 @@ describe('BrowserLocalSubject wire options', () => {
     expect(out.compliance?.sentHeaders.headers).toContainEqual({ name: 'x-test', value: 'w2l' })
     expect(out.trace.some((t) => t.event === 'custom_headers_withheld')).toBe(false)
     expect(out.trace.some((t) => t.event === 'identity_mismatch')).toBe(false)
+  }, 60_000)
+
+  it('collects images and attributes from the rendered DOM when asked, and keeps data: images only with removeBase64Images false', async () => {
+    const out = await subject.fetch(`${origin}/gallery`, Date.now() + 60_000, undefined, undefined, { includeImages: true, attributes: [{ selector: 'nav a', attribute: 'href' }], removeBase64Images: false })
+    expect(out.status).toBe('success')
+    expect(out.images).toEqual([`${origin}/og/card.png`, `${origin}/nav/logo.svg`, `${origin}/media/1.jpg`, `${origin}/media/1-2x.jpg`])
+    expect(out.attributes).toEqual([{ selector: 'nav a', attribute: 'href', values: ['/'] }])
+    expect(out.trace).toContainEqual(expect.objectContaining({ lane: 'browser_local', event: 'images_collected', detail: expect.objectContaining({ count: 4, dataUrisDropped: 1 }) }))
+    expect(out.markdown).toContain('![Spacer](data:image/gif;base64,R0lGOD)')
+    const plain = await subject.fetch(`${origin}/gallery`, Date.now() + 60_000)
+    expect(plain).not.toHaveProperty('images')
+    expect(plain.markdown).not.toContain('data:image')
   }, 60_000)
 
   it('declares the mobile identity, which the page sees as Android with a phone viewport and touch', async () => {

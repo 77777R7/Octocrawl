@@ -123,7 +123,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
     expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
-      .toThrow('unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)')
+      .toThrow('unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml, images, attributes)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'screenshot' }] })).toThrow('unsupported format: screenshot')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
@@ -145,6 +145,37 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, includeTags: Array.from({ length: 101 }, () => 'p') })).toThrow('includeTags must be an array of at most 100 CSS selectors')
     // The lanes' own switches are not request fields: the formats ask for the HTML.
     expect(() => parseScrapeRequest({ url, includeHtml: true })).toThrow('unsupported parameter: includeHtml')
+  })
+
+  it('accepts the images format, one attributes entry within its bounds and removeBase64Images on scrape, batch and crawl, each refusal by name', () => {
+    const url = 'https://example.com/'
+    const attributes = { type: 'attributes', selectors: [{ selector: ' span.titleline > a ', attribute: 'href' }, { selector: 'tr.athing', attribute: 'id' }] }
+    const req = parseScrapeRequest({ url, formats: ['markdown', 'images', attributes, { type: 'json', schema: { type: 'object' } }], removeBase64Images: false })
+    expect(req.formats).toEqual(['markdown', 'images', { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }, { selector: 'tr.athing', attribute: 'id' }] }, { type: 'json', schema: { type: 'object' } }])
+    expect(req.removeBase64Images).toBe(false)
+    expect(parseBatchStartRequest({ urls: [url], formats: ['images'], removeBase64Images: true })).toMatchObject({ formats: ['images'], removeBase64Images: true })
+    expect(parseCrawlStartRequest({ url, formats: [attributes] }).formats).toHaveLength(1)
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('removeBase64Images')
+    expect(() => parseScrapeRequest({ url, removeBase64Images: 'yes' })).toThrow('removeBase64Images must be a boolean')
+    expect(() => parseCrawlStartRequest({ url, removeBase64Images: 1 })).toThrow('removeBase64Images must be a boolean')
+    expect(() => parseScrapeRequest({ url, formats: ['images', 'images'] })).toThrow('formats must not contain duplicates')
+    const selectors = 'attributes format requires selectors: an array of 1 to 50 {selector, attribute} entries'
+    expect(() => parseScrapeRequest({ url, formats: ['attributes'] })).toThrow(selectors)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes' }] })).toThrow(selectors)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [] }] })).toThrow(selectors)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: ['a'] }] })).toThrow(selectors)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: Array.from({ length: 51 }, () => ({ selector: 'a', attribute: 'href' })) }] })).toThrow(selectors)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: ' ', attribute: 'href' }] }] })).toThrow('attributes selectors[0].selector must be a non-empty string of at most 200 characters')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a'.repeat(201), attribute: 'href' }] }] })).toThrow('attributes selectors[0].selector must be a non-empty string of at most 200 characters')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href' }, { selector: 'a', attribute: '1x' }] }] })).toThrow('attributes selectors[1].attribute must be an HTML attribute name')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'x'.repeat(101) }] }] })).toThrow('attributes selectors[0].attribute must be an HTML attribute name')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href' }], prompt: 'x' }] })).toThrow('unsupported attributes format option: prompt')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href', all: true }] }] })).toThrow('unsupported attributes selector option: all')
+    expect(() => parseScrapeRequest({ url, formats: [attributes, attributes] })).toThrow('formats must contain at most one attributes entry')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'images' }] })).toThrow('formats entries must be markdown, links, json, html, rawHtml, images, a json schema request or an attributes request')
+    // The lanes' own switches are not request fields: the formats ask for the images and attributes.
+    expect(() => parseScrapeRequest({ url, includeImages: true })).toThrow('unsupported parameter: includeImages')
+    expect(() => parseScrapeRequest({ url, attributes: [] })).toThrow('unsupported parameter: attributes')
   })
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {

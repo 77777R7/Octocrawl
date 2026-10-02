@@ -136,6 +136,28 @@ describe('scrape response metadata', () => {
   })
 })
 
+describe('format entries by type', () => {
+  const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
+  const attributes = { type: 'attributes' as const, selectors: [{ selector: 'a', attribute: 'href' }] }
+
+  it('never switches on JSON extraction for an attributes entry, and reads the json entry beside it', async () => {
+    const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary }
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', attributes], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact.formats).toEqual(['markdown', 'attributes'])
+    expect(compact).not.toHaveProperty('json')
+    // Asked for, but the run carried none (a page not read as content): the key is absent, never invented.
+    expect(compact).not.toHaveProperty('attributes')
+    const extracted = { ...run, attributes: [{ selector: 'a', attribute: 'href', values: ['/x'] }], images: ['https://images.example/subject.jpg'] }
+    const both = await prepareScrapeResponse(extracted, { url: result.requestedUrl, formats: [attributes, 'images', { type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } } } }], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(both.formats).toEqual(['images', 'attributes', 'json'])
+    expect(both.json?.data).toEqual({ title: 'Subject headphones' })
+    expect(both.attributes).toEqual([{ selector: 'a', attribute: 'href', values: ['/x'] }])
+    expect(both.images).toEqual(['https://images.example/subject.jpg'])
+    // Not asked for: the result's images stay off the compact response.
+    expect(await prepareScrapeResponse(extracted, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now())).not.toHaveProperty('images')
+  })
+})
+
 describe('structured JSON extraction', () => {
   it('defaults compact adapter responses to JSON, including unverified identities', async () => {
     const response = {

@@ -27,7 +27,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -1028,7 +1028,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let wholePage: string | null = null
       if (extracted.escalate && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
-        wholePage = wholePageMarkdown(converted, pageUrl, options.excludeTags)
+        wholePage = wholePageMarkdown(converted, pageUrl, options)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
         if (options.onlyMainContent !== false || wholePage === null) return {
@@ -1056,8 +1056,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
       const markdown = wholePageAsked(options)
-        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags })
-        : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
+        : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
+      // The images and attributes formats read the rendered DOM as received, like links.
+      const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
       return {
         ...base,
         status: waitCutShort ? 'partial' : 'success',
@@ -1068,6 +1070,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         escalations: [],
         markdown,
         links,
+        ...extra,
         metadata: extracted.metadata,
         document: {
           title: extracted.title,

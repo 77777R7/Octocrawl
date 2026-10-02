@@ -61,13 +61,29 @@ export interface JsonFormatRequest {
   modelFallback?: boolean
 }
 
+/** One CSS selector and the HTML attribute to read from every element it matches (the `attributes` format). */
+export interface AttributeSelector {
+  /** A non-empty selector of at most 200 characters, within what W2L matches (`invalidSelector`), like `includeTags`. */
+  selector: string
+  /** An HTML attribute name: `^[A-Za-z_][A-Za-z0-9_:.-]*$`, at most 100 characters. */
+  attribute: string
+}
+
+/** Firecrawl's `{ type: 'attributes', selectors }`: 1 to 50 selectors, at most one such entry per request. */
+export interface AttributesFormatRequest {
+  type: 'attributes'
+  selectors: readonly AttributeSelector[]
+}
+
 /**
  * String json returns the canonical envelope; an object maps into a caller schema.
  * `html` is the cleaned HTML the Markdown is written from (the main content,
  * the whole page when onlyMainContent is false, or an includeTags selection);
- * `rawHtml` is the page as the lane received it.
+ * `rawHtml` is the page as the lane received it. `images` is every image URL
+ * of the whole document, and an attributes entry reads named attributes off
+ * the elements its selectors match.
  */
-export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | JsonFormatRequest
+export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | JsonFormatRequest | AttributesFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string

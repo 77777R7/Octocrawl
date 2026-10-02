@@ -1,6 +1,7 @@
 import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
+  AttributesFormatRequest,
   CompactScrapeResponse,
   ExecutionContext,
   FetchResult,
@@ -909,18 +910,25 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly Scra
   return ['markdown', 'links']
 }
 
-function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml'): boolean {
-  return formats.some(format => typeof format === 'string' ? format === name : name === 'json')
+/** Whether the formats ask for one by name: a string entry, or an object entry of that `type` (a json schema request counts as `json`). */
+export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'attributes'): boolean {
+  return formats.some(format => typeof format === 'string' ? format === name : format.type === name)
 }
 
-function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRequest | undefined {
-  return formats.find((format): format is JsonFormatRequest => typeof format === 'object')
+/** The caller's json schema request, when the formats carry one; an attributes entry is not one. */
+export function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRequest | undefined {
+  return formats.find((format): format is JsonFormatRequest => typeof format === 'object' && format.type === 'json')
+}
+
+/** The attributes request, when the formats carry one. */
+export function attributesFormat(formats: readonly ScrapeFormat[]): AttributesFormatRequest | undefined {
+  return formats.find((format): format is AttributesFormatRequest => typeof format === 'object' && format.type === 'attributes')
 }
 
 function withoutRepeatedBodies(summary: ScrapeResponse['summary']): ScrapeResponse['summary'] {
   return {
     ...summary,
-    attempts: summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, ...result }, ...attempt }) => ({
+    attempts: summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, ...result }, ...attempt }) => ({
       ...attempt,
       result: { ...result, markdown: null, links: [] },
     })),
@@ -1090,12 +1098,17 @@ export function compactScrapeResponse(
       ...(hasFormat(formats, 'html') ? ['html' as const] : []),
       ...(hasFormat(formats, 'rawHtml') ? ['rawHtml' as const] : []),
       ...(includeLinks ? ['links' as const] : []),
+      ...(hasFormat(formats, 'images') ? ['images' as const] : []),
+      ...(hasFormat(formats, 'attributes') ? ['attributes' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
     ...(hasFormat(formats, 'html') ? { html: next.html ?? null } : {}),
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: next.rawHtml ?? null } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
+    // Asked for, and read: a page not read as content (a file, a failed or blocked page) carries neither.
+    ...(hasFormat(formats, 'images') && next.images !== undefined ? { images: next.images } : {}),
+    ...(hasFormat(formats, 'attributes') && next.attributes !== undefined ? { attributes: next.attributes } : {}),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,
       pageType: next.document.pageType,

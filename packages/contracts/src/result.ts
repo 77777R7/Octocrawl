@@ -194,6 +194,14 @@ export interface HandoffRequest {
   rationale: string
 }
 
+/** The values of one HTML attribute on the elements one CSS selector names (the `attributes` format). */
+export interface AttributeExtraction {
+  selector: string
+  attribute: string
+  /** As written in the HTML, in document order; an element without the attribute is skipped; `[]` when nothing matches. */
+  values: readonly string[]
+}
+
 /**
  * A caveat a reader of the result must see without opening the trace. Never
  * a failure reason, which `status` and its reason fields carry.
@@ -292,6 +300,23 @@ export interface FetchResult {
    * HTML itself.
    */
   links?: readonly string[]
+  /**
+   * The image URLs of the FULL document (`img` src and srcset candidates,
+   * `picture` sources, lazy-loading attributes, video posters, `image_src`
+   * links, og:image and twitter:image), absolute http(s), fragment stripped,
+   * each once, in document order; `data:` URIs left out. Present only when
+   * the `images` format was asked for (`FetchOptions.includeImages`), on a
+   * contentful page: absent for a file and for a page that was not read as
+   * content. `[]` for a page without images.
+   */
+  images?: readonly string[]
+  /**
+   * The `attributes` format: one entry per selector of the request, in its
+   * order, with the attribute's values as written in the HTML. Present only
+   * when asked for (`FetchOptions.attributes`), on a contentful page, like
+   * `images`.
+   */
+  attributes?: readonly AttributeExtraction[]
   /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
    * warning first when a recorded override set a robots.txt rule aside, then

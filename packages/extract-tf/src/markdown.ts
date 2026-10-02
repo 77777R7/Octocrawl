@@ -32,6 +32,13 @@ export interface MarkdownOptions {
    * caller's exclusions on a whole page, which no extraction pruned.
    */
   exclude?: readonly string[]
+  /**
+   * What becomes of an image whose `src` is a `data:` URI. `drop` (the
+   * default, Firecrawl's `removeBase64Images`): the image is left out and
+   * its alt text kept. `keep`: it is written as `![alt](data:…)`, and the
+   * token count then counts it. A `data:` link target is always dropped.
+   */
+  dataUriImages?: 'drop' | 'keep'
 }
 
 const ELEMENT_NODE = 1
@@ -105,6 +112,8 @@ interface Context {
   blockMemo: Map<Element, boolean>
   /** The HTML carries layout markers. */
   layout: boolean
+  /** `data:` image URIs are written as targets instead of being dropped (MarkdownOptions.dataUriImages 'keep'). */
+  keepDataUriImages: boolean
 }
 
 /** Never content, or hidden by the page's CSS: skipped together with everything inside. */
@@ -453,11 +462,12 @@ function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
   return true
 }
 
-/** An image with its alt text and absolute target; only the alt text when it has no target (a `data:` URI). */
+/** An image with its alt text and absolute target; only the alt text when it has no target (a `data:` URI, unless the caller keeps those). */
 function image(el: Element, out: Inline, ctx: Context): void {
   const alt = (el.getAttribute('alt') ?? '').replace(WHITESPACE, ' ').trim()
   const src = el.getAttribute('src')
-  const target = src === null ? null : linkTarget(src, ctx.base)
+  const kept = src === null ? null : src.replace(/[\t\n\r]/g, '').trim()
+  const target = kept === null ? null : ctx.keepDataUriImages && /^data:/i.test(kept) ? kept : linkTarget(kept, ctx.base)
   if (target !== null) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
   else if (alt) out.content(alt)
 }
@@ -730,7 +740,7 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout })
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep' })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()

@@ -12,7 +12,7 @@ import type { FetchResult, FetchWarning, LadderRunAudit } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
-import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
+import type { AttributeSelector, ScrapeFormat, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -27,10 +27,10 @@ export const MAX_WAIT_FOR_MS = 60_000
  * Per-page capture options shared by scrape, batch and crawl (for batch and
  * crawl they apply to every page). A robots override is never one of them:
  * it names one URL (`ScrapeRequest.robotsOverride`, `BatchStartRequest.robotsOverrides`).
- * Nor are `includeHtml` and `includeRawHtml`: the `html` and `rawHtml`
- * formats ask for those.
+ * Nor are `includeHtml`, `includeRawHtml`, `includeImages` and `attributes`:
+ * the `html`, `rawHtml`, `images` and `attributes` formats ask for those.
  */
-export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml'> {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -175,13 +175,17 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'attributes')[]
   markdown?: string | null
   /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
   html?: string | null
   /** Present when `rawHtml` was asked for, as on the full response; null when the result carries none. */
   rawHtml?: string | null
   links?: readonly string[]
+  /** Present when `images` was asked for and the page was read as content: every image URL of the whole document, as on the full response. */
+  images?: readonly string[]
+  /** Present when an `attributes` entry was asked for and the page was read as content, as on the full response. */
+  attributes?: FetchResult['attributes']
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
   metadata: ScrapeResponseMetadata
@@ -350,7 +354,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images'] as const
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
@@ -604,7 +608,35 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
   return value as import('./structured.js').JsonSchema
 }
 
-const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml']
+/** The formats a request names as strings; `attributes` carries its selectors and is named as an object. */
+const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images']
+const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes']
+const JSON_FORMAT_KEYS: readonly string[] = ['type', 'schema', 'prompt', 'modelFallback']
+const ATTRIBUTES_FORMAT_KEYS: readonly string[] = ['type', 'selectors']
+const ATTRIBUTE_SELECTOR_KEYS: readonly string[] = ['selector', 'attribute']
+/** An HTML attribute name, as the attributes format reads it. */
+const ATTRIBUTE_NAME = /^[A-Za-z_][A-Za-z0-9_:.-]*$/
+const ATTRIBUTES_SELECTORS_MESSAGE = 'attributes format requires selectors: an array of 1 to 50 {selector, attribute} entries'
+const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, html, rawHtml, images, a json schema request or an attributes request'
+
+/**
+ * The selectors of an attributes format: 1 to 50 `{ selector, attribute }`
+ * entries, each selector a non-empty string of at most 200 characters
+ * (whether it parses, and is one the extractor matches, is checked in the
+ * API engine as for `includeTags`) and each attribute an HTML attribute name
+ * of at most 100 characters.
+ */
+function readAttributeSelectors(value: unknown): readonly AttributeSelector[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50) throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
+  return value.map((entry, index) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
+    const rec = entry as Record<string, unknown>
+    for (const key of Object.keys(rec)) if (!ATTRIBUTE_SELECTOR_KEYS.includes(key)) throw new RequestError(`unsupported attributes selector option: ${key}`)
+    if (typeof rec.selector !== 'string' || rec.selector.trim().length === 0 || rec.selector.length > 200) throw new RequestError(`attributes selectors[${index}].selector must be a non-empty string of at most 200 characters`)
+    if (typeof rec.attribute !== 'string' || rec.attribute.length > 100 || !ATTRIBUTE_NAME.test(rec.attribute)) throw new RequestError(`attributes selectors[${index}].attribute must be an HTML attribute name`)
+    return { selector: rec.selector.trim(), attribute: rec.attribute }
+  })
+}
 
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
@@ -621,16 +653,27 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const [index, item] of value.entries()) {
-    if (item === 'markdown' || item === 'links' || item === 'json' || item === 'html' || item === 'rawHtml') {
+    if (typeof item === 'string') {
+      // The attributes format carries its selectors, so it is named as an object.
+      if (item === 'attributes') throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
+      if (!STRING_FORMATS.includes(item)) throw new RequestError(FORMAT_ENTRY_MESSAGE)
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
-      formats.push(item)
+      formats.push(item as ScrapeFormat)
       continue
     }
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, html, rawHtml, or a json schema request')
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError(FORMAT_ENTRY_MESSAGE)
     const rec = item as Record<string, unknown>
-    for (const key of Object.keys(rec)) if (!['type', 'schema', 'prompt', 'modelFallback'].includes(key)) throw new RequestError(`unsupported json format option: ${key}`)
-    if (rec.type !== 'json' || rec.schema === undefined) throw new RequestError('json format requires type=json and schema')
+    if (rec.type === 'attributes') {
+      for (const key of Object.keys(rec)) if (!ATTRIBUTES_FORMAT_KEYS.includes(key)) throw new RequestError(`unsupported attributes format option: ${key}`)
+      if (logical.has('attributes')) throw new RequestError('formats must contain at most one attributes entry')
+      logical.add('attributes')
+      formats.push({ type: 'attributes', selectors: readAttributeSelectors(rec.selectors) })
+      continue
+    }
+    if (rec.type !== 'json') throw new RequestError(FORMAT_ENTRY_MESSAGE)
+    for (const key of Object.keys(rec)) if (!JSON_FORMAT_KEYS.includes(key)) throw new RequestError(`unsupported json format option: ${key}`)
+    if (rec.schema === undefined) throw new RequestError('json format requires type=json and schema')
     if (logical.has('json')) throw new RequestError('formats must contain at most one json entry')
     if (rec.prompt !== undefined && (typeof rec.prompt !== 'string' || rec.prompt.length > 4000)) throw new RequestError('json prompt must be a string of at most 4000 characters')
     if (rec.modelFallback !== undefined && typeof rec.modelFallback !== 'boolean') throw new RequestError('json modelFallback must be a boolean')
@@ -777,7 +820,7 @@ function checkMobileMode(mode: ApiCrawlMode | undefined, mobile: boolean | undef
   if (mode === 'research' && mobile === true) throw new RequestError('mobile is not available in research mode: the research identity declares a bot, not a device')
 }
 
-/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode and blockAds, shared by scrape, batch and crawl. */
+/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds and removeBase64Images, shared by scrape, batch and crawl. */
 function readPageOptions(rec: Record<string, unknown>): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
@@ -791,6 +834,7 @@ function readPageOptions(rec: Record<string, unknown>): PageOptions {
   const skipTlsVerification = readBoolean(rec.skipTlsVerification, 'skipTlsVerification')
   const fastMode = readBoolean(rec.fastMode, 'fastMode')
   const blockAds = readBoolean(rec.blockAds, 'blockAds')
+  const removeBase64Images = readBoolean(rec.removeBase64Images, 'removeBase64Images')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -803,6 +847,7 @@ function readPageOptions(rec: Record<string, unknown>): PageOptions {
     ...(skipTlsVerification === undefined ? {} : { skipTlsVerification }),
     ...(fastMode === undefined ? {} : { fastMode }),
     ...(blockAds === undefined ? {} : { blockAds }),
+    ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
   }
 }
 

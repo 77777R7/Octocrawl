@@ -35,7 +35,8 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, origin, integration and the same scrapeOptions (applied to every page). The formats are markdown, links, html, rawHtml, images and an { type: "attributes", selectors } entry; other formats and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'images (data.images) lists every image URL of the whole document as received: img src and srcset candidates, picture sources, lazy data-src/data-srcset/data-lazy-src/data-original, video posters, image_src links, og:image and twitter:image, absolute http(s) with the fragment stripped, each once, in document order, data: URIs left out; includeTags, excludeTags and onlyMainContent do not narrow it. attributes (data.attributes) gives, per selector, the named attribute\'s values as written, elements without it skipped; a selector W2L does not match is HTTP 400 by name, as for includeTags. Both are absent for a file and for a page that is success: false. removeBase64Images (default true) keeps an image\'s alt text where Firecrawl writes a (<Base64-Image-Removed>) placeholder; false keeps the data: URI in the Markdown.',
   'origin (the Firecrawl SDKs\' client label) and integration are stored, not echoed: the scrape record (GET /v1/scrapes/:id) and the crawl task carry them, and nothing sent to the target changes.',
   'data.metadata carries scrapeId (a UUID per call, which GET /v1/scrapes/:id looks up), proxyUsed (operator for the server\'s environment proxy, user for the caller\'s own egress, else null), timezone (the browser rung\'s declared zone, null on the HTTP rung), creditsUsed: null (W2L counts no credits), concurrencyLimited and concurrencyQueueDurationMs (whether and how long the per-origin ceiling held the fetch back). cacheState and cachedAt are left out until W2L has a cache.',
   'A page whose result W2L has advice about (a login wall, a robots.txt rule, a gate, a cut, a script-filled shell) carries data.agent_hints, one sentence each; the native response calls them agentHints. A request refused for an option W2L does not offer carries agent_hints in the error envelope, and a caller over the server\'s per-minute rate limit gets HTTP 429 { success: false, error, code: rate_limited, agent_hints } with Retry-After.',
@@ -59,6 +60,10 @@ export interface FirecrawlPage {
   /** Present when the `rawHtml` format was asked for; null when the page has none. */
   rawHtml?: string | null
   links?: string[]
+  /** Present when the `images` format was asked for and the page was read as content: every image URL of the whole document. */
+  images?: string[]
+  /** Present when an `attributes` entry was asked for and the page was read as content: per selector, the attribute's values as written. */
+  attributes?: Array<{ selector: string; attribute: string; values: string[] }>
   /** What to change about the request next time, one sentence each (the native `agentHints`); present when W2L has any. */
   agent_hints?: string[]
   /** Page fields appear only when the page declares them (W2L's `metadata`, null values left out). */
@@ -171,7 +176,8 @@ export function firecrawlCrawlCounts(status: TaskStatus, steps: Partial<Record<S
 /** Default and largest number of steps one `GET /fc/v1/crawl/:id` returns in `data`. */
 export const FIRECRAWL_STATUS_PAGE_SIZE = { default: 100, max: 1000 } as const
 
-const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
+/** The formats the shim passes through as strings; an `{ type: 'attributes', selectors }` entry is passed as it is. */
+const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml', 'images']
 /** W2L page metadata fields that Firecrawl's `metadata` also has. */
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** The optional page fields (present on W2L's `metadata` only when the page states them), under the same names in Firecrawl's `metadata`. */
@@ -181,12 +187,11 @@ const SHIM_OPTIONAL_PAGE_FIELDS = [
   'publishedTime', 'modifiedTime', 'articleTag', 'articleSection',
 ] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
-const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
+const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images'] as const
 
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
   ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
-  removeBase64Images: { value: true, reason: 'W2L always drops data: URIs from Markdown, keeping an image\'s alt text and a link\'s text' },
 }
 
 interface ShimProblems {
@@ -236,16 +241,28 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   return parseCrawlStartRequest(native)
 }
 
-/** The scrape options the shim maps: formats (markdown, links, html, rawHtml), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode and blockAds; removeBase64Images only as true, which W2L always does. */
+/** The scrape options the shim maps: formats (markdown, links, html, rawHtml, images and an attributes entry), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds and removeBase64Images; the native parser validates them. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
-  checkShimKeys(rec, prefix, [...keys, 'formats', 'removeBase64Images', ...SHIM_PAGE_OPTIONS], problems)
-  checkShimFixedValue(rec, prefix, 'removeBase64Images', problems)
+  checkShimKeys(rec, prefix, [...keys, 'formats', ...SHIM_PAGE_OPTIONS], problems)
   const mapped: Record<string, unknown> = {}
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
   if (rec.formats === undefined) return mapped
-  if (!Array.isArray(rec.formats) || rec.formats.some((item) => typeof item !== 'string')) throw new RequestError(`${prefix}formats must be an array of strings`)
-  const formats = [...new Set(rec.formats as string[])]
-  for (const format of formats) if (!SHIM_FORMATS.includes(format)) problems.formats.add(format)
+  const isTyped = (item: unknown): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).type === 'string'
+  if (!Array.isArray(rec.formats) || rec.formats.some((item) => typeof item !== 'string' && !isTyped(item))) throw new RequestError(`${prefix}formats must be an array of strings or { type } objects`)
+  // Repeated names are one format, as on Firecrawl; an attributes entry passes as it is, and the native parser checks it.
+  const formats: unknown[] = []
+  const seen = new Set<string>()
+  for (const item of rec.formats as unknown[]) {
+    if (typeof item === 'string') {
+      if (seen.has(item)) continue
+      seen.add(item)
+      if (!SHIM_FORMATS.includes(item)) problems.formats.add(item)
+      formats.push(item)
+    } else if (isTyped(item)) {
+      if (item.type !== 'attributes') problems.formats.add(item.type as string)
+      formats.push(item)
+    }
+  }
   return { ...mapped, formats }
 }
 
@@ -367,6 +384,8 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
     ...(result.html === undefined ? {} : { html: result.html }),
     ...(result.rawHtml === undefined ? {} : { rawHtml: result.rawHtml }),
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
+    ...(result.images === undefined ? {} : { images: [...result.images] }),
+    ...(result.attributes === undefined ? {} : { attributes: result.attributes.map((entry) => ({ selector: entry.selector, attribute: entry.attribute, values: [...entry.values] })) }),
     ...(agentHints === undefined || agentHints.length === 0 ? {} : { agent_hints: [...agentHints] }),
     metadata: {
       ...(declared as Partial<FirecrawlPage['metadata']>),
