@@ -42,6 +42,7 @@ Success at week 16 (2027-01-17): three paying users or ten weekly active users. 
 | P2 · Breadth for researchers | 7–10 | Install, formats, Python client, guides | 25 of the core 29 solid; the seed user runs a regression on W2L data; a non-author installs W2L unaided |
 | P3 · Browser lane and Pro | 11–14 | A lane for blocked sites and something to sell | Published success rates of the user-browser lane against HTTP; 3 early users used queue mode |
 | P4 · Paid launch | 15–16 | First payment | 3 paying or 10 weekly active users by week 16 |
+| P5 · Breadth for developers | after P3 | Cache, browser actions, search, model-driven formats, hosted scale, proxies within the position | Firecrawl clients run unchanged; parity ≥50% with records |
 
 Weeks are a guide. A phase ends when its exit condition is met, not when its weeks run out.
 
@@ -127,11 +128,26 @@ The subset of the audit's M2 and M3 that researchers use; the rest is paused. P2
 - Launch to interviewees first, then the Chrome Web Store, Show HN, MCP directories and research mailing lists.
 - Measure licence activations and user feedback. Telemetry in the free version is off by default; if it is ever enabled, it is disclosed and can be turned off in one step.
 
+### P5 · Breadth for developers (after P3)
+
+Decided 2026-10-03: once P3 exits, these five items are required, in this order, each with its real-site record and status CSV like the M2 groups. They widen the audience from researchers to developers migrating from Firecrawl, without changing the product position: nothing here disguises the client or evades a site's access controls.
+
+| Item | Accepted when |
+| --- | --- |
+| `maxAge` cache (if not already closed in P2) | `maxAge`, `minAge`, `storeInCache` and the cache-only mode on scrape, batch and crawl, REST, SDK, MCP and `/fc`; a cache hit says so (`cacheState`, `cachedAt`) and gives the original fetch's Evidence Record, never a guessed `miss`; the audit's M3 cache features (4) solid |
+| Browser actions pipeline | The audit's M3 actions (11): `wait` (duration, selector), `click`, `write`, `press`, `scroll`, `screenshot`, `scrape`, `executeJavascript` and `pdf`, run on the local browser rung only and in the order given, each step recorded in the trace with its outcome and timing; a step that fails ends the pipeline with a named error and the page as it stood; `/fc` maps Firecrawl's `actions` shape; checked on 10 real pages that need an interaction to show their data (cookie walls, "load more", tabbed tables); the hosted MCP host refuses actions until its isolation is reviewed |
+| Search endpoint | `POST /v1/search` with `limit`, `scrapeOptions`, include / exclude domains, time filter and the result shape the audit names (core 29's four search features, plus the M5 operators that need no extra backend); the backend is pluggable and named in the response (`provider`), with a self-hosted SearXNG as the first and the user's own API key for a commercial engine as the second; every result that is scraped carries its Evidence Record; results are never invented when the backend fails (`cannot_verify`) |
+| Model-driven formats and cross-site extract | `summary`, `question`, `highlights` and multi-URL `extract` with the user's own model key (environment variable or request header, never stored), the model's name and the prompt hash recorded on the result, the source passages cited by URL and offset so a summary can be checked against its page; `extract.show-sources` on; no W2L-funded model budget |
+| Hosted scale | Batches of tens of thousands of URLs and crawls over several workers under one control database: a worker pool with leased tasks, per-tenant task roots and budgets, usage endpoints (`usage.concurrency`, `usage.queue-status`), metering for per-use billing, and the hosted API and hosted MCP taken out of Paused; the 1,000-URL `kill -9` resume test repeated at 20,000 URLs over 3 workers with 0 lost and 0 duplicated |
+| Proxies and location, within the position | `proxy: "basic" | "auto"` and `location` through operator- or user-supplied egress (an explicit proxy URL, the vendor lane, or a declared region), recorded on every result as `proxyUsed` and the declared location; refused by name on a server that offers none. Not included, and not restarted: fingerprint spoofing, stealth browsers, CAPTCHA solving or any route whose purpose is to evade a site's access controls; a site that blocks automated access is answered by the user's browser lane or an honest `blocked` |
+
+**Exit:** the audit's M3 and the search, extract and summary rows of M5 solid with records; a Firecrawl v1/v2 client switches the base URL and runs its existing scrape, crawl, batch, map, search and actions calls unchanged, with the refusals above as the only named differences; parity on `score.mjs` at or above 50% tier-weighted, as a computation beside the records.
+
 ### After week 16
 
 | Result | Reading | Next |
 | --- | --- | --- |
-| 3 or more paying users | The model works | Second audience; scheduled re-runs with change comparison as the second Pro feature; batches of tens of thousands and multiple workers |
+| 3 or more paying users | The model works | Second audience; scheduled re-runs with change comparison as the second Pro feature; P5 in its order |
 | Weekly users, no payment | The value is real; packaging or price is wrong | Test lab or team licences and one-off Evidence Pack purchases per project |
 | Neither | Wrong audience or channel | Reread the interviews and redo P0 with the second audience; no new features |
 
@@ -173,10 +189,10 @@ Not worked on unless the restart condition occurs or the person asking requests 
 | Paused | Why | Restart when |
 | --- | --- | --- |
 | Further Amazon.sg adapter work | No overlap with the first audience | Commerce price evidence becomes the active audience |
-| Firecrawl features outside the core 29 that researchers do not use: search (including SearXNG), agent, cross-site LLM extract, browser actions, live webhook push, file upload, summary, branding and similar | They need a search backend or a model budget, or researchers do not use them. The matrix stays in `research/parity/` | A paying user asks. LLM extraction with the user's own key keeps its environment-variable fallback, maintained but not extended |
-| Own stealth, fingerprint spoofing, proxy pools | An arms race that conflicts with the evidence positioning | Not restarted; the user's browser and the vendor lane replace them |
-| Hosted API and hosted MCP | Operations, compliance and isolation cost | Users ask for runs while their computer is off and will pay more for it |
-| Monitor → webhook extensions | Researchers do not need webhooks | The second audience |
+| Firecrawl features outside the core 29 and outside [P5](#p5--breadth-for-developers-after-p3): agent, branding, file upload and similar | They need a model budget, or no audience has asked. The matrix stays in `research/parity/` | A paying user asks. Search, browser actions, cross-site extract, summary / question / highlights and live webhook push moved to P5 on 2026-10-03 (webhook push landed in M2) |
+| Own stealth, fingerprint spoofing, CAPTCHA solving, proxy pools built to evade blocking | An arms race that conflicts with the evidence positioning | Not restarted; the user's browser and the vendor lane replace them. Declared proxies and `location` through supplied egress are a P5 item, recorded on every result |
+| Hosted API and hosted MCP at scale | Operations, compliance and isolation cost | P5's hosted-scale item, once P3 has exited; or earlier when users ask for runs while their computer is off and will pay more for it |
+| Monitor REST / MCP surface in Firecrawl's shape (the audit's M5 monitor rows) | The native Monitor and Delivery contracts already cover re-runs, change detection and signed delivery; only the interface shape differs | The second audience, or a Firecrawl Monitor client asks |
 | Internal gate process (Gate 5 and similar) | Replaced by real user signals | Not restarted |
 
 ## Risks
