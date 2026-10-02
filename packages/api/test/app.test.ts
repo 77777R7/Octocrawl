@@ -147,6 +147,13 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       details: { parameters: ['excludeTags[1]'] },
     } })
     expect(await postJson('/v1/batches', { urls: [url], includeTags: ['h2 ~ p'] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('includeTags entry uses the sibling combinator ~'), code: 'unsupported_parameter', details: { parameters: ['includeTags[0]'] } } })
+    // A list is bounded by its parts in all, since each costs the page a test of every element: 34 x 3 is over, 50 x 2 is at the limit.
+    const wide = Array.from({ length: 34 }, () => 'main > article p')
+    const tooMany = { error: 'includeTags must hold at most 100 selector parts in all, and holds 102 (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)', code: 'invalid_request' }
+    expect(await postJson('/v1/scrape', { url, includeTags: wide })).toEqual({ status: 400, body: tooMany })
+    expect(await postJson('/fc/v1/scrape', { url, includeTags: wide })).toEqual({ status: 400, body: { success: false, ...tooMany } })
+    expect(await postJson('/v1/crawl', { url, excludeTags: [...wide, ':is(h1, h2)'] })).toEqual({ status: 400, body: { ...tooMany, error: tooMany.error.replace('includeTags', 'excludeTags').replace('102', '105') } })
+    expect(await postJson('/v1/scrape', { url, includeTags: Array.from({ length: 50 }, () => 'ul li'), debug: false })).toMatchObject({ status: 200, body: { status: 'success', lane: 'http' } })
   })
 
   it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {

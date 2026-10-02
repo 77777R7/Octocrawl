@@ -16,7 +16,7 @@ import {
   OriginScheduler,
   type Channel,
 } from '@w2l/bench'
-import { invalidSelector, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
+import { invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
 import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
@@ -204,15 +204,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /**
    * A selector that does not parse, or that uses what W2L does not match, is
    * refused by name before anything is fetched or stored, never read as
-   * "matched nothing".
+   * "matched nothing". So is a list that holds more parts than the extractor
+   * matches for one list: what a list costs a page grows with its parts.
    */
   const checkSelectors = (req: PageOptions): void => {
     for (const name of ['includeTags', 'excludeTags'] as const) {
+      let parts = 0
       for (const [index, selector] of (req[name] ?? []).entries()) {
         const refusal = invalidSelector(selector)
-        if (refusal === null) continue
+        if (refusal === null) {
+          parts += selectorParts(selector)
+          continue
+        }
         if (refusal.kind === 'syntax') throw new RequestError(`${name} entry is not a valid CSS selector: ${selector}`)
         throw new RequestError(`${name} entry uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`${name}[${index}]`] })
+      }
+      if (parts > MAX_SELECTOR_PARTS) {
+        throw new RequestError(`${name} must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and holds ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
       }
     }
   }

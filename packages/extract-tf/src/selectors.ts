@@ -17,17 +17,59 @@
  * proportional to the page (SUPPORTED_SELECTORS), and its combinators are
  * never given to the DOM layer: that layer matches each compound selector on
  * its own, which needs no ancestor and no sibling, and the descendant and
- * child combinators between them are resolved here, one pass over the page
- * for each chain.
+ * child combinators between them are resolved here, in one pass over the
+ * page for all the selectors of a list.
+ *
+ * A selector is read with css-what, the parser the DOM layer reads it with,
+ * so the two never divide one differently: an escape that ends in a space
+ * (`#\31 23`, the id `123`) is part of a name to both. Each compound selector
+ * is handed to the DOM layer as written back from its tokens.
+ *
+ * What a list costs is the number of its parts (MAX_SELECTOR_PARTS): the DOM
+ * layer tests an element against a compound selector part by part, and
+ * passes over the page once for the compound selectors that are a whole
+ * selector and once for each other one.
  */
 
+import { AttributeAction, isTraversal, parse as parseSelector, SelectorType, type Selector } from 'css-what'
 import { qsa, selectorSyntaxError } from './dom.js'
 
 /** What a request selector may be built from, as the refusal of any other says it. */
 export const SUPPORTED_SELECTORS =
   'tag, class, id and attribute selectors, the descendant and child combinators, :root, :empty, and :not(), :is() and :where() around selectors without combinators'
 
-const PSEUDO_CLASSES: ReadonlySet<string> = new Set(['not', 'is', 'where', 'root', 'empty'])
+/**
+ * The parts one list of request selectors may hold in all. A tag name, `*`,
+ * a class, an id, an attribute test and a pseudo-class each count as one,
+ * those inside `:not()`, `:is()` and `:where()` too: `main > article
+ * p:not(.note)` has five. It bounds what a list can make a page cost: at
+ * most one test of every element for each part, and one pass over the page
+ * for each compound selector.
+ */
+export const MAX_SELECTOR_PARTS = 100
+
+/** Pseudo-classes without an argument, and those around compound selectors. */
+const PLAIN_PSEUDO_CLASSES: ReadonlySet<string> = new Set(['root', 'empty'])
+const SELECTOR_PSEUDO_CLASSES: ReadonlySet<string> = new Set(['not', 'is', 'where'])
+
+/** The combinators that are not resolved here, as a refusal names them. */
+const UNSUPPORTED_COMBINATORS: Partial<Record<SelectorType, string>> = {
+  [SelectorType.Adjacent]: 'the sibling combinator +',
+  [SelectorType.Sibling]: 'the sibling combinator ~',
+  [SelectorType.Parent]: 'the parent combinator <',
+  [SelectorType.ColumnCombinator]: 'the column combinator ||',
+}
+
+const ATTRIBUTE_OPERATORS: Record<AttributeAction, string> = {
+  [AttributeAction.Exists]: '',
+  [AttributeAction.Equals]: '=',
+  [AttributeAction.Element]: '~=',
+  [AttributeAction.Start]: '^=',
+  [AttributeAction.End]: '$=',
+  [AttributeAction.Any]: '*=',
+  [AttributeAction.Not]: '!=',
+  [AttributeAction.Hyphen]: '|=',
+}
 
 /** Why a request selector cannot be used. */
 export interface SelectorRefusal {
@@ -43,92 +85,120 @@ interface Step {
   child: boolean
 }
 
-/** Index of the character that closes what opens at `from`: a quoted string, or an attribute selector with the strings in it; the end of the text when nothing does. */
-function closing(text: string, from: number, close: string): number {
-  for (let i = from + 1; i < text.length; i++) {
-    const c = text[i]!
-    if (c === '\\') i++
-    else if (c === close) return i
-    else if (close === ']' && (c === '"' || c === "'")) i = closing(text, i, c)
-  }
-  return text.length
+/** A selector list as its chains of compound selectors, and the number of its parts. */
+interface Reading {
+  chains: Step[][]
+  parts: number
 }
 
-/** The nearest character that is not whitespace, before `at` (step -1) or after it (step 1). */
-function neighbour(text: string, at: number, step: 1 | -1): string {
-  for (let i = at + step; i >= 0 && i < text.length; i += step) if (!/\s/.test(text[i]!)) return text[i]!
-  return ''
+/** What a selector uses that is not matched here; thrown while it is read, and returned as its refusal. */
+class Unsupported extends Error {}
+
+/**
+ * A name or a value as the parser reads it back, whatever it holds: every
+ * character outside the parser's name characters as a six-digit escape.
+ */
+function written(text: string): string {
+  return text.replace(/[^\w°-￿-]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(6, '0')}`)
+}
+
+/**
+ * One compound selector written back from its tokens. Counts its parts, and
+ * refuses what is outside SUPPORTED_SELECTORS by name.
+ */
+function compoundText(tokens: readonly Selector[], tally: { parts: number }): string {
+  let text = ''
+  for (const [index, token] of tokens.entries()) {
+    tally.parts++
+    switch (token.type) {
+      case SelectorType.Tag:
+      case SelectorType.Universal:
+        if (token.namespace !== null) throw new Unsupported('a namespace')
+        // `*p`, or two names with a comment between them: written back, they would read as one name.
+        if (index > 0) throw new Unsupported('a tag name after another part of its compound selector')
+        text += token.type === SelectorType.Tag ? written(token.name) : '*'
+        break
+      case SelectorType.Attribute:
+        if (token.namespace !== null) throw new Unsupported('a namespace')
+        // `.class` and `#id` are the only attribute tests the parser marks `quirks`.
+        if (token.ignoreCase === 'quirks') text += `${token.name === 'id' ? '#' : '.'}${written(token.value)}`
+        else if (token.action === AttributeAction.Exists) text += `[${written(token.name)}]`
+        else text += `[${written(token.name)}${ATTRIBUTE_OPERATORS[token.action]}"${written(token.value)}"${token.ignoreCase === null ? '' : token.ignoreCase ? 'i' : 's'}]`
+        break
+      case SelectorType.Pseudo: {
+        const { name, data } = token
+        if (data === null && PLAIN_PSEUDO_CLASSES.has(name)) {
+          text += `:${name}`
+        } else if (Array.isArray(data) && SELECTOR_PSEUDO_CLASSES.has(name)) {
+          const inside = data.map((inner) => {
+            if (inner.some(isTraversal)) throw new Unsupported('a combinator inside parentheses')
+            return compoundText(inner, tally)
+          })
+          text += `:${name}(${inside.join(',')})`
+        } else {
+          throw new Unsupported(`:${name}`)
+        }
+        break
+      }
+      case SelectorType.PseudoElement:
+        throw new Unsupported(`::${token.name}`)
+      default:
+        // A combinator: a selector is divided at them before its compound selectors are written.
+        throw new Unsupported('a combinator')
+    }
+  }
+  return text
+}
+
+/**
+ * A compound selector as a step of its chain. What the DOM layer is handed
+ * is what was read: it accepts the text, and reads it back as these tokens.
+ */
+function stepOf(compound: readonly Selector[], child: boolean, tally: { parts: number }): Step {
+  const text = compoundText(compound, tally)
+  if (selectorSyntaxError(text) !== null || JSON.stringify(parseSelector(text)) !== JSON.stringify([compound])) {
+    throw new Unsupported('a name that cannot be written back for the DOM layer')
+  }
+  return { compound: text, child }
 }
 
 /**
  * A selector list as its chains of compound selectors, or why it cannot be
- * used. Attribute selectors, quoted strings and escaped characters are
- * copied whole, so what they contain is never read as a combinator.
+ * used: the DOM layer does not accept it, or it uses something outside
+ * SUPPORTED_SELECTORS, named in the order the selector writes it.
  */
-function read(selector: string): Step[][] | SelectorRefusal {
+function read(selector: string): Reading | SelectorRefusal {
   const syntax = selectorSyntaxError(selector)
   if (syntax !== null) return { kind: 'syntax', reason: syntax }
-  const unsupported = (reason: string): SelectorRefusal => ({ kind: 'unsupported', reason })
+  const tally = { parts: 0 }
   const chains: Step[][] = []
-  let steps: Step[] = []
-  let compound = ''
-  /** The combinator read since the last compound selector. */
-  let combinator: 'descendant' | 'child' | null = null
-  /** Open parentheses: inside :not(), :is() and :where(). */
-  let depth = 0
-  const endCompound = (): void => {
-    if (compound === '') return
-    steps.push({ compound, child: combinator === 'child' })
-    compound = ''
-    combinator = null
-  }
-  for (let i = 0; i < selector.length; i++) {
-    const c = selector[i]!
-    if (c === '\\') {
-      compound += selector.slice(i, i + 2)
-      i++
-    } else if (c === '[' || c === '"' || c === "'") {
-      const end = closing(selector, i, c === '[' ? ']' : c)
-      compound += selector.slice(i, end + 1)
-      i = end
-    } else if (c === ':') {
-      const name = /^::?([\w-]*)/.exec(selector.slice(i))![1]!.toLowerCase()
-      if (!PSEUDO_CLASSES.has(name)) return unsupported(`:${name}`)
-      compound += c
-    } else if (c === '(' || c === ')') {
-      depth += c === '(' ? 1 : -1
-      compound += c
-    } else if (c === '+' || c === '~') {
-      return unsupported(`the sibling combinator ${c}`)
-    } else if (depth > 0) {
-      // Inside parentheses: compound selectors and the commas between them.
-      const between = /\s/.test(c) && !'(,'.includes(neighbour(selector, i, -1)) && !'),'.includes(neighbour(selector, i, 1))
-      if (c === '>' || between) return unsupported('a combinator inside parentheses')
-      if (!/[\w\s\-.#*,]/.test(c) && c.charCodeAt(0) < 0x80) return unsupported(`the character ${c}`)
-      compound += c
-    } else if (/\s/.test(c)) {
-      endCompound()
-      if (steps.length > 0 && combinator === null) combinator = 'descendant'
-    } else if (c === '>') {
-      endCompound()
-      if (steps.length === 0) return unsupported('a combinator at its start')
-      combinator = 'child'
-    } else if (c === ',') {
-      endCompound()
-      if (combinator === 'child') return unsupported('a combinator at its end')
+  try {
+    for (const tokens of parseSelector(selector)) {
+      const steps: Step[] = []
+      let compound: Selector[] = []
+      let child = false
+      for (const token of tokens) {
+        if (!isTraversal(token)) {
+          compound.push(token)
+          continue
+        }
+        const follows = compound.length > 0
+        if (follows) steps.push(stepOf(compound, child, tally))
+        const refused = UNSUPPORTED_COMBINATORS[token.type]
+        if (refused !== undefined) throw new Unsupported(refused)
+        if (!follows) throw new Unsupported('a combinator at its start')
+        compound = []
+        child = token.type === SelectorType.Child
+      }
+      if (compound.length === 0) throw new Unsupported('a combinator at its end')
+      steps.push(stepOf(compound, child, tally))
       chains.push(steps)
-      steps = []
-      combinator = null
-    } else if (/[\w\-.#*]/.test(c) || c.charCodeAt(0) >= 0x80) {
-      compound += c
-    } else {
-      return unsupported(`the character ${c}`)
     }
+  } catch (error) {
+    if (error instanceof Unsupported) return { kind: 'unsupported', reason: error.message }
+    return { kind: 'syntax', reason: error instanceof Error ? error.message : String(error) }
   }
-  endCompound()
-  if (combinator === 'child') return unsupported('a combinator at its end')
-  chains.push(steps)
-  return chains.filter((chain) => chain.length > 0)
+  return { chains, parts: tally.parts }
 }
 
 /**
@@ -138,61 +208,84 @@ function read(selector: string): Step[][] | SelectorRefusal {
  * nothing.
  */
 export function invalidSelector(selector: string): SelectorRefusal | null {
-  const chains = read(selector)
-  return Array.isArray(chains) ? null : chains
+  const reading = read(selector)
+  return 'chains' in reading ? null : reading
+}
+
+/** The parts of a request selector, as MAX_SELECTOR_PARTS counts them; 0 for one that cannot be used. */
+export function selectorParts(selector: string): number {
+  const reading = read(selector)
+  return 'chains' in reading ? reading.parts : 0
 }
 
 /**
  * The elements of the document that any of the selectors names. A selector
- * that cannot be used (invalidSelector) names nothing: the API refuses it by
- * name before a page is fetched, and no other caller gets to run one whose
- * cost the page does not bound.
+ * that cannot be used (invalidSelector) names nothing, and neither does one
+ * from which on the list holds more than MAX_SELECTOR_PARTS parts: the API
+ * refuses both by name before a page is fetched, and no other caller gets to
+ * run a list whose cost the page does not bound. A compound selector or a
+ * chain the list repeats is matched once.
  */
 export function namedBy(document: Document, selectors: readonly string[]): Set<Element> {
   const named = new Set<Element>()
-  const chains: Step[][] = []
+  const alone = new Set<string>()
+  const chains = new Map<string, Step[]>()
+  let parts = 0
   for (const selector of selectors) {
-    const read_ = read(selector)
-    if (!Array.isArray(read_)) continue
-    for (const steps of read_) {
-      // A compound selector on its own is the DOM layer's to match.
-      if (steps.length === 1) for (const el of qsa(document, steps[0]!.compound)) named.add(el)
-      else chains.push(steps)
+    const reading = read(selector)
+    if (!('chains' in reading)) continue
+    parts += reading.parts
+    if (parts > MAX_SELECTOR_PARTS) break
+    for (const steps of reading.chains) {
+      if (steps.length === 1) alone.add(steps[0]!.compound)
+      else chains.set(steps.map((step) => `${step.child ? '>' : ' '}${step.compound}`).join(''), steps)
     }
   }
+  // A compound selector on its own is the DOM layer's to match: all of them in one pass.
+  if (alone.size > 0) for (const el of qsa(document, [...alone].join(','))) named.add(el)
   const root = document.documentElement
-  if (chains.length === 0 || root === null) return named
+  if (chains.size === 0 || root === null) return named
   // Every element's place in document order: what a compound selector
-  // matches is then one byte per element, for one chain at a time.
+  // matches is then one byte per element, read once for all the chains
+  // that hold it.
   const place = new Map<Element, number>()
   for (const el of qsa(document, '*')) place.set(el, place.size)
-  for (const steps of chains) {
-    const matched = new Map<string, Uint8Array>()
-    const fits = steps.map(({ compound }) => {
-      let flags = matched.get(compound)
+  const matched = new Map<string, Uint8Array>()
+  const fits: Uint8Array[] = []
+  const child: boolean[] = []
+  const opens: boolean[] = []
+  const closes: boolean[] = []
+  for (const steps of chains.values()) {
+    for (const [index, step] of steps.entries()) {
+      let flags = matched.get(step.compound)
       if (flags === undefined) {
         flags = new Uint8Array(place.size)
-        for (const el of qsa(document, compound)) flags[place.get(el)!] = 1
-        matched.set(compound, flags)
+        for (const el of qsa(document, step.compound)) flags[place.get(el)!] = 1
+        matched.set(step.compound, flags)
       }
-      return flags
-    })
-    resolveChain(root, place, fits, steps.map((step) => step.child), named)
+      fits.push(flags)
+      child.push(step.child)
+      opens.push(index === 0)
+      closes.push(index === steps.length - 1)
+    }
   }
+  resolveChains(root, place, fits, child, opens, closes, named)
   return named
 }
 
 /**
- * Adds to `named` the elements a chain of compound selectors names: one pass
- * in document order, which carries down the path from the root how far the
- * chain has come. For the element at each depth of that path, `here` says
- * which steps end at the element itself, and `above` which end at it or at
- * one of its ancestors: step i ends at an element that its compound selector
- * matches (`fits[i]`) and whose parent (after `>`), or any ancestor, ends
- * step i - 1. No step is tried twice for an element, however many ways its
- * ancestors fit the steps before it.
+ * Adds to `named` the elements that chains of compound selectors name: one
+ * pass in document order for all of them, which carries down the path from
+ * the root how far each chain has come. The steps of all chains are numbered
+ * in one row; `opens` marks the first step of a chain and `closes` its last.
+ * For the element at each depth of the path, `here` says which steps end at
+ * the element itself, and `above` which end at it or at one of its
+ * ancestors: step i ends at an element that its compound selector matches
+ * (`fits[i]`) and, unless it opens its chain, whose parent (after `>`), or
+ * any ancestor, ends step i - 1. No step is tried twice for an element,
+ * however many ways its ancestors fit the steps before it.
  */
-function resolveChain(root: Element, place: ReadonlyMap<Element, number>, fits: readonly Uint8Array[], child: readonly boolean[], named: Set<Element>): void {
+function resolveChains(root: Element, place: ReadonlyMap<Element, number>, fits: readonly Uint8Array[], child: readonly boolean[], opens: readonly boolean[], closes: readonly boolean[], named: Set<Element>): void {
   const steps = fits.length
   // One row of `steps` flags per depth of the current path.
   let here = new Uint8Array(64 * steps)
@@ -212,12 +305,12 @@ function resolveChain(root: Element, place: ReadonlyMap<Element, number>, fits: 
     const at = place.get(el)
     const parent = row - steps
     for (let i = 0; i < steps; i++) {
-      const before = i === 0 ? 1 : depth === 0 ? 0 : child[i] ? here[parent + i - 1]! : above[parent + i - 1]!
+      const before = opens[i] ? 1 : depth === 0 ? 0 : child[i] ? here[parent + i - 1]! : above[parent + i - 1]!
       const ends = before === 1 && at !== undefined && fits[i]![at] === 1 ? 1 : 0
       here[row + i] = ends
       above[row + i] = ends === 1 || (depth > 0 && above[parent + i] === 1) ? 1 : 0
+      if (ends === 1 && closes[i]) named.add(el)
     }
-    if (here[row + steps - 1] === 1) named.add(el)
     if (el.firstElementChild !== null) {
       el = el.firstElementChild
       depth++

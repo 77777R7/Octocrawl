@@ -62,7 +62,9 @@ export interface FetchOptions {
    * chooses the content. Nothing matching is an empty answer. The page's
    * type, title and metadata are still read from the whole page. The API
    * refuses a selector the extractor does not match (@w2l/extract-tf
-   * `invalidSelector`); a lane given one reads it as naming nothing.
+   * `invalidSelector`) and a list of more parts than it matches for one
+   * list (`MAX_SELECTOR_PARTS`); a lane given either reads it as naming
+   * nothing.
    */
   includeTags?: readonly string[]
   /**

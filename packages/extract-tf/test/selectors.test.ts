@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parse } from '../src/dom.js'
-import { invalidSelector, namedBy, SUPPORTED_SELECTORS } from '../src/index.js'
+import { invalidSelector, MAX_SELECTOR_PARTS, namedBy, selectorParts, SUPPORTED_SELECTORS } from '../src/index.js'
 
 // Selectors that come from a request (includeTags, excludeTags): what may be used, and how it is matched.
 const PAGE = `<!doctype html><html class="js"><head><title>Kiln archive</title></head><body class="home">
@@ -25,7 +25,9 @@ describe('request selectors', () => {
       ['li:nth-child(2)', ':nth-child'], ['p:first-child', ':first-child'], ['tr:last-of-type', ':last-of-type'], ['div:has(> img)', ':has'], ['p:contains(tide)', ':contains'],
       ['a:hover', ':hover'], [':is(li:only-child)', ':only-child'], ['h2 + p', 'the sibling combinator +'], ['h2 ~ p ~ p', 'the sibling combinator ~'],
       ['p:not(nav a)', 'a combinator inside parentheses'], [':is(ul > li)', 'a combinator inside parentheses'], ['> p', 'a combinator at its start'], ['div >', 'a combinator at its end'],
-      ['a < b', 'the character <'],
+      ['a < b', 'the parent combinator <'], ['*p', 'a tag name after another part of its compound selector'],
+      // A no-break space is no combinator to the DOM layer: it reads `div\u00a0p` as two tag names in one compound selector.
+      ['div\u00a0p', 'a tag name after another part of its compound selector'],
     ]
     for (const [selector, reason] of unsupported) expect(invalidSelector(selector), selector).toEqual({ kind: 'unsupported', reason })
     expect(SUPPORTED_SELECTORS).toContain('descendant and child combinators')
@@ -44,6 +46,39 @@ describe('request selectors', () => {
     }
     // Several selectors name the union, and one that cannot be used names nothing.
     expect(namedBy(document, ['h1', 'nav a', 'p:first-child', 'div[[']).size).toBe(3)
+  })
+
+  it('reads an escape as the DOM layer does, an escape that ends in a space included', () => {
+    // Ids and classes that start with a digit, or hold a colon or a slash, as CSS.escape writes them.
+    const { document } = parse(`<!doctype html><html><body><div id="123" class="2xl:grid w-1/2"><p class="7up x">Readings</p><span id="7up"><span>41</span></span></div>
+<div class="2xl"><p>Ledger</p></div><p class="a1 23">Office</p><div class=">a"><p>Tide</p></div></body></html>`)
+    for (const [selector, count] of [
+      ['#\\31 23', 1], ['.\\32 xl\\:grid', 1], ['.\\32 xl', 1], ['.\\32 xl p', 1], ['#\\37 up span', 1], ['div#\\31 23 > p.\\37 up.x', 1], ['.w-1\\/2 > #\\37 up', 1],
+      ['.\\000032xl', 1], ['.\\32xl', 1], ['.a\\31 23', 0], ['.a\\31  .\\32 3', 0], ['.\\>a p', 1], ['.>a', 1], ['[id="123"] :not(.\\37 up)', 2],
+    ] as const) {
+      expect(invalidSelector(selector), selector).toBeNull()
+      const named = namedBy(document, [selector])
+      const native = Array.from(document.querySelectorAll(selector))
+      expect(native, selector).toHaveLength(count)
+      expect([...named], selector).toEqual(native)
+    }
+  })
+
+  it('counts the parts of a selector, and matches a list up to its limit, each compound selector and chain once', () => {
+    expect(['table', 'table.wikitable', 'a[href$=".pdf"]', 'main > article p:not(.note)', ':is(h1, h2):not(.x)', 'h1, h2', 'li:nth-child(2)', 'div[['].map(selectorParts)).toEqual([1, 2, 2, 5, 5, 2, 0, 0])
+    const { document } = parse(PAGE)
+    // From the selector on with which a list passes the limit, nothing is named.
+    const full = Array.from({ length: MAX_SELECTOR_PARTS - 1 }, (_, i) => `.none-${i}`)
+    expect(namedBy(document, [...full, 'h1', 'footer p']).size).toBe(1)
+    expect(namedBy(document, [...full, 'nav a', 'h1']).size).toBe(0)
+    // What a list repeats is matched once: a pass for the compound selectors on their own, one for every element's place, one for each compound selector of a chain.
+    let passes = 0
+    const querySelectorAll = document.querySelectorAll.bind(document)
+    document.querySelectorAll = ((selector: string) => { passes++; return querySelectorAll(selector) }) as typeof document.querySelectorAll
+    const repeated = Array.from({ length: 10 }, () => 'article p, td p, article p, h1, nav, h1')
+    expect(repeated.reduce((sum, selector) => sum + selectorParts(selector), 0)).toBeLessThanOrEqual(MAX_SELECTOR_PARTS)
+    expect(namedBy(document, repeated).size).toBe(4)
+    expect(passes).toBe(5)
   })
 
   it('resolves a long chain of combinators in one pass, however many ways the ancestors fit it', () => {
