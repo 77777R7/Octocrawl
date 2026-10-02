@@ -14,6 +14,9 @@ import type {
   CrawlPageQuery,
   CrawlReport,
   CrawlStartRequest,
+  BatchAccepted,
+  BatchErrorsQuery,
+  BatchErrorsResponse,
   BatchStartRequest,
   BatchStatusResponse,
   CompactScrapeResponse,
@@ -303,12 +306,22 @@ export class W2L {
     return this.post<CrawlAccepted>('/v1/crawl', { ...opts, url, origin: originOf(opts, request) }, 202, request)
   }
 
-  async batchScrape(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
-    return this.post<CrawlAccepted>('/v1/batches', { ...opts, urls, origin: originOf(opts, request) }, 202, request)
+  /** Starts a batch: `{ taskId }`, plus `invalidURLs` (the entries skipped) when `ignoreInvalidURLs` was on. */
+  async batchScrape(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, request: RequestOptions = {}): Promise<BatchAccepted> {
+    return this.post<BatchAccepted>('/v1/batches', { ...opts, urls, origin: originOf(opts, request) }, 202, request)
   }
 
   async getBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
     return this.get<BatchStatusResponse>(`/v1/batches/${encodeURIComponent(id)}`, request, `batch not found: ${id}`)
+  }
+
+  /** The batch's failed, blocked, cancelled and budget-cut items across every attempt, in pages of up to 1000 (`limit`, `cursor`), with `robotsBlocked`, the URLs robots.txt refused. */
+  async getBatchErrors(id: string, options: BatchErrorsQuery = {}, request: RequestOptions = {}): Promise<BatchErrorsResponse> {
+    const params = new URLSearchParams()
+    if (options.cursor !== undefined) params.set('cursor', options.cursor)
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    const suffix = params.size === 0 ? '' : `?${params.toString()}`
+    return this.get<BatchErrorsResponse>(`/v1/batches/${encodeURIComponent(id)}/errors${suffix}`, request, `batch not found: ${id}`)
   }
 
   async getBatchItems(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlPage>> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JsonSchema } from '@w2l/contracts'
-import { hostedAmazonUrl, hostedDocumentUrl, normalizeHostedToolCall } from '../src/hostedToolPolicy.js'
+import { hostedAmazonUrl, hostedDocumentUrl, normalizeHostedToolCall, REMOTE_TOOLS } from '../src/hostedToolPolicy.js'
 
 const schema: JsonSchema = {type:'object',properties:{asin:{type:'string'}},required:['asin']}
 const receiver = 'https://receiver.example/webhook'
@@ -30,6 +30,14 @@ describe('single-owner hosted workflow policy', () => {
     // The remote endpoint takes no recorded robots override.
     expect(() => call('scrape',{url:'https://www.amazon.sg/dp/B000VW9PIK',robotsOverride:{reason:'r'}})).toThrow('unsupported remote tool option')
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],robotsOverrides:[{url:'https://www.amazon.sg/dp/B000VW9PIK',reason:'r'}]})).toThrow('unsupported remote tool option')
+    // The reviewed batch shape is fixed: the batch's own cap and the invalid-URL skip are refused too, and nothing is loosened.
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],maxConcurrency:1})).toThrow('unsupported remote tool option')
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],ignoreInvalidURLs:true})).toThrow('unsupported remote tool option')
+    // The errors report is a read of the owner's own batches, offered like get_batch_items; the crawl tools stay out.
+    expect(REMOTE_TOOLS.has('get_batch_errors')).toBe(true)
+    expect(call('get_batch_errors',{id:'batch-1',limit:10})).toEqual({id:'batch-1',limit:10})
+    expect(REMOTE_TOOLS.has('get_crawl_errors')).toBe(false)
+    expect(() => call('get_crawl_errors',{id:'c1'})).toThrow('tool not available in this deployment')
   })
 
   it('allows reviewed public-document monitors with explicit HTTP capture and one receiver', () => {

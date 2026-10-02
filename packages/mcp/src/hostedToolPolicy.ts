@@ -1,9 +1,10 @@
 import { parseMonitorRevision, type JsonSchema } from '@w2l/contracts'
 
 /** One owner, two reviewed workflows. The remote endpoint never accepts an
- * arbitrary URL, browser session, model prompt, or caller-selected schema. */
+ * arbitrary URL, browser session, model prompt, or caller-selected schema.
+ * `get_batch_errors` is a read of the owner's own batches, like `get_batch_items`. */
 export const REMOTE_TOOLS = new Set([
-  'scrape', 'scrape_product', 'batch_scrape', 'batch_products', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+  'scrape', 'scrape_product', 'batch_scrape', 'batch_products', 'get_batch', 'get_batch_items', 'get_batch_errors', 'wait_batch', 'cancel_batch',
   'preview_monitor', 'create_monitor', 'list_monitors', 'get_monitor', 'run_monitor',
   'get_monitor_run', 'pause_monitor', 'resume_monitor', 'cancel_monitor_run',
   'create_delivery_destination', 'list_delivery_destinations', 'pause_delivery_destination',

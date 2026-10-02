@@ -12,6 +12,7 @@ import {
   RATE_LIMITED_STATUS,
   rateLimitedBody,
   parseCrawlStartRequest,
+  parseBatchErrorsQuery,
   parseBatchStartRequest,
   parseCrawlPageQuery,
   firecrawlCrawlCounts,
@@ -156,6 +157,12 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const query = parseCrawlPageQuery(c.req.query())
     if (query.limit !== undefined && query.limit > 50) throw new RequestError('batch item limit must be at most 50')
     const page = await engine.getBatchItems(c.req.param('id'), query)
+    return page ? c.json(page) : fail(c, 'not_found', 'not found')
+  })
+
+  /** The batch's errors across every attempt, with the URLs robots.txt refused; no bodies, so pages of up to 1000. */
+  app.get('/v1/batches/:id/errors', async (c) => {
+    const page = await engine.getBatchErrors(c.req.param('id'), parseBatchErrorsQuery(c.req.query()))
     return page ? c.json(page) : fail(c, 'not_found', 'not found')
   })
 

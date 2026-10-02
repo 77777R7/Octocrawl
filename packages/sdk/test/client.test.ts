@@ -311,6 +311,24 @@ describe('W2L SDK', () => {
     }
   })
 
+  it('returns what a batch start skipped and reads a batch\'s errors by cursor and limit', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const errors = { errors: [{ id: 's1', timestamp: '2026-10-02T00:00:00.000Z', url: 'https://example.com/b', status: 'failed', code: 'policy_denied', error: 'failed: policy_denied — robots.txt rule /b', httpStatus: null }], robotsBlocked: ['https://example.com/b'], nextCursor: null, hasMore: false }
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      calls.push({ line: `${init?.method ?? 'GET'} ${url.pathname}${url.search}`, body: init?.body === undefined ? null : JSON.parse(String(init.body)) })
+      if (init?.method === 'POST') return new Response(JSON.stringify({ taskId: 'batch-1', invalidURLs: ['not a url'] }), { status: 202 })
+      if (url.pathname.endsWith('/nothing/errors')) return new Response('{"error":"not found","code":"not_found"}', { status: 404 })
+      return new Response(JSON.stringify(errors), { status: 200 })
+    }) as typeof fetch })
+    expect(await client.batchScrape(['https://example.com/a', 'not a url'], { ignoreInvalidURLs: true, maxConcurrency: 2 })).toEqual({ taskId: 'batch-1', invalidURLs: ['not a url'] })
+    expect(calls[0]?.body).toEqual({ urls: ['https://example.com/a', 'not a url'], ignoreInvalidURLs: true, maxConcurrency: 2, origin: SDK_ORIGIN })
+    expect(await client.getBatchErrors('batch-1')).toEqual(errors)
+    expect(await client.getBatchErrors('batch-1', { cursor: 'c1', limit: 5 })).toEqual(errors)
+    await expect(client.getBatchErrors('nothing')).rejects.toMatchObject({ name: 'W2LError', status: 404, code: 'not_found', message: 'batch not found: nothing' })
+    expect(calls.map((call) => call.line)).toEqual(['POST /v1/batches', 'GET /v1/batches/batch-1/errors', 'GET /v1/batches/batch-1/errors?cursor=c1&limit=5', 'GET /v1/batches/nothing/errors'])
+  })
+
   it('crawlAndWait and batchAndWait return the final status with every page, error and item', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {

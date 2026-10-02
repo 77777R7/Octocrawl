@@ -38,8 +38,14 @@ import {
   type CrawlPageList,
   type CrawlReport,
   type CrawlStartRequest,
-  type BatchStartRequest,
+  type BatchAccepted,
+  type BatchErrorItem,
+  type BatchErrorStatus,
+  type BatchErrorsQuery,
+  type BatchErrorsResponse,
   type BatchStatusResponse,
+  type ParsedBatchStartRequest,
+  BATCH_ERRORS_MAX_LIMIT,
   RequestError,
   type FetchResult,
   type NetworkPolicy,
@@ -114,9 +120,16 @@ export interface ApiEngine {
   startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
   /** The crawls this process is running, oldest start first: those it started and those it resumed at startup; never a batch. */
   listActiveCrawls(): Promise<ActiveCrawlList>
-  startBatch(req: BatchStartRequest): Promise<CrawlAccepted>
+  startBatch(req: ParsedBatchStartRequest): Promise<BatchAccepted>
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
+  /**
+   * The batch's failed, blocked, cancelled and budget-cut items across every
+   * attempt (an interrupted and resumed batch keeps its earlier failures), one
+   * page at a time, with the URLs robots.txt refused; null for an id that is
+   * not a batch.
+   */
+  getBatchErrors(taskId: string, query?: BatchErrorsQuery): Promise<BatchErrorsResponse | null>
   cancelBatch(taskId: string): Promise<BatchStatusResponse | null>
   getCrawl(taskId: string): Promise<CrawlReport | null>
   getCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null>
@@ -538,7 +551,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     void store.getTask(name).then(task => {
       const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
       if (unfinished && task.batch) {
-        launchTask(task, store, batchRunOptions(task.batch.urls, true))
+        launchTask(task, store, batchRunOptions(task.batch, true))
       } else if (unfinished && crawlOptionsStored(task)) {
         launchTask(task, store, crawlRunOptions(task, true))
       } else void store.close()
@@ -707,19 +720,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const store = SqliteTaskStore.open(taskDir)
       const now = new Date().toISOString()
       const urls = [...req.urls]
+      // The skipped entries stay on the record with the task and on the 202, so the refusal is visible later too.
+      const invalidURLs = req.invalidURLs === undefined ? undefined : [...req.invalidURLs]
+      const batch: NonNullable<Task['batch']> = {
+        urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
+        ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
+        ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
+        ...(invalidURLs === undefined ? {} : { invalidURLs }),
+      }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: {
-          urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
-          ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
-        },
+        batch,
         ...attributionOf(req),
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
-      launchTask(task, store, batchRunOptions(urls, false))
-      return { taskId }
+      launchTask(task, store, batchRunOptions(batch, false))
+      return { taskId, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
       } finally { batchStartInProgress = false }
     },
 
@@ -736,7 +754,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           : await crawlReportFromStore(store, taskId)
         if (!report) return null
         const completed = await store.countCompletedSteps(taskId)
-        return { ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed) }
+        return {
+          ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
+          // The cap in force: the batch's own, never above this service's worker count.
+          maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+          ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
+        }
       } finally { await store.close() }
     },
 
@@ -745,6 +768,26 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const page = await loadCrawlPageList(taskId, { ...query, limit: Math.min(50, query?.limit ?? 10) }, 'all', true)
       if (page === null || query?.debug === true) return page
       return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+    },
+
+    async getBatchErrors(taskId, query = {}) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+      try {
+        const task = await store.getTask(taskId)
+        if (!task?.batch) return null
+        // Every attempt's error steps, no attempt filter: a batch interrupted and resumed keeps its earlier failures on the record.
+        const page = await store.listStepsPage(taskId, { cursor: query.cursor, limit: query.limit ?? BATCH_ERRORS_MAX_LIMIT, kind: 'errors' })
+        // The robots.txt refusals are a projection of the same error steps, over the whole batch rather than the page asked for.
+        const robotsBlocked: string[] = []
+        for (let cursor: string | undefined; ;) {
+          const all = await store.listStepsPage(taskId, { cursor, limit: BATCH_ERRORS_MAX_LIMIT, kind: 'errors' })
+          for (const step of all.steps) if (step.result !== null && robotsRefusal(step.result) !== null) robotsBlocked.push(step.url)
+          if (!all.hasMore || all.nextCursor === null) break
+          cursor = all.nextCursor
+        }
+        return { errors: page.steps.map(batchErrorItem), robotsBlocked, nextCursor: page.nextCursor, hasMore: page.hasMore }
+      } finally { await store.close() }
     },
 
     async cancelBatch(taskId) {
@@ -1059,9 +1102,10 @@ interface TaskRunOptions {
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs, and governance its own URLs' hosts. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }
 
-function batchRunOptions(urls: readonly string[], resume: boolean): TaskRunOptions {
-  const hosts = [...new Set(urls.map(url => new URL(url).hostname))]
-  return { maxDepth: 0, allowlistedDomains: hosts, useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: null, policyAllowlist: hosts }
+/** A batch runs under the cap stored with it (`maxConcurrency`, null for the service's worker count), on a restart too. */
+function batchRunOptions(batch: Pick<NonNullable<Task['batch']>, 'urls' | 'maxConcurrency'>, resume: boolean): TaskRunOptions {
+  const hosts = [...new Set(batch.urls.map(url => new URL(url).hostname))]
+  return { maxDepth: 0, allowlistedDomains: hosts, useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: batch.maxConcurrency ?? null, policyAllowlist: hosts }
 }
 
 /** The options a running crawl reports: its task's stored options, with the defaults a task stored before an option existed runs under, plus its page budget. */
@@ -1191,6 +1235,38 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     createdAt: step.createdAt,
     updatedAt: step.updatedAt,
   }
+}
+
+/**
+ * What robots.txt said about a result that it refused: the rule that applied
+ * (the first disallow among the applied rules), or why the file could not be
+ * read. Null when the result was not refused by robots.txt: a success, a
+ * failure of another kind, a `policy_denied` from governance or the SSRF
+ * check (no `robots_disallowed` event), or a refusal a recorded override set
+ * aside (`robots_overridden`). The events are the lanes' own records; nothing
+ * is inferred here.
+ */
+function robotsRefusal(result: FetchResult): { pattern: string | null; unreachable: string | null } | null {
+  if (result.failureReason !== 'policy_denied') return null
+  const disallowed = result.trace.find((event) => event.event === 'robots_disallowed')
+  if (disallowed === undefined || result.trace.some((event) => event.event === 'robots_overridden')) return null
+  const applied = disallowed.detail?.appliedRules
+  const rules = Array.isArray(applied) ? applied as ReadonlyArray<{ pattern?: unknown; allow?: unknown }> : []
+  const rule = rules.find((entry) => entry.allow === false) ?? rules[0]
+  const unreachable = disallowed.detail?.unreachable
+  return { pattern: typeof rule?.pattern === 'string' ? rule.pattern : null, unreachable: typeof unreachable === 'string' ? unreachable : null }
+}
+
+/** One error of a batch, projected from its stored step: Firecrawl's names beside W2L's status and the HTTP status; nothing the step does not already carry. */
+function batchErrorItem(step: StepRecord): BatchErrorItem {
+  const result = step.result
+  const code = result?.failureReason ?? result?.blockReason ?? result?.budgetExceeded ?? step.status
+  const httpStatus = result?.evidence.httpStatus ?? null
+  const refusal = result === null ? null : robotsRefusal(result)
+  const robots = refusal === null ? '' : refusal.unreachable !== null ? ` — robots.txt unreachable (${refusal.unreachable})` : refusal.pattern === null ? ' — robots.txt rule' : ` — robots.txt rule ${refusal.pattern}`
+  const error = (result?.warnings?.[0]?.message ?? `${step.status}: ${code}${httpStatus === null ? '' : ` (HTTP ${httpStatus})`}`) + robots
+  // The store's `errors` kind lists only these four statuses.
+  return { id: step.id, timestamp: step.createdAt, url: step.url, status: step.status as BatchErrorStatus, code, error, httpStatus }
 }
 
 async function sessionBrokerStoreGet(broker: SessionBroker, sessionRef: string): Promise<ManagedSessionRef> {

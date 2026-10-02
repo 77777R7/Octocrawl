@@ -3,12 +3,12 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -255,7 +255,7 @@ export const TOOLS = [
   },
   {
     name: 'batch_scrape',
-    description: 'Persist and run 1-1000 explicit URLs. Returns a taskId; use get_batch_items for paginated results.',
+    description: 'Persist and run 1-1000 explicit URLs. Returns a taskId (with ignoreInvalidURLs also invalidURLs, the entries skipped); use get_batch_items for paginated results and get_batch_errors for the URLs that failed or that robots.txt refused.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -269,6 +269,8 @@ export const TOOLS = [
           description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
           items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
         },
+        maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Pages of this batch in flight at once; the per-host ceiling still applies. Only lowers the service\'s worker count; omitted takes it.' },
+        ignoreInvalidURLs: { type: 'boolean', description: 'Start with the entries of urls that are http(s) URLs and report the rest as invalidURLs (on the answer and on get_batch) instead of refusing the batch. Default false: an entry that is not a URL is refused by its index.' },
         ...INTEGRATION_PROPERTY,
       },
       required: ['urls'], additionalProperties: false,
@@ -279,6 +281,11 @@ export const TOOLS = [
     description: `${name} for a persistent URL-array batch`,
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' }, maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many items in all (pages of at most 50); the answer is then { items, nextCursor, hasMore, stoppedBy }.' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: 300000 } } : {}) }, required: ['id'], additionalProperties: false },
   })),
+  {
+    name: 'get_batch_errors',
+    description: 'The items of a batch that did not succeed, across every attempt (a resumed batch keeps its earlier failures): errors [{ id, timestamp, url, status, code, error, httpStatus }] in pages of up to 1000 (cursor, limit), and robotsBlocked, every URL robots.txt refused (policy_denied by a robots_disallowed trace event with no recorded override; a governance or SSRF refusal is not robots and stays in errors only).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'], additionalProperties: false },
+  },
   ...MONITOR_TOOLS,
 ] as const
 
@@ -388,7 +395,16 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(withoutOrigin(args))
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...integrationOf(req) }, request)
+    // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
+    const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
+    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...integrationOf(req) }, request)
+  }
+  if (name === 'get_batch_errors') {
+    const rec = readRecord(args)
+    const id = required(rec.id, 'id')
+    if (rec.cursor !== undefined && (typeof rec.cursor !== 'string' || rec.cursor.length === 0)) throw new RequestError('cursor must be a non-empty string')
+    if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit) || rec.limit < 1 || rec.limit > BATCH_ERRORS_MAX_LIMIT)) throw new RequestError(`limit must be an integer between 1 and ${BATCH_ERRORS_MAX_LIMIT}`)
+    return client.getBatchErrors(id, { ...(rec.cursor === undefined ? {} : { cursor: rec.cursor }), ...(rec.limit === undefined ? {} : { limit: rec.limit }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

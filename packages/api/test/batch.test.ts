@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -14,30 +14,190 @@ describe('persistent URL-array batch', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function fixture(options: {maxActiveBatches?:number} = {}) {
+  async function fixture(options: { maxActiveBatches?: number; perHostConcurrency?: number } = {}) {
+    const { perHostConcurrency = 1, ...engineOptions } = options
     const root = await mkdtemp(join(tmpdir(), 'w2l-batch-'))
     let slow = false
     let release = () => {}
     let slowStarted = () => {}
+    // Page requests being answered right now and the most there ever were at once; `hold` may keep an answer back (the concurrency tests).
+    let inFlight = 0
+    let maxInFlight = 0
+    let hold: (path: string) => Promise<void> = async () => {}
     const seen: string[] = []
     const server = createServer(async (req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nDisallow: /private\nAllow: /'); return }
-      seen.push(req.url ?? '')
-      if (req.url?.endsWith('/item/2') && slow) {
-        slowStarted()
-        await new Promise<void>(resolve => { release = resolve })
-      }
-      if (res.destroyed) return
-      const number = req.url?.split('/').at(-1) ?? '0'
-      res.writeHead(200, { 'content-type': 'text/html' })
-      res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p><p><a href="details">Details</a></p></article></main></body></html>`)
+      const path = req.url ?? ''
+      seen.push(path)
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      try {
+        if (path.endsWith('/item/2') && slow) {
+          slowStarted()
+          await new Promise<void>(resolve => { release = resolve })
+        }
+        await hold(path)
+        if (res.destroyed) return
+        if (path.startsWith('/missing/')) {
+          res.writeHead(404, { 'content-type': 'text/html' })
+          res.end('<html><head><title>Not Found</title></head><body><main><h1>Not Found</h1><p>There is no such item on this fixture server; the page you asked for does not exist here and never did, so this answer is the error page itself.</p></main></body></html>')
+          return
+        }
+        const number = path.split('/').at(-1) ?? '0'
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p><p><a href="details">Details</a></p></article></main></body></html>`)
+      } finally { inFlight-- }
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }, workerCount: 2, ...options, ...extra })
+    const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency, perHostMinDelayMs: 0 }, workerCount: 2, ...engineOptions, ...extra })
     cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
-    return { origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release() }
+    return {
+      origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release(),
+      setHold: (fn: (path: string) => Promise<void>) => { hold = fn }, inFlight: () => inFlight, maxInFlight: () => maxInFlight, resetMaxInFlight: () => { maxInFlight = 0 },
+    }
   }
+
+  const client = (engine: ApiEngine) => {
+    const app = createApp(engine)
+    return { app, client: new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch }) }
+  }
+
+  it('runs at most maxConcurrency pages at once, reports the cap in force and stores it with the task', async () => {
+    const f = await fixture({ perHostConcurrency: 2 })
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [1, 2, 3, 4].map(n => `${f.origin}/item/${n}`)
+    // A host's first page runs alone until its robots.txt verdict is known (the frontier's rule). From the second request on an
+    // answer waits until two requests are in flight, so overlap is proven by arrival, not by timing; the batch's last request
+    // answers alone, since nothing can join it.
+    const waiting: Array<() => void> = []
+    const releaseWaiting = () => { while (waiting.length > 0) waiting.shift()!() }
+    f.setHold(async () => {
+      if (f.seen.length === 1 || f.seen.length === urls.length || f.inFlight() >= 2) { releaseWaiting(); return }
+      await new Promise<void>(resolve => waiting.push(resolve))
+    })
+    const wide = await w2l.batchScrape(urls)
+    expect(await w2l.waitBatch(wide.taskId)).toMatchObject({ status: 'completed', completed: 4, maxConcurrency: 2 })
+    expect(f.maxInFlight()).toBe(2)
+    // Under maxConcurrency 1 each answer is held 100 ms instead: a correct cap sends the next request only after this one is
+    // answered, whatever the load, while a broken cap would have the second request arrive within the hold on loopback.
+    f.resetMaxInFlight()
+    f.setHold(() => new Promise(resolve => setTimeout(resolve, 100)))
+    const capped = await w2l.batchScrape(urls, { maxConcurrency: 1 })
+    expect(await w2l.waitBatch(capped.taskId)).toMatchObject({ status: 'completed', completed: 4, maxConcurrency: 1 })
+    expect(f.maxInFlight()).toBe(1)
+    const store = SqliteTaskStore.openReadOnly(join(f.root, capped.taskId))
+    try { expect((await store.getTask(capped.taskId))?.batch).toMatchObject({ maxConcurrency: 1 }) } finally { await store.close() }
+    // The cap only lowers the service's worker count (2 here): asking for 4 runs under, and reports, 2.
+    expect(await w2l.getBatch((await w2l.batchScrape([urls[0]!], { maxConcurrency: 4 })).taskId)).toMatchObject({ maxConcurrency: 2 })
+    expect(await w2l.getBatch(wide.taskId)).not.toHaveProperty('invalidURLs')
+  })
+
+  it('keeps the batch\'s maxConcurrency when an interrupted batch resumes', async () => {
+    const f = await fixture({ perHostConcurrency: 2 })
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine1 = f.engine()
+    const urls = [1, 2, 3, 4].map(n => `${f.origin}/item/${n}`)
+    const { taskId } = await engine1.startBatch({ urls, maxConcurrency: 1 })
+    await slowStarted
+    await engine1.close({ cancelActive: true })
+    expect(await engine1.getBatch(taskId)).toMatchObject({ status: 'paused', completed: 1, maxConcurrency: 1 })
+    f.setSlow(false); f.release()
+    // The fixture is still answering the request engine1 abandoned; let it drain before counting the resumed run's requests.
+    while (f.inFlight() > 0) await new Promise(resolve => setTimeout(resolve, 10))
+    f.resetMaxInFlight()
+    f.setHold(() => new Promise(resolve => setTimeout(resolve, 100)))
+    const engine2 = f.engine()
+    cleanup.push(() => engine2.close())
+    expect(await client(engine2).client.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 4, completed: 4, remaining: 0, maxConcurrency: 1 })
+    // The resumed run fetched the three missing pages one at a time, under the cap stored with the task.
+    expect(f.maxInFlight()).toBe(1)
+    expect(f.seen.filter(path => path === '/item/1')).toHaveLength(1)
+    expect(f.seen.filter(path => path === '/item/2')).toHaveLength(2)
+  })
+
+  it('starts with the valid URLs when ignoreInvalidURLs is on and keeps the skipped entries on the record', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const urls = [`${f.origin}/item/1`, 'not a url', 'ftp://x']
+    const accepted = await w2l.batchScrape(urls, { ignoreInvalidURLs: true })
+    expect(accepted).toEqual({ taskId: expect.any(String), invalidURLs: ['not a url', 'ftp://x'] })
+    expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', requested: 1, completed: 1, remaining: 0, invalidURLs: ['not a url', 'ftp://x'] })
+    expect((await w2l.getBatchItems(accepted.taskId)).items.map(item => [item.url, item.status])).toEqual([[urls[0], 'success']])
+    // Without the option the same body is refused by the entry's index, and no task directory appears.
+    const before = (await readdir(f.root)).length
+    const refused = await app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls }) })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toEqual({ error: 'urls[1] must be http(s)', code: 'invalid_request' })
+    expect((await readdir(f.root)).length).toBe(before)
+    expect(f.seen).toEqual(['/item/1'])
+  })
+
+  it('lists the items that did not succeed on /errors, every attempt included, with the URLs robots.txt refused', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/private/item/3`, `${f.origin}/missing/4`]
+    const accepted = await w2l.batchScrape(urls, { robotsOverrides: [{ url: urls[1]!, reason: 'The publisher links this item publicly.' }] })
+    expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', completed: 4 })
+    const errors = await w2l.getBatchErrors(accepted.taskId)
+    expect(errors).toMatchObject({ nextCursor: null, hasMore: false, robotsBlocked: [urls[2]] })
+    const byUrl = new Map(errors.errors.map(item => [item.url, item]))
+    expect([...byUrl.keys()].sort()).toEqual([urls[2], urls[3]].sort())
+    // The 404 page is the http lane's own failure with its status; the robots refusal names the rule; the overridden URL is in neither list.
+    expect(byUrl.get(urls[3])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[3], status: 'failed', code: 'http_error', error: 'failed: http_error (HTTP 404)', httpStatus: 404 })
+    expect(byUrl.get(urls[2])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[2], status: 'failed', code: 'policy_denied', error: 'failed: policy_denied — robots.txt rule /private', httpStatus: null })
+    const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
+    for (const error of errors.errors) expect(items.find(item => item.id === error.id)).toMatchObject({ url: error.url, createdAt: error.timestamp, failureReason: error.code })
+    // Pages of one, with the robots list whole on each page; the limit stops at 1000.
+    const first = await w2l.getBatchErrors(accepted.taskId, { limit: 1 })
+    expect(first).toMatchObject({ hasMore: true, nextCursor: expect.any(String), robotsBlocked: [urls[2]] })
+    const second = await w2l.getBatchErrors(accepted.taskId, { limit: 1, cursor: first.nextCursor! })
+    expect(second).toMatchObject({ hasMore: false, nextCursor: null })
+    expect([first.errors[0]!.url, second.errors[0]!.url].sort()).toEqual([urls[2], urls[3]].sort())
+    const tooMany = await app.request(`/v1/batches/${accepted.taskId}/errors?limit=1001`)
+    expect(tooMany.status).toBe(400)
+    expect(await tooMany.json()).toEqual({ error: 'limit must be an integer between 1 and 1000', code: 'invalid_request' })
+    // A crawl's id and an unknown id are not batches.
+    const crawl = await engine.startCrawl({ url: urls[0]!, maxPages: 1, sitemap: 'skip' })
+    expect((await app.request(`/v1/batches/${crawl.taskId}/errors`)).status).toBe(404)
+    await expect(w2l.getBatchErrors('nothing')).rejects.toMatchObject({ status: 404, code: 'not_found' })
+  })
+
+  it('keeps an earlier attempt\'s failure on /errors after an interrupted batch resumes', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine1 = f.engine()
+    const urls = [`${f.origin}/private/item/3`, `${f.origin}/item/2`]
+    const { taskId } = await engine1.startBatch({ urls })
+    await slowStarted
+    await engine1.close({ cancelActive: true })
+    f.setSlow(false); f.release()
+    const engine2 = f.engine()
+    cleanup.push(() => engine2.close())
+    const { app, client: w2l } = client(engine2)
+    expect(await w2l.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 2, completed: 2 })
+    // The refusal was recorded by the first attempt; the resumed attempt fetched only the interrupted page.
+    const store = SqliteTaskStore.openReadOnly(join(f.root, taskId))
+    try { expect((await store.listAttempts(taskId)).length).toBe(2) } finally { await store.close() }
+    expect(f.seen).toEqual(['/item/2', '/item/2'])
+    const errors = await w2l.getBatchErrors(taskId)
+    expect(errors.errors.map(item => [item.url, item.status, item.code])).toEqual([[urls[0], 'failed', 'policy_denied']])
+    expect(errors.robotsBlocked).toEqual([urls[0]])
+    // The crawl route reads the latest attempt alone and so no longer shows it.
+    expect((await (await app.request(`/v1/crawl/${taskId}/errors`)).json()).items).toEqual([])
+  })
 
   it('fetches only the URL a recorded robots override names, keeps the override on the item and with the task', async () => {
     const f = await fixture()

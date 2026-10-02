@@ -61,8 +61,14 @@ export interface Task {
   mode: CrawlMode
   status: TaskStatus
   budget: CrawlBudget
-  /** Present only for an explicit URL-array batch. Stored with the checkpoint, page options and recorded robots overrides included. */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[] } & PageOptions
+  /**
+   * Present only for an explicit URL-array batch. Stored with the checkpoint,
+   * page options and recorded robots overrides included, plus the batch's own
+   * cap on pages in flight (`maxConcurrency`, absent when the request set
+   * none) and the entries `ignoreInvalidURLs` skipped at submission
+   * (`invalidURLs`, present exactly when that option was on).
+   */
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[] } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
