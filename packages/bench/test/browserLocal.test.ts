@@ -888,14 +888,14 @@ describe('BrowserLocalSubject user-owned access', () => {
 })
 
 describe('BrowserLocalSubject in the public preview', () => {
-  // A site that lets every crawler in except W2L's preview, under /members.
+  // A site that lets every crawler in except OctoCrawl's preview, under /members.
   let previewServer: Server
   let origin: string
   let seen: { path: string; userAgent: string | undefined }[] = []
   beforeAll(async () => {
     previewServer = createServer((req, res) => {
       seen.push({ path: req.url ?? '', userAgent: req.headers['user-agent'] })
-      if (req.url === '/robots.txt') res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n\nUser-agent: w2l-preview\nDisallow: /members\n')
+      if (req.url === '/robots.txt') res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n\nUser-agent: octocrawl-preview\nDisallow: /members\n')
       else if (req.url === '/page' || req.url === '/members') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
           '<!doctype html><html><body><article><h1>Harbour notices</h1><p>The harbour office posts tide tables, berth changes and ' +
@@ -926,7 +926,7 @@ describe('BrowserLocalSubject in the public preview', () => {
       expect(wire.map((r) => r.path)).toContain('/page')
       for (const request of wire) expect(request.userAgent).toBe(sent)
       expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
-      expect(out.compliance!.robots.matchedUserAgentGroup).toBe('w2l-preview')
+      expect(out.compliance!.robots.matchedUserAgentGroup).toBe('octocrawl-preview')
     } finally {
       await subject.teardown()
     }
@@ -939,13 +939,13 @@ describe('BrowserLocalSubject in the public preview', () => {
     try {
       const refused = await preview.fetch(`${origin}/members`)
       expect(refused.failureReason).toBe('policy_denied')
-      expect(refused.compliance!.robots).toMatchObject({ decision: 'disallowed', matchedUserAgentGroup: 'w2l-preview', skippedFetch: true })
+      expect(refused.compliance!.robots).toMatchObject({ decision: 'disallowed', matchedUserAgentGroup: 'octocrawl-preview', skippedFetch: true })
       expect(seen.some((r) => r.path === '/members')).toBe(false)
 
       const allowed = await plain.fetch(`${origin}/members`)
       expect(allowed.status).toBe('success')
       expect(allowed.compliance!.robots.matchedUserAgentGroup).toBe('*')
-      expect(seen.find((r) => r.path === '/members')?.userAgent).not.toContain('W2L-Preview')
+      expect(seen.find((r) => r.path === '/members')?.userAgent).not.toContain('OctoCrawl-Preview')
     } finally {
       await preview.teardown()
       await plain.teardown()

@@ -50,7 +50,7 @@ const capture = (path: string) => {
   return capturePreview(url, new AbortController().signal, Date.now() + 20_000).then(outcome => ({ outcome, response: mapPreviewResult(url.url, url, outcome, 0) }))
 }
 
-describe('the public preview identifies itself as W2L', () => {
+describe('the public preview identifies itself as OctoCrawl', () => {
   it('sends its product token when it reads robots.txt and the page, and records the User-Agent it sent', async () => {
     robots = 'User-agent: *\nAllow: /\n'
     const { outcome, response } = await capture('/page')
@@ -64,11 +64,20 @@ describe('the public preview identifies itself as W2L', () => {
     expect(outcome.result.trace.some(event => event.event === 'identity_mismatch')).toBe(false)
   })
 
-  it('stops at a robots.txt group for w2l-preview that the wildcard group would allow', async () => {
+  for (const group of ['octocrawl-preview', 'octocrawl']) {
+    it(`stops at a robots.txt group for ${group} that the wildcard group would allow`, async () => {
+      robots = `User-agent: *\nAllow: /\n\nUser-agent: ${group}\nDisallow: /\n`
+      const { outcome, response } = await capture('/page')
+      expect(response).toMatchObject({ status: 'blocked', diagnostic: { code: 'robots_disallowed', evidence: 'observed' } })
+      expect(outcome.result.trace.find(event => event.event === 'robots_checked')?.detail).toMatchObject({ decision: 'disallowed', matchedGroup: group })
+      expect(requests.map(request => request.path)).toEqual(['/robots.txt'])
+    })
+  }
+
+  it('no longer answers to a group for its earlier token, w2l-preview', async () => {
     robots = 'User-agent: *\nAllow: /\n\nUser-agent: w2l-preview\nDisallow: /\n'
     const { outcome, response } = await capture('/page')
-    expect(response).toMatchObject({ status: 'blocked', diagnostic: { code: 'robots_disallowed', evidence: 'observed' } })
-    expect(outcome.result.trace.find(event => event.event === 'robots_checked')?.detail).toMatchObject({ decision: 'disallowed', matchedGroup: 'w2l-preview' })
-    expect(requests.map(request => request.path)).toEqual(['/robots.txt'])
+    expect(response.status).toBe('success')
+    expect(outcome.result.trace.find(event => event.event === 'robots_checked')?.detail).toMatchObject({ decision: 'allowed', matchedGroup: '*' })
   })
 })
