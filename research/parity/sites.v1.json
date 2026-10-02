@@ -1990,6 +1990,241 @@
         {"item": "map-search.map-timeout", "type": "field", "path": "elapsedMs", "max": 5000, "record": true},
         {"item": "map-search.map-timeout", "type": "field", "path": "roundTripMs", "max": 6000, "record": true}
       ]
+    },
+    {
+      "id": "MP07",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-sitemap-mode",
+      "url": "https://www.sitemaps.org/",
+      "request": {"sitemap": "only"},
+      "note": "Added 2026-10-03 for map sitemap mode (frozen row #34). Seen 2026-10-03: robots.txt names /sitemap.xml, a urlset of 84 <loc>. Expected with sitemap only: exactly the file's entries (links equal to the file record's entries), every link via sitemap alone, no page read (sources.startPage null), status completed.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.startPage", "equals": null},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "items.length", "equalsPath": "sources.sitemap.files.0.entries"},
+        {"item": "map-search.map-sitemap-mode", "type": "countWhere", "min": 80, "max": 90, "record": true},
+        {"item": "map-search.map-sitemap-mode", "type": "countWhere", "field": "via", "includes": "link", "count": 0},
+        {"item": "map-search.map-sitemap-mode", "type": "countWhere", "field": "via", "includes": "start", "count": 0},
+        {"item": "map-search.map-sitemap-mode", "type": "uniqueUrls"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.sitemap.mode", "equals": "only"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.sitemap.files.length", "equals": 1}
+      ]
+    },
+    {
+      "id": "MP08",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-sitemap-mode",
+      "url": "https://www.sitemaps.org/",
+      "request": {"sitemap": "skip"},
+      "compareRequest": {"sitemap": "include"},
+      "note": "Added 2026-10-03 for map sitemap mode (frozen row #34). Seen 2026-10-03: the home page links /, faq.php, protocol.php and terms.php. Expected with sitemap skip: 4 links, sources.sitemap null; the comparison map with sitemap include gives the union, 87 links as in MP01 (a range, since the site may change), with every skip link in it in the same order.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.sitemap", "equals": null},
+        {"item": "map-search.map-sitemap-mode", "type": "countWhere", "count": 4, "record": true},
+        {"item": "map-search.map-sitemap-mode", "type": "itemUrls", "pattern": "^https://www\\.sitemaps\\.org/(|faq\\.php|protocol\\.php|terms\\.php)$"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "compare.links", "min": 84, "max": 92, "record": true},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "compare.missing", "equals": 0},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "compare.orderKept", "equals": true}
+      ]
+    },
+    {
+      "id": "MP09",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-sitemap-mode",
+      "url": "https://www.gov.uk/",
+      "request": {"sitemap": "only", "limit": 500},
+      "note": "Added 2026-10-03 for map sitemap mode (frozen row #33). Seen 2026-10-03: www.gov.uk's sitemap is an index of 35 children; sitemap_1.xml holds 25,000 <loc>, the first https://www.gov.uk/. Expected with sitemap only and limit 500: exactly 500 links, the first https://www.gov.uk/ (the start URL is returned because the sitemap lists it), reached through the index, stoppedBy limit, status completed, no page read; robots-disallowed entries left out and counted.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "stoppedBy", "equals": "limit"},
+        {"item": "map-search.map-sitemap-mode", "type": "itemCount", "equals": 500},
+        {"item": "map-search.map-sitemap-mode", "type": "uniqueUrls"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "links.0.url", "equals": "https://www.gov.uk/"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "links.0.via", "equals": ["sitemap"]},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.startPage", "equals": null},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.sitemap.files.0.kind", "equals": "index"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "sources.sitemap.files.1.kind", "equals": "urlset"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "refused.robots", "min": 0, "record": true}
+      ]
+    },
+    {
+      "id": "MP10",
+      "batch": "map",
+      "endpoint": "fc-map",
+      "feature": "map-search.map-sitemap-mode",
+      "url": "https://www.sitemaps.org/",
+      "request": {"sitemapOnly": true},
+      "note": "Added 2026-10-03 for the /fc map (frozen row #34). Expected: Firecrawl's v1 sitemapOnly as sitemap only: success true, the map's id, 84 links (a range) as plain URL strings.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "success", "equals": true},
+        {"item": "map-search.map-sitemap-mode", "type": "fieldType", "path": "id", "equals": "string"},
+        {"item": "map-search.map-sitemap-mode", "type": "field", "path": "stringLinks", "equals": true},
+        {"item": "map-search.map-sitemap-mode", "type": "countWhere", "min": 80, "max": 90, "record": true},
+        {"item": "map-search.map-sitemap-mode", "type": "uniqueUrls"}
+      ]
+    },
+    {
+      "id": "MP11",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-search-filter",
+      "url": "https://docs.stripe.com/",
+      "request": {"search": "webhooks"},
+      "compareRequest": {},
+      "note": "Added 2026-10-03 for map search (the audit's real-site test; docs.stripe.com is not in the frozen set). Seen 2026-10-03: robots.txt names /sitemap.xml, a urlset of 4,924 <loc>, 22 containing 'webhooks' (case-insensitive); the home page has 49 in-scope links. Expected: at least 22 links, each with 'webhooks' in its decoded URL or title, every one in the unfiltered map (complete at the default limit 5000) in the same order, and more than 4,800 candidates left out by search.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-search-filter", "type": "countWhere", "min": 22, "record": true},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "searchMisses", "equals": 0},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "compare.status", "equals": "completed"},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "compare.stoppedBy", "equals": null},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "compare.links", "min": 4800, "record": true},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "compare.missing", "equals": 0},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "compare.orderKept", "equals": true},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "refused.searchFiltered", "min": 4800, "record": true}
+      ]
+    },
+    {
+      "id": "MP12",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-search-filter",
+      "url": "https://books.toscrape.com/",
+      "request": {"search": "travel"},
+      "note": "Added 2026-10-03 for map search (frozen row #1). Seen 2026-10-03: no robots.txt, no sitemap; one home-page link carries 'travel', the Travel category. Expected: exactly that link, titled Travel by its anchor.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-search-filter", "type": "itemCount", "equals": 1},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "links.0.url", "equals": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html"},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "links.0.title", "equals": "Travel"},
+        {"item": "map-search.map-search-filter", "type": "field", "path": "refused.searchFiltered", "min": 60, "record": true}
+      ]
+    },
+    {
+      "id": "MP13",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-include-subdomains",
+      "url": "https://python.org/",
+      "request": {"includeSubdomains": true},
+      "note": "Added 2026-10-03 for map includeSubdomains (the audit's real-site test; python.org is not in the frozen set). Seen 2026-10-03: https://python.org/ redirects to https://www.python.org/, no sitemap; with subdomains about 86 links, about 24 on 11 other *.python.org hosts (docs, blog, wiki, ...). Expected: 70 to 100 links, at least 15 on hosts other than www.python.org and python.org, at most 13 hosts in all (so at most 12 robots.txt reads beside the start host), no robots_host_cap warning, other domains (planetpython.org, ...) host-denied.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-include-subdomains", "type": "countWhere", "min": 70, "max": 100, "record": true},
+        {"item": "map-search.map-include-subdomains", "type": "countWhere", "field": "url", "pattern": "^https://(?!(www\\.)?python\\.org/)[a-z0-9.-]+\\.python\\.org/", "min": 15, "record": true},
+        {"item": "map-search.map-include-subdomains", "type": "itemUrls", "pattern": "^https://([a-z0-9-]+\\.)*python\\.org/"},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "hostCount", "max": 13, "record": true},
+        {"item": "map-search.map-include-subdomains", "type": "countWhere", "path": "warnings", "field": "code", "value": "robots_host_cap", "count": 0},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "refused.hostDenied", "min": 1, "record": true}
+      ]
+    },
+    {
+      "id": "MP14",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-include-subdomains",
+      "url": "https://python.org/",
+      "request": {},
+      "note": "Added 2026-10-03 for map includeSubdomains, default false (the audit's real-site test). Seen 2026-10-03: about 63 links, about 64 host-denied. Expected: 50 to 80 links, every one on www.python.org or python.org, many host-denied, and the guessed /sitemap.xml recorded as absent.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-include-subdomains", "type": "countWhere", "min": 50, "max": 80, "record": true},
+        {"item": "map-search.map-include-subdomains", "type": "itemUrls", "pattern": "^https://(www\\.)?python\\.org/"},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "refused.hostDenied", "min": 40, "record": true},
+        {"item": "map-search.map-include-subdomains", "type": "field", "path": "sources.sitemap.files.0.kind", "equals": "absent"}
+      ]
+    },
+    {
+      "id": "MP15",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-ignore-query-parameters",
+      "url": "https://www.scrapethissite.com/pages/forms/?per_page=100",
+      "request": {"ignoreQueryParameters": true},
+      "note": "Added 2026-10-03 for map ignoreQueryParameters (frozen row #5: page_num pages must not be merged silently; any merge must be reported). Seen 2026-10-03: no sitemap; the page has 6 links ?page_num=1..6&per_page=100 in its /pages/forms/ subtree. Expected: exactly one link, https://www.scrapethissite.com/pages/forms/, and 6 merges reported, each sample naming a page_num URL folded into it.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-ignore-query-parameters", "type": "itemCount", "equals": 1},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "links.0.url", "equals": "https://www.scrapethissite.com/pages/forms/"},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "refused.collapsed", "equals": 6},
+        {"item": "map-search.map-ignore-query-parameters", "type": "countWhere", "path": "refused.samples.collapsed", "field": "url", "includes": "page_num=", "count": 6},
+        {"item": "map-search.map-ignore-query-parameters", "type": "countWhere", "path": "refused.samples.collapsed", "field": "into", "value": "https://www.scrapethissite.com/pages/forms/", "count": 6}
+      ]
+    },
+    {
+      "id": "MP16",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-ignore-query-parameters",
+      "url": "https://www.scrapethissite.com/pages/forms/?per_page=100",
+      "request": {},
+      "compareRequest": {"crawlEntireDomain": true},
+      "note": "Added 2026-10-03 for map ignoreQueryParameters, default false (frozen row #5). Seen 2026-10-03: 12 unique links on the page; robots.txt disallows /lessons/ and /faq/. Expected without the option: 7 links (the start URL and the 6 page_num URLs, query kept), 5 subtree-denied, 1 host-denied; the comparison with crawlEntireDomain gives 10 links, /lessons/ and /faq/ refused by robots.txt.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-ignore-query-parameters", "type": "itemCount", "equals": 7},
+        {"item": "map-search.map-ignore-query-parameters", "type": "countWhere", "field": "url", "includes": "page_num=", "count": 6},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "refused.subtreeDenied", "equals": 5},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "refused.hostDenied", "equals": 1},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "compare.links", "equals": 10},
+        {"item": "map-search.map-ignore-query-parameters", "type": "field", "path": "compare.refusedRobots", "equals": 2}
+      ]
+    },
+    {
+      "id": "MP17",
+      "batch": "map",
+      "endpoint": "mcp-map",
+      "feature": "map-search.mcp-map-search-tools",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP",
+      "request": {"limit": 100},
+      "requiresEnv": "W2L_MCP_MAP_URL",
+      "note": "Added 2026-10-03 for the MCP map tool (MDN, the audit's test; 377 candidates under /en-US/docs/Web/HTTP on 2026-10-03). Against a local MCP service (W2L_MCP_MAP_URL, its /mcp URL). Expected: tools/list shows map with readOnlyHint true and an outputSchema; the call's structuredContent validates against it and equals the text; exactly 100 unique links under the start URL, stoppedBy limit, status completed.",
+      "checks": [
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "listed.present", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "listed.annotations.readOnlyHint", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "listed.outputSchema", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "outputValid", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "textMatches", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "error", "equals": null},
+        {"item": "map-search.mcp-map-search-tools", "type": "itemCount", "equals": 100},
+        {"item": "map-search.mcp-map-search-tools", "type": "uniqueUrls"},
+        {"item": "map-search.mcp-map-search-tools", "type": "itemUrls", "pattern": "^https://developer\\.mozilla\\.org/en-US/docs/Web/HTTP(/|$)"},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "stoppedBy", "equals": "limit"},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "status", "equals": "completed"}
+      ]
+    },
+    {
+      "id": "MP18",
+      "batch": "map",
+      "endpoint": "mcp-map",
+      "feature": "map-search.mcp-map-search-tools",
+      "url": "https://docs.python.org/3/",
+      "request": {"limit": 100},
+      "requiresEnv": "W2L_MCP_MAP_URL",
+      "note": "Added 2026-10-03 for the MCP map tool (frozen row #32, docs.python.org/3/). Seen 2026-10-03: the sitemap lists 8 version roots, so about 24 links. Expected: 20 to 30 unique links under /3/, stoppedBy null, status completed. The audit's '100 URLs' cannot be reached without an index; this case records that rather than counting it.",
+      "checks": [
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "outputValid", "equals": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "error", "equals": null},
+        {"item": "map-search.mcp-map-search-tools", "type": "countWhere", "min": 20, "max": 30, "record": true},
+        {"item": "map-search.mcp-map-search-tools", "type": "uniqueUrls"},
+        {"item": "map-search.mcp-map-search-tools", "type": "itemUrls", "pattern": "^https://docs\\.python\\.org/3/"},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "stoppedBy", "equals": null},
+        {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "status", "equals": "completed"}
+      ]
     }
   ]
 }

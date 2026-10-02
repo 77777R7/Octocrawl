@@ -123,6 +123,21 @@
 //               itself when absent) includes spec.includes (an array member or a substring), matches
 //               spec.pattern, is present (spec.present) or equals spec.value; their number is at least
 //               spec.min, at most spec.max and, with spec.count, exactly that.
+// Added for the map options, the /fc map and the MCP map tool (M3, 2026-10-03):
+//   map         doc.hostCount is the number of distinct hosts among the links. With case.request.search,
+//               doc.searchMisses counts the links in which some search word is in neither the decoded URL
+//               nor the title (case-insensitive). case.compareRequest maps the same URL again with that
+//               request into doc.compare {httpStatus, status, stoppedBy, links, refusedRobots, missing,
+//               orderKept}: missing counts this map's links absent from the second, orderKept says they
+//               appear there in the same order.
+//   fc-map      POST /fc/v1/map with { url, ...case.request }; doc is the response with doc.items = its
+//               links as { url } and doc.stringLinks (every link a string).
+//   mcp-map     a raw MCP client (JSON-RPC POSTs) against the local MCP service whose /mcp URL is in the
+//               variable case.requiresEnv names: initialize, tools/list (doc.listed: the map tool's
+//               annotations and whether it has an outputSchema), then tools/call map with
+//               { url, ...case.request }. doc is the call's structuredContent with doc.items = its links,
+//               doc.outputValid (ajv against the listed outputSchema), doc.textMatches (the text content
+//               parses to the same object), doc.error (a JSON-RPC error) and doc.roundTripMs.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -268,6 +283,22 @@ const runners = {
     const response = await call('POST', '/v1/map', { url: c.url, ...c.request })
     const doc = { ...(response.json ?? {}), roundTripMs: Date.now() - began }
     doc.items = Array.isArray(doc.links) ? doc.links : []
+    doc.hostCount = new Set(doc.items.map((item) => new URL(item.url).host)).size
+    if (typeof c.request?.search === 'string') {
+      const words = c.request.search.trim().toLowerCase().split(/\s+/)
+      const decode = (url) => { try { return decodeURIComponent(url) } catch { return url } }
+      doc.searchMisses = doc.items.filter((item) => !words.every((word) => `${decode(item.url)}\n${item.title ?? ''}`.toLowerCase().includes(word))).length
+    }
+    if (c.compareRequest !== undefined) {
+      const compare = await call('POST', '/v1/map', { url: c.url, ...c.compareRequest })
+      const urls = (compare.json?.links ?? []).map((link) => link.url)
+      const positions = doc.items.map((item) => urls.indexOf(item.url))
+      doc.compare = {
+        httpStatus: compare.httpStatus, status: compare.json?.status ?? null, stoppedBy: compare.json?.stoppedBy ?? null, links: urls.length,
+        refusedRobots: compare.json?.refused?.robots ?? null, missing: positions.filter((at) => at === -1).length, orderKept: positions.every((at, i) => i === 0 || at > positions[i - 1]),
+      }
+      response.compare = compare
+    }
     if (Array.isArray(c.probes)) {
       doc.probes = []
       for (const body of c.probes) {
@@ -277,6 +308,48 @@ const runners = {
       response.probes = doc.probes
     }
     return { response, doc }
+  },
+  async 'fc-map'(c) {
+    const response = await call('POST', '/fc/v1/map', { url: c.url, ...c.request })
+    const doc = { ...(response.json ?? {}) }
+    doc.items = Array.isArray(doc.links) ? doc.links.map((url) => ({ url })) : []
+    doc.stringLinks = Array.isArray(doc.links) && doc.links.every((link) => typeof link === 'string')
+    return { response, doc }
+  },
+  // The MCP map tool over Streamable HTTP, against a local MCP service (see the header).
+  async 'mcp-map'(c) {
+    const url = process.env[c.requiresEnv]
+    const post = async (body, session) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) },
+        body: JSON.stringify(body),
+      })
+      const text = await res.text()
+      // A JSON answer, or the last data line of an event stream.
+      const data = (res.headers.get('content-type') ?? '').includes('text/event-stream') ? text.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5)).pop() : text
+      return { session: res.headers.get('mcp-session-id'), json: data ? JSON.parse(data) : null }
+    }
+    const init = await post({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'w2l-parity-runner', version: '1.0.0' } } })
+    const session = init.session
+    await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, session).catch(() => null)
+    const list = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, session)
+    const tool = list.json?.result?.tools?.find((item) => item.name === 'map')
+    const listed = { present: tool !== undefined, annotations: tool?.annotations ?? null, outputSchema: tool?.outputSchema !== undefined }
+    const began = Date.now()
+    const called = await post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'map', arguments: { url: c.url, ...c.request } } }, session)
+    const roundTripMs = Date.now() - began
+    const structured = called.json?.result?.structuredContent ?? null
+    const text = called.json?.result?.content?.[0]?.text
+    let outputValid = null
+    if (tool?.outputSchema !== undefined && structured !== null) {
+      const validate = new Ajv2020({ allErrors: true, strict: false }).compile(tool.outputSchema)
+      outputValid = validate(structured)
+    }
+    let textMatches = false
+    try { textMatches = structured !== null && JSON.stringify(JSON.parse(text)) === JSON.stringify(structured) } catch {}
+    const doc = { ...(structured ?? {}), items: structured?.links ?? [], listed, outputValid, textMatches, error: called.json?.error ?? null, roundTripMs }
+    return { response: { mcpUrl: url, listed: tool ?? null, call: called.json }, doc }
   },
   async 'fc-scrape'(c) {
     const response = await call('POST', '/fc/v1/scrape', { url: c.url, ...c.request })
