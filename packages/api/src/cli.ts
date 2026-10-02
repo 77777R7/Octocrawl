@@ -14,6 +14,7 @@ async function main(): Promise<void> {
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
     allowRobotsOverride: listen.allowRobotsOverride,
+    hosted: listen.mode === 'hosted',
   })
   const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local' })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })

@@ -61,6 +61,8 @@ import {
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import type { ChannelsFiltered } from '@w2l/bench'
+import { agentHintsFor } from './hints.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
@@ -159,6 +161,14 @@ export interface ApiEngineOptions {
    * the operator's service set a publisher's rule aside.
    */
   allowRobotsOverride?: boolean
+  /**
+   * Whether this engine serves a hosted API (`--hosted`, the hosted MCP
+   * host). A hosted engine never loosens security for a caller: a
+   * `skipTlsVerification` on scrape, crawl or batch is refused with HTTP 400
+   * before anything is fetched, and a stored task that carries it runs
+   * without it. Absent or false is a local engine, the person's own.
+   */
+  hosted?: boolean
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -230,6 +240,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       throw new RequestError(`unsupported parameter: ${parameter} (this server takes no robots override; a recorded override is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
   }
+  const hosted = options.hosted === true
+  /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored. */
+  const checkHostedOptions = (req: PageOptions): void => {
+    if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode')
+  }
   const originScheduler = new OriginScheduler(networkPolicy)
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
@@ -253,12 +268,37 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     channelsByMode.set(mode, channels)
     return channels
   }
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string): Channel[] => {
+  /**
+   * The rungs a request gets, and the ones it does not, with why: the
+   * server's own channel policy first (never a caller's to change), then the
+   * request's `fastMode` (the http rung alone; refused by name for a URL the
+   * policy binds to the browser lane), then the options the local lanes
+   * alone honour (`headers`, `mobile`, `skipTlsVerification`), for which the
+   * vendor rungs are dropped. Each drop opens the run's ladder audit as a
+   * `ladder_channels_filtered` event.
+   */
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
-    const selected = policy === 'ladder' ? channels : channels.filter(channel => channel.id === (policy === 'http_only' ? 'http' : 'browser_local'))
+    let selected = policy === 'ladder' ? channels : channels.filter(channel => channel.id === (policy === 'http_only' ? 'http' : 'browser_local'))
     if (selected.length === 0) throw new RequestError(`capture channel unavailable for ${policy}`)
-    return selected
+    const filtered: ChannelsFiltered[] = []
+    const name = (channel: Channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`
+    if (page.fastMode === true) {
+      if (policy === 'browser_only') throw new RequestError('fastMode is not available for this URL: it is served by the browser lane only')
+      const kept = selected.filter(channel => channel.id === 'http')
+      if (kept.length === 0) throw new RequestError('fastMode is not available for this URL: no http rung is configured for it')
+      const dropped = selected.filter(channel => channel.id !== 'http').map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'fastMode', dropped })
+      selected = kept
+    }
+    const wire = (['headers', 'mobile', 'skipTlsVerification'] as const).filter(option => option === 'headers' ? page.headers !== undefined && Object.keys(page.headers).length > 0 : page[option] === true)
+    if (wire.length > 0) {
+      const dropped = selected.filter(channel => channel.vendorId !== undefined).map(name)
+      if (dropped.length > 0) filtered.push({ reason: wire.join(', '), dropped })
+      selected = selected.filter(channel => channel.vendorId === undefined)
+    }
+    return { channels: selected, filtered }
   }
   const historyFor = (mode: string): MemoryRoutingHistory => {
     const existing = historiesByMode.get(mode)
@@ -322,11 +362,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean }): void {
     const mode = defaultApiMode(task.mode)
-    const runner = new LadderRunner(channelsForUrl(mode, task.seedUrl), { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode))
     // Batch and crawl tasks apply their stored formats and page options to
     // every page. A task stored before crawl formats existed has neither and
-    // keeps the full result.
-    const selection = task.batch ?? task.crawl
+    // keeps the full result. A hosted engine runs a stored task without the
+    // relaxation it refuses at submission.
+    const stored = task.batch ?? task.crawl
+    const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
+    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {})
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -426,6 +469,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkRobotsOverride('robotsOverride', req.robotsOverride)
+      checkHostedOptions(req)
       const overallStart = performance.now()
       // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
       const deadlineAt = req.timeout === undefined
@@ -433,21 +477,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
       const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
       const mode = defaultApiMode(req.mode)
-      const channels = channelsForUrl(mode, req.url)
+      const rungs = channelsForUrl(mode, req.url, req)
       const policy: CrawlPolicy = {
         mode,
         ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
           ? { allowlistedDomains: req.allowlistedDomains }
           : {}),
       }
-      const runner = new LadderRunner(channels, policy, historyFor(mode))
+      const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
       const operation = (async () => {
         const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
+        const agentHints = agentHintsFor(req, run)
         const full: ScrapeResponse = {
           ...run.result,
           channelsTried: run.channelsTried,
           ladderTrace: run.ladderTrace,
           summary: run.summary,
+          ...(agentHints.length === 0 ? {} : { agentHints }),
         }
         return prepareScrapeResponse(full, req, scope, null, overallStart)
       })()
@@ -458,6 +504,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     async startCrawl(req) {
       checkFileCap(req)
       checkSelectors(req)
+      checkHostedOptions(req)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
       }
@@ -502,6 +549,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
+      checkHostedOptions(req)
       batchStartInProgress = true
       try {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
@@ -764,14 +812,18 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(options?.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
     ...(options?.includeTags === undefined ? {} : { includeTags: options.includeTags }),
     ...(options?.excludeTags === undefined ? {} : { excludeTags: options.excludeTags }),
+    ...(options?.headers === undefined ? {} : { headers: options.headers }),
+    ...(options?.mobile === undefined ? {} : { mobile: options.mobile }),
+    ...(options?.skipTlsVerification === undefined ? {} : { skipTlsVerification: options.skipTlsVerification }),
+    ...(options?.blockAds === undefined ? {} : { blockAds: options.blockAds }),
     ...(formats.includes('html') ? { includeHtml: true } : {}),
     ...(formats.includes('rawHtml') ? { includeRawHtml: true } : {}),
   }
 }
 
-/** The page options a batch or crawl request set, stored on its task so a resumed task keeps them. */
+/** The page options a batch or crawl request set, stored on its task so a resumed task keeps them (`fastMode` among them: it selects rungs, not a lane option). */
 function pageOptions(req: PageOptions): PageOptions {
-  return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }) }
+  return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }), ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }) }
 }
 
 /** A batch's recorded robots overrides by URL, as sent and in canonical form; every other URL has none. */

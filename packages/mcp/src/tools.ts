@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '@w2l/contracts'
+import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError, type PageOptions } from '@w2l/contracts'
 import type { RequestOptions, W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -22,6 +22,11 @@ const PAGE_OPTION_PROPERTIES = {
   maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file (PDF, CSV, XLSX, ZIP, JSON, text) to download, in bytes, below the server\'s own cap (W2L_MAX_FILE_BYTES, default 50 MiB). A larger file is failed with body_too_large and not saved.' },
   includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors naming the only elements to keep: the content is those elements in document order (a named navigation included), whatever onlyMainContent says. Nothing matching is an empty answer. Tag, class, id and attribute selectors, descendant and child combinators, :not(), :is(), :where(), :root and :empty, at most 100 parts in all (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one); sibling combinators, :nth-child and the like, and :has() are refused by name.' },
   excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors removed, with everything inside them, from the main content, the whole page (onlyMainContent false) and an includeTags selection. The same selectors and limit as includeTags.' },
+  headers: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 4096 }, description: 'Extra request headers sent to the requested origin (the page, its same-origin hops and the files it loads from that origin) after W2L\'s declared identity, and recorded in the trace: accept, accept-language, referer, cache-control, if-none-match, x-* and the like. User-Agent, client hints, credentials (authorization, cookie) and transport headers are refused by name with HTTP 400; a cross-origin hop gets the identity alone. Anything here is on the record.' },
+  mobile: { type: 'boolean', description: 'Fetch as a declared mobile Chrome identity (Android UA, mobile client hints, 412x915 viewport). Default false.' },
+  skipTlsVerification: { type: 'boolean', description: 'Local only: load a site with an invalid or self-signed certificate; recorded in the trace and a tls_unverified warning; refused in hosted mode.' },
+  fastMode: { type: 'boolean', description: 'http lane only, no browser escalation: a page that needs script execution returns the http lane\'s verdict (a shell is failed/empty_unverified, never rendered). Default false.' },
+  blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
 } as const
 /** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content. */
 const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung.'
@@ -253,6 +258,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       maxFileBytes: req.maxFileBytes,
       includeTags: req.includeTags,
       excludeTags: req.excludeTags,
+      ...executionOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
     }, request)
   }
@@ -274,6 +280,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       maxFileBytes: req.maxFileBytes,
       includeTags: req.includeTags,
       excludeTags: req.excludeTags,
+      ...executionOptions(req),
     }, request)
   }
   if (name === 'get_crawl') {
@@ -294,7 +301,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)
@@ -319,6 +326,17 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if ((TOOL_NAMES as readonly string[]).includes(name)) return callMonitorTool(client,name,readRecord(args),request)
   throw new RequestError(`unknown tool: ${name}`)
+}
+
+/** The execution options of a parsed request, those that were set: headers, mobile, skipTlsVerification, fastMode and blockAds. */
+function executionOptions(req: Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'>): Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'> {
+  return {
+    ...(req.headers === undefined ? {} : { headers: req.headers }),
+    ...(req.mobile === undefined ? {} : { mobile: req.mobile }),
+    ...(req.skipTlsVerification === undefined ? {} : { skipTlsVerification: req.skipTlsVerification }),
+    ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }),
+    ...(req.blockAds === undefined ? {} : { blockAds: req.blockAds }),
+  }
 }
 
 function readRecord(args: unknown): Record<string, unknown> {

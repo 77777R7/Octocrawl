@@ -47,7 +47,7 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
   if (!config.ownerSubject.trim()) throw new Error('ownerSubject is required')
   const amazonStateSha256 = validateAmazonPublicState(config.amazonPublicState)
   const policy = config.networkPolicy ?? hostedNetworkPolicy()
-  const runtime = createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:policy,defaultMaxPages:10,
+  const runtime = createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:policy,defaultMaxPages:10,hosted:true,
     publicPreferenceState:config.amazonPublicState,
     browserAllowedHosts:['www.amazon.sg','m.media-amazon.com','images-na.ssl-images-amazon.com','images-eu.ssl-images-amazon.com'],
     channelPolicy:url=>new URL(url).hostname === 'www.amazon.sg' ? 'browser_only' : 'http_only',

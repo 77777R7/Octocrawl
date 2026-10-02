@@ -179,6 +179,37 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], robotsOverrides: [{ url: 'https://other.example/', reason: 'r' }] })).rejects.toThrow('robotsOverrides[0].url is not one of the batch urls')
   })
 
+  it('declares and forwards headers, mobile, skipTlsVerification, fastMode and blockAds for scrape, crawl and batch_scrape, and refuses by name before any call', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { headers: { 'X-Test': 'w2l', 'Accept-Language': 'de' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
+    const sent = { ...options, headers: { 'x-test': 'w2l', 'accept-language': 'de' } }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...sent },
+      { url: 'https://example.com/', ...sent },
+      { urls: ['https://example.com/a'], ...sent },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      expect(TOOLS.find(tool => tool.name === name)?.inputSchema.properties).toMatchObject({
+        headers: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 4096 } },
+        mobile: { type: 'boolean' },
+        skipTlsVerification: { type: 'boolean' },
+        fastMode: { type: 'boolean' },
+        blockAds: { type: 'boolean' },
+      })
+    }
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', headers: { 'User-Agent': 'curl/8' } })).rejects.toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], headers: { Cookie: 'sid=1' } })).rejects.toThrow('headers.cookie is refused')
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', mode: 'research', mobile: true })).rejects.toThrow('mobile is not available in research mode')
+    expect(bodies).toHaveLength(3)
+  })
+
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
