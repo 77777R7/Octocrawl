@@ -85,7 +85,7 @@ function confidenceOf(
 
 export class ExtractTf implements Extractor {
   extract(html: string, options: ExtractorOptions = {}): ExtractorOutput {
-    const { favorPrecision = false, favorRecall = false, pruneSelectors, includeSelectors } = options
+    const { favorPrecision = false, favorRecall = false, pruneSelectors, includeSelectors, blockAds = true } = options
     const parseStart = performance.now()
     const doc = parse(html)
     const parseMs = Math.max(0, performance.now() - parseStart)
@@ -130,7 +130,7 @@ export class ExtractTf implements Extractor {
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
     cleanTree(doc.document, excluded)
-    pruneTree(doc.document)
+    pruneTree(doc.document, { blockAds })
     detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)

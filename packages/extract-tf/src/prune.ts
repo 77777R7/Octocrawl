@@ -74,6 +74,14 @@ function hasToken(attr: string, tokens: readonly string[]): boolean {
 export interface PruneOptions {
   /** Extra selectors beyond the built-in table. */
   selectors?: readonly string[]
+  /**
+   * Apply the built-in table: the ad-container tokens (AD_TOKENS), the
+   * CMP/cookie-consent tokens and aria labels, and the ad link farms.
+   * Default true, which is every extraction before the switch existed;
+   * false keeps ads and cookie banners (a request's `blockAds: false`). The
+   * caller's own selectors are applied either way.
+   */
+  blockAds?: boolean
 }
 
 /**
@@ -364,31 +372,33 @@ function formHoldsContent(form: Element): boolean {
  * Remove noise by built-in + user selectors. Run after cleanTree.
  */
 export function pruneTree(doc: Document, options: PruneOptions = {}): void {
-  // Attribute-driven CMP/ad removal.
-  const candidates = qsa(doc, '[id],[class]')
-  for (const el of candidates) {
-    const id = el.getAttribute('id') ?? ''
-    const cls = el.getAttribute('class') ?? ''
-    if (
-      hasToken(id, CMP_ID_TOKENS) ||
-      hasToken(cls, CMP_CLASS_TOKENS) ||
-      hasToken(id, AD_TOKENS) ||
-      hasToken(cls, AD_TOKENS)
-    ) {
-      detach(el)
-      continue
+  if (options.blockAds !== false) {
+    // Attribute-driven CMP/ad removal.
+    const candidates = qsa(doc, '[id],[class]')
+    for (const el of candidates) {
+      const id = el.getAttribute('id') ?? ''
+      const cls = el.getAttribute('class') ?? ''
+      if (
+        hasToken(id, CMP_ID_TOKENS) ||
+        hasToken(cls, CMP_CLASS_TOKENS) ||
+        hasToken(id, AD_TOKENS) ||
+        hasToken(cls, AD_TOKENS)
+      ) {
+        detach(el)
+        continue
+      }
+      // aria-label hints ("Close cookie banner").
+      const aria = (el.getAttribute('aria-label') ?? '').toLowerCase()
+      if (/(cookie|consent|gdpr)/.test(aria)) detach(el)
     }
-    // aria-label hints ("Close cookie banner").
-    const aria = (el.getAttribute('aria-label') ?? '').toLowerCase()
-    if (/(cookie|consent|gdpr)/.test(aria)) detach(el)
-  }
 
-  // Near-empty elements whose only content is a link farm (nav-shaped noise).
-  for (const el of qsa(doc, 'div,section,li')) {
-    const text = textOf(el).trim()
-    const links = qsa(el, 'a').length
-    if (links >= 3 && text.length > 0 && text.length < 40 && /ad|sponsor|promo|partner/i.test(el.className + el.id)) {
-      detach(el)
+    // Near-empty elements whose only content is a link farm (nav-shaped noise).
+    for (const el of qsa(doc, 'div,section,li')) {
+      const text = textOf(el).trim()
+      const links = qsa(el, 'a').length
+      if (links >= 3 && text.length > 0 && text.length < 40 && /ad|sponsor|promo|partner/i.test(el.className + el.id)) {
+        detach(el)
+      }
     }
   }
 

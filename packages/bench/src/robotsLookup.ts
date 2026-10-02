@@ -14,6 +14,7 @@ import { robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarni
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
+  isTlsError,
   raceWithSignal,
   throwIfExecutionStopped,
   evaluateRobots,
@@ -35,6 +36,25 @@ export interface CachedRobots {
   absent: boolean
   /** Why robots.txt was unreachable; set only when it was. */
   unreachable?: RobotsUnreachable
+  /**
+   * The network error that made it unreachable (`network_error`): its name,
+   * its code up the cause chain, and whether it was the host's certificate
+   * failing to verify. A lane reports that as `tls_error`, the fact about
+   * the host, rather than as the complete disallow an unreadable robots.txt
+   * otherwise is: the page would fail the same way.
+   */
+  error?: { name: string; code: string | null; tls: boolean }
+}
+
+/** The first `code` on an error or up its cause chain (Node's `fetch failed` wraps the socket's). */
+function errorCode(error: unknown): string | null {
+  let current = error
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
+    const code = (current as { code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code
+    current = 'cause' in current ? current.cause : null
+  }
+  return null
 }
 
 /**
@@ -79,7 +99,15 @@ export class RobotsOriginCache {
     await this.ownRoutes?.close()
   }
 
-  async lookup(url: string, userAgent: string, execution: ExecutionContext = {}): Promise<CachedRobots | null> {
+  /**
+   * The cached robots.txt of `url`'s origin, fetched with `userAgent` when it
+   * is not cached yet. `dispatcher` routes that one fetch instead of the
+   * cache's own routes (a request's relaxed-TLS routes, `skipTlsVerification`):
+   * what it reads is cached apart from what the default routes read, so a
+   * verdict read without certificate verification never answers a verified
+   * fetch, and a default fetch's `unreachable` never answers a relaxed one.
+   */
+  async lookup(url: string, userAgent: string, execution: ExecutionContext = {}, dispatcher?: Dispatcher | ((url: string) => Dispatcher)): Promise<CachedRobots | null> {
     throwIfExecutionStopped(execution)
     let origin: string
     let robotsUrl: string
@@ -90,10 +118,12 @@ export class RobotsOriginCache {
     } catch {
       return null
     }
+    const route = dispatcher ?? this.dispatcher
+    const key = dispatcher === undefined ? origin : `${origin} tls-unverified`
 
-    const cached = this.byOrigin.get(origin)
+    const cached = this.byOrigin.get(key)
     if (cached !== undefined && Date.now() < cached.expiresAt) return cached.entry
-    let pending = this.pending.get(origin)
+    let pending = this.pending.get(key)
     if (pending === undefined) {
       const controller = new AbortController()
       const request = (async (): Promise<CachedRobots | null> => {
@@ -110,7 +140,7 @@ export class RobotsOriginCache {
         redirect: 'manual',
         // Node's fetch accepts the Undici dispatcher; the socket lookup
         // validates the address again and pins the validated result.
-        dispatcher: typeof this.dispatcher === 'function' ? this.dispatcher(currentUrl) : this.dispatcher,
+        dispatcher: typeof route === 'function' ? route(currentUrl) : route,
       } as RequestInit & { dispatcher: Dispatcher })
         if (res.status >= 300 && res.status < 400) {
           await res.body?.cancel()
@@ -154,23 +184,25 @@ export class RobotsOriginCache {
       }
       break
       }
-    } catch {
+    } catch (error) {
       // Only the waiters leaving cancels the lookup. Its own deadline is an
       // unreachable robots.txt like any network error, never a thrown timeout
       // that would fail the fetch this lookup guards.
       controller.signal.throwIfAborted()
-      entry = { robotsUrl, robots: null, sha256: null, absent: false, unreachable: scope.signal.aborted ? 'timeout' : 'network_error' }
+      entry = scope.signal.aborted
+        ? { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'timeout' }
+        : { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'network_error', error: { name: error instanceof Error ? error.name : String(error), code: errorCode(error), tls: isTlsError(error) } }
     } finally { scope.dispose() }
 
       controller.signal.throwIfAborted()
       const expiresAt = entry.unreachable === undefined ? Infinity : Date.now() + (this.networkPolicy.robotsUnreachableTtlMs ?? ROBOTS_UNREACHABLE_TTL_MS)
-      this.byOrigin.set(origin, { entry, expiresAt })
+      this.byOrigin.set(key, { entry, expiresAt })
       return entry
     })()
       pending = { promise: request, controller, users: 0 }
-      this.pending.set(origin, pending)
+      this.pending.set(key, pending)
       const current = pending
-      void request.finally(() => { if (this.pending.get(origin) === current) this.pending.delete(origin) }).catch(() => {})
+      void request.finally(() => { if (this.pending.get(key) === current) this.pending.delete(key) }).catch(() => {})
     }
     pending.users++
     const caller = createExecutionScope(execution)
@@ -178,8 +210,8 @@ export class RobotsOriginCache {
     finally {
       caller.dispose()
       pending.users--
-      if (pending.users === 0 && this.pending.get(origin) === pending) {
-        this.pending.delete(origin)
+      if (pending.users === 0 && this.pending.get(key) === pending) {
+        this.pending.delete(key)
         pending.controller.abort(new DOMException('No robots lookup waiters remain', 'AbortError'))
       }
     }

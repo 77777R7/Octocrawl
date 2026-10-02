@@ -502,4 +502,32 @@ describe('extractTf selection and whole page', () => {
     expect(extractTf.extract(PAGE, { pruneSelectors: ['article p:first-child', 'table:has(sup)'] }).mainHtml).toContain('glaze vitrified')
     expect(wholePageBody(PAGE, ['header ~ article'])).toContain('glaze vitrified')
   })
+
+  it('removes ad containers and cookie banners by default and keeps them with blockAds: false, never touching a "download" class', () => {
+    const prose = 'The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the ledger kept by the harbour office for the whole season.'
+    const html = `<!doctype html><html><head><title>Kiln report</title></head><body><main>
+<div id="cookie-consent" role="dialog"><p>We use cookies to personalise content.</p></div>
+<h1>Kiln report</h1>
+<p>${prose}</p>
+<div class="advertisement"><p>Advertisement: buy the almanac.</p></div>
+<p>Sediment cores from the estuary date to 1873, and researchers compared them against the almanac kept at the plinth house through the winter.</p>
+<div id="ad-slot"><p>Sponsored slot.</p></div>
+<p class="download">Download the report as PDF.</p>
+</main></body></html>`
+    const pruned = extractTf.extract(html)
+    expect(pruned.mainHtml).toContain(prose)
+    expect(pruned.mainHtml).toContain('Download the report as PDF.')
+    for (const gone of ['Advertisement: buy', 'Sponsored slot', 'We use cookies']) expect(pruned.mainHtml).not.toContain(gone)
+    expect(extractTf.extract(html, { blockAds: true }).mainHtml).toBe(pruned.mainHtml)
+    const kept = extractTf.extract(html, { blockAds: false })
+    expect(kept.mainHtml).toContain(prose)
+    for (const stays of ['Advertisement: buy', 'Sponsored slot', 'We use cookies', 'Download the report as PDF.']) expect(kept.mainHtml).toContain(stays)
+    // The structural cleaning is not the switch's: scripts and navigation go either way, and a caller's own exclusions still apply.
+    const chrome = `<!doctype html><html><body><nav><a href="/">Home</a></nav><main><h1>Kiln report</h1><p>${prose}</p><div class="promo"><p>Promo box.</p></div><script>var x = 1</script></main></body></html>`
+    const loose = extractTf.extract(chrome, { blockAds: false, pruneSelectors: ['.promo'] })
+    expect(loose.mainHtml).not.toContain('Home')
+    expect(loose.mainHtml).not.toContain('var x')
+    expect(loose.mainHtml).not.toContain('Promo box')
+    expect(extractTf.extract(chrome, { blockAds: false }).mainHtml).toContain('Promo box')
+  })
 })

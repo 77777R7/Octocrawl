@@ -18,8 +18,8 @@ import {
   type ComplianceRecord,
   type ComplianceSentHeader,
 } from '@w2l/http-core'
-import { chromium, type Browser, type BrowserContext, type Download, type Page, type Response } from 'playwright'
-import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Response } from 'playwright'
+import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -32,17 +32,60 @@ import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
 import { MainFrameDocuments, reported, type MainFrameEntry } from './browserDocuments.js'
+import { AD_HOSTS, isAdHost } from './adHosts.js'
+import { wireHeaders } from '../httpIdentity.js'
+import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import {
-  BROWSER_FINGERPRINT,
   CHROME_MAJOR_FLOOR,
   assertIdentityBundle,
+  browserFingerprintFor,
+  browserUserAgentMetadata,
   checkIdentityHonesty,
   identityBundleFrom,
   identityForRoute,
   modeIdentity,
   type CrawlMode,
   type HonestyVerdict,
+  type IdentityDevice,
 } from '@w2l/contracts'
+
+/**
+ * Headers that never go into the as-sent record or the trace: a credential
+ * is recorded as a hash in the access fact (access.ts), never as its value.
+ * Playwright reports them as sent once a route intercepts the context's
+ * requests, which blockAds does by default.
+ */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['cookie', 'authorization', 'proxy-authorization'])
+
+/** The request headers Playwright reports, lower-cased and sorted, without credentials: what the honesty check reads and the record signs. */
+function asSentHeaders(headers: Readonly<Record<string, string>>): ComplianceSentHeader[] {
+  return Object.entries(headers)
+    .map(([name, value]) => ({ name: name.toLowerCase(), value }))
+    .filter(({ name }) => !CREDENTIAL_HEADERS.has(name))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * What became of the caller's headers when the document came from another
+ * origin than the one requested. A server redirect is followed by Chromium
+ * with the request's headers, custom ones included, as a browser does, and
+ * no route sees the hop: the record says they were forwarded
+ * (`custom_headers_forwarded`). A navigation the page itself made (a script,
+ * a meta refresh) is a new request the route saw, and got none
+ * (`custom_headers_withheld`). The HTTP lane withholds on every hop itself.
+ */
+function recordCrossOriginHeaders(trace: TraceEvent[], at: number, requestedOrigin: string, finalUrl: string, customHeaders: Readonly<Record<string, string>>, sent: readonly ComplianceSentHeader[]): void {
+  const names = Object.keys(customHeaders)
+  if (names.length === 0) return
+  let finalOrigin: string
+  try { finalOrigin = new URL(finalUrl).origin } catch { return }
+  if (finalOrigin === requestedOrigin) return
+  const sentNames = new Set(sent.map((header) => header.name))
+  const forwarded = names.filter((name) => sentNames.has(name))
+  const withheld = names.filter((name) => !sentNames.has(name))
+  if (forwarded.length > 0) trace.push({ at, lane: 'browser_local', event: 'custom_headers_forwarded', detail: { to: finalUrl, names: forwarded, reason: 'Chromium followed a server redirect with the request\'s headers' } })
+  if (withheld.length > 0) trace.push({ at, lane: 'browser_local', event: 'custom_headers_withheld', detail: { to: finalUrl, names: withheld } })
+}
 
 /**
  * Time kept free before the caller's deadline when a waitFor wait would run
@@ -158,6 +201,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
     /** Where files (PDF, CSV, ...) the browser downloads or displays are saved as received; without one they are read but not saved. */
     private readonly fileStore: FileStore | null = null,
+    /** The ad-serving hosts `blockAds` aborts requests to (adHosts.ts); a test seam. */
+    private readonly adHosts: readonly string[] = AD_HOSTS,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -193,13 +238,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
     let queueMs = 0
     let cooldownWaitMs = 0
     // Set when a robots disallow was set aside by the caller's recorded
-    // decision; every result of this fetch then carries the warning first.
+    // decision; every result of this fetch then carries the warning first,
+    // and every result of a fetch that relaxed certificate verification the
+    // tls_unverified warning.
     const robots: { overrideWarning: FetchWarning | null } = { overrideWarning: null }
+    const tlsWarning: FetchWarning | null = options.skipTlsVerification === true ? tlsUnverifiedWarning(new URL(url).hostname) : null
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
+      const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       return {
         ...result,
-        ...(robots.overrideWarning === null ? {} : { warnings: [robots.overrideWarning, ...(result.warnings ?? [])] }),
+        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -245,11 +294,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
     let context: BrowserContext | undefined
     let page: Page | undefined
+    /** The CDP session that holds the page's user-agent metadata override; open for the page's lifetime. */
+    let emulation: CDPSession | undefined
     const onAbort = () => {
       void page?.close().catch(() => {})
       if (context !== this.managedContext) void context?.close().catch(() => {})
     }
     signal?.addEventListener('abort', onAbort, { once: true })
+    // The robots.txt lookup of a fetch that relaxed certificate verification
+    // goes through routes of its own that relax it too, closed with the fetch;
+    // the cache's own routes keep verifying (see EgressTlsOptions).
+    const relaxedRoutes = options.skipTlsVerification === true ? new EgressRoutes(this.networkPolicy, undefined, { rejectUnauthorized: false }) : null
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -260,18 +315,26 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // version we are not running is an inconsistency, not a feature.
       const version = browser.version()
       const major = Number(version.split('.')[0] ?? CHROME_MAJOR_FLOOR)
+      // The mobile identity needs a context of its own; a managed profile's
+      // context already exists with the desktop one, and no API path asks it
+      // for the mobile identity.
+      const device: IdentityDevice = options.mobile === true && managedContext === null ? 'mobile' : 'desktop'
       // Research mode declares its contact in the format the page's host asks for (researchUserAgent).
-      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname)
+      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname, device)
       assertIdentityBundle(
-        identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR),
+        identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, undefined, device),
       )
+      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'identity_declared', detail: { mode: this.mode, ...(identity.device === undefined ? {} : { device: identity.device }) } })
+      const customHeaders = wireHeaders(options.headers)
+      if (Object.keys(customHeaders).length > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'request_headers_added', detail: { headers: Object.entries(customHeaders).map(([name, value]) => ({ name, value })) } })
+      if (options.skipTlsVerification === true) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'tls_verification_skipped', detail: { host: new URL(url).hostname } })
 
       // Robots is consulted BEFORE the browser context is opened. Every mode
       // declares respectsRobots: true, and the only way that claim means
       // anything is if a disallow actually stops the fetch — a record that
       // says "disallowed" next to a page we fetched anyway would be a
       // self-documenting violation.
-      const cachedRobots = await this.robotsCache.lookup(url, identity.userAgent, execution)
+      const cachedRobots = await this.robotsCache.lookup(url, identity.userAgent, execution, relaxedRoutes === null ? undefined : (target) => relaxedRoutes.dispatcherFor(target))
       const robotsDecision = this.robotsCache.decision(cachedRobots, url, identity.userAgent)
       trace.push({
         at: Date.now() - start,
@@ -335,10 +398,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
           event: 'robots_disallowed',
           detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
+        // robots.txt unreadable because the host's certificate does not verify: the page would fail the same way, and that is the fact to report.
+        const tlsFailed = robotsDecision.unreachable !== undefined && cachedRobots?.error?.tls === true
+        if (tlsFailed) trace.push({ at: wallMs, lane: 'browser_local', event: 'request_failed', detail: { reason: 'tls_error', url: robotsDecision.robotsUrl, error: cachedRobots!.error!.name, ...(cachedRobots!.error!.code === null ? {} : { code: cachedRobots!.error!.code }) } })
         return {
           requestedUrl: url,
           status: 'failed',
-          failureReason: 'policy_denied',
+          failureReason: tlsFailed ? 'tls_error' : 'policy_denied',
           blockReason: null,
           budgetExceeded: null,
           lane: 'browser_local',
@@ -371,14 +437,21 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const amazonPublicState = this.publicPreferenceState !== null && /(^|\.)amazon\.(com|sg)$/i.test(host)
         ? this.publicPreferenceState : null
+      // The fingerprint of the declared identity: the desktop one, or the
+      // mobile one (a phone viewport, touch) for the mobile identity.
+      const fingerprint = browserFingerprintFor(identity.device)
       const pendingContext = managedContext ? Promise.resolve(managedContext) : browser.newContext({
         userAgent: identity.userAgent,
-        locale: BROWSER_FINGERPRINT.locale,
-        timezoneId: BROWSER_FINGERPRINT.timezoneId,
-        viewport: BROWSER_FINGERPRINT.viewport,
-        screen: BROWSER_FINGERPRINT.screen,
-        deviceScaleFactor: BROWSER_FINGERPRINT.deviceScaleFactor,
+        locale: fingerprint.locale,
+        timezoneId: fingerprint.timezoneId,
+        viewport: fingerprint.viewport,
+        screen: fingerprint.screen,
+        deviceScaleFactor: fingerprint.deviceScaleFactor,
+        isMobile: fingerprint.isMobile,
+        hasTouch: fingerprint.hasTouch,
         extraHTTPHeaders: identity.clientHints,
+        // Local only (the engine refuses it in hosted mode), recorded above and in the result's warnings.
+        ...(options.skipTlsVerification === true ? { ignoreHTTPSErrors: true } : {}),
         ...(this.browserAllowedHosts === undefined ? {} : { serviceWorkers: 'block' as const }),
         // Restore the user's full session state (cookies, localStorage,
         // sessionStorage) when they inherited a storageState blob — the
@@ -407,24 +480,52 @@ export class BrowserLocalSubject implements SubjectAdapter {
       void pendingContext.then(created => { if (signal?.aborted && created !== this.managedContext) void created.close().catch(() => {}) }, () => {})
       context = await raceWithSignal(pendingContext, signal)
       let deniedResources = 0
-      if (this.browserAllowedHosts !== undefined) {
-        // Context routes are installed before creating a page so the first
-        // navigation of a popup or worker cannot bypass the host policy.
-        const allowedHosts = new Set(this.browserAllowedHosts)
+      // Requests to ad-serving hosts aborted under blockAds (default true), and the distinct hosts (first 20) for the trace.
+      let adsBlocked = 0
+      const adHostsBlocked = new Set<string>()
+      const allowedHosts = this.browserAllowedHosts === undefined ? null : new Set(this.browserAllowedHosts)
+      const blockAds = options.blockAds !== false
+      const pageOrigin = new URL(url).origin
+      const hasCustomHeaders = Object.keys(customHeaders).length > 0
+      if (allowedHosts !== null || blockAds || hasCustomHeaders) {
+        // One route for the three concerns, installed before creating a page
+        // so the first navigation of a popup or worker cannot bypass it: the
+        // hosted host allowlist first (an ad host is never on it, and
+        // blockAds: false cannot widen it), then the ad hosts, then the
+        // caller's headers on requests to the fetched URL's origin alone (the
+        // document, its same-origin hops and subresources), merged after the
+        // request's own so the identity is never overridden.
         await context.route('**/*', async route => {
           const request = route.request()
-          let allowed = false
-          try {
-            allowed = hostedBrowserRequestAllowed(request.url(), request.resourceType(), allowedHosts)
-            if (allowed) await assertSafeUrl(request.url(), this.networkPolicy)
-          } catch { allowed = false }
-          if (!allowed) {
-            deniedResources++
+          const target = request.url()
+          if (allowedHosts !== null) {
+            let allowed = false
+            try {
+              allowed = hostedBrowserRequestAllowed(target, request.resourceType(), allowedHosts)
+              if (allowed) await assertSafeUrl(target, this.networkPolicy)
+            } catch { allowed = false }
+            if (!allowed) {
+              deniedResources++
+              await route.abort('blockedbyclient').catch(() => {})
+              return
+            }
+          }
+          let targetUrl: URL | null = null
+          try { targetUrl = new URL(target) } catch { targetUrl = null }
+          if (blockAds && targetUrl !== null && isAdHost(targetUrl.hostname, this.adHosts)) {
+            adsBlocked++
+            if (adHostsBlocked.size < 20) adHostsBlocked.add(targetUrl.hostname.toLowerCase())
             await route.abort('blockedbyclient').catch(() => {})
+            return
+          }
+          if (hasCustomHeaders && targetUrl !== null && targetUrl.origin === pageOrigin) {
+            await route.continue({ headers: { ...request.headers(), ...customHeaders } }).catch(() => {})
             return
           }
           await route.continue().catch(() => {})
         })
+      }
+      if (allowedHosts !== null) {
         // HTTP routes do not intercept WebSocket handshakes. The public
         // preview does not need sockets, so block them before any page runs.
         await context.routeWebSocket('**/*', async ws => { await ws.close({ code: 1008, reason: 'network policy' }) })
@@ -456,6 +557,26 @@ export class BrowserLocalSubject implements SubjectAdapter {
       void pendingPage.then(created => { if (signal?.aborted) void created.close().catch(() => {}) }, () => {})
       page = await raceWithSignal(pendingPage, signal)
       throwIfExecutionStopped(execution)
+      // A context's extra headers reach the requests Playwright makes, not the
+      // client hints Chromium generates itself on a redirect hop or for the
+      // page's own requests; those come from the browser's user-agent
+      // metadata, which the headless shell fills with its own brands. The
+      // declared identity's metadata (browserUserAgentMetadata) makes every
+      // request carry the declared hints, and navigator.userAgentData agree.
+      // The override lives as long as the session that set it (Chromium drops
+      // a session's emulation when it detaches), so the session stays open
+      // until the page is closed.
+      if (identity.device !== undefined) {
+        const chromeMajor = Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR
+        const metadata = browserUserAgentMetadata(chromeMajor, identity.device)
+        emulation = await raceWithSignal(context.newCDPSession(page), signal)
+        await raceWithSignal(emulation.send('Emulation.setUserAgentOverride', {
+          userAgent: identity.userAgent,
+          acceptLanguage: fingerprint.locale,
+          platform: identity.device === 'mobile' ? 'Linux armv8l' : 'MacIntel',
+          userAgentMetadata: { ...metadata, brands: [...metadata.brands], fullVersionList: [...metadata.fullVersionList] },
+        }), signal)
+      }
       // A file (PDF, CSV, ZIP, ...) starts a download instead of a page: the
       // navigation fails with "Download is starting". Keep the download and
       // the navigation responses, whose headers and request say what came.
@@ -598,6 +719,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         throwIfExecutionStopped(execution)
       }
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
+      if (adsBlocked > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'ads_blocked', detail: { count: adsBlocked, hosts: [...adHostsBlocked] } })
       // The page as it is now, read while no new document loads, so that what
       // is read and the document's response belong together. A document
       // loaded since the last wait for stability (a script or a meta refresh
@@ -658,11 +780,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const browserMs = wallMs
       trace.push({ at: wallMs, lane: 'browser_local', event: 'rendered', detail: { status, attemptCount } })
 
-      // What actually went on the wire, as Playwright saw it — the fact the
-      // honesty check compares against, and the record signs.
-      const sentHeaders: ComplianceSentHeader[] = Object.entries((documentResponse ?? response)?.request().headers() ?? {})
-        .map(([name, value]) => ({ name: name.toLowerCase(), value }))
-        .sort((a, b) => a.name.localeCompare(b.name))
+      // What actually went on the wire, as Playwright saw it, credentials
+      // excepted (asSentHeaders): the fact the honesty check compares
+      // against, and the record signs.
+      const sentHeaders: ComplianceSentHeader[] = asSentHeaders((documentResponse ?? response)?.request().headers() ?? {})
+      recordCrossOriginHeaders(trace, wallMs, pageOrigin, finalUrl, customHeaders, sentHeaders)
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
       if (!honesty.honest) {
         trace.push({
@@ -790,7 +912,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(converted, { url: pageUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
+      const extracted = extractTf.extract(converted, { url: pageUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
       const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
@@ -874,13 +996,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const wallMs = Date.now() - start
       // Playwright surfaces deadline misses as TimeoutError; map them to the
       // contract's timeout reason so the timeout fixtures match. Chromium
-      // stops following redirects after 20, a loop included. Every other
-      // navigation failure is a connection_error.
+      // stops following redirects after 20, a loop included, and reports a
+      // certificate or handshake failure as net::ERR_CERT_* / net::ERR_SSL_*,
+      // a fact about the host (tls_error). Every other navigation failure is
+      // a connection_error.
       const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
         : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
           : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
             : err instanceof Error && err.message.includes('net::ERR_TOO_MANY_REDIRECTS') ? 'redirect_limit'
-              : 'connection_error'
+              : err instanceof Error && (err.message.includes('net::ERR_CERT_') || err.message.includes('net::ERR_SSL_')) ? 'tls_error'
+                : 'connection_error'
       trace.push({
         at: wallMs,
         lane: 'browser_local',
@@ -922,7 +1047,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
     } finally {
       signal?.removeEventListener('abort', onAbort)
       if (page !== undefined) await closePage(page)
+      await emulation?.detach().catch(() => {})
       if (context !== this.managedContext) await context?.close().catch(() => {})
+      await relaxedRoutes?.close()
     }
   }
 
@@ -962,10 +1089,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const maxBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     const declaredBytes = declaredLength(headers['content-length'])
     const base = (): Omit<FetchResult, 'status' | 'failureReason'> => {
-      // What went on the wire, as Playwright saw it, checked and signed as for a page.
-      const sentHeaders: ComplianceSentHeader[] = Object.entries(navigation === null ? {} : navigation.request().headers())
-        .map(([name, value]) => ({ name: name.toLowerCase(), value }))
-        .sort((a, b) => a.name.localeCompare(b.name))
+      // What went on the wire, as Playwright saw it, credentials excepted, checked and signed as for a page.
+      const sentHeaders: ComplianceSentHeader[] = asSentHeaders(navigation === null ? {} : navigation.request().headers())
+      recordCrossOriginHeaders(trace, at(), new URL(url).origin, finalUrl, wireHeaders(options.headers), sentHeaders)
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
       if (!honesty.honest) trace.push({ at: at(), lane: 'browser_local', event: 'identity_mismatch', detail: { mismatches: honesty.mismatches } })
       return {
