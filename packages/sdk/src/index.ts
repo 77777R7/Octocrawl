@@ -1,4 +1,4 @@
-export { chunkUrls, SDK_ORIGIN, W2L, W2LError, WaitTimeoutError } from './client.js'
+export { chunkUrls, MAP_ANSWER_MARGIN_MS, SDK_ORIGIN, W2L, W2LError, WaitTimeoutError } from './client.js'
 export { DEFAULT_WATCH_POLL_INTERVAL_MS, JobWatcher, MIN_WATCH_POLL_INTERVAL_MS, pageCursor, parseSseBlock } from './watcher.js'
 export type { WatchKind, WatchOptions, WatchTransport, WatcherClient, WatcherError, WatcherEvent, WatcherWebSocket, WatcherWebSocketConstructor } from './watcher.js'
 export { SDK_VERSION } from './version.js'

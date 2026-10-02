@@ -8,7 +8,7 @@
  * response (`agentHints`) only when there is one.
  */
 
-import { DEFAULT_SCRAPE_TIMEOUT_MS, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type ScrapeRequest } from '@w2l/contracts'
+import { DEFAULT_SCRAPE_TIMEOUT_MS, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -194,4 +194,21 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   hints.push(...jsonHints(result))
   if (result.file !== undefined) hints.push(fileHint(result.file))
   return hints.slice(0, MAX_AGENT_HINTS)
+}
+
+/**
+ * The hints of one map, from its warnings: a deadline that cut it (a larger
+ * timeout, up to this server's cap, or a lower limit), and a start page the
+ * http lane found filled by script (a scrape of it with the links format,
+ * which the browser lane renders). Empty when neither applies.
+ */
+export function mapAgentHints(response: Pick<MapResponse, 'url' | 'warnings'>, maxTimeoutMs: number): string[] {
+  const hints: string[] = []
+  if (response.warnings.some((warning) => warning.code === 'map_timeout')) {
+    hints.push(`the map's deadline cut it before every source was read; raise timeout (up to ${maxTimeoutMs} ms on this server) or lower limit for a complete list`)
+  }
+  if (response.warnings.some((warning) => warning.code === 'start_page_client_rendered')) {
+    hints.push(`the start page fills its links with script; scrape ${response.url} with formats ['links'] (the browser lane renders it) for the rendered page's links`)
+  }
+  return hints
 }

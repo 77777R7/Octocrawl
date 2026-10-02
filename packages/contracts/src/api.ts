@@ -341,6 +341,27 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
 /** What the parser hands the engine: the request plus, from the `/fc` shim, the payload shape its receiver expects. */
 export type ParsedCrawlStartRequest = CrawlStartRequest & { webhookPayloadFormat?: WebhookPayloadFormat }
 
+/** A map's `limit` when the request names none, and the largest it may name: Firecrawl's documented default and maximum (read 2026-10-03). */
+export const DEFAULT_MAP_LIMIT = 5_000
+export const MAX_MAP_LIMIT = 100_000
+/** One deadline for the whole map when the request names no `timeout`; a map answers synchronously. */
+export const DEFAULT_MAP_TIMEOUT_MS = 60_000
+export const MAX_MAP_TIMEOUT_MS = 300_000
+/** A hosted server's map caps: Firecrawl's default limit, and the default deadline, since a map answers synchronously. */
+export const HOSTED_MAP_MAX_LIMIT = 5_000
+export const HOSTED_MAP_MAX_TIMEOUT_MS = 60_000
+
+/** POST /v1/map: the URLs of a site from its sitemaps and its start page's links, without fetching each page. */
+export interface MapRequest extends RequestAttribution {
+  url: string
+  /** standard (default) or research; authed is refused: a map reads public sitemaps and one public page. */
+  mode?: 'standard' | 'research'
+  /** Links returned at most, 1 to MAX_MAP_LIMIT; default DEFAULT_MAP_LIMIT. */
+  limit?: number
+  /** Milliseconds for the whole map, 1000 to MAX_MAP_TIMEOUT_MS; default DEFAULT_MAP_TIMEOUT_MS. At the deadline the map answers with what it found. */
+  timeout?: number
+}
+
 export interface CrawlAccepted {
   taskId: string
   /** Present and true when `idempotencyKey` matched an earlier start and this is its stored answer; nothing was started. */
@@ -651,6 +672,7 @@ export const REFUSAL_HINTS = {
   stealth: "W2L does not offer a stealth mode or stealth proxies: every fetch declares W2L's identity; a proxy or session you own (mode authed) is the supported route",
   ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
+  useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
 } as const
 
 /** The hint for a refused request key, or null when the key has none (an option W2L simply does not know). */
@@ -658,6 +680,7 @@ export function refusalHint(key: string, value: unknown): string | null {
   const name = key.slice(key.lastIndexOf('.') + 1)
   if (name === 'stealth' || (name === 'proxy' && (value === 'stealth' || value === 'enhanced'))) return REFUSAL_HINTS.stealth
   if (name === 'ignoreRobotsTxt') return REFUSAL_HINTS.ignoreRobotsTxt
+  if (name === 'useIndex') return REFUSAL_HINTS.useIndex
   return null
 }
 
@@ -679,6 +702,8 @@ const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides'
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
+/** What a map takes. No page option (headers, mobile, skipTlsVerification, formats, ...): a map has nothing to loosen. */
+const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', ...ATTRIBUTION_KEYS] as const
 
 /**
  * An option W2L does not know is an error, never silently dropped; `at`
@@ -1460,6 +1485,30 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   checkScreenshotViewport(req.mobile, req.formats)
   return req
+}
+
+/**
+ * A map request: url, mode (standard or research), limit, timeout, origin
+ * and integration. Anything else is refused by name, `useIndex` with the
+ * supported route; nothing is silently ignored.
+ */
+export function parseMapRequest(body: unknown): MapRequest {
+  const rec = asRecord(body)
+  rejectUnknownKeys(rec, MAP_KEYS)
+  if (rec.mode === 'authed') throw new RequestError('mode authed is not available for map: a map reads public sitemaps and one public page')
+  if (rec.mode !== undefined && rec.mode !== 'standard' && rec.mode !== 'research') throw new RequestError('mode must be standard or research')
+  const limit = rec.limit
+  if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_MAP_LIMIT)) {
+    throw new RequestError(`limit must be an integer from 1 to ${MAX_MAP_LIMIT}`)
+  }
+  const timeout = readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, MAX_MAP_TIMEOUT_MS)
+  return {
+    url: readUrl(rec.url),
+    ...(rec.mode === undefined ? {} : { mode: rec.mode }),
+    ...(limit === undefined ? {} : { limit: limit as number }),
+    ...(timeout === undefined ? {} : { timeout }),
+    ...readAttribution(rec),
+  }
 }
 
 /**

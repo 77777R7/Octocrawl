@@ -302,6 +302,7 @@ describe('@w2l/runtime public surface', () => {
       'Frontier',
       'IDEMPOTENCY_FILENAME',
       'IdempotencyStore',
+      'MapRunner',
       'MemoryTaskStore',
       'MonitorStore',
       'RecipeStore',

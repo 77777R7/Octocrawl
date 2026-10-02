@@ -1,0 +1,330 @@
+/**
+ * A map: the URLs of a site, discovered without fetching each page.
+ *
+ * Not a second crawler. Every candidate goes through one Frontier built from
+ * the request's scope (the start host, its www twin and where the start URL
+ * redirected; the start URL's path subtree; assets left out; similar URLs
+ * folded), so the scope rules exist once. The map never dequeues: it reads
+ * at most one page body, the start URL's, through its MapSources, and the
+ * sitemaps the site declares. All of it runs inside one deadline, in this
+ * order: the start host's robots.txt, the start page, the sitemap files, and
+ * the robots.txt of each further host a candidate is on (at most
+ * MAP_MAX_ROBOTS_HOSTS of them). A URL robots.txt disallows for the map's
+ * identity, or whose robots.txt could not be read, is never returned.
+ *
+ * Titles are never invented: the start URL's comes from its own page, a
+ * page link's from its anchor, a sitemap entry's from its `<news:title>`.
+ * When the deadline passes the map answers with what it found, as partial
+ * (failed when it found nothing), never as a complete list. The caller's own
+ * cancellation throws and answers nothing.
+ */
+
+import {
+  DEFAULT_MAP_LIMIT,
+  DEFAULT_MAP_TIMEOUT_MS,
+  MAP_MAX_ROBOTS_HOSTS,
+  MAP_REFUSED_SAMPLES,
+  MAP_SITEMAP_MAX_FILES,
+  type ExecutionContext,
+  type MapLink,
+  type MapRefused,
+  type MapResponse,
+  type MapSitemapSource,
+  type MapSources,
+  type MapStartPage,
+  type MapWarning,
+  type ResultStatus,
+  type SitemapEntry,
+  type SitemapMode,
+} from '@w2l/contracts'
+import { createExecutionScope } from '@w2l/http-core'
+import { visitKey } from './canonicalize.js'
+import { Frontier, type FrontierEnqueueResult } from './frontier.js'
+
+export interface MapSpec {
+  /** The map run's id, the record key. */
+  id: string
+  url: string
+  /** Links returned at most; default DEFAULT_MAP_LIMIT. */
+  limit?: number
+  /** One deadline for the whole map, from the moment run() starts; default DEFAULT_MAP_TIMEOUT_MS. */
+  timeoutMs?: number
+  /** How the map uses the site's sitemap; default include. */
+  sitemap?: SitemapMode
+  /** Admit every host under the start URL's apex (the frontier's allowSubdomains). Default false. */
+  includeSubdomains?: boolean
+  ignoreQueryParameters?: boolean
+  /** Default true, as on a crawl. */
+  deduplicateSimilarURLs?: boolean
+  crawlEntireDomain?: boolean
+  includePaths?: readonly string[]
+  excludePaths?: readonly string[]
+  regexOnFullURL?: boolean
+  /** Sitemap files read at most; default MAP_SITEMAP_MAX_FILES. */
+  maxSitemapFiles?: number
+  /** Hosts beside the start host whose robots.txt is read at most; default MAP_MAX_ROBOTS_HOSTS. */
+  maxRobotsHosts?: number
+}
+
+/** A start page read that gave the page as content; anything else is a source that failed. */
+const READ_STATUSES: ReadonlySet<ResultStatus> = new Set<ResultStatus>(['success', 'empty_verified'])
+
+type Found = { via: 'link'; text: string | null } | { via: 'sitemap'; entry: SitemapEntry }
+type Verdict = 'allowed' | 'no_robots' | 'disallowed' | 'unchecked'
+
+export class MapRunner {
+  constructor(private readonly sources: MapSources) {}
+
+  async run(spec: MapSpec, context: ExecutionContext = {}): Promise<MapResponse> {
+    const began = Date.now()
+    const limit = spec.limit ?? DEFAULT_MAP_LIMIT
+    const timeoutMs = spec.timeoutMs ?? DEFAULT_MAP_TIMEOUT_MS
+    const deadlineAt = Math.min(began + timeoutMs, context.deadlineAt ?? Infinity)
+    const sitemapMode = spec.sitemap ?? 'include'
+    const maxRobotsHosts = spec.maxRobotsHosts ?? MAP_MAX_ROBOTS_HOSTS
+    const caller = context.signal
+    const cancelled = (): boolean => caller?.aborted === true
+    const scope = createExecutionScope({ ...(caller === undefined ? {} : { signal: caller }), deadlineAt })
+    try {
+      const dedupe = spec.deduplicateSimilarURLs !== false
+      const frontier = new Frontier({
+        seedUrl: spec.url,
+        maxDepth: null,
+        deduplicateSimilarURLs: dedupe,
+        ignoreQueryParameters: spec.ignoreQueryParameters === true,
+        allowSubdomains: spec.includeSubdomains === true,
+        crawlEntireDomain: spec.crawlEntireDomain === true,
+        regexOnFullURL: spec.regexOnFullURL === true,
+        ...(spec.includePaths === undefined ? {} : { includePaths: spec.includePaths }),
+        ...(spec.excludePaths === undefined ? {} : { excludePaths: spec.excludePaths }),
+      })
+      const startCanonical = frontier.seed(spec.url).canonicalUrl ?? frontier.seedCanonicalUrl
+      const links: MapLink[] = []
+      const byKey = new Map<string, MapLink>()
+      const keyOf = (canonicalUrl: string): string => visitKey(canonicalUrl, { deduplicateSimilarURLs: dedupe })
+      const refused: MapRefused = {
+        duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, assetDenied: 0,
+        robots: 0, robotsUnchecked: 0, searchFiltered: 0, overLimit: 0,
+        samples: { collapsed: [], hostDenied: [], robots: [] },
+      }
+      const sample = <T>(list: T[], value: T): void => { if (list.length < MAP_REFUSED_SAMPLES) list.push(value) }
+      let timedOut = false
+      let limitReached = false
+      let hostCapped = 0
+      const origins = new Set<string>()
+
+      /** The robots.txt verdict for a candidate: its origin's file is read once, for at most the start host and maxRobotsHosts others. */
+      const verdictFor = async (canonicalUrl: string): Promise<Verdict> => {
+        const origin = new URL(canonicalUrl).origin
+        if (!origins.has(origin)) {
+          if (origins.size >= 1 + maxRobotsHosts) { hostCapped++; return 'unchecked' }
+          origins.add(origin)
+        }
+        try {
+          const verdict = await this.sources.robotsVerdict(canonicalUrl, scope)
+          return typeof verdict === 'string' ? verdict : 'disallowed'
+        } catch (error) {
+          if (cancelled()) throw error
+          if (Date.now() >= deadlineAt) { timedOut = true; return 'unchecked' }
+          throw error
+        }
+      }
+
+      const add = (canonicalUrl: string, found: Found, robots: 'allowed' | 'no_robots'): void => {
+        const title = found.via === 'link' ? found.text ?? undefined : found.entry.title
+        const link: MapLink = {
+          url: canonicalUrl,
+          ...(title === undefined || title.length === 0 ? {} : { title, titleSource: found.via === 'link' ? 'anchor' : 'sitemap' }),
+          via: [found.via],
+          ...(found.via === 'sitemap' ? { sitemapFile: found.entry.file } : {}),
+          ...(found.via === 'sitemap' && found.entry.lastmod !== undefined ? { lastmod: found.entry.lastmod } : {}),
+          robots,
+        }
+        links.push(link)
+        byKey.set(keyOf(canonicalUrl), link)
+      }
+
+      /** A repeat of a returned link: what it adds (how it was found, a title the link lacks; the start URL's title is its page's alone). */
+      const merge = (link: MapLink, found: Found): void => {
+        const start = link.via.includes('start')
+        if (found.via === 'link') {
+          if (!start && !link.via.includes('link')) link.via.push('link')
+          if (!start && link.title === undefined && found.text !== null && found.text.length > 0) Object.assign(link, { title: found.text, titleSource: 'anchor' })
+          return
+        }
+        if (!link.via.includes('sitemap')) {
+          link.via.push('sitemap')
+          link.sitemapFile = found.entry.file
+          if (found.entry.lastmod !== undefined) link.lastmod = found.entry.lastmod
+        }
+        if (!start && link.title === undefined && found.entry.title !== undefined && found.entry.title.length > 0) Object.assign(link, { title: found.entry.title, titleSource: 'sitemap' })
+      }
+
+      /** One candidate's verdict, counted; true when it is taken (or would be, past the limit), which a sitemap load reads as its accept. */
+      const offer = async (result: FrontierEnqueueResult, found: Found): Promise<boolean> => {
+        if (!result.accepted) {
+          const url = result.canonicalUrl
+          switch (result.reason) {
+            case 'duplicate': {
+              if (result.collapsedInto === undefined) refused.duplicate++
+              else { refused.collapsed++; if (url !== null) sample(refused.samples.collapsed, { url, into: result.collapsedInto }) }
+              const existing = url === null ? undefined : byKey.get(keyOf(url))
+              if (existing !== undefined) merge(existing, found)
+              return false
+            }
+            case 'host_denied': refused.hostDenied++; if (url !== null) sample(refused.samples.hostDenied, url); return false
+            case 'subtree_denied': refused.subtreeDenied++; return false
+            case 'path_denied': case 'path_undecided': refused.pathDenied++; return false
+            case 'asset_denied': refused.assetDenied++; return false
+            default: return false
+          }
+        }
+        const canonicalUrl = result.canonicalUrl!
+        const verdict = await verdictFor(canonicalUrl)
+        if (verdict === 'unchecked') { refused.robotsUnchecked++; return false }
+        if (verdict === 'disallowed') { refused.robots++; sample(refused.samples.robots, canonicalUrl); return false }
+        if (links.length >= limit) { refused.overLimit++; limitReached = true; return true }
+        add(canonicalUrl, found, verdict)
+        return true
+      }
+
+      // 1-2. The start host's robots.txt, then the start page (not with sitemap only).
+      let startPage: MapStartPage | null = null
+      let clientRendered = false
+      if (sitemapMode !== 'only') {
+        const startVerdict = await verdictFor(startCanonical)
+        const blank = { url: spec.url, finalUrl: null, httpStatus: null, lane: 'http' as const, rawBodySha256: null, linksFound: 0, title: null, description: null }
+        if (startVerdict === 'disallowed') {
+          refused.robots++
+          sample(refused.samples.robots, startCanonical)
+          startPage = { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' }
+        } else if (startVerdict === 'unchecked') {
+          refused.robotsUnchecked++
+          startPage = { ...blank, status: 'failed', failureReason: 'timeout', robots: null }
+        } else {
+          const startLink: MapLink = { url: startCanonical, via: ['start'], robots: startVerdict }
+          links.push(startLink)
+          byKey.set(keyOf(startCanonical), startLink)
+          let read: Awaited<ReturnType<MapSources['readStartPage']>> | null = null
+          try {
+            read = await this.sources.readStartPage(spec.url, scope)
+          } catch (error) {
+            if (cancelled() || Date.now() < deadlineAt) throw error
+            timedOut = true
+            startPage = { ...blank, status: 'failed', failureReason: 'timeout', robots: startVerdict }
+          }
+          if (read !== null) {
+            const { result } = read
+            const title = nonEmpty(result.metadata?.title)
+            const description = nonEmpty(result.metadata?.description)
+            startPage = {
+              url: spec.url,
+              finalUrl: result.evidence.finalUrl,
+              httpStatus: result.evidence.httpStatus,
+              status: result.status,
+              failureReason: result.failureReason,
+              lane: 'http',
+              robots: startVerdict,
+              rawBodySha256: result.evidence.rawBodySha256,
+              linksFound: read.links.length,
+              title: title ?? null,
+              description: description ?? null,
+            }
+            if ((result.status === 'failed' && result.failureReason === 'timeout') || (result.status === 'partial' && Date.now() >= deadlineAt)) timedOut = true
+            clientRendered = read.clientRendered === true
+            // Only the page's own metadata titles the start URL.
+            if (title !== undefined) Object.assign(startLink, { title, ...(description === undefined ? {} : { description }), titleSource: 'page' })
+            else if (description !== undefined) startLink.description = description
+            if (result.evidence.finalUrl) frontier.followSeedRedirect(result.evidence.finalUrl)
+            for (const link of read.links) await offer(frontier.enqueue(link.url, 1, startCanonical), { via: 'link', text: link.text })
+          }
+        }
+      }
+
+      // 3. The sitemaps, with what is left of the limit and the deadline; not started once the deadline has passed.
+      let sitemap: MapSitemapSource | null = null
+      let sitemapStarted = false
+      let unreadFiles: number | undefined
+      if (sitemapMode !== 'skip') {
+        const record: MapSitemapSource = { mode: sitemapMode, sources: [], files: [], listed: 0, accepted: 0, truncated: null, error: null }
+        sitemap = record
+        if (timedOut || Date.now() >= deadlineAt) {
+          timedOut = true
+          record.truncated = 'time'
+        } else {
+          sitemapStarted = true
+          const before = links.length
+          try {
+            const loaded = await this.sources.sitemap.load({
+              seedUrl: spec.url,
+              maxUrls: Math.max(0, limit - links.length),
+              maxFiles: spec.maxSitemapFiles ?? MAP_SITEMAP_MAX_FILES,
+              softDeadlineAt: deadlineAt,
+              accept: (entry) => {
+                record.listed++
+                return offer(frontier.enqueueFromSitemap(entry.url, 1, entry.file), { via: 'sitemap', entry })
+              },
+            }, caller === undefined ? {} : { signal: caller })
+            record.sources = loaded.sources
+            record.files = loaded.files
+            record.truncated = loaded.truncated
+            unreadFiles = loaded.unreadFiles
+            if (loaded.truncated === 'time') timedOut = true
+          } catch (error) {
+            if (cancelled()) throw error
+            record.error = error instanceof Error ? error.message : String(error)
+          }
+          record.accepted = links.length - before
+        }
+      }
+
+      // Status: a source that failed or a deadline that cut the run makes it partial, or failed with nothing found.
+      const startFailed = startPage !== null && !READ_STATUSES.has(startPage.status)
+      const unreadable = sitemap?.files.filter((file) => file.kind === 'unreadable' || file.kind === 'refused') ?? []
+      const sitemapFailed = sitemap !== null && (sitemap.error !== null || sitemap.truncated === 'files' || unreadable.length > 0)
+      const sourceFailed = startFailed || sitemapFailed || hostCapped > 0
+      const elapsedMs = Date.now() - began
+      // The limit stopped the map when a candidate was left over, or when the sitemap load stopped with entries or files unread.
+      if (sitemap?.truncated === 'urls') limitReached = true
+      const status = sourceFailed || timedOut ? (links.length === 0 ? 'failed' : 'partial') : 'completed'
+      const warnings: MapWarning[] = []
+      if (timedOut) {
+        const unread = sitemap === null ? 'no sitemap was asked for' : !sitemapStarted ? 'the sitemaps were not read' : unreadFiles === undefined ? 'how many sitemap files were not read is unknown' : `${unreadFiles} sitemap files were not read`
+        warnings.push({ code: 'map_timeout', message: `the map stopped at its ${timeoutMs} ms timeout after ${elapsedMs} ms with ${links.length} links; ${unread}` })
+      }
+      if (startPage !== null && startFailed) {
+        const why = startPage.failureReason === 'policy_denied' ? '; robots.txt disallows it for the map\'s identity, so it was not requested' : ''
+        warnings.push({ code: 'start_page_unreadable', message: `the start page was not read as content (${startPage.status}${startPage.failureReason === null ? '' : `/${startPage.failureReason}`}${startPage.httpStatus === null ? '' : `, HTTP ${startPage.httpStatus}`})${why}; its links are not in this map` })
+      }
+      if (clientRendered) warnings.push({ code: 'start_page_client_rendered', message: 'the start page looks filled by script on the http lane, so the links read from it may be incomplete' })
+      if (sitemap?.error != null) warnings.push({ code: 'sitemap_unreadable', message: `the sitemap load failed: ${sitemap.error}` })
+      if (unreadable.length > 0) {
+        const named = unreadable.slice(0, 3).map((file) => `${file.url} (${file.kind}${file.error === null ? '' : `: ${file.error}`})`).join(', ')
+        warnings.push({ code: 'sitemap_unreadable', message: `${unreadable.length} sitemap ${unreadable.length === 1 ? 'file was' : 'files were'} not read: ${named}${unreadable.length > 3 ? ', ...' : ''}; their URLs are not in this map` })
+      }
+      if (sitemap?.truncated === 'files') warnings.push({ code: 'sitemap_files_capped', message: `the map reads at most ${spec.maxSitemapFiles ?? MAP_SITEMAP_MAX_FILES} sitemap files and the site lists more; URLs in the files not read are not in this map` })
+      if (hostCapped > 0) warnings.push({ code: 'robots_host_cap', message: `robots.txt is read for at most ${maxRobotsHosts} hosts beside the start host; ${hostCapped} URLs on further hosts were left out unchecked` })
+
+      return {
+        id: spec.id,
+        url: spec.url,
+        status,
+        stoppedBy: limitReached ? 'limit' : timedOut ? 'timeout' : null,
+        links,
+        sources: { startPage, sitemap },
+        refused,
+        identity: this.sources.identity,
+        warnings,
+        elapsedMs,
+      }
+    } finally {
+      scope.dispose()
+    }
+  }
+}
+
+function nonEmpty(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
+}
+

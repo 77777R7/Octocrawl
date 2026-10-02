@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -542,5 +542,31 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const tooMany = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, 'v']))
     const tooLarge = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, 'a'.repeat(1000)]))
     for (const metadata of [[], 'x', null, { n: 1 }, { nested: {} }, { long: 'a'.repeat(1001) }, tooMany, tooLarge]) expect(() => parse(metadata), JSON.stringify(metadata).slice(0, 40)).toThrow(message)
+  })
+})
+
+describe('parseMapRequest', () => {
+  const url = 'https://www.sitemaps.org/'
+
+  it('takes url, mode, limit, timeout, origin and integration, and nothing it does not offer', () => {
+    expect(parseMapRequest({ url })).toEqual({ url })
+    expect(parseMapRequest({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })).toEqual({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })
+    expect(parseMapRequest({ url, limit: 1, timeout: 300_000, mode: 'standard' })).toMatchObject({ limit: 1, timeout: 300_000 })
+    // The search and scope options are refused by name until they are offered; so are the page options a map has no use for.
+    for (const key of ['search', 'sitemap', 'includeSubdomains', 'ignoreQueryParameters', 'includePaths', 'excludePaths', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs', 'headers', 'mobile', 'skipTlsVerification', 'formats', 'location']) {
+      expect(thrown(() => parseMapRequest({ url, [key]: true })), key).toMatchObject({ code: 'unsupported_parameter', details: { parameters: [key] }, message: `unsupported parameter: ${key} (supported: url, mode, limit, timeout, origin, integration)` })
+    }
+    expect(thrown(() => parseMapRequest({ url, useIndex: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['useIndex'] }, agentHints: [REFUSAL_HINTS.useIndex] })
+    expect(thrown(() => parseMapRequest({ url, ignoreRobotsTxt: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect(thrown(() => parseMapRequest({ url, stealth: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
+  })
+
+  it('refuses mode authed, and a limit or timeout out of range, each with its message', () => {
+    expect(thrown(() => parseMapRequest({ url, mode: 'authed' }))).toMatchObject({ status: 400, code: 'invalid_request', message: 'mode authed is not available for map: a map reads public sitemaps and one public page' })
+    expect(() => parseMapRequest({ url, mode: 'fast' })).toThrow('mode must be standard or research')
+    for (const limit of [0, -1, 1.5, '50', 100_001, null]) expect(() => parseMapRequest({ url, limit }), String(limit)).toThrow(/^limit must be an integer from 1 to 100000$/)
+    for (const timeout of [999, 300_001, 1_500.5, '60000']) expect(() => parseMapRequest({ url, timeout }), String(timeout)).toThrow(/^timeout must be an integer number of milliseconds from 1000 to 300000$/)
+    expect(() => parseMapRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
+    expect(() => parseMapRequest({})).toThrow('url is required')
   })
 })

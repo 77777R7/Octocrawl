@@ -17,10 +17,11 @@ import {
   MemoryRoutingHistory,
   ResilientHttpSubject,
   OriginScheduler,
+  prepareHttpIdentity,
   RobotsOriginCache,
   type Channel,
 } from '@w2l/bench'
-import { invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
+import { collectLinkDetails, invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
 import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
@@ -78,11 +79,19 @@ import {
   type MonitorRun,
   type MonitorRunDetail,
   warningOf,
+  HOSTED_MAP_MAX_LIMIT,
+  HOSTED_MAP_MAX_TIMEOUT_MS,
+  MAX_MAP_LIMIT,
+  MAX_MAP_TIMEOUT_MS,
+  type MapRecord,
+  type MapRequest,
+  type MapResponse,
+  type MapSources,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
-import { agentHintsFor } from './hints.js'
+import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -135,6 +144,15 @@ export interface ApiEngine {
   scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
+  /**
+   * One map: the start page on the http rung, the sitemaps the site declares
+   * and robots.txt, inside the request's deadline (MapRunner). Recorded under
+   * `maps/<id>.json` before it is answered; the caller's cancellation answers
+   * nothing and records nothing.
+   */
+  map(req: MapRequest, context?: ExecutionContext): Promise<MapResponse>
+  /** The record of one map (`maps/<id>.json` under the task root); null for an id this server has no record of. */
+  getMap(id: string): Promise<MapRecord | null>
   /** Starts a crawl; with `idempotencyKey`, a retried start replays the first one's answer (`replayed: true`), and the key sent with another request is a CrawlStateError. */
   startCrawl(req: ParsedCrawlStartRequest): Promise<CrawlAccepted>
   /** The crawls this process is running, oldest start first: those it started and those it resumed at startup; never a batch. */
@@ -263,7 +281,12 @@ export interface ApiEngineOptions {
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
+  /** The largest map `limit` this engine takes. Default MAX_MAP_LIMIT (100 000) locally, HOSTED_MAP_MAX_LIMIT (5000) on a hosted engine. */
+  mapMaxLimit?: number
+  /** The largest map `timeout` this engine takes. Default MAX_MAP_TIMEOUT_MS (300 000) locally, HOSTED_MAP_MAX_TIMEOUT_MS (60 000) on a hosted engine. */
+  mapMaxTimeoutMs?: number
 }
+
 
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
 const DEFAULT_WORKER_COUNT = 4
@@ -360,6 +383,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     await scrapesDirReady
     await writeFile(join(scrapesDir, `${record.scrapeId}.json`), JSON.stringify(record, null, 2))
   }
+  // One record per map call, written before the response is sent and read back by GET /v1/maps/:id. No retention, like scrape records.
+  const mapsDir = join(taskRoot, 'maps')
+  let mapsDirReady: Promise<void> | null = null
+  const writeMapRecord = async (record: MapRecord): Promise<void> => {
+    mapsDirReady ??= mkdir(mapsDir, { recursive: true }).then(() => undefined, (error: unknown) => { mapsDirReady = null; throw error })
+    await mapsDirReady
+    await writeFile(join(mapsDir, `${record.response.id}.json`), JSON.stringify(record))
+  }
+  const mapMaxLimit = options.mapMaxLimit ?? (hosted ? HOSTED_MAP_MAX_LIMIT : MAX_MAP_LIMIT)
+  const mapMaxTimeoutMs = options.mapMaxTimeoutMs ?? (hosted ? HOSTED_MAP_MAX_TIMEOUT_MS : MAX_MAP_TIMEOUT_MS)
   const originScheduler = new OriginScheduler(networkPolicy)
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
@@ -776,8 +809,87 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try { return await operation } finally { activeScrapes.delete(operation); scope.dispose() }
   }
 
+  /**
+   * One map. The start page is read on the http rung alone (fastMode) with
+   * its raw HTML, so its anchors' text is at hand; robots.txt through this
+   * mode's shared cache under the mode's declared identity, each origin
+   * looked up once per map; the sitemaps by a reader of their own on the
+   * engine's policy, scheduler and robots cache. A hosted engine's caps and
+   * the operator's channel policy are checked before anything is fetched.
+   */
+  async function runMap(req: MapRequest, context: ExecutionContext): Promise<MapResponse> {
+    if (req.limit !== undefined && req.limit > mapMaxLimit) throw new RequestError(`limit must be at most ${mapMaxLimit} on this server`)
+    if (req.timeout !== undefined && req.timeout > mapMaxTimeoutMs) throw new RequestError(`timeout must be at most ${mapMaxTimeoutMs} on this server`)
+    if (options.channelPolicy?.(req.url) === 'browser_only') throw new RequestError('map is not available for this URL: this server reads it with the browser lane only')
+    const mode = req.mode ?? 'standard'
+    const rungs = channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml'])
+    const requestedAt = new Date().toISOString()
+    const id = crypto.randomUUID()
+    const signal = context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal
+    const userAgentFor = (url: string): string => prepareHttpIdentity(mode, networkPolicy.contact ?? null, new URL(url).hostname).identity.userAgent
+    const robots = robotsCacheFor(mode)
+    const lookups = new Map<string, ReturnType<RobotsOriginCache['lookup']>>()
+    const runner = new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const sitemap = new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots })
+    const sources: MapSources = {
+      async readStartPage(url, scope) {
+        const run = await runner.run(url, undefined, scope, fetchOptions(undefined, ['rawHtml']))
+        const result = run.result
+        const links = typeof result.rawHtml === 'string' ? collectLinkDetails(result.rawHtml, result.evidence.finalUrl || url) : []
+        const clientRendered = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected') === true || httpLaneAskedForBrowser(result)
+        return { result, links, clientRendered }
+      },
+      sitemap,
+      async robotsVerdict(url, scope) {
+        const userAgent = userAgentFor(url)
+        const origin = new URL(url).origin
+        let lookup = lookups.get(origin)
+        if (lookup === undefined) {
+          lookup = robots.lookup(url, userAgent, scope)
+          lookup.catch(() => {})
+          lookups.set(origin, lookup)
+        }
+        const decision = robots.decision(await lookup, url, userAgent)
+        return decision.decision === 'disallowed' ? { disallowed: true, ...(decision.unreachable === undefined ? {} : { unreachable: decision.unreachable }) } : decision.decision
+      },
+      identity: { mode, userAgent: userAgentFor(req.url) },
+    }
+    const operation = (async () => {
+      try {
+        const run = await new MapRunner(sources).run({ id, url: req.url, ...(req.limit === undefined ? {} : { limit: req.limit }), ...(req.timeout === undefined ? {} : { timeoutMs: req.timeout }) }, { signal })
+        const agentHints = mapAgentHints(run, mapMaxTimeoutMs)
+        const { elapsedMs, ...rest } = run
+        const response: MapResponse = { ...rest, ...(agentHints.length === 0 ? {} : { agentHints }), elapsedMs }
+        // Written before the response is sent; a write failure is logged and the response says so.
+        try {
+          await writeMapRecord({ requestedAt, request: req, response })
+          return response
+        } catch (error) {
+          console.error(JSON.stringify({ component: 'api', event: 'map_record_unwritten', id, error: error instanceof Error ? error.message : String(error) }))
+          return { ...response, warnings: [...response.warnings, { code: 'map_record_unwritten' as const, message: `the map record could not be written, so GET /v1/maps/${id} will not find it` }] }
+        }
+      } finally {
+        await sitemap.close()
+      }
+    })()
+    activeScrapes.add(operation)
+    try { return await operation } finally { activeScrapes.delete(operation) }
+  }
+
   return {
     scrape: (req, context = {}) => runScrape(req, context, true),
+
+    map: (req, context = {}) => runMap(req, context),
+
+    async getMap(id) {
+      if (!UUID.test(id)) return null
+      try {
+        return JSON.parse(await readFile(join(mapsDir, `${id}.json`), 'utf8')) as MapRecord
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
+    },
 
     async getScrape(scrapeId) {
       if (!UUID.test(scrapeId)) return null

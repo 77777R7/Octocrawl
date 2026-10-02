@@ -21,6 +21,9 @@ import type {
   BatchStatusResponse,
   CompactScrapeResponse,
   FetchResult,
+  MapRecord,
+  MapRequest,
+  MapResponse,
   MonitorRevision,
   MonitorView,
   MonitorPreview,
@@ -30,7 +33,7 @@ import type {
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
-import { DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
+import { DEFAULT_MAP_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
 import { SDK_VERSION } from './version.js'
 import { JobWatcher, type WatchOptions, type WatcherClient } from './watcher.js'
 
@@ -57,6 +60,9 @@ function environmentToken(): string | undefined {
 
 /** How long past a scrape's own deadline (its `timeout`, 300 000 ms by default) the SDK waits for the API's answer. */
 const SCRAPE_ANSWER_MARGIN_MS = 30_000
+
+/** How long past a map's own deadline (its `timeout`, 60 000 ms by default) the SDK waits for the API's answer: Firecrawl's timeout + 5000 convention. */
+export const MAP_ANSWER_MARGIN_MS = 5_000
 
 /**
  * Node's fetch (undici) stops waiting for response headers after 300 s, and
@@ -346,6 +352,21 @@ export class W2L {
   /** The record of one scrape call, by the `scrapeId` its response carried (`metadata.scrapeId`); a W2LError with code `not_found` for an id the server has no record of. */
   async getScrape(id: string, request: RequestOptions = {}): Promise<ScrapeRecord> {
     return this.get<ScrapeRecord>(`/v1/scrapes/${encodeURIComponent(id)}`, request, `scrape not found: ${id}`)
+  }
+
+  /**
+   * The URLs of a site from its sitemaps and its start page's links, without
+   * fetching each page (POST /v1/map). The API answers by the map's deadline
+   * with what it found; the SDK waits that long plus MAP_ANSWER_MARGIN_MS.
+   */
+  async map(url: string, opts: Omit<MapRequest, 'url'> = {}, request: RequestOptions = {}): Promise<MapResponse> {
+    const deadlineMs = Number.isInteger(opts.timeout) ? Math.max(opts.timeout!, 0) : DEFAULT_MAP_TIMEOUT_MS
+    return this.post<MapResponse>('/v1/map', { ...opts, url, origin: originOf(opts, request) }, 200, request, deadlineMs + MAP_ANSWER_MARGIN_MS)
+  }
+
+  /** The record of one map, by the `id` its response carried; a W2LError with code `not_found` for an id the server has no record of. */
+  async getMap(id: string, request: RequestOptions = {}): Promise<MapRecord> {
+    return this.get<MapRecord>(`/v1/maps/${encodeURIComponent(id)}`, request, `map not found: ${id}`)
   }
 
   async crawl(url: string, opts: Omit<CrawlStartRequest, 'url'> = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
