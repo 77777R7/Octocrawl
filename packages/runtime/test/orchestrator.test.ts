@@ -198,12 +198,20 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
   })
 
   it('marks a later URL with the same body as duplicate and keeps crawling', async () => {
-    // The crawl asked for the html formats: a duplicate gives them up with its Markdown.
+    // The crawl asked for every format a page read as content carries: a duplicate gives them all up with its Markdown.
+    const formats = {
+      html: '<main>same body</main>',
+      rawHtml: '<html><body><main>same body</main></body></html>',
+      images: ['https://fixture.test/media/1.jpg'],
+      attributes: [{ selector: 'main a', attribute: 'href', values: ['/a'] }],
+      screenshot: { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' },
+    }
+    const first = outcome(SEED, [ITEM_A, ITEM_B], 'same-body')
     const repeated = outcome(ITEM_A, [SEED], 'same-body')
     const atom = new FakeAtom(
       new Map([
-        [SEED, outcome(SEED, [ITEM_A, ITEM_B], 'same-body')],
-        [ITEM_A, { ...repeated, result: { ...repeated.result, html: '<main>same body</main>', rawHtml: '<html><body><main>same body</main></body></html>' } }],
+        [SEED, { ...first, result: { ...first.result, ...formats } }],
+        [ITEM_A, { ...repeated, result: { ...repeated.result, ...formats } }],
         [ITEM_B, outcome(ITEM_B, [], 'other')],
       ]),
     )
@@ -219,8 +227,9 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(dup?.contentHash).toBe('same-body')
     expect(dup?.result?.failureReason).toBeNull()
     expect(dup?.result?.markdown).toBeNull()
-    expect(dup?.result).not.toHaveProperty('html')
-    expect(dup?.result).not.toHaveProperty('rawHtml')
+    for (const format of Object.keys(formats)) expect(dup?.result).not.toHaveProperty(format)
+    // The first page with that body keeps them all.
+    expect(steps.find((s) => s.canonicalUrl === SEED)?.result).toMatchObject(formats)
     // The page's own links stay on the record (an empty list would claim it has none); the crawl does not follow them.
     expect(dup?.result?.links).toEqual([SEED])
     expect(dup?.result?.trace.some((t) => t.event === 'duplicate_content')).toBe(true)
