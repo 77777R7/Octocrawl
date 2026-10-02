@@ -52,8 +52,8 @@ export function reportFromTaskAttempt(
     costUnknown: attempt.costUnknown,
     contentTokens: attempt.contentTokens,
     contentTokensUnknown: attempt.contentTokensUnknown,
-    // A batch discovers nothing; a crawl attempt stored before the counters were kept has none.
-    discovery: task.batch !== undefined ? null : attempt.discovery ?? null,
+    // A batch discovers nothing; a crawl attempt stored before the counters were kept has none, and one stored before the sitemap record read no sitemap.
+    discovery: task.batch !== undefined || attempt.discovery === undefined || attempt.discovery === null ? null : { ...attempt.discovery, sitemap: attempt.discovery.sitemap ?? null },
     ...(task.attribution === undefined ? {} : { attribution: task.attribution }),
   }
 }

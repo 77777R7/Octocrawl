@@ -336,6 +336,53 @@ describe('W2L SDK', () => {
     ])
   })
 
+  it('follows cursors within pagination limits, merges status with documents, and lists active crawls', async () => {
+    // Eight pages served by cursor and limit (two per page when the request names no limit), the status alongside.
+    const all = Array.from({ length: 8 }, (_, i) => ({ id: `p${i + 1}`, url: `https://example.com/${i + 1}` }))
+    const calls: string[] = []
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      calls.push(`${url.pathname}${url.search}`)
+      if (url.pathname === '/v1/crawl/active') return new Response(JSON.stringify({ crawls: [{ id: 'c1', url: 'https://example.com/', status: 'running' }] }))
+      if (url.pathname.endsWith('/pages') || url.pathname.endsWith('/items')) {
+        const start = Number(url.searchParams.get('cursor') ?? '0')
+        const limit = Number(url.searchParams.get('limit') ?? '2')
+        const items = all.slice(start, start + limit)
+        const end = start + items.length
+        return new Response(JSON.stringify({ items, hasMore: end < all.length, nextCursor: end < all.length ? String(end) : null }))
+      }
+      return new Response(JSON.stringify({ taskId: 'task-1', status: 'completed', pagesFetched: 8 }))
+    }) as typeof fetch })
+    const capped = await client.getCrawlDocuments('task-1', { limit: 2, maxResults: 5 })
+    expect(capped.report).toMatchObject({ status: 'completed', pagesFetched: 8 })
+    expect(capped.pages.map((page) => page.id)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5'])
+    expect(capped).toMatchObject({ stoppedBy: 'maxResults', nextCursor: '5' })
+    // The last page was requested no larger than what was still wanted, so the cursor continues after p5.
+    expect(calls).toEqual(['/v1/crawl/task-1', '/v1/crawl/task-1/pages?limit=2', '/v1/crawl/task-1/pages?cursor=2&limit=2', '/v1/crawl/task-1/pages?cursor=4&limit=1'])
+    calls.length = 0
+    const onePageMore: string[] = []
+    const listing = client.listCrawlPages('task-1', { limit: 2, maxPages: 1 })
+    for (let next = await listing.next(); !next.done; next = await listing.next()) onePageMore.push(next.value.id)
+    expect(onePageMore).toEqual(['p1', 'p2', 'p3', 'p4'])
+    const impatient = await client.getCrawlDocuments('task-1', { limit: 2, maxWaitMs: 0 })
+    expect(impatient.pages).toHaveLength(2)
+    expect(impatient).toMatchObject({ stoppedBy: 'maxWait', nextCursor: '2' })
+    const items: string[] = []
+    for await (const item of client.listBatchItems('batch-1', { maxResults: 3 })) items.push(item.id)
+    expect(items).toEqual(['p1', 'p2', 'p3'])
+    expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=3')
+    // No caps: everything, and the end is the end.
+    expect(await client.collectBatchItems('batch-1', { limit: 5 })).toMatchObject({ items: all.slice(0, 8), nextCursor: null, hasMore: false, stoppedBy: 'end' })
+    const whole = await client.getBatchDocuments('batch-1', { limit: 50 })
+    expect(whole.items).toHaveLength(8)
+    expect(whole.stoppedBy).toBe('end')
+    expect(await client.getActiveCrawls()).toEqual({ crawls: [{ id: 'c1', url: 'https://example.com/', status: 'running' }] })
+    expect(calls.at(-1)).toBe('/v1/crawl/active')
+    for (const options of [{ maxPages: -1 }, { maxResults: 0 }, { maxWaitMs: Number.NaN }]) {
+      await expect(client.collectCrawlPages('task-1', options)).rejects.toBeInstanceOf(RangeError)
+    }
+  })
+
   it('preserves API error status and body for read and mutation failures', async () => {
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"monitor paused"}', { status: 409 })) as typeof fetch })
     await expect(client.getMonitor('catalog')).rejects.toThrow('GET /v1/monitors/catalog failed: 409 {"error":"monitor paused"}')

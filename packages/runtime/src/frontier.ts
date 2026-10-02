@@ -24,6 +24,10 @@
  * programs) are not enqueued. Seeds bypass the subtree, path and asset
  * filters, so the seed URL is always fetched.
  *
+ * A sitemap entry (enqueueFromSitemap) is admitted exactly as a link is, at
+ * the depth the orchestrator gives it, and recorded as discovered via the
+ * sitemap file that listed it.
+ *
  * Visited is keyed by visitKey (canonicalize.ts): the canonical URL, without
  * its query when ignoreQueryParameters is set, and folded over scheme, `www.`,
  * trailing slash and index file when deduplicateSimilarURLs is set. A link
@@ -45,7 +49,7 @@ export interface FrontierItem {
   host: string
   /** How the URL entered the crawl: the seed, a link on a page, or a sitemap entry. */
   via: 'seed' | 'link' | 'sitemap'
-  /** The canonical URL of the page that linked it, when a link. */
+  /** The canonical URL of the page that linked it, when a link; the URL of the sitemap file that listed it, when a sitemap entry. */
   from?: string
 }
 
@@ -166,6 +170,11 @@ export class Frontier {
     return this.offer(url, depth, 'enqueued', base)
   }
 
+  /** An absolute URL a sitemap file listed, offered under a link's rules (host scope, subtree, path filters, depth, visited) and recorded as found via that file. */
+  enqueueFromSitemap(url: string, depth: number, fileUrl: string): FrontierEnqueueResult {
+    return this.offer(url, depth, 'enqueued', undefined, { via: 'sitemap', from: fileUrl })
+  }
+
   /**
    * The next page whose host has a free slot and whose delay has passed.
    * Pages `admit` refuses (the orchestrator's page budget) leave the queue
@@ -278,6 +287,7 @@ export class Frontier {
     depth: number,
     acceptedReason: 'enqueued' | 'seeded',
     base?: string,
+    origin?: Pick<FrontierItem, 'via' | 'from'>,
   ): FrontierEnqueueResult {
     // The canonical URL with its query tells a repeat of the same URL from a variant folded into it.
     const fullCanonicalUrl = canonicalizeUrl(url, base)
@@ -309,13 +319,14 @@ export class Frontier {
       return { accepted: false, canonicalUrl, reason: 'duplicate', collapsedInto: seen.canonicalUrl }
     }
     this.visited.set(key, { canonicalUrl, variants: new Set([fullCanonicalUrl]) })
+    const from = origin?.from ?? base
     this.pending.push({
       url: resolvedHref(url, base) ?? canonicalUrl,
       canonicalUrl,
       depth,
       host,
-      via: acceptedReason === 'seeded' ? 'seed' : 'link',
-      ...(base === undefined ? {} : { from: base }),
+      via: origin?.via ?? (acceptedReason === 'seeded' ? 'seed' : 'link'),
+      ...(from === undefined ? {} : { from }),
     })
     return { accepted: true, canonicalUrl, reason: acceptedReason }
   }

@@ -41,6 +41,7 @@ import {
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
+import type { RobotsOriginCache } from './robotsLookup.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
 import { FileStore } from './fileStore.js'
@@ -165,6 +166,8 @@ export function buildChannels(
      * API leave it unset; other modes refuse it.
      */
     previewProductToken?: boolean
+    /** A robots.txt cache the http rung shares with a crawl's sitemap reader (one read of a host's robots.txt serves both); the rung keeps its own without one. */
+    robotsCache?: RobotsOriginCache
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -174,7 +177,7 @@ export function buildChannels(
   const fileStore = opts.fileStore ?? null
   const preview = opts.previewProductToken === true
   if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview)
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview, opts.robotsCache)
   const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview)
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
 

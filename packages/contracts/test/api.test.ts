@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -145,6 +145,22 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, includeTags: Array.from({ length: 101 }, () => 'p') })).toThrow('includeTags must be an array of at most 100 CSS selectors')
     // The lanes' own switches are not request fields: the formats ask for the HTML.
     expect(() => parseScrapeRequest({ url, includeHtml: true })).toThrow('unsupported parameter: includeHtml')
+  })
+
+  it('takes a crawl\'s sitemap mode and concurrency cap, and refuses them on scrape and batch', () => {
+    const url = 'https://example.com/'
+    expect(parseCrawlStartRequest({ url, sitemap: 'only', maxConcurrency: 2 })).toMatchObject({ sitemap: 'only', maxConcurrency: 2 })
+    expect(parseCrawlStartRequest({ url, sitemap: 'skip' })).toMatchObject({ sitemap: 'skip' })
+    expect(parseCrawlStartRequest({ url, maxConcurrency: null })).toMatchObject({ maxConcurrency: null })
+    const plain = parseCrawlStartRequest({ url })
+    expect(plain).not.toHaveProperty('sitemap')
+    expect(plain).not.toHaveProperty('maxConcurrency')
+    for (const sitemap of ['all', 'INCLUDE', true, null]) expect(() => parseCrawlStartRequest({ url, sitemap })).toThrow('sitemap must be include, skip, or only')
+    for (const maxConcurrency of [0, -1, 1.5, '2', true]) expect(() => parseCrawlStartRequest({ url, maxConcurrency })).toThrow('maxConcurrency must be an integer >= 1')
+    expect(() => parseScrapeRequest({ url, sitemap: 'include' })).toThrow('unsupported parameter: sitemap')
+    expect(() => parseBatchStartRequest({ urls: [url], sitemap: 'skip' })).toThrow('unsupported parameter: sitemap')
+    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: 1 })).toThrow('unsupported parameter: maxConcurrency')
+    expect(DEFAULT_CRAWL_SPEC).toMatchObject({ sitemap: 'include', maxConcurrency: null })
   })
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {

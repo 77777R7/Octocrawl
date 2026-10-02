@@ -9,6 +9,7 @@ import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
+import { SqliteTaskStore } from '@w2l/runtime'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import { parseListen } from '../src/listen.js'
@@ -762,6 +763,86 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       release()
       await slow.close()
     }
+  })
+
+  it('lists the crawls it is running at GET /v1/crawl/active, never a batch, and stays 200 when nothing runs', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    // Every page waits at the gate, so the crawl and the batch are observably running.
+    const slow = createApiEngine({
+      taskRoot,
+      workerCount: 1,
+      channelsFor: () => [{
+        id: 'http',
+        identity: identityForRoute('standard'),
+        fetch: async () => {
+          await gate
+          return (await httpOnlyChannels('standard')[0]!.fetch(`${server.url}/crawl/listing`))
+        },
+      }],
+    })
+    const slowApp = createApp(slow)
+    const listActive = async () => {
+      const res = await slowApp.request('/v1/crawl/active')
+      return { status: res.status, body: await res.json() as { crawls: Array<Record<string, unknown>> } }
+    }
+    try {
+      expect(await listActive()).toEqual({ status: 200, body: { crawls: [] } })
+      const post = async (path: string, body: unknown) => (await slowApp.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json() as Promise<{ taskId: string }>
+      const crawl = await post('/v1/crawl', { url: `${server.url}/crawl/listing`, maxPages: 4, crawlEntireDomain: true, sitemap: 'skip', maxConcurrency: 1 })
+      await post('/v1/batches', { urls: [`${server.url}/crawl/item/1`] })
+      const active = await listActive()
+      expect(active.status).toBe(200)
+      expect(active.body.crawls).toHaveLength(1)
+      expect(active.body.crawls[0]).toMatchObject({ id: crawl.taskId, url: `${server.url}/crawl/listing`, status: expect.stringMatching(/^(pending|running)$/), startedAt: expect.any(String), pagesFetched: 0 })
+      expect(active.body.crawls[0]!.options).toEqual({
+        maxPages: 4, maxDepth: null, allowlistedDomains: [], includePaths: [], excludePaths: [], useCached: false, sitemap: 'skip',
+        ignoreQueryParameters: false, deduplicateSimilarURLs: true, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false, regexOnFullURL: false, maxConcurrency: 1,
+        scrapeOptions: { formats: ['markdown'], includeLinks: false },
+      })
+      // The static route is registered before the id routes: the report of a crawl is still served by its id.
+      expect(await (await slowApp.request(`/v1/crawl/${crawl.taskId}`)).json()).toMatchObject({ taskId: crawl.taskId })
+      expect((await slowApp.request('/v1/crawl/active/pages')).status).toBe(404)
+      release()
+      await slow.close()
+      // Nothing runs after close: an empty list, not a 404 for an id named "active".
+      expect(await listActive()).toEqual({ status: 200, body: { crawls: [] } })
+    } finally {
+      release()
+      await slow.close()
+    }
+  })
+
+  it('refuses a maxConcurrency above its worker count and a sitemap mode it does not know, before anything is stored', async () => {
+    const app = createApp(engine)
+    const postJson = async (path: string, body: unknown) => {
+      const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return { status: res.status, body: await res.json() }
+    }
+    const url = `${server.url}/crawl/listing`
+    expect(await postJson('/v1/crawl', { url, maxConcurrency: 5 })).toEqual({ status: 400, body: { error: 'maxConcurrency must be at most 4 on this service', code: 'invalid_request' } })
+    expect(await postJson('/v1/crawl', { url, maxConcurrency: 0 })).toEqual({ status: 400, body: { error: 'maxConcurrency must be an integer >= 1', code: 'invalid_request' } })
+    expect(await postJson('/v1/crawl', { url, sitemap: 'maybe' })).toEqual({ status: 400, body: { error: 'sitemap must be include, skip, or only', code: 'invalid_request' } })
+    const two = createApiEngine({ taskRoot, workerCount: 2, channelsFor: httpOnlyChannels })
+    try {
+      await expect(two.startCrawl({ url, maxConcurrency: 3 })).rejects.toMatchObject({ code: 'invalid_request', message: 'maxConcurrency must be at most 2 on this service' })
+    } finally {
+      await two.close()
+    }
+    // Within the count, the cap and the default sitemap mode are stored with the task.
+    const started = await postJson('/v1/crawl', { url, maxPages: 1, maxConcurrency: 1 })
+    expect(started.status).toBe(202)
+    await engine.close()
+    const store = SqliteTaskStore.openReadOnly(join(taskRoot, started.body.taskId as string))
+    try {
+      expect((await store.getTask(started.body.taskId as string))?.crawl).toMatchObject({ maxConcurrency: 1, sitemap: 'include' })
+    } finally {
+      await store.close()
+    }
+    // The fixture server has no sitemap: the conventional location answered a soft-404 page, read as not a sitemap and recorded.
+    const report = await (await app.request(`/v1/crawl/${started.body.taskId as string}`)).json()
+    expect(report.discovery.sitemap).toMatchObject({ mode: 'include', sources: ['guess'], listed: 0, enqueued: 0, truncated: null, error: null })
+    expect(report.discovery.sitemap.files).toEqual([expect.objectContaining({ url: `${server.url}/sitemap.xml`, kind: 'not_sitemap', status: 200, robots: 'no_robots', proxyUsed: false })])
   })
 
   it('records a page whose scrape throws as a failed item, not a failed or running crawl', async () => {

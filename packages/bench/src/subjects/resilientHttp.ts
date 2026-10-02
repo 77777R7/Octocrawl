@@ -15,7 +15,8 @@ import {
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
-import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
+import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
+import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
@@ -56,6 +57,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
   private readonly egress: EgressRoutes
+  private readonly route: EgressRoute
   private readonly localPreviewProxy: ProxyAgent | null
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
@@ -63,8 +65,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
   /**
    * `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved.
    * `previewProductToken`: the hosted public preview's standard User-Agent carries PREVIEW_PRODUCT_TOKEN (previewIdentity).
+   * `robotsCache`: a robots.txt cache shared with the crawl's sitemap reader, so one robots.txt read serves both; without one the subject keeps its own.
    */
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false) {
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false, robotsCache?: RobotsOriginCache) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
     this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, 'desktop', undefined, previewProductToken)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
@@ -73,7 +76,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
     this.egress = new EgressRoutes(this.networkPolicy)
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
+    this.route = new EgressRoute(this.networkPolicy, this.egress, this.localPreviewProxy)
+    this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
     this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
@@ -134,14 +138,14 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return prepared
   }
 
-  /** The dispatcher for a URL: the local preview proxy for its fixed hosts, else `routes` (a request's relaxed-TLS routes) or the subject's own. */
+  /** The dispatcher for a URL: the local preview proxy for its fixed hosts, else `routes` (a request's relaxed-TLS routes) or the subject's own (EgressRoute). */
   private dispatcherFor(url: string, routes: EgressRoutes | null = null): Dispatcher {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : (routes ?? this.egress).dispatcherFor(url)
+    return this.route.dispatcherFor(url, routes)
   }
 
   /** `host:port` of the environment proxy a request to this URL goes through; null when it does not. */
   private envProxyFor(url: string): string | null {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? null : this.egress.proxyFor(url)?.endpoint ?? null
+    return this.route.viaOperatorProxy(url)
   }
 
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
@@ -247,7 +251,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // The page's own egress checks come before robots.txt: a name that does
     // not resolve, or an address the policy denies, is reported as itself,
     // never as the unreachable robots.txt it would also cause.
-    try { await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal) }
+    try { await raceWithSignal(this.route.assertUrl(url), signal) }
     catch (error) {
       if (signal?.aborted) return timedDenied('timeout')
       if (!(error instanceof DnsLookupError) && !(error instanceof SsrfDeniedError)) throw error
@@ -347,7 +351,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       capsFollowDeadline: options.timeout !== undefined,
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
-        await assertSafeUrl(target, this.networkPolicy)
+        await this.route.assertUrl(target)
       },
     }).catch(error => {
       if (!signal?.aborted && (deadlineAt === undefined || Date.now() < deadlineAt)) throw error

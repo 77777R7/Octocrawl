@@ -14,6 +14,14 @@ import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
 import type { ExecutionContext } from './execution.js'
 
+/**
+ * How a crawl uses the site's sitemap: beside the links it finds (`include`,
+ * the default), not at all (`skip`), or as its only source of URLs beside the
+ * start URL (`only`: page links are returned when asked for, never followed).
+ */
+export const SITEMAP_MODES = ['include', 'skip', 'only'] as const
+export type SitemapMode = (typeof SITEMAP_MODES)[number]
+
 export interface ScrapeOutcome {
   result: FetchResult
   links: readonly string[]
@@ -30,11 +38,95 @@ export interface ScrapeAtom {
   close(): Promise<void>
 }
 
+export interface SitemapLoadRequest {
+  seedUrl: string
+  /** Stop collecting entries once this many are in hand: the crawl's maxPages, or 50 000 when it is unbounded. */
+  maxUrls: number
+  /** At most this many sitemap files are fetched for one load, an index and its children each counting as one. */
+  maxFiles: number
+}
+
+/** Where a load looked for sitemaps: the `Sitemap:` lines of the start URL's robots.txt, or the conventional `/sitemap.xml` when it lists none. */
+export type SitemapSourceKind = 'robots' | 'guess'
+
+/**
+ * What one sitemap file turned out to be: a `<sitemapindex>`, a `<urlset>`, a
+ * 4xx (`absent`), a 2xx body that is neither (`not_sitemap`), a file that
+ * could not be read (`unreadable`: too large, over the decompression cap, a
+ * 5xx, a transport failure; `error` says which) or one its host's robots.txt
+ * disallows for the crawl's identity (`refused`, never requested).
+ */
+export type SitemapFileKind = 'index' | 'urlset' | 'absent' | 'not_sitemap' | 'unreadable' | 'refused'
+
+/** One sitemap file a load fetched or refused, on the record of the crawl that used it. These fetches carry no signed compliance record. */
+export interface SitemapFileRecord {
+  url: string
+  /** Where the file was read from after redirects; null when no response answered. */
+  finalUrl: string | null
+  status: number | null
+  contentType: string | null
+  /** Bytes on the wire, before any gzip inflation; null when no body was read. */
+  bytes: number | null
+  /** SHA-256 of the bytes as received; null when no body was read. */
+  sha256: string | null
+  kind: SitemapFileKind
+  /** `<loc>` entries the file holds (child sitemaps for an index), http(s) ones only; null when the file was not parsed. */
+  entries: number | null
+  /** The robots.txt verdict for the file's own URL under the crawl's identity (an unreachable robots.txt is `disallowed`, as for a page); null when the URL failed its egress check before robots.txt was consulted. */
+  robots: 'allowed' | 'disallowed' | 'no_robots' | null
+  /** Whether the request left through the operator's environment proxy (local mode); a hosted server never has one. */
+  proxyUsed: boolean
+  error: string | null
+}
+
+/** A URL a sitemap listed and the file that listed it. */
+export interface SitemapEntry {
+  url: string
+  file: string
+}
+
+export interface SitemapLoadResult {
+  /** The declared identity the files were requested with: the crawl mode's http identity. */
+  identity: { mode: CrawlMode; userAgent: string }
+  sources: SitemapSourceKind[]
+  files: SitemapFileRecord[]
+  /** The entries collected, in listed order, each once, up to `maxUrls`. */
+  urls: SitemapEntry[]
+  /** Set when the load stopped before reading everything: at `maxFiles` with files unread, or at `maxUrls` with entries uncollected. */
+  truncated: 'files' | 'urls' | null
+}
+
+/**
+ * Reads a site's sitemaps for a crawl: an auxiliary fetch path beside
+ * robots.txt, never a page fetcher. The bench's HttpSitemapSource is the
+ * production implementation; tests inject a fake. One source serves one crawl
+ * and is closed with it.
+ */
+export interface SitemapSource {
+  load(request: SitemapLoadRequest, context?: ExecutionContext): Promise<SitemapLoadResult>
+  close(): Promise<void>
+}
+
+/** What a crawl attempt's sitemap load found and what the frontier made of it. Null when the crawl read no sitemap. */
+export interface SitemapDiscovery {
+  mode: SitemapMode
+  sources: SitemapSourceKind[]
+  files: SitemapFileRecord[]
+  /** Entries the load returned and offered to the frontier. */
+  listed: number
+  /** Entries the frontier accepted as pages to fetch. */
+  enqueued: number
+  truncated: 'files' | 'urls' | null
+  /** Why the load itself failed, when it threw before returning; `files` then holds what it had read. Null otherwise. */
+  error: string | null
+}
+
 /**
  * What one run of the orchestrator crawls. A new task stores its budget,
- * maxDepth, allowlistedDomains, includePaths, excludePaths and URL-scope
- * options; a resumed (`resumeFrom`) or existing (`taskId`) task runs with the
- * ones it stored, so a resume never widens the crawl it continues.
+ * maxDepth, allowlistedDomains, includePaths, excludePaths, URL-scope options,
+ * sitemap mode and concurrency cap; a resumed (`resumeFrom`) or existing
+ * (`taskId`) task runs with the ones it stored, so a resume never widens the
+ * crawl it continues.
  */
 export interface CrawlSpec {
   seedUrl: string
@@ -62,6 +154,10 @@ export interface CrawlSpec {
   crawlEntireDomain?: boolean
   allowSubdomains?: boolean
   allowExternalLinks?: boolean
+  /** How the crawl uses the site's sitemap; `skip` when the run has no SitemapSource. */
+  sitemap?: SitemapMode
+  /** Pages this crawl fetches at once, at most; null takes the service's worker count. Never raises the per-host ceiling. */
+  maxConcurrency?: number | null
 }
 
 /**
@@ -71,9 +167,10 @@ export interface CrawlSpec {
  * `/index.html` after `/`, the www twin), or refused by the host scope, the
  * start URL's path subtree, includePaths / excludePaths or maxDepth. The
  * `offered` total also counts links no counter names (assets, non-http
- * schemes, a path a filter could not decide). `duplicateContent` counts pages
- * fetched and then found to repeat an earlier page's body. Null on a batch,
- * which discovers nothing.
+ * schemes, a path a filter could not decide). Sitemap entries the crawl
+ * offered count here too, and `sitemap` says what the load read. `duplicateContent`
+ * counts pages fetched and then found to repeat an earlier page's body. Null
+ * on a batch, which discovers nothing.
  */
 export interface CrawlDiscovery {
   offered: number
@@ -85,6 +182,8 @@ export interface CrawlDiscovery {
   pathDenied: number
   depthDenied: number
   duplicateContent: number
+  /** The attempt's sitemap load; null when the crawl read no sitemap (`sitemap: skip`, or a task stored before the option). */
+  sitemap: SitemapDiscovery | null
 }
 
 export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
@@ -97,6 +196,7 @@ export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
   pathDenied: 0,
   depthDenied: 0,
   duplicateContent: 0,
+  sitemap: null,
 }
 
 export interface CrawlReport {
@@ -181,4 +281,6 @@ export const DEFAULT_CRAWL_SPEC: Omit<CrawlSpec, 'seedUrl' | 'taskDir'> = {
   crawlEntireDomain: false,
   allowSubdomains: false,
   allowExternalLinks: false,
+  sitemap: 'include',
+  maxConcurrency: null,
 }

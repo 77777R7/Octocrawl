@@ -92,6 +92,8 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
   async function setup(browser: BrowserStub, options: Partial<ApiEngineOptions> = {}) {
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      // A crawl's default sitemap read gets a plain 404 here; only /hang never answers.
+      if (req.url === '/sitemap.xml') { res.writeHead(404).end(); return }
       // /slow sends its headers after 12 s, past the HTTP lane's default 10 s wait for them (undici's timers run up to 1 s late).
       if (req.url === '/slow') { setTimeout(() => { if (!res.destroyed) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGES['/chrome']) }, 12_000); return }
       const page = PAGES[req.url ?? '']

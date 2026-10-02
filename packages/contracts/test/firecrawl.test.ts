@@ -138,7 +138,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
     expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
       .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: screenshot')
-    expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
+    expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: 'yes' })).toThrow('ignoreSitemap must be a boolean')
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
@@ -160,8 +160,8 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     // Parameters and formats together: the parameter code wins and details keep both lists.
     expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], actions: [] } })))
       .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['screenshot'] } })
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })))
-      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreSitemap'] } })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['scrapeOptions.removeBase64Images'] } })
     expect(thrown(() => parseFirecrawlScrapeRequest({ url: 'ftp://example.com/' }))).toMatchObject({ code: 'invalid_request' })
   })
 
@@ -388,6 +388,25 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(status.total).toBe(2)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /crawlEntireDomain/.test(d) && /allowBackwardLinks/.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /not the duplicates/.test(d))).toBe(true)
+  })
+
+  it('maps sitemap (v1 ignoreSitemap and sitemapOnly, v2 sitemap) and maxConcurrency onto the native crawl request', () => {
+    const url = 'https://example.com/'
+    expect(parseFirecrawlCrawlRequest({ url, ignoreSitemap: true })).toMatchObject({ sitemap: 'skip' })
+    expect(parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toMatchObject({ sitemap: 'include' })
+    expect(parseFirecrawlCrawlRequest({ url, sitemapOnly: true })).toMatchObject({ sitemap: 'only' })
+    expect(parseFirecrawlCrawlRequest({ url, ignoreSitemap: false, sitemapOnly: true })).toMatchObject({ sitemap: 'only' })
+    expect(parseFirecrawlCrawlRequest({ url, sitemapOnly: false })).not.toHaveProperty('sitemap')
+    // The v2 string passes through and the native parser validates it; it wins over the v1 flags.
+    expect(parseFirecrawlCrawlRequest({ url, ignoreSitemap: true, sitemap: 'include' })).toMatchObject({ sitemap: 'include' })
+    expect(() => parseFirecrawlCrawlRequest({ url, sitemap: 'never' })).toThrow('sitemap must be include, skip, or only')
+    expect(() => parseFirecrawlCrawlRequest({ url, sitemapOnly: 1 })).toThrow('sitemapOnly must be a boolean')
+    expect(parseFirecrawlCrawlRequest({ url, maxConcurrency: 2 })).toMatchObject({ maxConcurrency: 2 })
+    expect(parseFirecrawlCrawlRequest({ url })).not.toHaveProperty('maxConcurrency')
+    expect(() => parseFirecrawlCrawlRequest({ url, maxConcurrency: 0 })).toThrow('maxConcurrency must be an integer >= 1')
+    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { sitemap: 'skip' } })).toThrow('unsupported parameter: scrapeOptions.sitemap')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /ignoreSitemap true is skip/.test(d) && /maxConcurrency/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /discovery\.sitemap/.test(d) && /no signed compliance record/.test(d))).toBe(true)
   })
 
   it('maps headers, mobile, skipTlsVerification, fastMode and blockAds for scrape and for a crawl\'s scrapeOptions, with the native refusals', () => {

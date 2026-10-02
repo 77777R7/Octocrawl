@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type FetchResult, type ScrapeAtom, type ScrapeOutcome } from '@w2l/contracts'
+import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type FetchResult, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
 import { crawlReportFromStore } from '../src/crawlReport.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
@@ -88,6 +88,22 @@ class ConcurrentAtom implements ScrapeAtom {
 function outcome(url: string, links: readonly string[], hash = url): ScrapeOutcome {
   const result = page(url, { links, hash })
   return { result, links }
+}
+
+const SITEMAP_FILE = 'https://fixture.test/sitemap.xml'
+
+/** A sitemap source that lists the given URLs from one file, or throws; it records every load request. */
+class FakeSitemapSource implements SitemapSource {
+  readonly loads: SitemapLoadRequest[] = []
+  closed = 0
+  constructor(private readonly urls: readonly string[], private readonly failure: Error | null = null) {}
+  async load(request: SitemapLoadRequest): Promise<SitemapLoadResult> {
+    this.loads.push(request)
+    if (this.failure !== null) throw this.failure
+    const file: SitemapFileRecord = { url: SITEMAP_FILE, finalUrl: SITEMAP_FILE, status: 200, contentType: 'application/xml', bytes: 120, sha256: 'f'.repeat(64), kind: 'urlset', entries: this.urls.length, robots: 'allowed', proxyUsed: false, error: null }
+    return { identity: { mode: 'standard', userAgent: 'test' }, sources: ['robots'], files: [file], urls: this.urls.map((url) => ({ url, file: SITEMAP_FILE })), truncated: null }
+  }
+  async close(): Promise<void> { this.closed++ }
 }
 
 function runWith(atom: FakeAtom, spec: Parameters<CrawlOrchestrator['run']>[0], store: TaskStore = new MemoryTaskStore()) {
@@ -247,7 +263,7 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     // The query variants fold into the seed (the first is fetched as the seed itself), the repeat is a plain duplicate,
     // other.test is outside the host scope and /about outside the seed's /list/ subtree.
     expect(atom.fetches).toEqual([HUB, ITEM])
-    const discovery = { offered: 6, enqueued: 1, duplicate: 1, collapsed: 2, hostDenied: 1, subtreeDenied: 1, pathDenied: 0, depthDenied: 0, duplicateContent: 0 }
+    const discovery = { offered: 6, enqueued: 1, duplicate: 1, collapsed: 2, hostDenied: 1, subtreeDenied: 1, pathDenied: 0, depthDenied: 0, duplicateContent: 0, sitemap: null }
     expect(report.discovery).toEqual(discovery)
     expect((await store.getAttempt(report.attemptId))?.discovery).toEqual(discovery)
     expect((await store.getTask(report.taskId))?.crawl).toMatchObject({ ignoreQueryParameters: true, crawlEntireDomain: false })
@@ -311,6 +327,8 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
       expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({
         maxDepth: null, allowlistedDomains: [], includePaths: ['^/[ab]$'], excludePaths: ['^/b$'],
         regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: true, crawlEntireDomain: false, allowSubdomains: false, allowExternalLinks: false,
+        // No SitemapSource was given: the task says it read no sitemap, and takes the worker count.
+        sitemap: 'skip', maxConcurrency: null,
       })
       await resumeStore.close()
     } finally {
@@ -376,6 +394,20 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     const report = await new CrawlOrchestrator({ store: new MemoryTaskStore(), atom, clock, workerCount: 2, perHostMinDelayMs: 0 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
     expect(report.pagesFetched).toBe(3)
     expect(atom.maxActive).toBe(2)
+  })
+
+  it('lowers its workers to the task\'s maxConcurrency and never raises them above the service\'s count', async () => {
+    const pages = () => new Map<string, ScrapeOutcome>([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]])
+    const capped = new ConcurrentAtom(pages())
+    const store = new MemoryTaskStore()
+    const one = await new CrawlOrchestrator({ store, atom: capped, clock: new FakeClock(), workerCount: 4, perHostMinDelayMs: 0 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', maxConcurrency: 1 })
+    expect(one.pagesFetched).toBe(3)
+    expect(capped.maxActive).toBe(1)
+    expect((await store.getTask(one.taskId))?.crawl).toMatchObject({ maxConcurrency: 1 })
+    const wide = new ConcurrentAtom(pages())
+    const two = await new CrawlOrchestrator({ store: new MemoryTaskStore(), atom: wide, clock: new FakeClock(), workerCount: 2, perHostMinDelayMs: 0 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', maxConcurrency: 8 })
+    expect(two.pagesFetched).toBe(3)
+    expect(wide.maxActive).toBe(2)
   })
 
   it('does not oversubscribe maxPages while workers are in flight', async () => {
@@ -500,6 +532,70 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(report.attemptId).not.toBe('attempt-kill')
     const resumedAttempt = attempts.find((row) => row.id === report.attemptId)
     expect(resumedAttempt?.recoveredFromAttemptId).toBe('attempt-kill')
+  })
+})
+
+describe('CrawlOrchestrator sitemap modes', () => {
+  const sitemapRun = (atom: FakeAtom, source: SitemapSource | undefined, spec: Partial<Parameters<CrawlOrchestrator['run']>[0]>) => {
+    const store = new MemoryTaskStore()
+    const orchestrator = new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, ...(source === undefined ? {} : { sitemapSource: source }) })
+    return { store, go: () => orchestrator.run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', ...spec }) }
+  }
+
+  it('include: queues the sitemap\'s entries after the seed and before the seed\'s links, and records the load', async () => {
+    const atom = new FakeAtom(new Map([[SEED, outcome(SEED, [ITEM_A])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]]))
+    const source = new FakeSitemapSource([ITEM_B, SEED])
+    const { store, go } = sitemapRun(atom, source, { budget: { ...DEFAULT_CRAWL_BUDGET, maxPages: 5 } })
+    const report = await go()
+    expect(report.status).toBe('completed')
+    expect(atom.fetches).toEqual([SEED, ITEM_B, ITEM_A])
+    expect(source.loads).toEqual([{ seedUrl: SEED, maxUrls: 5, maxFiles: 20 }])
+    expect(source.closed).toBe(1)
+    // The seed's own entry is a duplicate of the seed; the other entry and the seed's link were enqueued.
+    expect(report.discovery).toMatchObject({ offered: 3, enqueued: 2, duplicate: 1, sitemap: { mode: 'include', sources: ['robots'], listed: 2, enqueued: 1, truncated: null, error: null } })
+    expect(report.discovery?.sitemap?.files).toEqual([expect.objectContaining({ url: SITEMAP_FILE, kind: 'urlset', entries: 2 })])
+    expect((await store.getAttempt(report.attemptId))?.discovery?.sitemap?.mode).toBe('include')
+    expect((await store.getTask(report.taskId))?.crawl).toMatchObject({ sitemap: 'include' })
+    const steps = await store.listSteps(report.taskId, report.attemptId)
+    expect(steps.find((s) => s.canonicalUrl === ITEM_B)?.result?.trace[0]).toMatchObject({ event: 'discovered', detail: { via: 'sitemap', from: SITEMAP_FILE } })
+    expect(steps.find((s) => s.canonicalUrl === ITEM_B)?.depth).toBe(1)
+    expect(steps.find((s) => s.canonicalUrl === ITEM_A)?.result?.trace[0]).toMatchObject({ event: 'discovered', detail: { via: 'link', from: SEED } })
+  })
+
+  it('only: crawls the seed and the sitemap\'s entries, never a page link, and skip never asks the source', async () => {
+    const atom = new FakeAtom(new Map([[SEED, outcome(SEED, [ITEM_A])], [ITEM_B, outcome(ITEM_B, [])]]))
+    const source = new FakeSitemapSource([ITEM_B])
+    const { store, go } = sitemapRun(atom, source, { sitemap: 'only' })
+    const report = await go()
+    expect(report.status).toBe('completed')
+    expect(atom.fetches).toEqual([SEED, ITEM_B])
+    expect(report.discovery).toMatchObject({ offered: 1, enqueued: 1, sitemap: { mode: 'only', listed: 1, enqueued: 1 } })
+    const seed = (await store.listSteps(report.taskId, report.attemptId)).find((s) => s.canonicalUrl === SEED)!
+    expect(seed.result?.links).toEqual([ITEM_A])
+    expect(seed.result?.trace.some((event) => event.event === 'links_offered')).toBe(false)
+
+    const skipping = new FakeSitemapSource([ITEM_B])
+    const skipped = sitemapRun(new FakeAtom(new Map([[SEED, outcome(SEED, [])]])), skipping, { sitemap: 'skip' })
+    const skipReport = await skipped.go()
+    expect(skipping.loads).toEqual([])
+    expect(skipReport.discovery?.sitemap).toBeNull()
+    expect((await skipped.store.getTask(skipReport.taskId))?.crawl).toMatchObject({ sitemap: 'skip' })
+  })
+
+  it('offers entries under a link\'s rules (maxDepth 0 drops them) and records a load that throws without failing the crawl', async () => {
+    const dropped = new FakeSitemapSource([ITEM_B, 'https://other.test/x'])
+    const shallow = sitemapRun(new FakeAtom(new Map([[SEED, outcome(SEED, [])]])), dropped, { maxDepth: 0 })
+    const report = await shallow.go()
+    expect(report.pagesFetched).toBe(1)
+    expect(report.discovery).toMatchObject({ offered: 2, enqueued: 0, depthDenied: 2, sitemap: { listed: 2, enqueued: 0 } })
+
+    const failing = new FakeSitemapSource([], new Error('sitemap host unreachable'))
+    const atom = new FakeAtom(new Map([[SEED, outcome(SEED, [ITEM_A])], [ITEM_A, outcome(ITEM_A, [])]]))
+    const failed = await sitemapRun(atom, failing, {}).go()
+    expect(failed.status).toBe('completed')
+    expect(atom.fetches).toEqual([SEED, ITEM_A])
+    expect(failed.discovery?.sitemap).toEqual({ mode: 'include', sources: [], files: [], listed: 0, enqueued: 0, truncated: null, error: 'Error: sitemap host unreachable' })
+    expect(failing.closed).toBe(1)
   })
 })
 

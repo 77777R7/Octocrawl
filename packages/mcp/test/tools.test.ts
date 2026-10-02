@@ -8,7 +8,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -127,6 +127,41 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'crawl', { url: 'https://example.com/', allowExternalLinks: true, allowlistedDomains: ['other.test'] })).rejects.toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
     await expect(callTool(client, 'get_crawl_pages', { id: 'task-1', includeDuplicates: 'yes' })).rejects.toThrow('includeDuplicates must be a boolean')
     expect(calls).toHaveLength(2)
+  })
+
+  it('declares and forwards sitemap and maxConcurrency, lists active crawls, and follows cursors for maxResults', async () => {
+    const all = Array.from({ length: 5 }, (_, i) => ({ id: `p${i + 1}` }))
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      const url = new URL(String(input))
+      calls.push({ line: `${init?.method ?? 'GET'} ${url.pathname}${url.search}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if (url.pathname === '/v1/crawl') return json({ taskId: 'task-1' }, 202)
+      if (url.pathname === '/v1/crawl/active') return json({ crawls: [] })
+      // Pages by cursor and limit (two items when the request names no limit), as the API serves them.
+      const start = Number(url.searchParams.get('cursor') ?? '0')
+      const end = Math.min(all.length, start + Number(url.searchParams.get('limit') ?? '2'))
+      return json({ items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null, hasMore: end < all.length })
+    }) as typeof fetch })
+    await callTool(client, 'crawl', { url: 'https://example.com/', sitemap: 'only', maxConcurrency: 2 })
+    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', sitemap: 'only', maxConcurrency: 2, origin: SDK_ORIGIN })
+    expect(await callTool(client, 'list_active_crawls', {})).toEqual({ crawls: [] })
+    expect(calls[1]?.line).toBe('GET /v1/crawl/active')
+    // Pages of two, three wanted: two requests, the second no larger than the one item still wanted, and the cursor continues after it.
+    const paged = await callTool(client, 'get_crawl_pages', { id: 'task-1', limit: 2, maxResults: 3, includeDuplicates: true }) as { items: Array<{ id: string }>; nextCursor: string | null; hasMore: boolean; stoppedBy: string }
+    expect(paged.items.map((item) => item.id)).toEqual(['p1', 'p2', 'p3'])
+    expect(paged).toMatchObject({ hasMore: true, nextCursor: '3', stoppedBy: 'maxResults' })
+    expect(calls.slice(2).map((call) => call.line)).toEqual(['GET /v1/crawl/task-1/pages?limit=2&includeDuplicates=true', 'GET /v1/crawl/task-1/pages?cursor=2&limit=1&includeDuplicates=true'])
+    expect(await callTool(client, 'get_batch_items', { id: 'batch-1', maxResults: 5 })).toMatchObject({ items: all, nextCursor: null, hasMore: false, stoppedBy: 'end' })
+    // Without maxResults the tool answers one page, as before.
+    expect(await callTool(client, 'get_crawl_pages', { id: 'task-1', limit: 2 })).toMatchObject({ items: all.slice(0, 2), hasMore: true })
+    const crawl = TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>
+    expect(crawl.sitemap).toMatchObject({ type: 'string', enum: ['include', 'skip', 'only'] })
+    expect(crawl.maxConcurrency).toMatchObject({ type: 'integer', minimum: 1 })
+    for (const name of ['get_crawl_pages', 'get_batch_items']) expect((TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, unknown>).maxResults).toMatchObject({ type: 'integer', minimum: 1, maximum: 200 })
+    expect(TOOLS.find((tool) => tool.name === 'list_active_crawls')?.inputSchema).toEqual({ type: 'object', properties: {}, additionalProperties: false })
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', sitemap: 'later' })).rejects.toThrow('sitemap must be include, skip, or only')
+    await expect(callTool(client, 'get_crawl_pages', { id: 'task-1', maxResults: 201 })).rejects.toThrow('maxResults must be an integer between 1 and 200')
+    await expect(callTool(client, 'list_active_crawls', { teamId: 't1' })).rejects.toThrow('unsupported parameter: teamId')
   })
 
   it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {

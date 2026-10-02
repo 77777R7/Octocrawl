@@ -8,7 +8,7 @@ import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -146,6 +146,8 @@ export const TOOLS = [
         crawlEntireDomain: { type: 'boolean', description: 'Follow links anywhere on the start URL\'s host. Default false: links on that host are followed only inside the start URL\'s path subtree (its directory, or the directory of the file it names); the rest are reported as subtreeDenied.' },
         allowSubdomains: { type: 'boolean', description: 'Follow links to every host under the start URL\'s apex (the host with one leading www. removed; no public-suffix list, so a seed on www.gov.uk admits every *.gov.uk host). Default false. Each new host gets its own robots.txt read.' },
         allowExternalLinks: { type: 'boolean', description: 'Follow links to any host, each with its own robots.txt read; maxDepth and maxPages bound the walk. Default false. Cannot be combined with allowlistedDomains.' },
+        sitemap: { type: 'string', enum: ['include', 'skip', 'only'], description: 'How the crawl uses the site\'s sitemap. include (default): the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, are read with the crawl\'s identity and robots.txt verdict and their URLs queued ahead of the start page\'s links, under the same host, subtree, path and depth rules. skip: no sitemap is read. only: no page link is followed; the pages are the start URL and the sitemap\'s entries. get_crawl reports the files read, refused or unreadable in discovery.sitemap.' },
+        maxConcurrency: { type: 'integer', minimum: 1, description: 'Pages this crawl fetches at once, at most; refused above the service\'s worker count (4 locally, 2 on the hosted host). It only lowers the crawl\'s parallelism: the per-host ceiling and minimum interval still apply.' },
         ...PAGE_OPTION_PROPERTIES,
         ...INTEGRATION_PROPERTY,
       },
@@ -167,7 +169,7 @@ export const TOOLS = [
   },
   {
     name: 'get_crawl_pages',
-    description: 'Read a paginated list of crawl page results by task id. Pages omit the routing audit and trace unless debug is true, and leave out pages whose content repeated an earlier page\'s (status duplicate) unless includeDuplicates is true.',
+    description: 'Read a paginated list of crawl page results by task id (the latest attempt\'s unless attemptId is given). Pages omit the routing audit and trace unless debug is true, and leave out pages whose content repeated an earlier page\'s (status duplicate) unless includeDuplicates is true. With maxResults the tool follows cursors itself, up to that many pages, and answers { items, nextCursor, hasMore, stoppedBy }.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -177,6 +179,7 @@ export const TOOLS = [
         attemptId: { type: 'string' },
         debug: { type: 'boolean' },
         includeDuplicates: { type: 'boolean', description: 'List the pages whose body repeated an earlier page\'s too (status duplicate, markdown null). Default false.' },
+        maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many pages in all, each request no larger than what is still wanted; nextCursor then continues exactly after the last page returned, and stoppedBy says whether the end or this cap stopped the listing.' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -218,6 +221,11 @@ export const TOOLS = [
     },
   },
   {
+    name: 'list_active_crawls',
+    description: 'List the crawls the API process is running (those it started and those it resumed at startup; never a batch): each with its id, start URL, status, pages so far and the options it was started with. Empty when nothing runs.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'batch_scrape',
     description: 'Persist and run 1-1000 explicit URLs. Returns a taskId; use get_batch_items for paginated results.',
     inputSchema: {
@@ -244,7 +252,7 @@ export const TOOLS = [
   ...(['get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch'] as const).map(name => ({
     name,
     description: `${name} for a persistent URL-array batch`,
-    inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: 300000 } } : {}) }, required: ['id'], additionalProperties: false },
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' }, maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many items in all (pages of at most 50); the answer is then { items, nextCursor, hasMore, stoppedBy }.' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: 300000 } } : {}) }, required: ['id'], additionalProperties: false },
   })),
   ...MONITOR_TOOLS,
 ] as const
@@ -317,6 +325,8 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       includePaths: req.includePaths,
       excludePaths: req.excludePaths,
       ...crawlScopeOptions(req),
+      ...(req.sitemap === undefined ? {} : { sitemap: req.sitemap }),
+      ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -335,7 +345,15 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
   }
   if (name === 'get_crawl_pages' || name === 'get_crawl_errors') {
     const input = readCrawlQuery(args)
-    return name === 'get_crawl_pages' ? client.getCrawlPages(input.id, input.options, request) : client.getCrawlErrors(input.id, input.options, request)
+    if (name === 'get_crawl_errors') return client.getCrawlErrors(input.id, input.options, request)
+    // With maxResults the tool follows the cursors itself and says where it stopped.
+    if (input.maxResults !== undefined) return client.collectCrawlPages(input.id, { ...input.options, maxResults: input.maxResults }, request)
+    return client.getCrawlPages(input.id, input.options, request)
+  }
+  if (name === 'list_active_crawls') {
+    const rec = readRecord(args)
+    if (Object.keys(rec).length > 0) throw new RequestError(`unsupported ${Object.keys(rec).length === 1 ? 'parameter' : 'parameters'}: ${Object.keys(rec).join(', ')} (list_active_crawls takes none)`, 'unsupported_parameter', { parameters: Object.keys(rec) })
+    return client.getActiveCrawls(request)
   }
   if (name === 'cancel_crawl' || name === 'resume_crawl') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
@@ -349,6 +367,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)
+    if (input.maxResults !== undefined) return client.collectBatchItems(input.id, { ...input.options, maxResults: input.maxResults }, request)
     return client.getBatchItems(input.id, input.options, request)
   }
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
@@ -457,14 +476,19 @@ async function callMonitorTool(client: W2L, name: string, rec: Record<string, un
   throw new RequestError(`unknown tool: ${name}`)
 }
 
-function readCrawlQuery(args: unknown): { id: string; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean; includeDuplicates?: boolean } } {
+/** The largest `maxResults` a listing tool follows cursors for in one call. */
+const MAX_TOOL_RESULTS = 200
+
+function readCrawlQuery(args: unknown): { id: string; maxResults?: number; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean; includeDuplicates?: boolean } } {
   const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
   if (typeof rec?.id !== 'string' || rec.id.length === 0) throw new RequestError('id is required')
   if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit))) throw new RequestError('limit must be an integer')
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeDuplicates !== undefined && typeof rec.includeDuplicates !== 'boolean') throw new RequestError('includeDuplicates must be a boolean')
+  if (rec.maxResults !== undefined && (typeof rec.maxResults !== 'number' || !Number.isInteger(rec.maxResults) || rec.maxResults < 1 || rec.maxResults > MAX_TOOL_RESULTS)) throw new RequestError(`maxResults must be an integer between 1 and ${MAX_TOOL_RESULTS}`)
   return {
     id: rec.id,
+    ...(rec.maxResults === undefined ? {} : { maxResults: rec.maxResults as number }),
     options: {
       cursor: typeof rec.cursor === 'string' ? rec.cursor : undefined,
       limit: rec.limit as number | undefined,

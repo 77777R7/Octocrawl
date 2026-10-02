@@ -35,8 +35,9 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl); data lists the failed and blocked pages too (with metadata.error) but not the duplicates, whose content is an earlier entry\'s, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only), maxConcurrency, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
   'A crawl follows links inside the start URL\'s path subtree on its host and www twin by default (crawlEntireDomain false), folds /a and /a/, / and /index.html, www and apex, http and https into one page (deduplicateSimilarURLs true) and reports every collapsed or refused link in the native crawl status (discovery) and each page\'s trace (links_offered); allowSubdomains takes every host under the start URL\'s apex (no public-suffix list), allowExternalLinks every host, each page with its own robots.txt read.',
+  'sitemap (default include, as in Firecrawl) reads the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, with the crawl\'s own http identity, robots.txt verdict, SSRF checks and proxy, and queues their URLs ahead of the start page\'s links under the same host, subtree, path and depth rules; only follows no page link; skip reads none. The native crawl status lists every sitemap file read, refused or unreadable in discovery.sitemap; the shim\'s status carries nothing of it, and sitemap fetches have no signed compliance record. maxConcurrency caps the pages one crawl fetches at once, at most the service\'s worker count (HTTP 400 above it), and never raises the per-host ceiling.',
   'origin (the Firecrawl SDKs\' client label) and integration are stored, not echoed: the scrape record (GET /v1/scrapes/:id) and the crawl task carry them, and nothing sent to the target changes.',
   'data.metadata carries scrapeId (a UUID per call, which GET /v1/scrapes/:id looks up), proxyUsed (operator for the server\'s environment proxy, user for the caller\'s own egress, else null), timezone (the browser rung\'s declared zone, null on the HTTP rung), creditsUsed: null (W2L counts no credits), concurrencyLimited and concurrencyQueueDurationMs (whether and how long the per-origin ceiling held the fetch back). cacheState and cachedAt are left out until W2L has a cache.',
   'A page whose result W2L has advice about (a login wall, a robots.txt rule, a gate, a cut, a script-filled shell) carries data.agent_hints, one sentence each; the native response calls them agentHints. A request refused for an option W2L does not offer carries agent_hints in the error envelope, and a caller over the server\'s per-minute rate limit gets HTTP 429 { success: false, error, code: rate_limited, agent_hints } with Retry-After.',
@@ -151,12 +152,11 @@ const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
 const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
-/** Crawl URL-scope options that keep their Firecrawl name on the native request; the native parser validates them. */
-const SHIM_CRAWL_SCOPE_OPTIONS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'allowSubdomains', 'allowExternalLinks'] as const
+/** Crawl options that keep their Firecrawl name on the native request; the native parser validates them. */
+const SHIM_CRAWL_SCOPE_OPTIONS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'allowSubdomains', 'allowExternalLinks', 'sitemap', 'maxConcurrency'] as const
 
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
-  ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
   removeBase64Images: { value: true, reason: 'W2L always drops data: URIs from Markdown, keeping an image\'s alt text and a link\'s text' },
 }
 
@@ -190,8 +190,7 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
   const problems = noProblems()
-  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain'], problems)
-  checkShimFixedValue(rec, '', 'ignoreSitemap', problems)
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain'], problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
     const options = rec.scrapeOptions
@@ -204,6 +203,15 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
   if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
   if (rec.excludePaths !== undefined) native.excludePaths = rec.excludePaths
+  // v1 ignoreSitemap and sitemapOnly are v2 sitemap: skip / include and only; the v2 name wins when both are sent.
+  if (rec.ignoreSitemap !== undefined) {
+    if (typeof rec.ignoreSitemap !== 'boolean') throw new RequestError('ignoreSitemap must be a boolean')
+    native.sitemap = rec.ignoreSitemap ? 'skip' : 'include'
+  }
+  if (rec.sitemapOnly !== undefined) {
+    if (typeof rec.sitemapOnly !== 'boolean') throw new RequestError('sitemapOnly must be a boolean')
+    if (rec.sitemapOnly) native.sitemap = 'only'
+  }
   for (const key of SHIM_CRAWL_SCOPE_OPTIONS) if (rec[key] !== undefined) native[key] = rec[key]
   // v1 allowBackwardLinks is v2 crawlEntireDomain; the v2 name wins when both are sent.
   if (rec.allowBackwardLinks !== undefined) {

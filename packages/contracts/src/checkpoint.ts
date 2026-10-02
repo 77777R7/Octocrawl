@@ -10,7 +10,7 @@
 
 import type { PageOptions, RequestAttribution, RobotsUrlOverride } from './api.js'
 import type { CrawlMode } from './compliance.js'
-import type { CrawlDiscovery } from './crawl.js'
+import type { CrawlDiscovery, SitemapMode } from './crawl.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
 import type { BudgetKind, Lane, ResultStatus } from './status.js'
@@ -90,6 +90,10 @@ export interface Task {
     crawlEntireDomain?: boolean
     allowSubdomains?: boolean
     allowExternalLinks?: boolean
+    /** How the crawl uses the site's sitemap. Absent on a task stored before it was kept: such a task resumes as `skip`. */
+    sitemap?: SitemapMode
+    /** The crawl's own cap on pages fetched at once; null takes the service's worker count. */
+    maxConcurrency?: number | null
   } & PageOptions
   /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
   attribution?: RequestAttribution

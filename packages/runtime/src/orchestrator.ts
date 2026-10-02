@@ -11,6 +11,13 @@
  * Same rawBodySha256 on two distinct canonical URLs is duplicate content,
  * not a crawl loop. The duplicate is recorded and skipped; the crawl
  * continues. DOM-fingerprint N / pagination stall is out of this slice.
+ *
+ * A crawl given a SitemapSource reads the site's sitemap once per attempt,
+ * before its first page: the entries go to the frontier at depth 1, after the
+ * seed and ahead of the seed's own links, under a link's rules. With sitemap
+ * `only` a page's links stay on its record and are not followed. The load is
+ * written to the attempt's discovery with every file it read or refused. A
+ * crawl's maxConcurrency lowers the workers it runs; the per-host gate stays.
  */
 
 import {
@@ -24,15 +31,20 @@ import {
   type CrawlDiscovery,
   type CrawlReport,
   type CrawlSpec,
+  type ExecutionContext,
   type FetchResult,
   type ScrapeAtom,
   type ScrapeOutcome,
+  type SitemapDiscovery,
+  type SitemapLoadResult,
+  type SitemapMode,
+  type SitemapSource,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { reportFromTaskAttempt } from './crawlReport.js'
-import { Frontier, type FrontierItem } from './frontier.js'
+import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 
@@ -41,9 +53,12 @@ type CrawlScopeOptions = Required<Pick<CrawlSpec, 'regexOnFullURL' | 'ignoreQuer
 
 /** Up to this many collapsed and host-refused links are named in a page's `links_offered` trace event. */
 const LINK_SAMPLE_LIMIT = 20
+/** Sitemap files one load may read (an index and its children each count), and the entries it collects for a crawl without a page budget. */
+const SITEMAP_MAX_FILES = 20
+const SITEMAP_UNBOUNDED_URLS = 50_000
 
 /** What became of one page's links at the frontier: the `links_offered` trace event's detail. */
-type LinksOffered = Omit<CrawlDiscovery, 'duplicateContent'> & {
+type LinksOffered = Omit<CrawlDiscovery, 'duplicateContent' | 'sitemap'> & {
   samples: { collapsed: Array<{ url: string; into: string }>; hostDenied: string[] }
 }
 
@@ -69,6 +84,8 @@ export interface OrchestratorOptions {
   signal?: AbortSignal
   /** Service shutdown interrupts work but leaves the task resumable. */
   shutdownSignal?: AbortSignal
+  /** Reads the site's sitemap for a crawl whose mode is not `skip`; closed with the run. Without one every crawl runs as `skip`. */
+  sitemapSource?: SitemapSource
 }
 
 const EMPTY_USAGE = {
@@ -91,6 +108,7 @@ export class CrawlOrchestrator {
   private readonly workerCount: number
   private readonly signal?: AbortSignal
   private readonly shutdownSignal?: AbortSignal
+  private readonly sitemapSource?: SitemapSource
   private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
@@ -102,6 +120,7 @@ export class CrawlOrchestrator {
     this.workerCount = Math.max(1, options.workerCount ?? 4)
     this.signal = options.signal
     this.shutdownSignal = options.shutdownSignal
+    this.sitemapSource = options.sitemapSource
   }
 
   /**
@@ -171,6 +190,11 @@ export class CrawlOrchestrator {
       // before its depth and hosts were kept, with the caller's.
       const stored = task.batch === undefined ? task.crawl : undefined
       if (task.batch === undefined) discovery = { ...EMPTY_CRAWL_DISCOVERY }
+      // The sitemap mode and the concurrency cap the task was started with: a batch has neither, a run without a
+      // source reads no sitemap, and a crawl stored before the options were kept resumes as `skip` with the worker count.
+      const sitemapMode: SitemapMode = task.batch !== undefined || this.sitemapSource === undefined ? 'skip' : stored?.sitemap ?? 'skip'
+      const concurrencyCap = task.batch !== undefined ? spec.maxConcurrency ?? null : stored?.maxConcurrency ?? null
+      const workerCount = Math.max(1, Math.min(this.workerCount, concurrencyCap ?? this.workerCount))
       const frontier = new Frontier({
         seedUrl: task.seedUrl,
         maxDepth: stored?.maxDepth !== undefined ? stored.maxDepth : spec.maxDepth,
@@ -181,7 +205,12 @@ export class CrawlOrchestrator {
         ...this.frontierOptions,
       })
       const priorSteps = await this.store.listSteps(task.id)
-      await this.restoreFrontier(frontier, task, spec, priorSteps)
+      const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps)
+      if (sitemapMode !== 'skip' && this.sitemapSource !== undefined && discovery !== null) {
+        discovery.sitemap = await this.loadSitemap(this.sitemapSource, sitemapMode, task.seedUrl, task.budget.maxPages, frontier, discovery, scope)
+      }
+      // A resumed crawl's known links follow the sitemap's entries, as a fresh crawl's do; `only` follows none.
+      if (sitemapMode !== 'only') for (const step of restoredLinks) for (const href of linksOf(step.result!)) frontier.enqueue(href, step.depth + 1, step.canonicalUrl)
       const runningTask = task
       const runningAttempt = attempt
       // The page budget is the task's: every URL it already has counts once,
@@ -305,7 +334,8 @@ export class CrawlOrchestrator {
             // A batch page's links are offered too (its depth limit refuses
             // them) and leave no record: a batch discovers nothing.
             const contentful = CONTENTFUL_STATUS.has(result.status)
-            if (contentful) {
+            // With sitemap `only` a page's links stay on its record and are not offered: the sitemap is the crawl's discovery.
+            if (contentful && sitemapMode !== 'only') {
               const offered = offerLinks(frontier, links, item)
               if (discovery !== null) {
                 addDiscovery(discovery, offered)
@@ -354,7 +384,7 @@ export class CrawlOrchestrator {
           }
         }
       }
-      const workers = Array.from({ length: this.workerCount }, () => work())
+      const workers = Array.from({ length: workerCount }, () => work())
       const settled = await Promise.allSettled(workers)
       const firstFailure = settled.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
       if (firstFailure !== undefined) throw firstFailure.reason
@@ -368,6 +398,7 @@ export class CrawlOrchestrator {
       scope.dispose()
       wakeWorkers()
       await this.atom.close().catch(() => {})
+      await this.sitemapSource?.close().catch(() => {})
     }
 
     if (task === undefined || attempt === undefined) {
@@ -434,7 +465,12 @@ export class CrawlOrchestrator {
       mode: spec.mode,
       status: 'running',
       budget: spec.budget,
-      crawl: { maxDepth: spec.maxDepth, allowlistedDomains: spec.allowlistedDomains, includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [], ...scopeOptions(spec, undefined) },
+      crawl: {
+        maxDepth: spec.maxDepth, allowlistedDomains: spec.allowlistedDomains, includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [], ...scopeOptions(spec, undefined),
+        // What this run can do: without a source the crawl reads no sitemap, and the task says so.
+        sitemap: this.sitemapSource === undefined ? 'skip' : spec.sitemap ?? DEFAULT_CRAWL_SPEC.sitemap ?? 'include',
+        maxConcurrency: spec.maxConcurrency ?? null,
+      },
       createdAt: startedAt,
       updatedAt: startedAt,
     }
@@ -462,7 +498,12 @@ export class CrawlOrchestrator {
     return recoveredFrom
   }
 
-  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<void> {
+  /**
+   * Seed the frontier: a batch's URLs, a fresh crawl's seed, or a resumed
+   * crawl's contentful pages. Returns the resumed pages whose links the caller
+   * enqueues after the sitemap's entries (none for a batch or a fresh crawl).
+   */
+  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<readonly StepRecord[]> {
     if (task.batch !== undefined) {
       const completed = new Set(prior
         .filter(step => step.result !== null)
@@ -472,25 +513,43 @@ export class CrawlOrchestrator {
         if (canonical !== null && completed.has(canonical)) frontier.markVisited(canonical)
         else frontier.seed(url)
       }
-      return
+      return []
     }
     if (spec.resumeFrom === null) {
       frontier.seed(task.seedUrl)
-      return
+      return []
     }
     const contentful = prior.filter((step) => step.result !== null && CONTENTFUL_STATUS.has(step.result.status))
     if (contentful.length === 0) {
       frontier.seed(task.seedUrl)
-      return
+      return []
     }
     // Pages on the host the seed redirected to belong to the crawl, as before.
     for (const step of contentful) if (step.depth === 0) frontier.followSeedRedirect(step.result!.evidence.finalUrl)
     for (const step of contentful) frontier.seed(step.url, step.depth)
-    for (const step of contentful) {
-      for (const href of linksOf(step.result!)) {
-        frontier.enqueue(href, step.depth + 1, step.canonicalUrl)
-      }
+    return contentful
+  }
+
+  /**
+   * Read the site's sitemap and offer its entries at depth 1 under a link's
+   * rules, counting what became of each in the attempt's discovery. A load
+   * that throws is this crawl's own record, not its failure: the crawl goes on
+   * with the links it finds. Cancellation, shutdown and the time budget still
+   * stop the run.
+   */
+  private async loadSitemap(source: SitemapSource, mode: SitemapMode, seedUrl: string, maxPages: number | null, frontier: Frontier, discovery: CrawlDiscovery, scope: ExecutionContext & { signal: AbortSignal }): Promise<SitemapDiscovery> {
+    const record: SitemapDiscovery = { mode, sources: [], files: [], listed: 0, enqueued: 0, truncated: null, error: null }
+    let loaded: SitemapLoadResult
+    try {
+      loaded = await raceWithSignal(source.load({ seedUrl, maxUrls: maxPages ?? SITEMAP_UNBOUNDED_URLS, maxFiles: SITEMAP_MAX_FILES }, scope), scope.signal)
+    } catch (error) {
+      if (scope.signal.aborted) throw error
+      return { ...record, error: (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 500) }
     }
+    const offered = emptyLinksOffered()
+    for (const entry of loaded.urls) countVerdict(offered, frontier.enqueueFromSitemap(entry.url, 1, entry.file), entry.url, entry.file)
+    addDiscovery(discovery, offered)
+    return { ...record, sources: loaded.sources, files: loaded.files, listed: loaded.urls.length, enqueued: offered.enqueued, truncated: loaded.truncated }
   }
 }
 
@@ -528,28 +587,34 @@ function scopeOptions(spec: CrawlSpec, stored: Task['crawl'] | undefined): Crawl
  * to LINK_SAMPLE_LIMIT named; so is a host the scope refused.
  */
 function offerLinks(frontier: Frontier, links: readonly string[], page: FrontierItem): LinksOffered {
-  const offered: LinksOffered = { offered: 0, enqueued: 0, duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, depthDenied: 0, samples: { collapsed: [], hostDenied: [] } }
-  for (const href of links) {
-    offered.offered++
-    const verdict = frontier.enqueue(href, page.depth + 1, page.canonicalUrl)
-    if (verdict.accepted) { offered.enqueued++; continue }
-    switch (verdict.reason) {
-      case 'duplicate':
-        if (verdict.collapsedInto === undefined) { offered.duplicate++; break }
-        offered.collapsed++
-        if (offered.samples.collapsed.length < LINK_SAMPLE_LIMIT) offered.samples.collapsed.push({ url: absoluteHref(href, page.canonicalUrl), into: verdict.collapsedInto })
-        break
-      case 'host_denied':
-        offered.hostDenied++
-        if (offered.samples.hostDenied.length < LINK_SAMPLE_LIMIT) offered.samples.hostDenied.push(absoluteHref(href, page.canonicalUrl))
-        break
-      case 'subtree_denied': offered.subtreeDenied++; break
-      case 'path_denied': offered.pathDenied++; break
-      case 'depth': offered.depthDenied++; break
-      default: break
-    }
-  }
+  const offered = emptyLinksOffered()
+  for (const href of links) countVerdict(offered, frontier.enqueue(href, page.depth + 1, page.canonicalUrl), href, page.canonicalUrl)
   return offered
+}
+
+function emptyLinksOffered(): LinksOffered {
+  return { offered: 0, enqueued: 0, duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, depthDenied: 0, samples: { collapsed: [], hostDenied: [] } }
+}
+
+/** Count one frontier verdict for a link (`href` as the page gave it, resolved against `base`) or a sitemap entry. */
+function countVerdict(offered: LinksOffered, verdict: FrontierEnqueueResult, href: string, base: string): void {
+  offered.offered++
+  if (verdict.accepted) { offered.enqueued++; return }
+  switch (verdict.reason) {
+    case 'duplicate':
+      if (verdict.collapsedInto === undefined) { offered.duplicate++; break }
+      offered.collapsed++
+      if (offered.samples.collapsed.length < LINK_SAMPLE_LIMIT) offered.samples.collapsed.push({ url: absoluteHref(href, base), into: verdict.collapsedInto })
+      break
+    case 'host_denied':
+      offered.hostDenied++
+      if (offered.samples.hostDenied.length < LINK_SAMPLE_LIMIT) offered.samples.hostDenied.push(absoluteHref(href, base))
+      break
+    case 'subtree_denied': offered.subtreeDenied++; break
+    case 'path_denied': offered.pathDenied++; break
+    case 'depth': offered.depthDenied++; break
+    default: break
+  }
 }
 
 function addDiscovery(discovery: CrawlDiscovery, offered: LinksOffered): void {

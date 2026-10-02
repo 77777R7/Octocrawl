@@ -184,6 +184,9 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     })
   })
 
+  /** The crawls this process is running; registered before the `:id` routes, which would otherwise take `active` for an id. Always 200. */
+  app.get('/v1/crawl/active', async (c) => c.json(await engine.listActiveCrawls(), 200))
+
   app.get('/v1/crawl/:id', async (c) => {
     const id = c.req.param('id')
     const report = await engine.getCrawl(id)

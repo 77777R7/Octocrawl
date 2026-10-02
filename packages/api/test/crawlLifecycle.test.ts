@@ -278,7 +278,8 @@ describe('crawl lifecycle', () => {
   it('waits the robots.txt Crawl-delay between page starts and records the delay it applied', async () => {
     const s = await site({ robots: 'User-agent: *\nCrawl-delay: 0.5\n' })
     const engine = s.engine()
-    const { taskId } = await engine.startCrawl({ url: `${s.origin}/`, maxPages: 3 })
+    // No sitemap read: its one request would arrive before the first page, paced by the scheduler's interval, not by the Crawl-delay the frontier spaces pages by.
+    const { taskId } = await engine.startCrawl({ url: `${s.origin}/`, maxPages: 3, sitemap: 'skip' })
     await waitFor(engine, taskId, (r) => r.status === 'completed')
     const pages = (await engine.getCrawlPages(taskId, { limit: 10, debug: true }))!.items
     const delays = pages
