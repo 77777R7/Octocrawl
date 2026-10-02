@@ -166,14 +166,22 @@ The image is built from `Dockerfile.public-preview` and includes Chromium. Do no
 
 Pages, `robots.txt` and `sitemap.xml` carry the site's absolute address (canonical links, Open Graph cards, sitemap entries). The server writes it in at request time: the host the request reached by default, or `W2L_PUBLIC_ORIGIN` when set.
 
-Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's free plan cannot rewrite the `Host` header, so the domain is served by the Worker in `cloudflare/public-preview-proxy/`. It forwards every request to the `run.app` URL and names the domain in `X-Forwarded-Host`; the server believes that header only when it equals `W2L_PUBLIC_ORIGIN`.
+Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's free plan cannot rewrite the `Host` header, so the domain is served by the Worker in `cloudflare/public-preview-proxy/`. It answers on `octocrawl.dev` (and redirects `octocrawl.app` and `www.octocrawl.dev` there), forwards every request to the `run.app` URL, names the domain in `X-Forwarded-Host` and the visitor's address in `CF-Connecting-IP`, and proves it is the Worker with a secret header shared with the service (`PROXY_SECRET` in the Worker, `W2L_PROXY_SECRET` in Cloud Run). Without that proof the service drops both headers, so a client calling `run.app` directly can neither name the domain nor choose the address its quota is counted under. Behind the Worker, the last `X-Forwarded-For` entry is Cloudflare's own address, which is why the service needs `CF-Connecting-IP` at all.
 
-1. Register the domain with Cloudflare Registrar (or add an existing one to Cloudflare as a zone).
-2. In `cloudflare/public-preview-proxy/wrangler.toml`, replace `YOUR_DOMAIN`, then run `npx wrangler login` and `npx wrangler deploy` from that directory. The Worker is attached to the domain as a custom domain; no DNS record for Cloud Run is needed.
-3. Deploy the service with `--update-env-vars=W2L_PUBLIC_ORIGIN=https://DOMAIN`. Until then the domain works but pages name the `run.app` host.
-4. Check `https://DOMAIN/`, `/robots.txt`, `/sitemap.xml`, `/pricing` (404) and a real extraction on the domain, and that `https://…run.app/` now answers 301 to the domain.
+1. Create the shared secret once, keep it under `.w2l/`, and store it in both places:
 
-With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
+   ```sh
+   openssl rand -hex 32 > .w2l/public-preview/proxy-secret && chmod 600 .w2l/public-preview/proxy-secret
+   gcloud secrets create w2l-proxy-secret --replication-policy=automatic --data-file=.w2l/public-preview/proxy-secret --project="$W2L_PROJECT_ID"
+   gcloud secrets add-iam-policy-binding w2l-proxy-secret --member="serviceAccount:${W2L_RUNTIME_SA}" --role='roles/secretmanager.secretAccessor' --project="$W2L_PROJECT_ID"
+   (cd cloudflare/public-preview-proxy && npx wrangler secret put PROXY_SECRET < ../../.w2l/public-preview/proxy-secret)
+   ```
+
+2. From `cloudflare/public-preview-proxy/`, after `npx wrangler login`, run `npx wrangler deploy`. The Worker attaches itself to the three hosts as custom domains; no DNS record for Cloud Run is needed. Pages load on the domain from here, but a preview there is refused until step 3, because the service does not yet know the domain.
+3. Update the service: `--update-env-vars=W2L_PUBLIC_ORIGIN=https://octocrawl.dev --update-secrets=W2L_PROXY_SECRET=w2l-proxy-secret:latest`, then move traffic as for any deploy.
+4. Check `https://octocrawl.dev/`, `/robots.txt`, `/sitemap.xml`, `/pricing` (404), a real extraction on the domain and `GET /api/quota` there, and that `https://octocrawl.app/` and `https://…run.app/` answer 301 to the domain.
+
+With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks, the holdout scripts and the daily Amazon.sg check keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
 ### Refresh the Amazon.sg state
 

@@ -1,10 +1,16 @@
-# Deploy with `npx wrangler deploy` from this directory after replacing YOUR_DOMAIN. The Worker answers on the domain
-# itself (a Workers custom domain), so no DNS record for Cloud Run is needed. See docs/public-preview.md.
+# Deploy with `npx wrangler deploy` from this directory, after `npx wrangler secret put PROXY_SECRET` with the same value
+# as the service's W2L_PROXY_SECRET. The Worker answers on each domain itself (Workers custom domains), so no DNS record
+# for Cloud Run is needed. See docs/public-preview.md.
 name = "w2l-public-preview-proxy"
 main = "worker.js"
 compatibility_date = "2026-09-30"
 workers_dev = false
-routes = [{ pattern = "YOUR_DOMAIN", custom_domain = true }]
+routes = [
+  { pattern = "octocrawl.dev", custom_domain = true },
+  { pattern = "www.octocrawl.dev", custom_domain = true },
+  { pattern = "octocrawl.app", custom_domain = true },
+]
 
 [vars]
 ORIGIN_URL = "https://w2l-public-preview-307354954747.asia-southeast1.run.app"
+PRIMARY_HOST = "octocrawl.dev"

@@ -95,6 +95,32 @@ describe('public site routes', () => {
     expect((await preview({})).status).toBe(403)
   })
 
+  it('with a proxy secret, believes the Worker\'s domain and visitor address only when it proves itself', async () => {
+    const keys: string[] = []
+    const secret = 'p'.repeat(32)
+    const { url } = await site({
+      publicOrigin: 'https://w2l.example', proxySecret: secret,
+      quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 } }, consume: async () => 'ok' },
+    })
+    const proven = { 'x-forwarded-host': 'w2l.example', 'cf-connecting-ip': '203.0.113.7', 'x-w2l-proxy-secret': secret }
+    expect((await fetch(url, { headers: proven, redirect: 'manual' })).status).toBe(200)
+    await fetch(`${url}/api/quota`, { headers: proven })
+    // A direct caller cannot name the domain, or pick the address it is counted under.
+    const forged = { 'x-forwarded-host': 'w2l.example', 'cf-connecting-ip': '198.51.100.9', 'x-w2l-proxy-secret': 'q'.repeat(32) }
+    expect((await fetch(url, { headers: forged, redirect: 'manual' })).status).toBe(301)
+    await fetch(`${url}/api/quota`, { headers: forged })
+    await fetch(`${url}/api/quota`, { headers: { 'cf-connecting-ip': '198.51.100.9' } })
+    expect(keys[0]).toBe('ip:203.0.113.7')
+    expect(keys.slice(1).some(key => key.includes('198.51.100.9'))).toBe(false)
+  })
+
+  it('never believes CF-Connecting-IP without a proxy secret', async () => {
+    const keys: string[] = []
+    const { url } = await site({ quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 } }, consume: async () => 'ok' } })
+    await fetch(`${url}/api/quota`, { headers: { 'cf-connecting-ip': '198.51.100.9' } })
+    expect(keys[0]).not.toContain('198.51.100.9')
+  })
+
   it('rejects a public origin with a path or plain http', () => {
     expect(parsePublicOrigin('https://w2l.example/')).toBe('https://w2l.example')
     expect(() => parsePublicOrigin('https://w2l.example/app')).toThrow()

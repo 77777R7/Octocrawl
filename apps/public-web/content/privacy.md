@@ -1,6 +1,6 @@
 # Privacy
 
-This page covers the public W2L page and its preview service. When you run W2L on your own computer, none of it applies: requests, results and logs stay on your machine.
+This page covers the public OctoCrawl page and its preview service. When you run OctoCrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
 Last updated 2 October 2026.
 
@@ -23,7 +23,7 @@ Events and outcomes carry a pseudonym that changes every UTC day, so a visit can
 
 ## The request log
 
-The service runs on Google Cloud Run in Singapore. Google Cloud records each HTTP request: time, method, path and query, status, response time, your IP address, user agent and referring page. Events, outcomes and this request log are kept for 30 days and then deleted.
+Requests to octocrawl.dev first pass through Cloudflare, which forwards them to the service and passes on your IP address so your daily count is yours; Cloudflare handles them under its own privacy policy. The service runs on Google Cloud Run in Singapore. Google Cloud records each HTTP request: time, method, path and query, status, response time, your IP address, user agent and referring page. Events, outcomes and this request log are kept for 30 days and then deleted.
 
 ## What is never recorded
 

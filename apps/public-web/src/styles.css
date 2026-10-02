@@ -72,7 +72,7 @@ a { color: inherit; }
 .brand-name { font: italic 400 31px/1 Georgia, "Times New Roman", serif; letter-spacing: -.055em; }
 .brand-dot { color: #ff8659; }
 .site-nav { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
-.site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; text-decoration: none; color: #eef6ff; }
+.site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; text-decoration: none; white-space: nowrap; color: #eef6ff; }
 .site-nav a:hover { color: #ffae86; }
 .site-nav a span { margin-left: 6px; }
 .github-link { display: inline-flex; align-items: center; justify-self: end; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-size: 13px; font-weight: 650; text-decoration: none; }
@@ -700,8 +700,8 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .site-header { grid-template-columns: auto 1fr auto; min-height: 72px; padding-inline: 10px; }
   .site-nav { justify-self: end; }
   .brand { gap: 2px; }
-  .brand-mark { width: 44px; height: 44px; }
-  .brand-name { font-size: 27px; }
+  .brand-mark { width: 38px; height: 38px; }
+  .brand-name { font-size: 23px; }
   .site-nav { gap: 0; }
   .site-nav a { padding: 0 8px; font-size: 12px; }
   .github-link { width: 44px; padding: 0; justify-content: center; }
@@ -782,6 +782,11 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .footer-cards { padding: 0 18px 32px; }
   .footer-card { padding: 0 18px; }
   .footer-col { padding: 8px 18px 28px; }
+}
+
+/* A phone too narrow for the name and both links: How it works stays at the hero's foot and in the footer. */
+@media (max-width: 420px) {
+  .site-nav .nav-how { display: none; }
 }
 
 /* The narrowest phones: slimmer tool buttons keep Get code on the first row beside Options. */
