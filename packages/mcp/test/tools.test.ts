@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { W2L } from '@w2l/sdk'
+import { SDK_ORIGIN, W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
-import { createMcpServer } from '../src/server.js'
+import { createMcpServer, mcpOrigin } from '../src/server.js'
 import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -55,7 +55,7 @@ describe('MCP tools', () => {
       'POST http://127.0.0.1:8787/v1/crawl/task-1/cancel',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/resume',
     ])
-    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', mode: 'standard', debug: false })
+    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', mode: 'standard', debug: false, origin: SDK_ORIGIN })
   })
 
   it('forwards custom formats and debug to REST', async () => {
@@ -101,7 +101,7 @@ describe('MCP tools', () => {
     }) as typeof fetch })
     const request = { url: 'https://example.com/', formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'] }
     await callTool(client, 'crawl', request)
-    expect(body).toEqual(request)
+    expect(body).toEqual({ ...request, origin: SDK_ORIGIN })
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const formats = (TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, { maxItems?: number }>).formats
       expect(formats).toBeDefined()
@@ -120,9 +120,9 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...options },
-      { url: 'https://example.com/', ...options },
-      { urls: ['https://example.com/a'], ...options },
+      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       expect(TOOLS.find(tool => tool.name === name)?.inputSchema.properties).toMatchObject({
@@ -145,9 +145,9 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...options },
-      { url: 'https://example.com/', ...options },
-      { urls: ['https://example.com/a'], ...options },
+      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
@@ -186,7 +186,7 @@ describe('MCP tools', () => {
       return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
     }) as typeof fetch })
     const options = { headers: { 'X-Test': 'w2l', 'Accept-Language': 'de' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
-    const sent = { ...options, headers: { 'x-test': 'w2l', 'accept-language': 'de' } }
+    const sent = { ...options, headers: { 'x-test': 'w2l', 'accept-language': 'de' }, origin: SDK_ORIGIN }
     await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
@@ -208,6 +208,49 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], headers: { Cookie: 'sid=1' } })).rejects.toThrow('headers.cookie is refused')
     await expect(callTool(client, 'crawl', { url: 'https://example.com/', mode: 'research', mobile: true })).rejects.toThrow('mobile is not available in research mode')
     expect(bodies).toHaveLength(3)
+  })
+
+  it('records a call under the client\'s name and version, forwards integration, refuses origin, and reads a scrape record', async () => {
+    const calls: Array<{ line: string; body: Record<string, unknown> | null }> = []
+    const record = { scrapeId: '7c1d4d2c-0f3e-4a7b-9b1a-2f0d4d1b5a6e', status: 'success', origin: 'mcp-parity-check@1', integration: 'parity-check' }
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      calls.push({ line: `${init?.method ?? 'GET'} ${String(input)}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if (String(input).endsWith(`/v1/scrapes/${record.scrapeId}`)) return json(record)
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success', metadata: { scrapeId: record.scrapeId } }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const mcp = new Client({ name: 'parity-check', version: '1' })
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
+    try {
+      await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', integration: 'parity-check' } })
+      await mcp.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxPages: 1 } })
+      await mcp.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/a'], integration: 'parity-check' } })
+      await mcp.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } })
+      expect(calls.map((call) => [call.body?.origin, call.body?.integration])).toEqual([['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined], ['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined]])
+      expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }] })
+      expect(calls.at(-1)?.line).toBe(`GET http://127.0.0.1:8787/v1/scrapes/${record.scrapeId}`)
+      // origin is the server's to record: a caller naming one is refused before any API call.
+      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
+      await expect(mcp.callTool({ name: 'get_scrape', arguments: {} })).rejects.toThrow('id is required')
+      expect(calls).toHaveLength(5)
+    } finally {
+      await mcp.close()
+    }
+    expect(mcpOrigin(undefined)).toBe('mcp@0.3.0')
+    expect(mcpOrigin({ name: 'Claude Desktop', version: '1.0 beta' })).toBe('mcp-Claude_Desktop@1.0_beta')
+    expect(mcpOrigin({ name: 'x'.repeat(200), version: '1' })).toHaveLength(100)
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(properties.integration).toMatchObject({ type: 'string', minLength: 1, maxLength: 100 })
+      expect(properties).not.toHaveProperty('origin')
+    }
+  })
+
+  it('turns the API\'s 429 into a plain error naming the wait', async () => {
+    const body = { error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: 7, agentHints: ['wait 7 s before the next request'] }
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => new Response(JSON.stringify(body), { status: 429, headers: { 'retry-after': '7' } })) as typeof fetch })
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/' })).rejects.toThrow('rate limited: retry after 7 s (rate_limited)')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'] })).rejects.toThrow('rate limited: retry after 7 s (rate_limited)')
   })
 
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {

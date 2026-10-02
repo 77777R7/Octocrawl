@@ -3,12 +3,12 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError, type PageOptions } from '@w2l/contracts'
-import type { RequestOptions, W2L } from '@w2l/sdk'
+import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -27,6 +27,10 @@ const PAGE_OPTION_PROPERTIES = {
   skipTlsVerification: { type: 'boolean', description: 'Local only: load a site with an invalid or self-signed certificate; recorded in the trace and a tls_unverified warning; refused in hosted mode.' },
   fastMode: { type: 'boolean', description: 'http lane only, no browser escalation: a page that needs script execution returns the http lane\'s verdict (a shell is failed/empty_unverified, never rendered). Default false.' },
   blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
+} as const
+/** The caller's own label for its integration; `origin` is not a tool option: the server records the client's name and version. */
+const INTEGRATION_PROPERTY = {
+  integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
 } as const
 /** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content. */
 const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung.'
@@ -74,7 +78,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden, or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better.',
+    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden, or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait). metadata.scrapeId names the call\'s record for get_scrape.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,10 +110,16 @@ export const TOOLS = [
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
         ...PAGE_OPTION_PROPERTIES,
         robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
+        ...INTEGRATION_PROPERTY,
       },
       required: ['url'],
       additionalProperties: false,
     },
+  },
+  {
+    name: 'get_scrape',
+    description: 'Read the record of one scrape call by the scrapeId its response carried (metadata.scrapeId): the request (header values replaced by their names), who made it (origin, integration), the verdict, the lanes tried, the metadata, the snapshot, the usage, the warnings and the hints. No page body. Records live under the server\'s task root without retention.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'metadata.scrapeId of a scrape response' } }, required: ['id'], additionalProperties: false },
   },
   {
     name: 'crawl',
@@ -131,6 +141,7 @@ export const TOOLS = [
         includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a discovered link must match; the start URL is always fetched.' },
         excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that skip a discovered link; they win over includePaths.' },
         ...PAGE_OPTION_PROPERTIES,
+        ...INTEGRATION_PROPERTY,
       },
       required: ['url'],
       additionalProperties: false,
@@ -218,6 +229,7 @@ export const TOOLS = [
           description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
           items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
         },
+        ...INTEGRATION_PROPERTY,
       },
       required: ['urls'], additionalProperties: false,
     },
@@ -230,8 +242,26 @@ export const TOOLS = [
   ...MONITOR_TOOLS,
 ] as const
 
-/** `request.signal` is the MCP call's: every API request the tool makes, and a wait, stop when the client cancels the call. */
+/**
+ * `request.signal` is the MCP call's: every API request the tool makes, and a
+ * wait, stop when the client cancels the call. `request.origin` is what the
+ * server records the call under. A caller the API rate-limits (HTTP 429)
+ * hears how long to wait, not the raw response.
+ */
 export async function callTool(client: W2L, name: string, args: unknown, request: RequestOptions = {}): Promise<unknown> {
+  try {
+    return await dispatchTool(client, name, args, request)
+  } catch (error) {
+    if (error instanceof W2LError && error.code === RATE_LIMITED_CODE) {
+      const body = error.body as { retryAfterSeconds?: unknown } | null
+      const seconds = typeof body?.retryAfterSeconds === 'number' ? body.retryAfterSeconds : Math.max(1, Math.ceil((error.retryAfterMs ?? 1000) / 1000))
+      throw new Error(`rate limited: retry after ${seconds} s (${RATE_LIMITED_CODE})`, { cause: error })
+    }
+    throw error
+  }
+}
+
+async function dispatchTool(client: W2L, name: string, args: unknown, request: RequestOptions): Promise<unknown> {
   if (name === 'scrape_product') {
     const input=readRecord(args)
     if (Object.keys(input).some(key=>!['url','debug'].includes(key)) || (input.debug !== undefined && typeof input.debug !== 'boolean')) throw new RequestError('invalid scrape_product options')
@@ -245,7 +275,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
     return client.batchScrape(urls,{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],includeLinks:false},request)
   }
   if (name === 'scrape') {
-    const req = parseScrapeRequest(args)
+    const req = parseScrapeRequest(withoutOrigin(args))
     return client.scrape(req.url, {
       mode: req.mode,
       allowlistedDomains: req.allowlistedDomains,
@@ -260,10 +290,15 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       excludeTags: req.excludeTags,
       ...executionOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
+      ...integrationOf(req),
     }, request)
   }
+  if (name === 'get_scrape') {
+    const rec = readRecord(args)
+    return client.getScrape(required(rec.id, 'id'), request)
+  }
   if (name === 'crawl') {
-    const req = parseCrawlStartRequest(args)
+    const req = parseCrawlStartRequest(withoutOrigin(args))
     return client.crawl(req.url, {
       mode: req.mode,
       maxPages: req.maxPages,
@@ -281,6 +316,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       includeTags: req.includeTags,
       excludeTags: req.excludeTags,
       ...executionOptions(req),
+      ...integrationOf(req),
     }, request)
   }
   if (name === 'get_crawl') {
@@ -300,8 +336,8 @@ export async function callTool(client: W2L, name: string, args: unknown, request
     return name === 'cancel_crawl' ? client.cancelCrawl(id, request) : client.resumeCrawl(id, request)
   }
   if (name === 'batch_scrape') {
-    const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
+    const req = parseBatchStartRequest(withoutOrigin(args))
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)
@@ -326,6 +362,19 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if ((TOOL_NAMES as readonly string[]).includes(name)) return callMonitorTool(client,name,readRecord(args),request)
   throw new RequestError(`unknown tool: ${name}`)
+}
+
+/** `origin` is the server's to record, from the client's name and version: a tool call that names one is refused before any API call. */
+function withoutOrigin(args: unknown): unknown {
+  if (args !== null && typeof args === 'object' && !Array.isArray(args) && (args as Record<string, unknown>).origin !== undefined) {
+    throw new RequestError('unsupported parameter: origin (the MCP server records the client\'s name and version; integration is yours to set)', 'unsupported_parameter', { parameters: ['origin'] })
+  }
+  return args
+}
+
+/** The caller's `integration`, when set. */
+function integrationOf(req: RequestAttribution): Pick<RequestAttribution, 'integration'> {
+  return req.integration === undefined ? {} : { integration: req.integration }
 }
 
 /** The execution options of a parsed request, those that were set: headers, mobile, skipTlsVerification, fastMode and blockAds. */

@@ -17,8 +17,22 @@ export interface McpServerOptions {
   calls?: PostCalls
 }
 
+/** This server's own version: the `origin` of a call whose client declared no name and version. */
+const MCP_VERSION = '0.3.0'
+
+/**
+ * The `origin` W2L records for this client's calls: `mcp-<client name>@<client
+ * version>` from the client's `initialize`, with anything that is not
+ * printable ASCII without spaces written as `_` and cut to the 100 characters
+ * the API takes; `mcp@<version>` when the client declared none.
+ */
+export function mcpOrigin(client: { name: string; version: string } | undefined): string {
+  if (client === undefined) return `mcp@${MCP_VERSION}`
+  return `mcp-${client.name}@${client.version}`.replace(/[^\x21-\x7e]/g, '_').slice(0, 100)
+}
+
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
-  const server = new Server({ name: 'w2l', version: '0.3.0' }, { capabilities: { tools: {} } })
+  const server = new Server({ name: 'w2l', version: MCP_VERSION }, { capabilities: { tools: {} } })
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name)) }))
   const calls = options.calls
@@ -35,7 +49,8 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
       const signal = call === undefined ? extra.signal : AbortSignal.any([extra.signal, call.signal])
       let result: unknown
-      try { result = await callTool(client, request.params.name, args, { signal }) }
+      // Every call is recorded under this client's name and version; the tools take no origin of their own.
+      try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(server.getClientVersion()) }) }
       catch (error) { throw call?.signal.aborted ? requestCancelled() : withErrorCode(error) }
       if (call?.signal.aborted) throw requestCancelled()
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
