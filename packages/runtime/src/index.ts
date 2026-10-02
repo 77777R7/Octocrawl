@@ -20,6 +20,8 @@ export { initializeFirecrawlMonitor, runFirecrawlMonitor } from './monitorRunner
 export { initializeMonitor, runConfiguredMonitor } from './monitorRunner.js'
 export { assessConfiguredDocument } from './configuredAssessment.js'
 export { RecipeStore } from './recipeStore.js'
+export { IDEMPOTENCY_FILENAME, IdempotencyStore, requestFingerprint } from './idempotencyStore.js'
+export type { IdempotencyClaim, IdempotencyStoreOptions } from './idempotencyStore.js'
 
 export * from './webhookInbox.js'
 export { toEvidenceRecord } from './evidenceRecord.js'

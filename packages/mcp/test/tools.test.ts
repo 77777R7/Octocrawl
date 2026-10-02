@@ -8,7 +8,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -375,6 +375,60 @@ describe('MCP tools', () => {
       'GET http://127.0.0.1:8787/v1/batches/batch-1/items?limit=1',
       'GET http://127.0.0.1:8787/v1/batches/batch-1',
     ])
+  })
+
+  it('declares maxConcurrency and ignoreInvalidURLs on batch_scrape, forwards them with the urls as sent, and reads a batch\'s errors', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      const url = String(input)
+      calls.push({ line: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if (url.endsWith('/v1/batches')) return json({ taskId: 'batch-1', invalidURLs: ['not a url'] }, 202)
+      return json({ errors: [{ id: 's1', timestamp: 't', url: 'https://example.com/b', status: 'failed', code: 'http_error', error: 'failed: http_error (HTTP 404)', httpStatus: 404 }], robotsBlocked: [], nextCursor: null, hasMore: false })
+    }) as typeof fetch })
+    // The server's list is authoritative: the entries go as the caller sent them, the API reports the ones it skipped.
+    expect(await callTool(client, 'batch_scrape', { urls: ['https://example.com/a', 'not a url'], ignoreInvalidURLs: true, maxConcurrency: 2 })).toEqual({ taskId: 'batch-1', invalidURLs: ['not a url'] })
+    expect(calls[0]?.body).toEqual({ urls: ['https://example.com/a', 'not a url'], ignoreInvalidURLs: true, maxConcurrency: 2, origin: SDK_ORIGIN })
+    expect((await callTool(client, 'get_batch_errors', { id: 'batch-1', limit: 5 }) as { errors: unknown[] }).errors).toHaveLength(1)
+    expect(calls[1]?.line).toBe('GET http://127.0.0.1:8787/v1/batches/batch-1/errors?limit=5')
+    const batch = TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>
+    expect(JSON.stringify(batch)).toContain('"maxConcurrency"')
+    expect(batch.maxConcurrency).toMatchObject({ type: 'integer', minimum: 1, maximum: 4 })
+    expect(batch.ignoreInvalidURLs).toMatchObject({ type: 'boolean' })
+    expect(TOOLS.find((tool) => tool.name === 'get_batch_errors')?.inputSchema).toMatchObject({ properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'] })
+    // Refused before any call, by the contract's own messages.
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], maxConcurrency: 5 })).rejects.toThrow('maxConcurrency must be an integer between 1 and 4')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/', 'not a url'] })).rejects.toThrow('urls[1] must be http(s)')
+    await expect(callTool(client, 'get_batch_errors', { id: 'batch-1', limit: 1001 })).rejects.toThrow('limit must be an integer between 1 and 1000')
+    await expect(callTool(client, 'get_batch_errors', {})).rejects.toThrow('id is required')
+    expect(calls).toHaveLength(2)
+  })
+
+  it('declares and forwards idempotencyKey on crawl and batch_scrape, and appendToId on batch_scrape', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      const url = String(input)
+      calls.push({ line: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return json(url.endsWith('/v1/crawl') ? { taskId: 'crawl-1', replayed: true } : { taskId: 'batch-1', requested: 7, appended: 2 }, 202)
+    }) as typeof fetch })
+    expect(await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], idempotencyKey: 'nightly-1' })).toEqual({ taskId: 'batch-1', requested: 7, appended: 2 })
+    expect(calls[0]?.body).toEqual({ urls: ['https://example.com/a'], idempotencyKey: 'nightly-1', origin: SDK_ORIGIN })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true })
+    expect(calls[1]?.body).toEqual({ urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true, origin: SDK_ORIGIN })
+    expect(await callTool(client, 'crawl', { url: 'https://example.com/', idempotencyKey: 'nightly-2' })).toEqual({ taskId: 'crawl-1', replayed: true })
+    expect(calls[2]?.body).toMatchObject({ url: 'https://example.com/', idempotencyKey: 'nightly-2', origin: SDK_ORIGIN })
+    const key = { type: 'string', minLength: 1, maxLength: 200 }
+    const batch = TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>
+    expect(batch.idempotencyKey).toMatchObject(key)
+    expect(batch.appendToId).toMatchObject(key)
+    expect((TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>).idempotencyKey).toMatchObject(key)
+    const scrape = TOOLS.find((tool) => tool.name === 'scrape')?.inputSchema.properties as Record<string, unknown>
+    expect(scrape).not.toHaveProperty('idempotencyKey')
+    expect(scrape).not.toHaveProperty('appendToId')
+    // Refused before any call, by the contract's own messages.
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], idempotencyKey: '' })).rejects.toThrow('idempotencyKey must be a string of 1 to 200 characters')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], appendToId: 'batch-1', formats: ['markdown'] })).rejects.toThrow('appendToId keeps the job\'s options; formats cannot be changed')
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', appendToId: 'batch-1' })).rejects.toThrow('unsupported parameter: appendToId')
+    expect(calls).toHaveLength(3)
   })
 
   it('bounds wait_batch and returns current state when its wait expires', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -159,8 +159,68 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     for (const maxConcurrency of [0, -1, 1.5, '2', true]) expect(() => parseCrawlStartRequest({ url, maxConcurrency })).toThrow('maxConcurrency must be an integer >= 1')
     expect(() => parseScrapeRequest({ url, sitemap: 'include' })).toThrow('unsupported parameter: sitemap')
     expect(() => parseBatchStartRequest({ urls: [url], sitemap: 'skip' })).toThrow('unsupported parameter: sitemap')
-    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: 1 })).toThrow('unsupported parameter: maxConcurrency')
+    // A batch has a cap of its own, read by its own rule (below): the crawl's null is not one of its values.
+    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: null })).toThrow('maxConcurrency must be an integer between 1 and 4')
     expect(DEFAULT_CRAWL_SPEC).toMatchObject({ sitemap: 'include', maxConcurrency: null })
+  })
+
+  it('takes a batch\'s maxConcurrency from 1 to 4 and ignoreInvalidURLs, and names the entry a refused URL sits at', () => {
+    const url = 'https://example.com/'
+    for (const maxConcurrency of [1, 2, 3, 4]) expect(parseBatchStartRequest({ urls: [url], maxConcurrency })).toMatchObject({ maxConcurrency })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('maxConcurrency')
+    for (const maxConcurrency of [0, 5, 2.5, '2', true]) expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency })).toThrow('maxConcurrency must be an integer between 1 and 4')
+    expect(() => parseCrawlStartRequest({ url, appendToId: 'b1' })).toThrow('unsupported parameter: appendToId')
+    const mixed = ['https://example.com', 'not a url', 'ftp://x']
+    expect(parseBatchStartRequest({ urls: mixed, ignoreInvalidURLs: true })).toMatchObject({ urls: ['https://example.com'], ignoreInvalidURLs: true, invalidURLs: ['not a url', 'ftp://x'] })
+    expect(parseBatchStartRequest({ urls: [url], ignoreInvalidURLs: true })).toMatchObject({ invalidURLs: [] })
+    expect(parseBatchStartRequest({ urls: [url], ignoreInvalidURLs: false })).not.toHaveProperty('invalidURLs')
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('invalidURLs')
+    expect(() => parseBatchStartRequest({ urls: mixed })).toThrow('urls[1] must be http(s)')
+    expect(() => parseBatchStartRequest({ urls: [url, ''] })).toThrow('urls[1] is required')
+    expect(() => parseBatchStartRequest({ urls: ['not a url', 'ftp://x'], ignoreInvalidURLs: true })).toThrow('urls must contain at least one valid URL')
+    expect(() => parseBatchStartRequest({ urls: [url], ignoreInvalidURLs: 'yes' })).toThrow('ignoreInvalidURLs must be a boolean')
+    // The option skips invalid URLs, not invalid JSON; a duplicate is not an invalid URL; the wire type has no invalidURLs.
+    expect(() => parseBatchStartRequest({ urls: [42], ignoreInvalidURLs: true })).toThrow('urls[0] must be a string')
+    expect(() => parseBatchStartRequest({ urls: [url, url, 'ftp://x'], ignoreInvalidURLs: true })).toThrow('urls must be unique')
+    expect(() => parseBatchStartRequest({ urls: [url], invalidURLs: [] })).toThrow('unsupported parameter: invalidURLs')
+    // An override binds to the valid list.
+    expect(() => parseBatchStartRequest({ urls: mixed, ignoreInvalidURLs: true, robotsOverrides: [{ url: 'ftp://x', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    // The scrape and crawl messages keep their field name.
+    expect(() => parseScrapeRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
+    expect(() => parseCrawlStartRequest({ url: '' })).toThrow('url is required')
+    // The errors route's query: a cursor and a limit of 1 to 1000.
+    expect(parseBatchErrorsQuery({})).toEqual({})
+    expect(parseBatchErrorsQuery({ cursor: 'c1', limit: '1000' })).toEqual({ cursor: 'c1', limit: 1000 })
+    for (const limit of ['0', '1001', '2.5', 'ten']) expect(() => parseBatchErrorsQuery({ limit })).toThrow('limit must be an integer between 1 and 1000')
+    expect(() => parseBatchErrorsQuery({ cursor: '' })).toThrow('cursor must not be empty')
+  })
+
+  it('takes an idempotency key on batch and crawl, and appendToId with only the entries and what binds to them', () => {
+    const url = 'https://example.com/'
+    expect(parseBatchStartRequest({ urls: [url], idempotencyKey: 'nightly-2026-10-02' })).toMatchObject({ idempotencyKey: 'nightly-2026-10-02' })
+    expect(parseCrawlStartRequest({ url, idempotencyKey: 'k'.repeat(200) })).toMatchObject({ idempotencyKey: 'k'.repeat(200) })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('idempotencyKey')
+    expect(parseCrawlStartRequest({ url })).not.toHaveProperty('idempotencyKey')
+    for (const idempotencyKey of ['', 'k'.repeat(201), 'a\nb', 'a\u0000b', 'a\u007f', 7, null, true]) {
+      expect(() => parseBatchStartRequest({ urls: [url], idempotencyKey }), JSON.stringify(idempotencyKey)).toThrow('idempotencyKey must be a string of 1 to 200 characters')
+      expect(() => parseCrawlStartRequest({ url, idempotencyKey }), JSON.stringify(idempotencyKey)).toThrow('idempotencyKey must be a string of 1 to 200 characters')
+    }
+    // A scrape is answered in the same call: it takes no key.
+    expect(() => parseScrapeRequest({ url, idempotencyKey: 'k' })).toThrow('unsupported parameter: idempotencyKey')
+    // An append carries the entries, what binds to them (an override, the skip, a key) and the labels.
+    const append = parseBatchStartRequest({ appendToId: 'batch-1', urls: [url, 'not a url'], ignoreInvalidURLs: true, idempotencyKey: 'k', robotsOverrides: [{ url, reason: 'r' }], integration: 'nightly' })
+    expect(append).toMatchObject({ appendToId: 'batch-1', urls: [url], invalidURLs: ['not a url'], idempotencyKey: 'k', robotsOverrides: [{ url, reason: 'r' }], integration: 'nightly' })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('appendToId')
+    // The job's options stay as they were: each is refused by name, the page options included.
+    for (const option of [{ formats: ['markdown'] }, { mode: 'standard' }, { includeLinks: true }, { maxConcurrency: 2 }, { onlyMainContent: false }, { timeout: 5_000 }, { headers: { Referer: 'https://example.com/' } }]) {
+      const [key] = Object.keys(option)
+      expect(() => parseBatchStartRequest({ appendToId: 'batch-1', urls: [url], ...option })).toThrow(`appendToId keeps the job's options; ${key} cannot be changed`)
+    }
+    for (const appendToId of ['', 7, null, 'x'.repeat(201)]) expect(() => parseBatchStartRequest({ appendToId, urls: [url] }), JSON.stringify(appendToId)).toThrow('appendToId must be a non-empty string')
+    // The entries of an append are checked as a new batch's are.
+    expect(() => parseBatchStartRequest({ appendToId: 'batch-1', urls: [] })).toThrow('urls must contain 1 to 1000 URLs')
+    expect(() => parseBatchStartRequest({ appendToId: 'batch-1', urls: [url, 'ftp://x'] })).toThrow('urls[1] must be http(s)')
+    expect(() => parseBatchStartRequest({ appendToId: 'batch-1', urls: [url, url] })).toThrow('urls must be unique')
   })
 
   it('accepts the images format, one attributes entry within its bounds and removeBase64Images on scrape, batch and crawl, each refusal by name', () => {

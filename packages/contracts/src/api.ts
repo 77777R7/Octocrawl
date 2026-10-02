@@ -269,11 +269,24 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
    * the worker count.
    */
   maxConcurrency?: number | null
+  /**
+   * A client-chosen key, 1 to 200 characters without control characters,
+   * that makes a retried start return the first start's answer instead of a
+   * second job (also the `x-idempotency-key` header on REST). The same key
+   * with a different request is HTTP 409 `conflict`. Keys live 24 hours.
+   */
+  idempotencyKey?: string
 }
 
 export interface CrawlAccepted {
   taskId: string
+  /** Present and true when `idempotencyKey` matched an earlier start and this is its stored answer; nothing was started. */
+  replayed?: boolean
 }
+
+/** The request headers REST reads an idempotency key from, merged into the body as `idempotencyKey` before parsing. */
+export const IDEMPOTENCY_KEY_HEADERS = ['x-idempotency-key', 'idempotency-key'] as const
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 200
 
 /** The options a running crawl was started with, as `GET /v1/crawl/active` reports them: its task's stored options plus its page budget. */
 export interface ActiveCrawlOptions {
@@ -320,13 +333,114 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
   includeLinks?: boolean
   /** Recorded robots overrides, each for one URL of `urls`. A hosted server refuses the field (`unsupported_parameter`). */
   robotsOverrides?: readonly RobotsUrlOverride[]
+  /**
+   * Pages of this batch in flight at once, at most: an integer from 1 to 4.
+   * It only lowers the service's worker count (4 locally, 2 on the hosted
+   * MCP host); the per-host ceiling and minimum interval still apply.
+   * Omitted takes the worker count. Stored with the task, so a resumed batch
+   * runs under the same cap.
+   */
+  maxConcurrency?: number
+  /**
+   * Start the batch with the entries of `urls` that are http(s) URLs and
+   * report the rest as `invalidURLs` instead of refusing the request. A
+   * non-string entry is still refused (`urls[i] must be a string`), and so
+   * is a duplicate: neither is an invalid URL. Default false.
+   */
+  ignoreInvalidURLs?: boolean
+  /**
+   * A client-chosen key, 1 to 200 characters without control characters,
+   * that makes a retried submission return the first one's answer (with
+   * `replayed: true`) instead of a second job; also the `x-idempotency-key`
+   * header on REST. The same key with a different request is HTTP 409
+   * `conflict`. Keys live 24 hours, per task root.
+   */
+  idempotencyKey?: string
+  /**
+   * The id of an existing batch to add `urls` to instead of starting a new
+   * job. The body may then carry only `urls`, `ignoreInvalidURLs`,
+   * `idempotencyKey`, `robotsOverrides` and the attribution labels: the job's
+   * `mode`, `formats`, `includeLinks`, `maxConcurrency` and page options
+   * stay as they were (`appendToId keeps the job's options; <key> cannot be
+   * changed`). The appended URLs go to the end of the job's list, in order.
+   */
+  appendToId?: string
+}
+
+/** What the parser hands the engine: the request plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none). */
+export type ParsedBatchStartRequest = BatchStartRequest & { invalidURLs?: readonly string[] }
+
+/**
+ * `POST /v1/batches` 202: the task id and, when `ignoreInvalidURLs` was on,
+ * the entries skipped, possibly none. An append answers with the job's id,
+ * `requested` (the job's URLs after the append) and `appended` (the URLs this
+ * request added); a replayed submission carries `replayed: true`.
+ */
+export interface BatchAccepted extends CrawlAccepted {
+  invalidURLs?: string[]
+  requested?: number
+  appended?: number
 }
 
 export interface BatchStatusResponse extends CrawlReport {
   requested: number
   completed: number
   remaining: number
+  /** The cap in force: the request's `maxConcurrency` or the service's worker count, whichever is lower. */
+  maxConcurrency: number
+  /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
+  invalidURLs?: readonly string[]
 }
+
+/** The step statuses `GET /v1/batches/:id/errors` lists: the same ones `/v1/crawl/:id/errors` does. */
+export const BATCH_ERROR_STATUSES = ['failed', 'blocked', 'cancelled', 'budget_exceeded'] as const
+export type BatchErrorStatus = (typeof BATCH_ERROR_STATUSES)[number]
+
+/**
+ * One item of a batch that did not succeed, under Firecrawl's names (`id`,
+ * `timestamp`, `url`, `code`, `error`) with W2L's status vocabulary beside
+ * them: `status` and `code` (the `failureReason`, `blockReason` or
+ * `budgetExceeded` the status carries, else the status itself) are the same
+ * values the item on `/items` carries.
+ */
+export interface BatchErrorItem {
+  /** The item's step id, as on `GET /v1/batches/:id/items`. */
+  id: string
+  /** When the item was recorded (its `createdAt`). */
+  timestamp: string
+  url: string
+  status: BatchErrorStatus
+  code: string
+  /**
+   * A sentence for a reader: the result's first warning when it has one,
+   * else `<status>: <code>`, with ` (HTTP <n>)` when the status is known and,
+   * for a robots.txt refusal, the rule that applied.
+   */
+  error: string
+  httpStatus: number | null
+}
+
+/** `GET /v1/batches/:id/errors`: the batch's errors across every attempt, one page at a time, and the URLs robots.txt refused (every attempt, not paginated). */
+export interface BatchErrorsResponse {
+  errors: BatchErrorItem[]
+  /**
+   * URLs of the batch whose result is `policy_denied` by a `robots_disallowed`
+   * trace event that no recorded override set aside. A governance or SSRF
+   * refusal is `policy_denied` too but is not robots.txt, and stays out of
+   * this list (it is still in `errors`).
+   */
+  robotsBlocked: string[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+/** The page of errors asked for: `limit` 1 to 1000 (default 1000: a batch has at most 1000 URLs and errors carry no bodies). */
+export interface BatchErrorsQuery {
+  cursor?: string
+  limit?: number
+}
+
+export const BATCH_ERRORS_MAX_LIMIT = 1000
 
 export type CrawlStatusResponse = CrawlReport
 export interface CrawlPageQuery {
@@ -450,8 +564,10 @@ const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'inc
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'appendToId', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+/** What a batch body may carry beside `appendToId`: the job's own options are not among them. */
+const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
 /**
@@ -504,17 +620,42 @@ function readRobotsOverrides(value: unknown, urls: readonly string[]): readonly 
   })
 }
 
-function readUrl(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0) throw new RequestError('url is required')
+/** An http(s) URL; `name` says which field the refusal is about (`url`, or a batch entry such as `urls[2]`). */
+function readUrl(value: unknown, name = 'url'): string {
+  if (typeof value !== 'string' || value.length === 0) throw new RequestError(`${name} is required`)
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new RequestError('url must be http(s)')
+      throw new RequestError(`${name} must be http(s)`)
     }
   } catch (err) {
     if (err instanceof RequestError) throw err
-    throw new RequestError('url must be http(s)')
+    throw new RequestError(`${name} must be http(s)`)
   }
+  return value
+}
+
+/** An idempotency key: 1 to 200 characters, none of them a control character (it is stored and compared, never sent to a site). */
+function readIdempotencyKey(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  // eslint-disable-next-line no-control-regex
+  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_IDEMPOTENCY_KEY_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new RequestError(`idempotencyKey must be a string of 1 to ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`)
+  }
+  return value
+}
+
+/** The id of the batch to append to: a non-empty string of at most 200 characters (the engine decides whether such a batch exists). */
+function readAppendToId(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length < 1 || value.length > 200) throw new RequestError('appendToId must be a non-empty string')
+  return value
+}
+
+/** A batch's `maxConcurrency`: an integer from 1 to 4; the engine lowers it to its worker count, never raises it. */
+function readMaxConcurrency(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 4) throw new RequestError(`${name} must be an integer between 1 and 4`)
   return value
 }
 
@@ -1077,6 +1218,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   const sitemap = readSitemapMode(rec.sitemap)
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
+  const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
@@ -1091,6 +1233,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     ...scope,
     ...(sitemap === undefined ? {} : { sitemap }),
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...page,
     ...readAttribution(rec),
   }
@@ -1098,27 +1241,72 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   return req
 }
 
-export function parseBatchStartRequest(body: unknown): BatchStartRequest {
+/**
+ * A batch entry that is not an http(s) URL is refused by its index
+ * (`urls[2] must be http(s)`), or with `ignoreInvalidURLs` collected into
+ * `invalidURLs` instead; an entry that is not a string is refused either
+ * way. The 1..1000 cap counts the submitted entries; `requested` later
+ * counts the valid ones. With `appendToId` the body may carry only the
+ * entries to add and what binds to them: an option of the job itself is
+ * refused by name (`appendToId keeps the job's options; formats cannot be
+ * changed`).
+ */
+export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const rec = asRecord(body)
   rejectUnknownKeys(rec, BATCH_KEYS)
+  const appendToId = readAppendToId(rec.appendToId)
+  if (appendToId !== undefined) {
+    const changed = BATCH_KEYS.find((key) => rec[key] !== undefined && !(BATCH_APPEND_KEYS as readonly string[]).includes(key))
+    if (changed !== undefined) throw new RequestError(`appendToId keeps the job's options; ${changed} cannot be changed`)
+  }
+  const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   if (!Array.isArray(rec.urls) || rec.urls.length < 1 || rec.urls.length > 1000) {
     throw new RequestError('urls must contain 1 to 1000 URLs')
   }
-  const urls = rec.urls.map(readUrl)
+  const ignoreInvalidURLs = readBoolean(rec.ignoreInvalidURLs, 'ignoreInvalidURLs')
+  const urls: string[] = []
+  const invalidURLs: string[] = []
+  rec.urls.forEach((entry: unknown, index: number) => {
+    const name = `urls[${index}]`
+    if (typeof entry !== 'string') throw new RequestError(`${name} must be a string`)
+    try {
+      urls.push(readUrl(entry, name))
+    } catch (error) {
+      if (ignoreInvalidURLs !== true || !(error instanceof RequestError)) throw error
+      invalidURLs.push(entry)
+    }
+  })
+  if (urls.length === 0) throw new RequestError('urls must contain at least one valid URL')
   if (new Set(urls.map(url => new URL(url).href)).size !== urls.length) throw new RequestError('urls must be unique')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
+  const maxConcurrency = readMaxConcurrency(rec.maxConcurrency, 'maxConcurrency')
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
-  const req: BatchStartRequest = {
+  const req: ParsedBatchStartRequest = {
     urls, mode, formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
     ...page,
     ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
+    ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+    ...(ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs }),
+    ...(ignoreInvalidURLs === true ? { invalidURLs } : {}),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(appendToId === undefined ? {} : { appendToId }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats)
   return req
+}
+
+/** `GET /v1/batches/:id/errors`: `cursor` and `limit` (1 to 1000) from the query string. */
+export function parseBatchErrorsQuery(query: Record<string, string | undefined>): BatchErrorsQuery {
+  const limit = query.limit === undefined ? undefined : Number(query.limit)
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > BATCH_ERRORS_MAX_LIMIT)) {
+    throw new RequestError(`limit must be an integer between 1 and ${BATCH_ERRORS_MAX_LIMIT}`)
+  }
+  if (query.cursor !== undefined && query.cursor.length === 0) throw new RequestError('cursor must not be empty')
+  return { ...(query.cursor === undefined ? {} : { cursor: query.cursor }), ...(limit === undefined ? {} : { limit }) }
 }
 
 export function parseCrawlPageQuery(query: Record<string, string | undefined>): CrawlPageQuery {

@@ -38,8 +38,14 @@ import {
   type CrawlPageList,
   type CrawlReport,
   type CrawlStartRequest,
-  type BatchStartRequest,
+  type BatchAccepted,
+  type BatchErrorItem,
+  type BatchErrorStatus,
+  type BatchErrorsQuery,
+  type BatchErrorsResponse,
   type BatchStatusResponse,
+  type ParsedBatchStartRequest,
+  BATCH_ERRORS_MAX_LIMIT,
   RequestError,
   type FetchResult,
   type NetworkPolicy,
@@ -73,7 +79,7 @@ import {
   warningOf,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor } from './hints.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -107,16 +113,46 @@ export class CrawlStateError extends Error {
   override readonly name = 'CrawlStateError'
 }
 
+/** The task a request names does not exist, or is not of the kind the request is about (HTTP 404 `not_found`). */
+export class TaskNotFoundError extends Error {
+  override readonly name = 'TaskNotFoundError'
+}
+
+/** The message of the 409 an idempotency key gets when it was first sent with another request. */
+const IDEMPOTENCY_CONFLICT = 'idempotency key was used for a different request'
+
+/** The idempotency verdict for one submission: a stored answer to replay, or a recorder for the answer this call gives. */
+interface Submission<T extends CrawlAccepted> {
+  replay?: T
+  record: (taskId: string, response: T) => void
+  forget: () => void
+}
+
 export interface ApiEngine {
   scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
+  /** Starts a crawl; with `idempotencyKey`, a retried start replays the first one's answer (`replayed: true`), and the key sent with another request is a CrawlStateError. */
   startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
   /** The crawls this process is running, oldest start first: those it started and those it resumed at startup; never a batch. */
   listActiveCrawls(): Promise<ActiveCrawlList>
-  startBatch(req: BatchStartRequest): Promise<CrawlAccepted>
+  /**
+   * Starts a batch, or with `appendToId` adds the URLs to that batch (a
+   * TaskNotFoundError for an id that is not a batch; a CrawlStateError when
+   * it is cancelled or failed; the answer then carries `requested` and
+   * `appended`). With `idempotencyKey`, a retried submission replays the first
+   * one's answer with `replayed: true` and starts nothing.
+   */
+  startBatch(req: ParsedBatchStartRequest): Promise<BatchAccepted>
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
+  /**
+   * The batch's failed, blocked, cancelled and budget-cut items across every
+   * attempt (an interrupted and resumed batch keeps its earlier failures), one
+   * page at a time, with the URLs robots.txt refused; null for an id that is
+   * not a batch.
+   */
+  getBatchErrors(taskId: string, query?: BatchErrorsQuery): Promise<BatchErrorsResponse | null>
   cancelBatch(taskId: string): Promise<BatchStatusResponse | null>
   getCrawl(taskId: string): Promise<CrawlReport | null>
   getCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null>
@@ -309,6 +345,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
   const inflight = new Map<string, Promise<void>>()
   let batchStartInProgress = false
+  // The keys of the submissions this task root has answered (`<taskRoot>/idempotency.sqlite`): a retried start replays its answer instead of starting a second job.
+  const idempotency = IdempotencyStore.open(taskRoot, { taskExists: (taskId) => existsSync(join(taskRoot, taskId, 'checkpoint.sqlite')) })
+  /**
+   * The idempotency verdict for a start or an append: the stored answer to
+   * replay (nothing is started), or a recorder for the answer this call will
+   * give; a key first sent with a different request is a 409 conflict. The
+   * answer is recorded before the task is created, with no await between the
+   * claim and the record, and forgotten when the creation fails.
+   */
+  function claimSubmission<T extends CrawlAccepted>(req: { idempotencyKey?: string }): Submission<T> {
+    const key = req.idempotencyKey
+    if (key === undefined) return { record: () => {}, forget: () => {} }
+    const fingerprint = requestFingerprint(req)
+    const claim = idempotency.claim<T>(key, fingerprint)
+    if (claim.kind === 'conflict') throw new CrawlStateError(IDEMPOTENCY_CONFLICT)
+    if (claim.kind === 'replay') return { replay: { ...claim.response, replayed: true }, record: () => {}, forget: () => {} }
+    return { record: (taskId, response) => idempotency.record(key, fingerprint, taskId, response), forget: () => idempotency.forget(key) }
+  }
   const activeScrapes = new Set<Promise<unknown>>()
   const crawlControllers = new Map<string, AbortController>()
   const runningCrawls = new Map<string, CrawlOrchestrator>()
@@ -515,7 +569,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       sitemap: req.sitemap,
       maxConcurrency: req.maxConcurrency,
     }).then(async () => {
-      inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
+      crawlControllers.delete(task.id); runningCrawls.delete(task.id)
+      // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
+      const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
+      if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
+      inflight.delete(task.id)
       await store.close()
     }).catch(async () => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
@@ -538,7 +596,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     void store.getTask(name).then(task => {
       const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
       if (unfinished && task.batch) {
-        launchTask(task, store, batchRunOptions(task.batch.urls, true))
+        launchTask(task, store, batchRunOptions(task.batch, true))
       } else if (unfinished && crawlOptionsStored(task)) {
         launchTask(task, store, crawlRunOptions(task, true))
       } else void store.close()
@@ -625,8 +683,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
         throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
       }
+      // A retried start is answered from the record before anything is created or fetched.
+      const submission = claimSubmission<CrawlAccepted>(req)
+      if (submission.replay !== undefined) return submission.replay
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
+      const accepted: CrawlAccepted = { taskId }
+      submission.record(taskId, accepted)
+      try {
       const taskDir = join(taskRoot, taskId)
       mkdirSync(taskDir, { recursive: true })
       const store = SqliteTaskStore.open(taskDir)
@@ -667,7 +731,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       await store.putTask(task)
       launchTask(task, store, crawlRunOptions(task, false))
-      return { taskId }
+      } catch (error) { submission.forget(); throw error }
+      return accepted
     },
 
     async listActiveCrawls() {
@@ -697,29 +762,42 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkHostedOptions(req)
       batchStartInProgress = true
       try {
+      const canonical = req.urls.map(url => canonicalizeUrl(url))
+      if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
+      // A retried submission is answered from the record before anything is counted, created or fetched; an append creates no task, and appendToBatch counts it against the batch limit only when it runs a completed batch again.
+      const submission = claimSubmission<BatchAccepted>(req)
+      if (submission.replay !== undefined) return submission.replay
+      if (req.appendToId !== undefined) return await appendToBatch(req, canonical as string[], submission)
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
         throw new RequestError('active batch limit reached')
       }
-      const canonical = req.urls.map(url => canonicalizeUrl(url))
-      if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
-      const store = SqliteTaskStore.open(taskDir)
       const now = new Date().toISOString()
       const urls = [...req.urls]
+      // The skipped entries stay on the record with the task and on the 202, so the refusal is visible later too.
+      const invalidURLs = req.invalidURLs === undefined ? undefined : [...req.invalidURLs]
+      const batch: NonNullable<Task['batch']> = {
+        urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
+        ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
+        ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
+        ...(invalidURLs === undefined ? {} : { invalidURLs }),
+      }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: {
-          urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
-          ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
-        },
+        batch,
         ...attributionOf(req),
         createdAt: now, updatedAt: now,
       }
-      await store.putTask(task)
-      launchTask(task, store, batchRunOptions(urls, false))
-      return { taskId }
+      const accepted: BatchAccepted = { taskId, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
+      submission.record(taskId, accepted)
+      try {
+        const store = SqliteTaskStore.open(taskDir)
+        await store.putTask(task)
+        launchTask(task, store, batchRunOptions(batch, false))
+      } catch (error) { submission.forget(); throw error }
+      return accepted
       } finally { batchStartInProgress = false }
     },
 
@@ -736,7 +814,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           : await crawlReportFromStore(store, taskId)
         if (!report) return null
         const completed = await store.countCompletedSteps(taskId)
-        return { ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed) }
+        return {
+          ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
+          // The cap in force: the batch's own, never above this service's worker count.
+          maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+          ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
+        }
       } finally { await store.close() }
     },
 
@@ -745,6 +828,26 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const page = await loadCrawlPageList(taskId, { ...query, limit: Math.min(50, query?.limit ?? 10) }, 'all', true)
       if (page === null || query?.debug === true) return page
       return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+    },
+
+    async getBatchErrors(taskId, query = {}) {
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+      try {
+        const task = await store.getTask(taskId)
+        if (!task?.batch) return null
+        // Every attempt's error steps, no attempt filter: a batch interrupted and resumed keeps its earlier failures on the record.
+        const page = await store.listStepsPage(taskId, { cursor: query.cursor, limit: query.limit ?? BATCH_ERRORS_MAX_LIMIT, kind: 'errors' })
+        // The robots.txt refusals are a projection of the same error steps, over the whole batch rather than the page asked for.
+        const robotsBlocked: string[] = []
+        for (let cursor: string | undefined; ;) {
+          const all = await store.listStepsPage(taskId, { cursor, limit: BATCH_ERRORS_MAX_LIMIT, kind: 'errors' })
+          for (const step of all.steps) if (step.result !== null && robotsRefusal(step.result) !== null) robotsBlocked.push(step.url)
+          if (!all.hasMore || all.nextCursor === null) break
+          cursor = all.nextCursor
+        }
+        return { errors: page.steps.map(batchErrorItem), robotsBlocked, nextCursor: page.nextCursor, hasMore: page.hasMore }
+      } finally { await store.close() }
     },
 
     async cancelBatch(taskId) {
@@ -934,7 +1037,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (options.cancelActive) {
         shutdownController.abort(new DOMException('service shutdown', 'ShutdownError'))
       }
-      await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
+      // A relaunch an append scheduled while a run was finishing is a new entry: wait until nothing is in flight.
+      while (inflight.size > 0) await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))
       await Promise.all([...channelsByMode.values()].flatMap((channels) => channels.map((channel) => channel.close?.().catch(() => {}))))
       channelsByMode.clear()
@@ -943,7 +1047,64 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       crawlControllers.clear()
       monitorStore.close()
       deliveryStore.close()
+      idempotency.close()
     },
+  }
+
+  /**
+   * `appendToId`: the URLs go to the end of the batch's stored list, the
+   * job's options stay, and no new task is created. A running orchestrator
+   * seeds the tail itself from the row it re-reads, so an append to a
+   * pending, running or paused batch adds no run and is not counted against
+   * the active-batch limit; a batch no run is working on (completed, or left
+   * by a crash) is relaunched as a resume, which seeds only the URLs without
+   * a step, and a completed batch, active again from that relaunch, counts
+   * against the limit as a new batch does. The record is the longer list in
+   * the checkpoint and the steps of the appended URLs in whichever attempt
+   * fetched them.
+   */
+  async function appendToBatch(req: ParsedBatchStartRequest, canonical: readonly string[], submission: Submission<BatchAccepted>): Promise<BatchAccepted> {
+    const id = req.appendToId!
+    if (!existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw new TaskNotFoundError(`batch not found: ${id}`)
+    const store = SqliteTaskStore.open(join(taskRoot, id))
+    let launched = false
+    try {
+      const task = await store.getTask(id)
+      if (task === null || task.batch === undefined) throw new TaskNotFoundError(`batch not found: ${id}`)
+      const total = task.batch.urls.length + req.urls.length
+      if (total > 1000) throw new RequestError('batch would exceed 1000 URLs')
+      const present = new Set(task.batch.urls.map((url) => canonicalizeUrl(url) ?? url))
+      const repeated = canonical.findIndex((url) => present.has(url))
+      if (repeated !== -1) throw new RequestError(`appended url is already in the batch: ${req.urls[repeated]}`)
+      if (task.status === 'cancelled' || task.status === 'failed') throw new CrawlStateError(`batch is ${task.status}`)
+      // A completed batch runs again for the new URLs and so is active again: under an active-batch limit that is refused as a new
+      // batch is while the limit is reached, before anything is written or recorded. Its own row is `completed`, so it is not among
+      // those counted; a pending, running or paused batch is counted already, and its append adds no run.
+      if (task.status === 'completed' && options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
+        throw new RequestError('active batch limit reached')
+      }
+      const now = new Date().toISOString()
+      const invalidURLs = req.invalidURLs === undefined ? undefined : [...req.invalidURLs]
+      // Pushed to the end, in order: the orchestrator seeds the tail past what it has seeded, by index.
+      const batch: NonNullable<Task['batch']> = {
+        ...task.batch,
+        urls: [...task.batch.urls, ...req.urls],
+        ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: [...(task.batch.robotsOverrides ?? []), ...req.robotsOverrides] }),
+        ...(invalidURLs === undefined && task.batch.invalidURLs === undefined ? {} : { invalidURLs: [...(task.batch.invalidURLs ?? []), ...(invalidURLs ?? [])] }),
+      }
+      // A completed batch has work again; a pending, running or paused one keeps its status.
+      const updated: Task = { ...task, batch, status: task.status === 'completed' ? 'pending' : task.status, updatedAt: now }
+      await store.putTask(updated)
+      const accepted: BatchAccepted = { taskId: id, requested: total, appended: req.urls.length, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
+      submission.record(id, accepted)
+      if (!inflight.has(id)) {
+        launchTask(updated, store, batchRunOptions(batch, true))
+        launched = true
+      }
+      return accepted
+    } finally {
+      if (!launched) await store.close()
+    }
   }
 }
 
@@ -1056,12 +1217,37 @@ interface TaskRunOptions {
   policyAllowlist: readonly string[]
 }
 
-/** A batch never discovers: its frontier takes the whole host and exact canonical URLs, and governance its own URLs' hosts. */
+/** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }
 
-function batchRunOptions(urls: readonly string[], resume: boolean): TaskRunOptions {
-  const hosts = [...new Set(urls.map(url => new URL(url).hostname))]
-  return { maxDepth: 0, allowlistedDomains: hosts, useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: null, policyAllowlist: hosts }
+/**
+ * A batch runs under the cap stored with it (`maxConcurrency`, null for the
+ * service's worker count), on a restart too. It fetches exactly the URLs it
+ * was given, at depth 0, so it names no hosts: a frontier seed passes the host
+ * scope, and governance lists no domains (a list of the batch's own hosts
+ * added nothing and would refuse a URL appended on a new host); every page
+ * still gets its own robots.txt, SSRF and identity checks, and the mode's
+ * channel set is unchanged.
+ */
+function batchRunOptions(batch: Pick<NonNullable<Task['batch']>, 'urls' | 'maxConcurrency'>, resume: boolean): TaskRunOptions {
+  return { maxDepth: 0, allowlistedDomains: [], useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: batch.maxConcurrency ?? null, policyAllowlist: [] }
+}
+
+/**
+ * A completed batch whose URL list grew after its run had stopped seeding
+ * (an append that landed as the workers were finishing): URLs without a step
+ * remain, and a relaunch as a resume fetches them. Null when every URL has
+ * its step, when the batch did not complete (cancelled, paused and failed
+ * stay as they are) or when a budget cut the run short (a time-cut batch does
+ * not run again by itself), so a relaunch always has URLs to fetch and the
+ * sequence ends.
+ */
+async function appendedWithoutStep(taskId: string, store: SqliteTaskStore): Promise<(Task & { batch: NonNullable<Task['batch']> }) | null> {
+  const task = await store.getTask(taskId)
+  if (task === null || task.batch === undefined || task.status !== 'completed') return null
+  const batch = task.batch
+  if ((await store.listAttempts(taskId)).at(-1)?.budgetExceeded !== null) return null
+  return await store.countCompletedSteps(taskId) < batch.urls.length ? { ...task, batch } : null
 }
 
 /** The options a running crawl reports: its task's stored options, with the defaults a task stored before an option existed runs under, plus its page budget. */
@@ -1191,6 +1377,38 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     createdAt: step.createdAt,
     updatedAt: step.updatedAt,
   }
+}
+
+/**
+ * What robots.txt said about a result that it refused: the rule that applied
+ * (the first disallow among the applied rules), or why the file could not be
+ * read. Null when the result was not refused by robots.txt: a success, a
+ * failure of another kind, a `policy_denied` from governance or the SSRF
+ * check (no `robots_disallowed` event), or a refusal a recorded override set
+ * aside (`robots_overridden`). The events are the lanes' own records; nothing
+ * is inferred here.
+ */
+function robotsRefusal(result: FetchResult): { pattern: string | null; unreachable: string | null } | null {
+  if (result.failureReason !== 'policy_denied') return null
+  const disallowed = result.trace.find((event) => event.event === 'robots_disallowed')
+  if (disallowed === undefined || result.trace.some((event) => event.event === 'robots_overridden')) return null
+  const applied = disallowed.detail?.appliedRules
+  const rules = Array.isArray(applied) ? applied as ReadonlyArray<{ pattern?: unknown; allow?: unknown }> : []
+  const rule = rules.find((entry) => entry.allow === false) ?? rules[0]
+  const unreachable = disallowed.detail?.unreachable
+  return { pattern: typeof rule?.pattern === 'string' ? rule.pattern : null, unreachable: typeof unreachable === 'string' ? unreachable : null }
+}
+
+/** One error of a batch, projected from its stored step: Firecrawl's names beside W2L's status and the HTTP status; nothing the step does not already carry. */
+function batchErrorItem(step: StepRecord): BatchErrorItem {
+  const result = step.result
+  const code = result?.failureReason ?? result?.blockReason ?? result?.budgetExceeded ?? step.status
+  const httpStatus = result?.evidence.httpStatus ?? null
+  const refusal = result === null ? null : robotsRefusal(result)
+  const robots = refusal === null ? '' : refusal.unreachable !== null ? ` — robots.txt unreachable (${refusal.unreachable})` : refusal.pattern === null ? ' — robots.txt rule' : ` — robots.txt rule ${refusal.pattern}`
+  const error = (result?.warnings?.[0]?.message ?? `${step.status}: ${code}${httpStatus === null ? '' : ` (HTTP ${httpStatus})`}`) + robots
+  // The store's `errors` kind lists only these four statuses.
+  return { id: step.id, timestamp: step.createdAt, url: step.url, status: step.status as BatchErrorStatus, code, error, httpStatus }
 }
 
 async function sessionBrokerStoreGet(broker: SessionBroker, sessionRef: string): Promise<ManagedSessionRef> {

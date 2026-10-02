@@ -64,6 +64,20 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(added.enqueue('https://c.test/p', 1).reason).toBe('host_denied')
   })
 
+  it('seeds an explicit URL on a host outside the scope, while a link found on it is still host_denied', () => {
+    const frontier = seeded()
+    // A batch URL appended on a new host, or any caller URL: seeded, since the scope governs discovered links.
+    expect(frontier.seed('https://other.test/appended')).toMatchObject({ accepted: true, canonicalUrl: 'https://other.test/appended', reason: 'seeded' })
+    expect(frontier.enqueue('https://other.test/linked', 1, 'https://other.test/appended')).toMatchObject({ accepted: false, reason: 'host_denied' })
+    expect(frontier.enqueue('/sibling', 1, 'https://other.test/appended')).toMatchObject({ accepted: false, canonicalUrl: 'https://other.test/sibling', reason: 'host_denied' })
+    expect(frontier.pendingCount()).toBe(2)
+    // The same URL seeded again is the duplicate it always was, and a batch's depth 0 refuses that host's links before the scope does.
+    expect(frontier.seed('https://other.test/appended')).toMatchObject({ accepted: false, reason: 'duplicate' })
+    const batch = new Frontier({ seedUrl: SEED, maxDepth: 0 })
+    expect(batch.seed('https://other.test/appended').accepted).toBe(true)
+    expect(batch.enqueue('https://other.test/linked', 1, 'https://other.test/appended')).toMatchObject({ accepted: false, reason: 'depth' })
+  })
+
   it('admits every host under the seed\'s apex with allowSubdomains, never a look-alike', () => {
     const frontier = new Frontier({ seedUrl: 'https://www.example.com/', allowSubdomains: true })
     frontier.seed()

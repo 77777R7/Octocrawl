@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
@@ -121,6 +121,39 @@ describe('Firecrawl /scrape /crawl shim', () => {
     expect(status.data.some((page: { markdown: string | null }) => page.markdown?.includes('Harbour lantern catalog'))).toBe(
       true,
     )
+  })
+
+  it('POST /fc/v1/crawl and /v1/crawl honour x-idempotency-key: a retry answers the first start\'s id and starts nothing', async () => {
+    // An engine of this test's own: the shared one is closed between tests, and a key is looked up in the task root's index.
+    const own = createApiEngine({ taskRoot, channelsFor: httpOnlyChannels })
+    try {
+      const app = createApp(own)
+      const post = (path: string, body: unknown, headers: Record<string, string> = {}) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+      const url = `${server.url}/crawl/listing`
+      const taskDirs = async () => (await readdir(taskRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      const before = (await taskDirs()).length
+      const first = await (await post('/fc/v1/crawl', { url, limit: 1, ignoreSitemap: true }, { 'x-idempotency-key': 'fc-retry' })).json() as { success: boolean; id: string; url: string }
+      expect(first).toEqual({ success: true, id: expect.any(String), url })
+      expect(await (await post('/fc/v1/crawl', { url, limit: 1, ignoreSitemap: true }, { 'x-idempotency-key': 'fc-retry' })).json()).toEqual(first)
+      // Another body under the same key is a conflict, in Firecrawl's envelope.
+      const conflict = await post('/fc/v1/crawl', { url, limit: 2, ignoreSitemap: true }, { 'x-idempotency-key': 'fc-retry' })
+      expect(conflict.status).toBe(409)
+      expect(await conflict.json()).toEqual({ success: false, error: 'idempotency key was used for a different request', code: 'conflict' })
+      // The native route takes the key in the body or either header, says it replayed, and refuses a body key that differs from the header.
+      const native = await (await post('/v1/crawl', { url, maxPages: 1, sitemap: 'skip', idempotencyKey: 'native-retry' })).json() as { taskId: string }
+      expect(native).toEqual({ taskId: expect.any(String) })
+      expect(await (await post('/v1/crawl', { url, maxPages: 1, sitemap: 'skip' }, { 'Idempotency-Key': 'native-retry' })).json()).toEqual({ taskId: native.taskId, replayed: true })
+      const mismatch = await post('/v1/crawl', { url, maxPages: 1, sitemap: 'skip', idempotencyKey: 'native-retry' }, { 'x-idempotency-key': 'other' })
+      expect(mismatch.status).toBe(400)
+      expect(await mismatch.json()).toEqual({ error: 'idempotencyKey does not match the x-idempotency-key header', code: 'invalid_request' })
+      await own.close()
+      // Two crawls were started by five submissions: one task directory per key.
+      const after = await taskDirs()
+      expect(after.filter((name) => name === first.id || name === native.taskId)).toHaveLength(2)
+      expect(after.length).toBe(before + 2)
+    } finally {
+      await own.close()
+    }
   })
 
   it('POST /fc/v1/crawl maps includePaths / excludePaths and scrapeOptions.formats', async () => {

@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { createHash } from 'node:crypto'
-import { CrawlStateError, type ApiEngine } from './engine.js'
+import { CrawlStateError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
 import {
   API_ERROR_STATUS,
@@ -9,9 +9,11 @@ import {
   type ApiErrorBody,
   type ApiErrorCode,
   type ApiErrorDetails,
+  IDEMPOTENCY_KEY_HEADERS,
   RATE_LIMITED_STATUS,
   rateLimitedBody,
   parseCrawlStartRequest,
+  parseBatchErrorsQuery,
   parseBatchStartRequest,
   parseCrawlPageQuery,
   firecrawlCrawlCounts,
@@ -62,6 +64,20 @@ function fail(c: Context, code: ApiErrorCode, message: string, details?: ApiErro
 function firecrawlEnvelope<T extends { agentHints?: AgentHints }>(body: T): Omit<T, 'agentHints'> & { success: false; agent_hints?: AgentHints } {
   const { agentHints, ...rest } = body
   return { success: false, ...rest, ...(agentHints === undefined ? {} : { agent_hints: agentHints }) }
+}
+
+/**
+ * The idempotency key a request's `x-idempotency-key` (or `Idempotency-Key`)
+ * header carries, the way Firecrawl's clients send it, merged into the body
+ * as `idempotencyKey` for the parser; a body key that differs from the header
+ * is refused, so one request never names two keys.
+ */
+function withIdempotencyHeader(c: Context, body: unknown): unknown {
+  const header = IDEMPOTENCY_KEY_HEADERS.map((name) => c.req.header(name)).find((value) => value !== undefined)
+  if (header === undefined || body === null || typeof body !== 'object' || Array.isArray(body)) return body
+  const rec = body as Record<string, unknown>
+  if (rec.idempotencyKey !== undefined && rec.idempotencyKey !== header) throw new RequestError('idempotencyKey does not match the x-idempotency-key header')
+  return { ...rec, idempotencyKey: header }
 }
 
 /** The bearer token a request presents, or '' when it presents none. */
@@ -138,12 +154,13 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   })
 
   app.post('/v1/crawl', async (c) => {
-    const req = parseCrawlStartRequest(await c.req.json())
+    const req = parseCrawlStartRequest(withIdempotencyHeader(c, await c.req.json()))
     return c.json(await engine.startCrawl(req), 202)
   })
 
+  /** A new batch, a replay of an earlier submission (`idempotencyKey`) or an append to an existing batch (`appendToId`), each 202. */
   app.post('/v1/batches', async (c) => {
-    const req = parseBatchStartRequest(await c.req.json())
+    const req = parseBatchStartRequest(withIdempotencyHeader(c, await c.req.json()))
     return c.json(await engine.startBatch(req), 202)
   })
 
@@ -156,6 +173,12 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const query = parseCrawlPageQuery(c.req.query())
     if (query.limit !== undefined && query.limit > 50) throw new RequestError('batch item limit must be at most 50')
     const page = await engine.getBatchItems(c.req.param('id'), query)
+    return page ? c.json(page) : fail(c, 'not_found', 'not found')
+  })
+
+  /** The batch's errors across every attempt, with the URLs robots.txt refused; no bodies, so pages of up to 1000. */
+  app.get('/v1/batches/:id/errors', async (c) => {
+    const page = await engine.getBatchErrors(c.req.param('id'), parseBatchErrorsQuery(c.req.query()))
     return page ? c.json(page) : fail(c, 'not_found', 'not found')
   })
 
@@ -375,7 +398,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   })
 
   app.post('/fc/v1/crawl', async (c) => {
-    const body = await c.req.json()
+    const body = withIdempotencyHeader(c, await c.req.json())
     const req = parseFirecrawlCrawlRequest(body)
     const accepted = await engine.startCrawl(req)
     return c.json(wrapCrawlAccepted(accepted, req.url), 200)
@@ -401,6 +424,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.onError((err, c) => {
     if (err instanceof RequestError) return fail(c, err.code, err.message, err.details, err.agentHints)
+    if (err instanceof CrawlStateError) return fail(c, 'conflict', err.message)
+    if (err instanceof TaskNotFoundError) return fail(c, 'not_found', 'not found')
     if (err instanceof SyntaxError) return fail(c, 'invalid_json', 'body must be JSON')
     if (options.exposeInternalErrors === true) return fail(c, 'internal_error', err.message)
     console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err.stack ?? String(err) }))
