@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Agent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici'
-import { SDK_ORIGIN, SDK_VERSION, W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
+import { chunkUrls, SDK_ORIGIN, SDK_VERSION, W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -343,6 +343,52 @@ describe('W2L SDK', () => {
       { line: 'POST /v1/batches', body: { urls: ['https://example.com/a'], idempotencyKey: 'nightly-1', origin: SDK_ORIGIN } },
       { line: 'POST /v1/batches', body: { urls: ['https://example.com/b', 'https://example.com/c'], appendToId: 'batch-1', idempotencyKey: 'nightly-1:append', ignoreInvalidURLs: true, origin: SDK_ORIGIN } },
     ])
+  })
+
+  it('splits a long list with chunkUrls and runs it as batches in sequence with batchScrapeChunked, merging the items in submission order', async () => {
+    const urls = Array.from({ length: 2500 }, (_, n) => `https://example.com/p/${n}`)
+    expect(chunkUrls(urls, 1000).map((chunk) => chunk.length)).toEqual([1000, 1000, 500])
+    expect(chunkUrls(urls).length).toBe(25)
+    expect(chunkUrls([])).toEqual([])
+    for (const chunkSize of [0, 1001, 2.5]) expect(() => chunkUrls(urls, chunkSize)).toThrow('chunkSize must be an integer between 1 and 1000')
+    // A fake API: each POST is a new job whose items are listed, paged by limit and cursor, in the reverse of their submission order.
+    const calls: Array<{ line: string; body: unknown }> = []
+    const jobs = new Map<string, string[]>()
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const body = init?.body === undefined ? null : JSON.parse(String(init.body)) as { urls: string[] }
+      calls.push({ line: `${init?.method ?? 'GET'} ${url.pathname}${url.search}`, body })
+      if (init?.method === 'POST') { const taskId = `batch-${jobs.size}`; jobs.set(taskId, body!.urls); return new Response(JSON.stringify({ taskId }), { status: 202 }) }
+      const [, , , id, tail] = url.pathname.split('/')
+      const all = jobs.get(id!)!
+      if (tail === 'items') {
+        const limit = Number(url.searchParams.get('limit') ?? 10)
+        const start = Number(url.searchParams.get('cursor') ?? 0)
+        const page = [...all].reverse().slice(start, start + limit).map((item, i) => ({ id: `step-${start + i}`, url: item, status: 'success' }))
+        return new Response(JSON.stringify({ items: page, nextCursor: start + limit < all.length ? String(start + limit) : null, hasMore: start + limit < all.length }))
+      }
+      return new Response(JSON.stringify({ taskId: id, status: 'completed', requested: all.length, completed: all.length, remaining: 0 }))
+    }) as typeof fetch })
+    const result = await client.batchScrapeChunked(urls, { formats: ['markdown'], idempotencyKey: 'nightly-1' }, { chunkSize: 1000, pollIntervalMs: 1 })
+    expect(result.jobs.map((job) => [job.taskId, job.urls, job.report.status])).toEqual([['batch-0', 1000, 'completed'], ['batch-1', 1000, 'completed'], ['batch-2', 500, 'completed']])
+    expect(result.items).toHaveLength(2500)
+    expect(result.items.map((item) => item.url)).toEqual(urls)
+    expect(result.invalidURLs).toEqual([])
+    // Three jobs, strictly in sequence, each waited for and listed in pages of 50 before the next starts; the caller's key per chunk.
+    const posts = calls.filter((call) => call.line.startsWith('POST'))
+    expect(posts.map((call) => (call.body as { idempotencyKey: string; urls: string[] }).idempotencyKey)).toEqual(['nightly-1:0', 'nightly-1:1', 'nightly-1:2'])
+    expect(posts.map((call) => (call.body as { urls: string[] }).urls.length)).toEqual([1000, 1000, 500])
+    expect(posts[0]?.body).toMatchObject({ formats: ['markdown'], origin: SDK_ORIGIN })
+    expect(calls.slice(0, 3).map((call) => call.line)).toEqual(['POST /v1/batches', 'GET /v1/batches/batch-0', 'GET /v1/batches/batch-0/items?limit=50'])
+    expect(calls.findIndex((call) => call.line === 'GET /v1/batches/batch-1')).toBeGreaterThan(calls.findLastIndex((call) => call.line.startsWith('GET /v1/batches/batch-0/items')))
+    expect(calls.filter((call) => call.line.startsWith('GET /v1/batches/batch-0/items'))).toHaveLength(20)
+    // An append is a different call; a job that never completes surfaces the wait's error, naming the job.
+    await expect(client.batchScrapeChunked(urls, { appendToId: 'batch-1' } as unknown as Record<string, never>)).rejects.toThrow('batchScrapeChunked cannot append; use appendToBatch')
+    await expect(client.batchScrapeChunked(urls, {}, { itemLimit: 51 })).rejects.toThrow('itemLimit must be an integer between 1 and 50')
+    const stuck = new W2L({ baseUrl: 'http://localhost', fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(init?.method === 'POST' ? { taskId: 'batch-9' } : { taskId: 'batch-9', status: 'running' }), { status: init?.method === 'POST' ? 202 : 200 })) as typeof fetch })
+    const error = await stuck.batchScrapeChunked(urls.slice(0, 3), {}, { chunkSize: 2, pollIntervalMs: 1, timeoutMs: 20 }).catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(WaitTimeoutError)
+    expect(error).toMatchObject({ taskId: 'batch-9', timeoutMs: 20 })
   })
 
   it('crawlAndWait and batchAndWait return the final status with every page, error and item', async () => {

@@ -129,6 +129,29 @@ export class WaitTimeoutError<T extends { status: string } = { status: string }>
 /** What `appendToBatch` may send beside the URLs: what binds to them, and the attribution labels; the job's own options stay as they are. */
 export type AppendToBatchOptions = Pick<BatchStartRequest, 'ignoreInvalidURLs' | 'idempotencyKey' | 'robotsOverrides' | 'origin' | 'integration'>
 
+/** How `batchScrapeChunked` splits a list and waits for each job (Python's `process_large_batch`: `chunk_size`, `poll_interval`, `timeout` are `chunkSize`, `pollIntervalMs`, `timeoutMs`). */
+export interface ChunkedBatchOptions extends WaitOptions {
+  /** URLs per job, 1 to 1000. Default 100. */
+  chunkSize?: number
+  /** Items per request while a job's items are listed, 1 to 50. Default 50. */
+  itemLimit?: number
+}
+
+/** One job `batchScrapeChunked` ran: its id, how many URLs it was given, its final status and the entries it skipped. */
+export interface ChunkedBatchJob {
+  taskId: string
+  urls: number
+  report: BatchStatusResponse
+  invalidURLs?: string[]
+}
+
+/** `batchScrapeChunked`'s result: the jobs in submission order, every item of every job in the order the URLs were submitted, and every entry `ignoreInvalidURLs` skipped. */
+export interface ChunkedBatchResult {
+  jobs: ChunkedBatchJob[]
+  items: CrawlPage[]
+  invalidURLs: string[]
+}
+
 /** crawlAndWait's result: the final status, every page and every error of the crawl's latest attempt. */
 export interface CrawlCollected {
   taskId: string
@@ -193,7 +216,25 @@ export type PagedListOptions = Omit<CrawlPageQuery, 'cursor'> & PaginationLimits
 /** The largest page the API serves: crawl pages up to 1 000, batch items up to 50. */
 const CRAWL_PAGE_MAX_LIMIT = 1_000
 const BATCH_ITEM_MAX_LIMIT = 50
+/** The most URLs one batch takes; a longer list is split by chunkUrls. */
+const BATCH_MAX_URLS = 1_000
 
+/**
+ * Split a URL list into lists of at most `chunkSize` (default 100), in order;
+ * an empty list gives none. Firecrawl's JS helper of the same name, exported
+ * here. `batchScrapeChunked` runs one batch per chunk.
+ */
+export function chunkUrls(urls: readonly string[], chunkSize = 100): string[][] {
+  if (!Number.isInteger(chunkSize) || chunkSize < 1 || chunkSize > BATCH_MAX_URLS) throw new RangeError(`chunkSize must be an integer between 1 and ${BATCH_MAX_URLS}`)
+  const chunks: string[][] = []
+  for (let start = 0; start < urls.length; start += chunkSize) chunks.push(urls.slice(start, start + chunkSize))
+  return chunks
+}
+
+/** A URL as the API records an item's `url`: WHATWG-normalised; as given when it does not parse. */
+function hrefOf(url: string): string {
+  try { return new URL(url).href } catch { return url }
+}
 
 function checkPaginationLimits(options: PaginationLimits): void {
   if (options.maxPages !== undefined && !(Number.isInteger(options.maxPages) && options.maxPages >= 0)) throw new RangeError('maxPages must be an integer, 0 or more')
@@ -332,6 +373,39 @@ export class W2L {
     return this.batchScrape(urls, { ...opts, appendToId: id }, request)
   }
 
+  /**
+   * Runs a list of any length as batches of `chunkSize` URLs (default 100),
+   * one after another: each job is started, waited for (as waitBatch, with
+   * the WaitOptions) and listed before the next starts. The items are merged
+   * in the order the URLs were submitted; the jobs stay on the server as
+   * ordinary batches, each with its own task directory. A caller's
+   * `idempotencyKey` becomes `<key>:<chunkIndex>` per job, so a retry of the
+   * whole call replays the jobs that went through. A WaitTimeoutError or
+   * W2LError from any job ends the call, naming that job; the earlier jobs
+   * are complete and the later chunks were never sent.
+   */
+  async batchScrapeChunked(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls' | 'appendToId'> = {}, options: ChunkedBatchOptions = {}): Promise<ChunkedBatchResult> {
+    if ((opts as { appendToId?: unknown }).appendToId !== undefined) throw new TypeError('batchScrapeChunked cannot append; use appendToBatch')
+    const { chunkSize = 100, itemLimit = BATCH_ITEM_MAX_LIMIT, ...wait } = options
+    checkWaitOptions(wait)
+    if (!Number.isInteger(itemLimit) || itemLimit < 1 || itemLimit > BATCH_ITEM_MAX_LIMIT) throw new RangeError(`itemLimit must be an integer between 1 and ${BATCH_ITEM_MAX_LIMIT}`)
+    const chunks = chunkUrls(urls, chunkSize)
+    const jobs: ChunkedBatchJob[] = []
+    const items: CrawlPage[] = []
+    const invalidURLs: string[] = []
+    for (const [index, chunk] of chunks.entries()) {
+      const accepted = await this.batchScrape(chunk, { ...opts, ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: `${opts.idempotencyKey}:${index}` }) }, wait)
+      const report = await this.waitBatch(accepted.taskId, wait)
+      // The server lists items as they were recorded; the submission order is restored from the chunk (an item whose URL is not found keeps its place after the rest).
+      const order = new Map(chunk.map((url, position) => [hrefOf(url), position]))
+      const listed: CrawlPage[] = []
+      for await (const item of this.listBatchItems(accepted.taskId, { limit: itemLimit }, wait)) listed.push(item)
+      items.push(...listed.sort((a, b) => (order.get(a.url) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.url) ?? Number.MAX_SAFE_INTEGER)))
+      jobs.push({ taskId: accepted.taskId, urls: chunk.length, report, ...(accepted.invalidURLs === undefined ? {} : { invalidURLs: accepted.invalidURLs }) })
+      if (accepted.invalidURLs !== undefined) invalidURLs.push(...accepted.invalidURLs)
+    }
+    return { jobs, items, invalidURLs }
+  }
 
   async getBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
     return this.get<BatchStatusResponse>(`/v1/batches/${encodeURIComponent(id)}`, request, `batch not found: ${id}`)
