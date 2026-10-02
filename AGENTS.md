@@ -12,6 +12,12 @@ A change is done when it moves the current phase's exit condition. In P1 that me
 - The comparison is frozen at firecrawl-js v4.42.0. Do not follow newer Firecrawl behaviour.
 - Record every real-site run with its command and source commit.
 
+## Real-site runs
+
+- Start the local API with `npm run api` (port 8787, `W2L_API_PORT` to change), then run `node research/parity/run-sites.mjs --batch L --record research/parity/runs/<YYYY-MM-DD>-<label>-<commit>.md`.
+- Local mode follows `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` from the shell. Say in every record whether the run was proxied or direct; a site can pass one way and fail the other.
+- Run `research/**/*.py` in a virtualenv (for example `.w2l/pyenv`), never with system `pip`.
+
 ## Evidence honesty
 
 W2L sells traceable data, so its own reports must be traceable too.
@@ -43,6 +49,15 @@ npm test
 
 Two tests call live websites (`packages/api/test/monitor.test.ts`, `packages/api/test/session.test.ts`) and can fail without network access; say so when reporting results rather than treating it as a regression.
 
+## Branches
+
+- Start every task with `git fetch` and a branch from current `origin/main`. Do not keep building on a long-lived branch: one PR per work group, and no branch more than one group behind main. A branch that drifted 223 commits behind main once needed a 62-file merge and was abandoned.
+- Several agent sessions work on this repository at once, each in its own worktree under `.claude/worktrees/`. Do not edit, merge or rebase another session's branch or worktree.
+
 ## Commits
 
 Use conventional commit messages (`feat:`, `fix:`, `docs:`, `test:`, `research:`) and sign off every commit (`git commit -s`, see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## Public preview deploys
+
+Deploy only when the person asks. The Cloud Run service routes traffic to tagged revisions, so `gcloud run deploy` alone leaves the old revision serving. After each deploy run `gcloud run services update-traffic <service> --to-revisions=<new>=100 --update-tags=<tag>=<new> --project="$W2L_PROJECT_ID"`, then confirm the live URL serves the new revision. Keep the previous tag as the rollback. Pass `--project` on every `gcloud` call, because no default project is set.
