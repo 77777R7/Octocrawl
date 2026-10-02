@@ -175,7 +175,13 @@ Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day
 gcloud firestore fields ttls update expireAt --collection-group=publicPreviewQuotas --enable-ttl --project="$W2L_PROJECT_ID"
 ```
 
-Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Firestore usually removes an expired document within a day of its `expireAt`.
+Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their three previews back for the rest of the day):
+
+```sh
+gcloud firestore bulk-delete --collection-ids=publicPreviewQuotas --project="$W2L_PROJECT_ID"
+```
+
+Firestore usually removes an expired document within a day of its `expireAt`. The privacy page says counters expire, so both steps must be done before that page is deployed.
 
 ### Page events
 
