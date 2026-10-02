@@ -132,8 +132,10 @@ class CustomHeaderGate {
    */
   sent(url: string, reported: readonly ComplianceSentHeader[]): ComplianceSentHeader[] {
     if (!this.documents.has(url)) return [...reported]
-    const present = new Set(reported.map(({ name }) => name))
-    return [...reported, ...this.entries.filter(({ name }) => !present.has(name))].sort((a, b) => a.name.localeCompare(b.name))
+    // What went on the wire for a document the gate handled: its own values
+    // for the names it set (Playwright reports the browser's pre-interception
+    // value, en-US for a context's Accept-Language), the rest as reported.
+    return [...reported.filter(({ name }) => !this.names.has(name)), ...this.entries].sort((a, b) => a.name.localeCompare(b.name))
   }
 }
 
@@ -379,7 +381,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // The request route of this fetch (host allowlist, ad hosts) and what it
     // matches, removed before the context closes.
     let requestRoute: ((route: Route) => Promise<void>) | null = null
-    let routeMatch: string | ((target: URL) => boolean) = '**/*'
+    const routeMatch = '**/*'
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -564,41 +566,26 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const blockAds = options.blockAds !== false
       const pageOrigin = new URL(url).origin
       const hasCustomHeaders = Object.keys(customHeaders).length > 0
-      // One route for the two concerns, installed before creating a page
-      // so the first navigation of a popup or worker cannot bypass it: the
-      // hosted host allowlist first (an ad host is never on it, and
-      // blockAds: false cannot widen it), then the ad hosts. The caller's
-      // headers are not a route's business: a route's continue() overrides
-      // ride every redirect hop (see CustomHeaderGate). The handler is kept
-      // so the fetch can remove it again: a route left on a context that
-      // keeps navigating holds the context's close, and on a managed
-      // context one would pile up per fetch. The hosted allowlist must see
-      // every request; blockAds alone matches the ad hosts only, so a page's
-      // own navigations are not paused in a handler (a page that reloads
-      // itself without end made each fetch outlive its deadline on Linux
-      // when every request was intercepted).
-      if (allowedHosts !== null || blockAds) {
-        if (allowedHosts === null) routeMatch = (target: URL) => isAdHost(target.hostname, this.adHosts)
+      // The hosted host allowlist is a route over every request, installed
+      // before creating a page so the first navigation of a popup or worker
+      // cannot bypass it; an ad host is never on it, and blockAds: false
+      // cannot widen it. The handler is kept so the fetch can remove it again:
+      // a route left on a context that keeps navigating holds the context's
+      // close. The ad hosts are not a route's business: a route pauses every
+      // request of the page, and on Linux a page that reloads itself without
+      // end then outlived its deadline; they are blocked in Chromium's network
+      // layer instead (Network.setBlockedURLs, below), which pauses nothing.
+      if (allowedHosts !== null) {
         requestRoute = async route => {
           const request = route.request()
           const target = request.url()
-          if (allowedHosts !== null) {
-            let allowed = false
-            try {
-              allowed = hostedBrowserRequestAllowed(target, request.resourceType(), allowedHosts)
-              if (allowed) await assertSafeUrl(target, this.networkPolicy)
-            } catch { allowed = false }
-            if (!allowed) {
-              deniedResources++
-              await route.abort('blockedbyclient').catch(() => {})
-              return
-            }
-          }
-          let targetUrl: URL | null = null
-          try { targetUrl = new URL(target) } catch { targetUrl = null }
-          if (blockAds && targetUrl !== null && isAdHost(targetUrl.hostname, this.adHosts)) {
-            adsBlocked++
-            if (adHostsBlocked.size < 20) adHostsBlocked.add(targetUrl.hostname.toLowerCase())
+          let allowed = false
+          try {
+            allowed = hostedBrowserRequestAllowed(target, request.resourceType(), allowedHosts)
+            if (allowed) await assertSafeUrl(target, this.networkPolicy)
+          } catch { allowed = false }
+          if (!allowed) {
+            deniedResources++
             await route.abort('blockedbyclient').catch(() => {})
             return
           }
@@ -647,7 +634,25 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // The override lives as long as the session that set it (Chromium drops
       // a session's emulation when it detaches), so the session stays open
       // until the page is closed.
-      if (identity.device !== undefined || hasCustomHeaders) session = await raceWithSignal(context.newCDPSession(page), signal)
+      if (identity.device !== undefined || hasCustomHeaders || blockAds) session = await raceWithSignal(context.newCDPSession(page), signal)
+      if (blockAds && session !== undefined) {
+        // Chromium drops a request to a listed host before any connection
+        // (net::ERR_BLOCKED_BY_CLIENT); the page's other requests are not
+        // touched. The block lives as long as the session, which stays open
+        // until the page is closed. Counted from the page's failed requests.
+        await raceWithSignal(session.send('Network.enable'), signal)
+        await raceWithSignal(session.send('Network.setBlockedURLs', { urls: this.adHosts.flatMap((host) => [`*://${host}/*`, `*://${host}:*/*`, `*://*.${host}/*`, `*://*.${host}:*/*`]) }), signal)
+        const requestUrls = new Map<string, string>()
+        session.on('Network.requestWillBeSent', (event: { requestId: string; request: { url: string } }) => { requestUrls.set(event.requestId, event.request.url) })
+        session.on('Network.loadingFailed', (event: { requestId: string; blockedReason?: string }) => {
+          if (event.blockedReason !== 'inspector') return
+          let hostname: string | null = null
+          try { hostname = new URL(requestUrls.get(event.requestId) ?? '').hostname } catch { hostname = null }
+          if (hostname === null || !isAdHost(hostname, this.adHosts)) return
+          adsBlocked++
+          if (adHostsBlocked.size < 20) adHostsBlocked.add(hostname.toLowerCase())
+        })
+      }
       if (identity.device !== undefined && session !== undefined) {
         const chromeMajor = Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR
         const metadata = browserUserAgentMetadata(chromeMajor, identity.device)
