@@ -44,6 +44,7 @@ import {
   identityBundleFrom,
   identityForRoute,
   modeIdentity,
+  previewIdentity,
   type CrawlMode,
   type HonestyVerdict,
   type IdentityDevice,
@@ -256,11 +257,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly onRenderedHtml?: (html: string, sha256: string) => void,
     /** Where files (PDF, CSV, ...) the browser downloads or displays are saved as received; without one they are read but not saved. */
     private readonly fileStore: FileStore | null = null,
+    /** The hosted public preview's standard User-Agent carries PREVIEW_PRODUCT_TOKEN (previewIdentity). */
+    private readonly previewProductToken = false,
     /** The ad-serving hosts `blockAds` aborts requests to (adHosts.ts); a test seam. */
     private readonly adHosts: readonly string[] = AD_HOSTS,
   ) {
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
+    }
+    if (previewProductToken && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
+      throw new Error('the preview product token is only available to the standard public browser')
     }
     if (browserAllowedHosts !== undefined && (access != null || managedProfileDir !== null)) {
       throw new Error('host-pinned browser requires an unmanaged direct connection')
@@ -379,8 +385,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // context already exists with the desktop one, and no API path asks it
       // for the mobile identity.
       const device: IdentityDevice = options.mobile === true && managedContext === null ? 'mobile' : 'desktop'
-      // Research mode declares its contact in the format the page's host asks for (researchUserAgent).
-      const identity = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname, device)
+      // Research mode declares its contact in the format the page's host asks
+      // for (researchUserAgent); the hosted preview adds its product token.
+      const declared = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname, device)
+      const identity = this.previewProductToken ? previewIdentity(declared) : declared
       assertIdentityBundle(
         identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, undefined, device),
       )

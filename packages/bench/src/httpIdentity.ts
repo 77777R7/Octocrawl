@@ -9,6 +9,7 @@ import {
   headersFromIdentity,
   identityBundleFrom,
   modeIdentity,
+  previewIdentity,
   type CrawlMode,
   type IdentityDevice,
   type ModeIdentity,
@@ -45,11 +46,14 @@ export function wireHeaders(headers: Readonly<Record<string, string>> | undefine
 /**
  * The identity for requests to `host`: research mode declares its contact in
  * the format the host asks for (researchUserAgent); `device` picks the
- * desktop or the mobile browser identity. `headers` are the caller's custom
- * headers, sent before the identity's so they can never override it.
+ * desktop or the mobile browser identity; `preview` appends the hosted
+ * preview's product token to the standard identity (previewIdentity).
+ * `headers` are the caller's custom headers, sent before the identity's so
+ * they can never override it.
  */
-export function prepareHttpIdentity(mode: CrawlMode = 'standard', contact: string | null = null, host: string | null = null, device: IdentityDevice = 'desktop', headers?: Readonly<Record<string, string>>): PreparedHttpIdentity {
-  const identity = modeIdentity(mode, undefined, contact, host, device)
+export function prepareHttpIdentity(mode: CrawlMode = 'standard', contact: string | null = null, host: string | null = null, device: IdentityDevice = 'desktop', headers?: Readonly<Record<string, string>>, preview = false): PreparedHttpIdentity {
+  const declared = modeIdentity(mode, undefined, contact, host, device)
+  const identity = preview ? previewIdentity(declared) : declared
   const customHeaders = wireHeaders(headers)
   const identityHeaders = headersFromIdentity(identityBundleFrom(identity))
   const sent = { ...customHeaders, ...identityHeaders }

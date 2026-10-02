@@ -60,10 +60,13 @@ export class ResilientHttpSubject implements SubjectAdapter {
   private readonly localPreviewRobotsException: boolean
   private teardownPromise: Promise<void> | null = null
 
-  /** `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved. */
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null) {
+  /**
+   * `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved.
+   * `previewProductToken`: the hosted public preview's standard User-Agent carries PREVIEW_PRODUCT_TOKEN (previewIdentity).
+   */
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
-    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null)
+    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, 'desktop', undefined, previewProductToken)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
@@ -126,7 +129,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * request's custom headers (`headers`) before it.
    */
   private preparedFor(url: string, options: FetchOptions): ReturnType<typeof prepareHttpIdentity> {
-    const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname, options.mobile === true ? 'mobile' : 'desktop', options.headers)
+    const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname, options.mobile === true ? 'mobile' : 'desktop', options.headers, this.previewProductToken)
     prepared.identity.respectsRobots = this.prepared.identity.respectsRobots
     return prepared
   }

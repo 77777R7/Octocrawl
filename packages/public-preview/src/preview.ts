@@ -10,7 +10,7 @@ import { fieldsSchema, type PreviewOptions } from './options.js'
 export type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'quota_exceeded' | 'invalid_url'
 
 export type PreviewDiagnosticCode = 'subject_mismatch' | 'subject_conflicting' | 'subject_unverified' | 'quote_unverified' | 'quote_absent_observed' | 'quote_conflicting' | 'region_unverified' | 'currency_unverified'
-  | 'robots_disallowed' | 'login_required' | 'challenge' | 'policy_denied' | 'timeout' | 'quota_exceeded'
+  | 'robots_disallowed' | 'robots_unreachable' | 'login_required' | 'challenge' | 'policy_denied' | 'timeout' | 'quota_exceeded'
   | 'service_unavailable' | 'content_unverified' | 'capture_failed' | 'invalid_url' | 'invalid_options'
 export interface PreviewDiagnostic {
   code: PreviewDiagnosticCode
@@ -155,6 +155,8 @@ export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSig
     onRenderedHtml: url.amazonAsin !== null ? (html, sha256) => { rendered = { html, sha256 } } : undefined,
     localPreviewProxyUrl: localPlatformRequest ? localPlatformProxyUrl : undefined,
     localPreviewRobotsException: localPlatformRequest && localPlatformRobotsException,
+    // Sites see the preview as W2L and can address it in robots.txt (User-agent: w2l-preview).
+    previewProductToken: true,
     // No third-party provider calls, even if environment keys happen to exist.
     keys: {},
   }).filter(channel => channel.id === resolvePreviewCapability(url).captureMode)
@@ -371,7 +373,11 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
   const { result } = outcome
   const product = normalized.amazonAsin === null ? undefined : productView(normalized.amazonAsin, outcome)
   const social = socialPostSummary(normalized, result)
-  const robotsDenied = result.failureReason === 'policy_denied' && result.trace?.some(event => event.event === 'robots_disallowed') === true
+  const robotsEvent = result.failureReason === 'policy_denied' ? result.trace?.find(event => event.event === 'robots_disallowed') : undefined
+  const robotsDenied = robotsEvent !== undefined
+  // An unreachable robots.txt counts as a complete disallow (RFC 9309 §2.3.1.4), but it is not a rule the site wrote:
+  // the reason says which it was.
+  const robotsUnreachable = robotsDenied && (robotsEvent.detail as { unreachable?: unknown } | undefined)?.unreachable !== undefined
   const status: PreviewStatus = result.status === 'blocked' || robotsDenied ? 'blocked'
     : result.failureReason === 'timeout' || result.budgetExceeded === 'time' || result.status === 'cancelled' ? 'timeout'
       : result.status === 'success' ? product && product.status !== 'complete' || social.applies && social.markdown === null ? 'incomplete' : 'success'
@@ -380,7 +386,8 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
   const quoteState = result.document?.product?.quoteState
   const quoteMissing = typeof extractedPrice !== 'number' || !Number.isFinite(extractedPrice) || (quoteState !== undefined && quoteState !== 'present')
   let reason = status === 'success' ? null
-    : status === 'blocked' ? robotsDenied ? 'This site does not allow automated preview of this page.'
+    : status === 'blocked' ? robotsUnreachable ? 'This site\'s robots.txt could not be read, so W2L did not fetch the page.'
+      : robotsDenied ? 'This site does not allow automated preview of this page.'
       : result.blockReason === 'bot_detected_generic' ? 'The site returned a verification page instead of the requested content.'
         : result.blockReason === 'login_wall' ? 'The page requires a login.'
           : 'The website blocked this request.'
@@ -391,6 +398,7 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
             : result.failureReason ? `Extraction failed (${result.failureReason}).`
             : status === 'incomplete' ? 'The page content is incomplete.' : 'We could not extract this page right now.'
   const diagnostic: PreviewDiagnostic | undefined = status === 'success' ? undefined
+    : robotsUnreachable ? { code: 'robots_unreachable', stage: 'policy', evidence: 'observed' }
     : robotsDenied ? { code: 'robots_disallowed', stage: 'policy', evidence: 'observed' }
       : result.blockReason === 'login_wall' ? { code: 'login_required', stage: 'acquisition', evidence: 'observed' }
         : result.blockReason === 'bot_detected_generic' ? { code: 'challenge', stage: 'acquisition', evidence: 'observed' }
@@ -425,7 +433,9 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
   return {
     status,
     requestedUrl,
-    finalUrl: result.evidence.finalUrl || null,
+    // A capture refused before any request (robots.txt, DNS, policy) still carries the requested URL as its final
+    // URL; it was never requested, so there is none (the same rule as runtime/src/evidenceRecord.ts).
+    finalUrl: typeof result.evidence.httpStatus === 'number' || (result.usage?.requestCount ?? 0) > 0 ? result.evidence.finalUrl || null : null,
     title: product && product.asin === null ? null : result.document?.title ?? null,
     markdown,
     ...(markdown !== null && product === undefined && !social.applies && (result.markdown?.length ?? 0) > MARKDOWN_CHARS ? { markdownTruncated: true } : {}),

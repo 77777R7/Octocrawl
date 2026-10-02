@@ -4,10 +4,10 @@ The first-use page accepts one public HTTP(S) URL and shows readable content, th
 
 The same static build includes an English `/docs/` site generated from
 `apps/public-web/content/`. It links the first page trial to the locally
-verified Codex MCP path and separates that from the pending hosted login and
-permanent MCP URL. The docs use the Hero's language on a quieter reading area: its mountain artwork in the header, dotted rules, numbered sections with an "On this page" list that marks the section being read, ledger tables, and code blocks drawn as session sheets with numbered lines (copying takes the code alone).
+verified Codex MCP path and separates that from the hosted login and MCP URL, which the roadmap has paused
+([ROADMAP.md](../ROADMAP.md#paused)). The docs use the Hero's language on a quieter reading area: its mountain artwork in the header, dotted rules, numbered sections with an "On this page" list that marks the section being read, ledger tables, and code blocks drawn as session sheets with numbered lines (copying takes the code alone).
 
-The Hero fills the first screen (`100svh`; it grows only when its content needs more room) over the static mountain artwork. On screens at least 760 px tall, a small *How it works* link at its foot points to *Recent runs* after a first extraction.
+The Hero fills the first screen (`100svh`; it grows only when its content needs more room) over the static mountain artwork. On screens at least 760 px tall, a small *See what comes back* link at its foot points to the recorded results, and to *Recent runs* after a first extraction. The help line under the URL card shows the visitor's previews left today from `GET /api/quota` (read-only and never cached while previews remain, since a preview on the other instance may have used one; a used-up day is cached until 00:00 UTC; at most 120 lookups, two Firestore document reads each, a minute per instance); when the count cannot be read it keeps the static text.
 
 The octopus lies behind the centered headline, a little larger than the text, with its eyes in the gap between the headline and the description. It uses the [React Bits ASCIIText JS-CSS component](https://reactbits.dev/text-animations/ascii-text). The untouched registry source is vendored at `apps/public-web/src/reactbits/ASCIIText.registry.jsx` (SHA-256 `5188e633807ed6f3d55ee9ed3c48f87e9eb7cc185b31d7d8d5d16f895b3fae72`); the adjacent `ASCIIText.jsx` adapts it for this page by removing remote font loading, pausing offscreen, and moving glyphs away from a stationary pointer. In motif mode it writes the octopus in plain marks from the artwork's own glyph family (dots, colons, `+`, `x`, `X`) in the source's colours, each re-rolled every one to three seconds, over a feathered backdrop blur. Its ink is quieter behind the headline and description, so they stay legible.
 
@@ -23,7 +23,7 @@ Above them, `apps/public-web/src/heroSky.ts` draws the night sky on the same can
 
 Both animate only on screens 1050 px and wider with a fine pointer, motion allowed and WebGL 2. The glyphs and the sky enter when the octopus lights up: they appear inside a circle that spreads from the octopus to the Hero's corners, and everything is alive about 4 s after the octopus first draws; a Hero that comes back later relights in about half the time. A device too slow for them gives them up at once, so the octopus keeps priority. They loop for as long as the Hero is on screen, with no pause control; the system's reduced-motion setting keeps the Hero still. They stop in hidden tabs and out of view and start over when the Hero returns. While the visitor types in the form, or while its Format, Options or Get code panel is open, the Hero yields (a button that merely keeps focus after a click does not hold it): the octopus dims and rests and the glyphs fade back to the painted artwork. While a preview runs the landscape still rests, and only the octopus moves. Otherwise (touch, reduced motion, no WebGL, or while the chunks load) the static octopus artwork shows in the same place, masked by `octopus-silhouette.webp`; narrower screens use one centered column with a faint static octopus. The form and extraction path depend on none of them. React, React DOM and the registry-listed Three.js dependency stay in a lazy decorative chunk; the glyph light, the sky, the sea of clouds and the sparks are a separate small lazy chunk.
 
-Below the Hero, How it works pairs three steps with a replay that shows them happening: `apps/public-web/src/sessionReplay.ts` types and streams two recorded runs (the documentation example and an Amazon.sg product) like an agent session, with values cited in `apps/public-web/src/sessionScript.ts`. The window is labelled as a replay, and each result names the time it measured (server or browser). `howReplay.ts` loads the player as the section nears the screen; it loops for as long as it is on screen in a visible tab, with no pause control. With reduced motion, and until the player loads, the window shows the first run's result as static text.
+Below the Hero, How it works pairs three steps with a replay that shows them happening: `apps/public-web/src/sessionReplay.ts` types and streams two recorded runs (the documentation example and an Amazon.sg product) like an agent session, with values cited in `apps/public-web/src/sessionScript.ts`. The window is labelled as a replay, and each run shows one recorded capture and names the time it measured (server or client). `howReplay.ts` loads the player as the section nears the screen; it loops for as long as it is on screen in a visible tab, with no pause control. With reduced motion, and until the player loads, the window shows the first run's result as static text.
 
 ## Try it
 
@@ -32,6 +32,14 @@ Open the public HTTPS service URL, paste a page address, and choose **Extract pa
 The anonymous allowance is three attempts per browser visitor per UTC day and 100 attempts globally per UTC day. A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
 
 Amazon.sg browser requests also use one Firestore-backed origin lease across the two Cloud Run instances. It preserves spacing and observed Retry-After cooldown, and exhausted visitors are rejected by a read-only quota check before acquiring that lease. This coordination is specific to Amazon.sg; generic public HTTP pages still use per-request scheduling, so this release does not claim shared cross-instance pacing for every domain.
+
+## How the preview identifies itself
+
+The preview names W2L to the sites it reads, so their owners can see it in their logs and address it in robots.txt. Every request it sends (robots.txt, the page, and every request of the Amazon.sg browser context) carries the standard-mode Chrome User-Agent followed by `W2L-Preview/1.0 (+https://github.com/77777R7/w2l)` (`PREVIEW_PRODUCT_TOKEN` in `packages/contracts/src/compliance.ts`). The client hints (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`) are unchanged and still describe the Chrome that sends the request: the Chrome 128 floor on the HTTP lane, the running Chromium's major in the browser. `capturePreview` turns this on with `buildChannels`' `previewProductToken` option; the local API, CLI and MCP leave it unset, so their standard mode still sends the plain Chrome User-Agent, and research mode keeps its own `w2l-research` identity. The HTTP lane's trace and the browser's compliance record carry the User-Agent as sent, token included.
+
+robots.txt groups match by substring of the whole User-Agent, and the longest matching name wins (`matchRobotsGroup` in `packages/http-core/src/robots.ts`). A group for `w2l-preview`, or for `w2l`, which also matches research mode, therefore governs the preview in place of `*`; without one, `*` applies. A disallowed page is never requested and returns `blocked` with diagnostic `robots_disallowed`. The public docs give site owners the same instructions (`apps/public-web/content/limits.md`).
+
+Amazon.sg receives the token too. How it treats the new User-Agent is unmeasured: after a deploy that changes the User-Agent, run one Amazon.sg product preview with the owner token and compare it with the previous revision's result before relying on the Amazon route.
 
 ## Request and response
 
@@ -167,9 +175,25 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 
 With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
+### Quota counter expiry
+
+Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day after the UTC day it counts (`quotaExpiry` in `packages/public-preview/src/quota.ts`). Firestore deletes expired documents only once a TTL policy exists on that field, so create it once per project:
+
+```sh
+gcloud firestore fields ttls update expireAt --collection-group=publicPreviewQuotas --enable-ttl --project="$W2L_PROJECT_ID"
+```
+
+Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their three previews back for the rest of the day):
+
+```sh
+gcloud firestore bulk-delete --collection-ids=publicPreviewQuotas --project="$W2L_PROJECT_ID"
+```
+
+Firestore usually removes an expired document within a day of its `expireAt`. The privacy page says counters expire, so both steps must be done before that page is deployed.
+
 ### Page events
 
-The page sends first-party events to `POST /api/events` (same origin only; fixed event names and short properties; nothing is sent when the browser signals Do Not Track or Global Privacy Control). Each is one stdout line with `event: "w2l_web_event"`. Every anonymous `/api/preview` answer also logs one `event: "w2l_preview"` line with its state, diagnostic code, the target's host (never its path or query), whether options were used and the server time. Both carry `vid`, a pseudonym that changes every UTC day (an HMAC of the visitor key under `W2L_QUOTA_HASH_KEY`), and `automated`, a user-agent guess for filtering crawlers. Owner-token evaluation runs are not counted. Read them in Cloud Logging:
+The page sends first-party events to `POST /api/events` (same origin only; fixed event names and short properties). When the browser signals Do Not Track or Global Privacy Control, the page sends no events and the server logs neither events nor preview outcomes for that request. Each is one stdout line with `event: "w2l_web_event"`. Every anonymous `/api/preview` answer also logs one `event: "w2l_preview"` line with its state, diagnostic code, the target's host (never its path or query), whether options were used and the server time. Both carry `vid`, a pseudonym that changes every UTC day (an HMAC of the visitor key under `W2L_QUOTA_HASH_KEY`), and `automated`, a user-agent guess for filtering crawlers. Owner-token evaluation runs are not counted. The public [privacy page](../apps/public-web/content/privacy.md) describes all of this to visitors; change it with any change to what is logged. Read them in Cloud Logging:
 
 ```sh
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="w2l-public-preview" AND (jsonPayload.event="w2l_web_event" OR jsonPayload.event="w2l_preview") AND jsonPayload.automated=false' \

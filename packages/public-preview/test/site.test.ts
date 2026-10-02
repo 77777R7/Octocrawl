@@ -102,6 +102,54 @@ describe('public site routes', () => {
   })
 })
 
+describe('remaining previews', () => {
+  it('reads the same visitor key a preview consumes, without consuming, logging or setting a cookie', async () => {
+    const reads: string[] = []
+    const consumed: string[] = []
+    const { url, lines } = await site({
+      visitorCookieSecret: 's'.repeat(32),
+      quota: {
+        status: async visitor => { reads.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 - consumed.length } },
+        consume: async visitor => { consumed.push(visitor); return 'ok' },
+      },
+    })
+    const cookie = (await fetch(url)).headers.get('set-cookie')!.split(';')[0]!
+    const first = await fetch(`${url}/api/quota`, { headers: { cookie } })
+    expect(first.headers.get('set-cookie')).toBeNull()
+    expect(await first.json()).toMatchObject({ enabled: true, state: 'ok', limit: 3, remaining: 3, basis: 'visitor' })
+    await fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ url: 'https://docs.example' }) })
+    // A count with previews left is never cached: another instance may have used one.
+    expect(await (await fetch(`${url}/api/quota`, { headers: { cookie } })).json()).toMatchObject({ remaining: 2 })
+    expect(reads).toEqual([consumed[0], consumed[0]])
+    expect(lines.filter(line => line.event !== 'w2l_preview')).toEqual([])
+    expect(await (await fetch(`${url}/api/quota`)).json()).toMatchObject({ basis: 'ip' })
+  })
+
+  it('caches a used-up day until the next UTC midnight, and only that', async () => {
+    let reads = 0
+    const { url } = await site({ quota: { status: async () => { reads++; return { decision: 'visitor_limited', limit: 3, remaining: 0 } }, consume: async () => 'ok' } })
+    const first = await (await fetch(`${url}/api/quota`)).json() as { resetsAt: string }
+    await fetch(`${url}/api/quota`)
+    expect(reads).toBe(1)
+    expect(Date.parse(first.resetsAt) % 86_400_000).toBe(0)
+    expect(Date.parse(first.resetsAt) - Date.now()).toBeLessThanOrEqual(86_400_000)
+  })
+
+  it('refuses other methods, parameters and cross-site reads, and never guesses a count', async () => {
+    const { url } = await site({ quota: { status: async () => { throw new Error('store down') }, consume: async () => 'ok' } })
+    expect((await fetch(`${url}/api/quota`, { method: 'POST' })).status).toBe(405)
+    expect((await fetch(`${url}/api/quota?visitor=x`)).status).toBe(400)
+    expect((await fetch(`${url}/api/quota`, { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403)
+    const down = await fetch(`${url}/api/quota`)
+    expect(down.status).toBe(503)
+    expect(await down.json()).not.toHaveProperty('remaining')
+    const paused = await site({ enabled: false })
+    expect(await (await fetch(`${paused.url}/api/quota`)).json()).toEqual({ enabled: false })
+    const unsupported = await site()
+    expect((await fetch(`${unsupported.url}/api/quota`)).status).toBe(501)
+  })
+})
+
 describe('first-party analytics', () => {
   it('logs a known page event and refuses unknown names, properties and cross-site posts', async () => {
     const { url, lines } = await site({ visitorCookieSecret: 's'.repeat(32) })
@@ -123,6 +171,13 @@ describe('first-party analytics', () => {
       { event: 'w2l_preview', status: 'blocked', http: 200, code: 'policy_denied', host: '127.0.0.1' },
     ])
     expect(JSON.stringify(lines)).not.toContain('private/path')
+  })
+
+  it('logs nothing for a visitor whose browser sends Do Not Track or Global Privacy Control', async () => {
+    const { url, lines } = await site()
+    await fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', 'sec-gpc': '1' }, body: JSON.stringify({ url: 'https://docs.example' }) })
+    expect((await fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', dnt: '1' }, body: JSON.stringify({ name: 'page_view' }) })).status).toBe(204)
+    expect(lines).toEqual([])
   })
 
   it('keeps event properties short and plain, and rotates the visitor pseudonym daily', () => {

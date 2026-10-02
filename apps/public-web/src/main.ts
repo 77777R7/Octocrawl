@@ -53,6 +53,38 @@ type PreviewFields = {
 type CapabilityResponse = { requestedUrl: string; capability: { task: string; support: string; captureMode: 'http' | 'browser_local'; limitation: string } }
 
 
+// Tab sets (recorded results, ways to run W2L). The prerendered page shows every panel and no tabs, so it reads in
+// full without script; here the tabs appear and every panel but the selected one is hidden, before anything below
+// measures the page.
+for (const set of document.querySelectorAll<HTMLElement>('[data-tabs]')) {
+  const list = set.querySelector<HTMLElement>('[role="tablist"]')!
+  const tabs = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+  const select = (tab: HTMLButtonElement, focus: boolean): void => {
+    for (const other of tabs) {
+      const selected = other === tab
+      other.setAttribute('aria-selected', String(selected))
+      other.tabIndex = selected ? 0 : -1
+      const panel = document.getElementById(other.getAttribute('aria-controls')!)
+      if (panel) panel.hidden = !selected
+    }
+    if (focus) tab.focus()
+  }
+  list.hidden = false
+  select(tabs.find(tab => tab.getAttribute('aria-selected') === 'true') ?? tabs[0]!, false)
+  for (const tab of tabs) tab.addEventListener('click', () => {
+    if (tab.getAttribute('aria-selected') !== 'true') track(set.classList.contains('selfhost-specimen') ? 'selfhost_tab' : 'example_tab', { tab: tab.dataset.tab })
+    select(tab, false)
+  })
+  list.addEventListener('keydown', (event) => {
+    const at = tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true')
+    const next = event.key === 'ArrowRight' ? (at + 1) % tabs.length : event.key === 'ArrowLeft' ? (at + tabs.length - 1) % tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1
+    if (next < 0) return
+    event.preventDefault()
+    select(tabs[next]!, true)
+  })
+}
+
 const hero = document.querySelector<HTMLElement>('.hero')!
 trackPageView()
 trackLinkClicks(document.body)
@@ -83,6 +115,8 @@ const capabilityMessage = document.querySelector<HTMLElement>('#capability-messa
 const heroScroll = document.querySelector<HTMLAnchorElement>('#hero-scroll')!
 const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label')!
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
+const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
+const QUOTA_NOTE = quotaNote.textContent ?? ''
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
 const formatLabel = document.querySelector<HTMLElement>('#format-label')!
 const formatPanel = document.querySelector<HTMLElement>('#format-panel')!
@@ -183,7 +217,11 @@ function scheduleCapability(): void {
     const request = new AbortController()
     capabilityRequest = request
     try {
-      const response = await fetch(`/api/capability?url=${encodeURIComponent(url)}`, { signal: request.signal, credentials: 'same-origin' })
+      // In the body, not the query string: the hosting request log keeps every request's path and query.
+      const response = await fetch('/api/capability', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+        signal: request.signal, credentials: 'same-origin',
+      })
       if (!response.ok) return
       const result = await response.json() as CapabilityResponse
       if (request.signal.aborted || normalizeUrl(input.value) !== url) return
@@ -242,6 +280,7 @@ function statusText(status: PreviewStatus, product?: ProductPreview, diagnostic?
   if (diagnostic?.code === 'quote_absent_observed') return 'Unavailable in this page context'
   if (diagnostic?.code === 'quote_conflicting') return 'Conflicting quote evidence'
   if (diagnostic?.code === 'robots_disallowed') return 'Site policy blocks preview'
+  if (diagnostic?.code === 'robots_unreachable') return 'robots.txt unreadable'
   if (diagnostic?.code === 'login_required') return 'Login required'
   if (diagnostic?.code === 'challenge') return 'Verification page'
   if (status === 'success' && product?.status === 'incomplete') return 'Page read · Product fields need review'
@@ -281,6 +320,7 @@ function failureAdvice(result: PreviewResponse): string[] {
   const retry = 'Check that the page opens in your browser, then try again in a few minutes.'
   const code = result.diagnostic?.code
   if (code === 'robots_disallowed') return ['Try a page from a different site.']
+  if (code === 'robots_unreachable') return ['Try again in a few minutes: the site’s robots.txt may answer then.', 'Or try a page from a different site.']
   if (code === 'login_required') return ['Try a page that anyone can open without signing in. W2L does not bypass login walls.']
   if (code === 'challenge') return ['Try a different public page. W2L does not solve verification challenges.']
   if (code === 'policy_denied') return ['Use a public http:// or https:// address that anyone can open.']
@@ -293,7 +333,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, set up W2L through MCP on your own computer.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run W2L on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
   })[result.status]
 }
 
@@ -323,9 +363,9 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
     content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
   })
   const docs = result.status === 'quota_exceeded'
-    ? textElement('a', 'Connect MCP ↗', 'guidance-link')
+    ? textElement('a', 'Run it yourself ↓', 'guidance-link')
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
-  docs.href = result.status === 'quota_exceeded' ? '/docs/connect-mcp/' : '/docs/limits/'
+  docs.href = result.status === 'quota_exceeded' ? '#run-it-yourself' : '/docs/limits/'
   actions.append(json, docs)
   panel.append(actions)
   return panel
@@ -904,6 +944,25 @@ function renderDetail(run: Run): void {
 }
 
 /** Point to the result below; its guidance panel carries the reason. */
+/** The visitor's previews left today, as the service counted them. Anything it cannot say for sure leaves the
+ * prerendered "3 free previews a day" in place: the page never guesses a number. */
+async function refreshQuota(): Promise<void> {
+  let text = QUOTA_NOTE
+  try {
+    const response = await fetch('/api/quota', { credentials: 'same-origin' })
+    const quota = response.ok ? await response.json() as { enabled?: boolean; state?: QuotaDecision; limit?: number; remaining?: number } : null
+    if (quota?.enabled === false) text = 'Previews are paused right now'
+    else if (quota?.enabled === true && typeof quota.remaining === 'number' && typeof quota.limit === 'number') {
+      text = quota.state === 'global_limited' ? 'Today’s public previews are used up · resets 00:00 UTC'
+        : quota.state === 'visitor_limited' ? 'No previews left today · resets 00:00 UTC'
+          : `${quota.remaining} of ${quota.limit} free previews left today`
+    }
+  } catch { /* An unreadable count shows the static note, never an older number. */ }
+  quotaNote.textContent = text
+}
+type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
+void refreshQuota()
+
 function setResultMessage(result: PreviewResponse): void {
   const read = isPageRead(result)
   message.textContent = read ? 'Your result is below.' : 'No readable content was returned. See why below.'
@@ -1262,6 +1321,21 @@ codeCopy.addEventListener('click', async () => {
   } catch { codeStatus.textContent = 'Copy failed. Select the text manually.' }
 })
 
+// Run it yourself: the open tab's terminal lines, copied as one script.
+const selfhostCopy = document.querySelector<HTMLButtonElement>('#selfhost-copy')!
+const selfhostStatus = document.querySelector<HTMLElement>('#selfhost-status')!
+selfhostCopy.addEventListener('click', async () => {
+  const panel = document.querySelector<HTMLElement>('.selfhost-panel:not([hidden])')!
+  track('get_code_copy', { tab: `selfhost-${panel.id.replace('sh-panel-', '')}` })
+  const lines = [...panel.querySelectorAll<HTMLElement>('.code-text')].map(line => line.textContent ?? '')
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    selfhostCopy.textContent = 'Copied ✓'
+    selfhostStatus.textContent = 'Copied to the clipboard.'
+    window.setTimeout(() => { selfhostCopy.textContent = 'Copy' }, 2200)
+  } catch { selfhostStatus.textContent = 'Copy failed. Select the text manually.' }
+})
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
   if (submit.disabled) return
@@ -1329,5 +1403,6 @@ form.addEventListener('submit', async (event) => {
   } finally {
     clearTimeout(timeout)
     setBusy(false)
+    void refreshQuota()
   }
 })

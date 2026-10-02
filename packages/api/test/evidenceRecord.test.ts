@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { identityForRoute, localNetworkPolicy, type EvidenceRecord, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
+import { identityForRoute, localNetworkPolicy, modeIdentity, type EvidenceRecord, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { buildChannels, ProviderSubject, robotsFetcherVia, type Channel, type ProviderTransport } from '@w2l/bench'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
@@ -57,11 +57,13 @@ const PAGES: Record<string, { status?: number; headers?: Record<string, string>;
 let server: Server
 let origin: string
 let taskRoot: string
+const userAgents: { path: string; userAgent: string | undefined }[] = []
 const engines: ApiEngine[] = []
 const policy: NetworkPolicy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    userAgents.push({ path: req.url ?? '', userAgent: req.headers['user-agent'] })
     const page = PAGES[req.url ?? '']
     if (page === undefined) { res.writeHead(404).end(); return }
     res.writeHead(page.status ?? 200, { 'content-type': 'text/html; charset=utf-8', ...page.headers }).end(page.body)
@@ -127,6 +129,17 @@ describe('Evidence Record: HTTP lane', () => {
     const compact = await scrape(http, { url: `${origin}/moved`, formats: ['markdown'], debug: false })
     expect(valid(compact.evidenceRecord)).toMatchObject({ finalUrl: `${origin}/article`, lane: 'http', outputSha256: { markdown: sha256Utf8(compact.markdown!) } })
     expect(compact).not.toHaveProperty('trace')
+  })
+
+  it('sends and records the plain standard User-Agent from the local API, without the public preview\'s token', async () => {
+    // The API's own channels, not a test's: the token is the hosted preview's alone.
+    const local = engineWith({ httpOnly: true })
+    userAgents.length = 0
+    const record = valid((await scrape(local, { url: `${origin}/article` })).evidenceRecord)
+    const standard = modeIdentity('standard').userAgent
+    expect(record.identity).toMatchObject({ mode: 'standard', userAgent: standard })
+    expect(userAgents.map(request => request.path)).toEqual(['/robots.txt', '/article'])
+    for (const request of userAgents) expect(request.userAgent).toBe(standard)
   })
 
   it('keeps a 404 page as failed evidence, hashes it, and records a block', async () => {

@@ -3,9 +3,35 @@ import { throwIfExecutionStopped, type ExecutionBudget } from '@w2l/http-core'
 
 export type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 
+/** Previews per visitor, and for the whole site, per UTC day. */
+export const VISITOR_DAILY_PREVIEWS = 3
+export const SITE_DAILY_PREVIEWS = 100
+
+/** What a visitor has left today: never more than the site has left, so the page cannot promise a preview the
+ * site-wide limit would refuse. */
+export interface QuotaStatus {
+  decision: QuotaDecision
+  limit: number
+  remaining: number
+}
+
+export function quotaStatus(siteUsed: number, visitorUsed: number): QuotaStatus {
+  const decision: QuotaDecision = siteUsed >= SITE_DAILY_PREVIEWS ? 'global_limited' : visitorUsed >= VISITOR_DAILY_PREVIEWS ? 'visitor_limited' : 'ok'
+  const remaining = decision === 'ok' ? Math.min(VISITOR_DAILY_PREVIEWS - visitorUsed, SITE_DAILY_PREVIEWS - siteUsed) : 0
+  return { decision, limit: VISITOR_DAILY_PREVIEWS, remaining }
+}
+
+/** When a day's counters may go: one day after that UTC day ends. A Firestore TTL policy on `expireAt` in the
+ * publicPreviewQuotas collection group deletes them after that (docs/public-preview.md). */
+export function quotaExpiry(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2))
+}
+
 export interface PreviewQuota {
   /** Advisory read-only check before acquiring a scarce origin permit. */
   check?(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaDecision>
+  /** Read-only: what this visitor has left today. Never writes a counter. */
+  status?(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaStatus>
   consume(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaDecision>
 }
 
@@ -48,14 +74,16 @@ export class FirestorePreviewQuota implements PreviewQuota {
   }
 
   async check(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaDecision> {
+    return (await this.status(visitor, now, execution)).decision
+  }
+
+  async status(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaStatus> {
     throwIfExecutionStopped(execution)
     const { global, individual } = this.names(visitor, now)
     const token = await this.accessToken(execution)
     const [all, own] = await Promise.all([this.read(global, token, execution), this.read(individual, token, execution)])
     throwIfExecutionStopped(execution)
-    if (all.count >= 100) return 'global_limited'
-    if (own.count >= 3) return 'visitor_limited'
-    return 'ok'
+    return quotaStatus(all.count, own.count)
   }
 
   async consume(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaDecision> {
@@ -66,15 +94,15 @@ export class FirestorePreviewQuota implements PreviewQuota {
       throwIfExecutionStopped(execution)
       const token = await this.accessToken(execution)
       const [all, own] = await Promise.all([this.read(global, token, execution), this.read(individual, token, execution)])
-      if (all.count >= 100) return 'global_limited'
-      if (own.count >= 3) return 'visitor_limited'
+      const decision = quotaStatus(all.count, own.count).decision
+      if (decision !== 'ok') return decision
       // A client disconnect between the reads and commit must not consume a
       // quota slot for a scrape that will never start.
       throwIfExecutionStopped(execution)
       const response = await this.fetcher(`${this.endpointBase}:commit`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ writes: [this.write(all), this.write(own)] }),
+        body: JSON.stringify({ writes: [this.write(all, now), this.write(own, now)] }),
         signal: this.requestSignal(execution, 5_000),
       })
       if (response.ok) return 'ok'
@@ -89,9 +117,9 @@ export class FirestorePreviewQuota implements PreviewQuota {
     throw new Error('Firestore quota contention exceeded retry budget')
   }
 
-  private write(doc: DocumentRead): Record<string, unknown> {
+  private write(doc: DocumentRead, now: Date): Record<string, unknown> {
     return {
-      update: { name: doc.name, fields: { count: { integerValue: String(doc.count + 1) } } },
+      update: { name: doc.name, fields: { count: { integerValue: String(doc.count + 1) }, expireAt: { timestampValue: quotaExpiry(now).toISOString() } } },
       currentDocument: doc.updateTime === null ? { exists: false } : { updateTime: doc.updateTime },
     }
   }

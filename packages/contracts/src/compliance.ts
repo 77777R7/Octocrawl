@@ -352,6 +352,26 @@ export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR
   }
 }
 
+/**
+ * The product token the hosted public preview adds to the standard
+ * User-Agent, so a site owner can see the preview in their logs and address
+ * it in robots.txt with `User-agent: w2l-preview` (or `w2l`, which covers
+ * research mode too). Groups match by substring of the whole User-Agent
+ * (http-core matchRobotsGroup); `*` still applies when no group names it.
+ */
+export const PREVIEW_PRODUCT_TOKEN = 'W2L-Preview/1.0 (+https://github.com/77777R7/w2l)'
+
+/**
+ * The hosted preview's identity: the standard identity with
+ * PREVIEW_PRODUCT_TOKEN appended. The client hints stay as they are: they
+ * describe the Chrome that sends the request, and the token names no browser.
+ * Only the standard identity takes the token.
+ */
+export function previewIdentity(identity: ModeIdentity): ModeIdentity {
+  if (identity.mode !== 'standard') throw new Error(`the preview product token is for the standard identity, not ${identity.mode}`)
+  return { ...identity, userAgent: `${identity.userAgent} ${PREVIEW_PRODUCT_TOKEN}` }
+}
+
 /** All four identities, for the subject layer to enumerate without a switch. */
 export const MODE_IDENTITIES: Readonly<Record<CrawlMode, ModeIdentity>> = {
   research: modeIdentity('research'),

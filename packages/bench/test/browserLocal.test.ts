@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { localNetworkPolicy, type RobotsOverrideApplied } from '@w2l/contracts'
+import { localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 
@@ -884,5 +884,75 @@ describe('BrowserLocalSubject user-owned access', () => {
     } finally {
       await subject.teardown()
     }
+  })
+})
+
+describe('BrowserLocalSubject in the public preview', () => {
+  // A site that lets every crawler in except W2L's preview, under /members.
+  let previewServer: Server
+  let origin: string
+  let seen: { path: string; userAgent: string | undefined }[] = []
+  beforeAll(async () => {
+    previewServer = createServer((req, res) => {
+      seen.push({ path: req.url ?? '', userAgent: req.headers['user-agent'] })
+      if (req.url === '/robots.txt') res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n\nUser-agent: w2l-preview\nDisallow: /members\n')
+      else if (req.url === '/page' || req.url === '/members') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
+          '<!doctype html><html><body><article><h1>Harbour notices</h1><p>The harbour office posts tide tables, berth changes and ' +
+            'weather warnings here every morning, long enough for the extraction cascade to select it as the content.</p></article></body></html>',
+        )
+      } else res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => previewServer.listen(0, '127.0.0.1', resolve))
+    origin = `http://127.0.0.1:${(previewServer.address() as { port: number }).port}`
+  })
+  afterAll(async () => {
+    await new Promise<void>((resolve) => previewServer.close(() => resolve()))
+  })
+
+  const previewBrowser = () => new BrowserLocalSubject('standard', null, false, undefined, null, undefined, null, undefined, undefined, null, true)
+
+  it('sends its product token on robots.txt and the page, and signs the User-Agent it sent', async () => {
+    seen = []
+    const subject = previewBrowser()
+    try {
+      const out = await subject.fetch(`${origin}/page`)
+      expect(out.status).toBe('success')
+      const sent = out.compliance!.sentHeaders.headers.find((h) => h.name === 'user-agent')?.value
+      expect(sent).toMatch(/Chrome\/\d+\.0\.0\.0 Safari\/537\.36 /)
+      expect(sent?.endsWith(` ${PREVIEW_PRODUCT_TOKEN}`)).toBe(true)
+      const wire = seen.filter((r) => r.path === '/robots.txt' || r.path === '/page')
+      expect(wire.map((r) => r.path)).toContain('/robots.txt')
+      expect(wire.map((r) => r.path)).toContain('/page')
+      for (const request of wire) expect(request.userAgent).toBe(sent)
+      expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
+      expect(out.compliance!.robots.matchedUserAgentGroup).toBe('w2l-preview')
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('stops at its own robots.txt group, where the plain standard browser goes on', async () => {
+    seen = []
+    const preview = previewBrowser()
+    const plain = new BrowserLocalSubject()
+    try {
+      const refused = await preview.fetch(`${origin}/members`)
+      expect(refused.failureReason).toBe('policy_denied')
+      expect(refused.compliance!.robots).toMatchObject({ decision: 'disallowed', matchedUserAgentGroup: 'w2l-preview', skippedFetch: true })
+      expect(seen.some((r) => r.path === '/members')).toBe(false)
+
+      const allowed = await plain.fetch(`${origin}/members`)
+      expect(allowed.status).toBe('success')
+      expect(allowed.compliance!.robots.matchedUserAgentGroup).toBe('*')
+      expect(seen.find((r) => r.path === '/members')?.userAgent).not.toContain('W2L-Preview')
+    } finally {
+      await preview.teardown()
+      await plain.teardown()
+    }
+  })
+
+  it('refuses the token outside the standard public browser', () => {
+    expect(() => new BrowserLocalSubject('research', null, false, undefined, null, undefined, null, undefined, undefined, null, true)).toThrow(/standard public browser/)
   })
 })

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   BROWSER_FINGERPRINT,
   MOBILE_BROWSER_FINGERPRINT,
+  PREVIEW_PRODUCT_TOKEN,
   assertIdentityBundle,
+  browserClientHints,
+  browserUserAgent,
   browserUserAgentMetadata,
   checkIdentityHonesty,
   serializeBrands,
@@ -12,6 +15,7 @@ import {
   identityBundleIssues,
   identityForRoute,
   modeIdentity,
+  previewIdentity,
   vendorIdentityIssues,
 } from '../src/index.js'
 
@@ -104,6 +108,23 @@ describe('headersFromIdentity', () => {
     expect(() => assertIdentityBundle({ ...bundle, userAgent: bundle.userAgent.replace('Chrome/', 'HeadlessChrome/') })).toThrow(
       /HeadlessChrome/,
     )
+  })
+})
+
+describe('previewIdentity', () => {
+  it('appends the product token to the standard User-Agent and keeps a coherent bundle', () => {
+    const preview = previewIdentity(modeIdentity('standard', 128))
+    expect(preview.userAgent).toBe(`${browserUserAgent(128)} ${PREVIEW_PRODUCT_TOKEN}`)
+    expect(preview.clientHints).toEqual(browserClientHints(128))
+    expect(preview.respectsRobots).toBe(true)
+    expect(identityBundleIssues(identityBundleFrom(preview))).toEqual([])
+    expect(formatIdentitySummary(identityBundleFrom(preview))).toBe(formatIdentitySummary(identityBundleFrom(modeIdentity('standard', 128))))
+  })
+
+  it('is for the standard identity only', () => {
+    for (const mode of ['research', 'authed', 'proxy'] as const) {
+      expect(() => previewIdentity(modeIdentity(mode)), mode).toThrow(/standard identity/)
+    }
   })
 })
 

@@ -61,7 +61,14 @@ describe('anonymous preview contract', () => {
     expect([captures, quotaCalls]).toEqual([0, 0])
     expect((await fetch(`${url}/api/capability?url=file:///etc/passwd`)).status).toBe(400)
     expect((await fetch(`${url}/api/capability?url=https://docs.example&debug=true`)).status).toBe(400)
-    expect((await fetch(`${url}/api/capability`, { method: 'POST' })).status).toBe(405)
+    expect((await fetch(`${url}/api/capability`, { method: 'PUT' })).status).toBe(405)
+    // The page sends the address in the body, so it never appears in a request log's path and query.
+    const posted = await fetch(`${url}/api/capability`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://www.amazon.sg/dp/B0D4DHBFFH' }) })
+    expect(await posted.json()).toMatchObject({ capability: { task: 'amazon_sg_product' } })
+    const post = (body: unknown, headers: Record<string, string> = {}) => fetch(`${url}/api/capability`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+    expect((await post({ url: 'https://docs.example', debug: true })).status).toBe(400)
+    expect((await post({ url: 'https://docs.example' }, { origin: 'https://evil.example' })).status).toBe(403)
+    expect((await fetch(`${url}/api/capability?url=x`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://docs.example' }) })).status).toBe(400)
   })
 
   it('keeps hosted X and Reddit routes conditional despite local adapters', () => {
@@ -211,6 +218,22 @@ describe('anonymous preview contract', () => {
       text: { raw: 'The verified post', normalized: 'The verified post', source: 'meta', path: 'meta[property="og:description"]', status: 'confirmed' },
     }, relationships: { author: 'alice' } }]
     expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 100)).toMatchObject({ status: 'success', markdown: 'Post by @alice\n\nThe verified post', reason: null })
+  })
+
+  it('says when robots.txt could not be read rather than blaming the site\'s rules', () => {
+    const url = 'https://docs.example/page'
+    const outcome = fixture(url)
+    outcome.result.status = 'failed'
+    outcome.result.failureReason = 'policy_denied'
+    outcome.result.trace = [{ at: 0, lane: 'http', event: 'robots_disallowed', detail: { unreachable: 'timeout' } }] as unknown as typeof outcome.result.trace
+    outcome.result.evidence = { ...outcome.result.evidence, httpStatus: null } as typeof outcome.result.evidence
+    outcome.result.usage = { ...outcome.result.usage, requestCount: 0 } as typeof outcome.result.usage
+    expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 10)).toMatchObject({
+      status: 'blocked', reason: 'This site\'s robots.txt could not be read, so W2L did not fetch the page.',
+      diagnostic: { code: 'robots_unreachable', stage: 'policy', evidence: 'observed' },
+      // The page was never requested, so there is no final URL.
+      finalUrl: null,
+    })
   })
 
   it('distinguishes a robots refusal from an unsafe URL policy refusal', () => {

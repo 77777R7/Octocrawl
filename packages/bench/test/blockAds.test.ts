@@ -60,7 +60,7 @@ describe('the ad-host list', () => {
 })
 
 describe('blockAds on the local browser lane', () => {
-  const subject = new BrowserLocalSubject('standard', null, false, localNetworkPolicy(), null, undefined, null, undefined, undefined, null, ['localhost'])
+  const subject = new BrowserLocalSubject('standard', null, false, localNetworkPolicy(), null, undefined, null, undefined, undefined, null, false, ['localhost'])
   afterAll(async () => { await subject.teardown() })
 
   it('aborts requests to listed ad hosts before any connection and prunes ad containers, by default', async () => {

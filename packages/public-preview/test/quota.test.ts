@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FirestorePreviewQuota } from '../src/quota.js'
+import { FirestorePreviewQuota, quotaExpiry, quotaStatus } from '../src/quota.js'
 
 interface Saved { count: number; updateTime: string }
 const restPrefix = 'https://firestore.googleapis.com/v1/'
@@ -49,6 +49,36 @@ describe('durable preview quota', () => {
     expect([...store.docs.values()].map(value => value.count).sort((a, b) => a - b)).toEqual([3, 3])
     expect([...store.docs.keys()].every(name => name.startsWith('projects/sample-project/databases/(default)/documents/'))).toBe(true)
     expect(store.names.join(' ')).not.toContain('203.0.113.10')
+  })
+
+  it('stamps both counters with an expiry one day after the day they count', async () => {
+    const bodies: string[] = []
+    const store = fakeFirestore()
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') bodies.push(String(init.body))
+      return store.fetcher(input, init)
+    }) as typeof fetch
+    const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), fetcher)
+    await quota.consume('visitor-a', new Date('2026-09-24T23:59:00Z'))
+    const writes = (JSON.parse(bodies[0]!) as { writes: { update: { fields: { expireAt?: { timestampValue: string } } } }[] }).writes
+    expect(writes.map(write => write.update.fields.expireAt?.timestampValue)).toEqual(['2026-09-26T00:00:00.000Z', '2026-09-26T00:00:00.000Z'])
+    expect(quotaExpiry(new Date('2026-09-24T00:00:00Z')).toISOString()).toBe('2026-09-26T00:00:00.000Z')
+  })
+
+  it('reads what a visitor has left without writing, capped by what the site has left', async () => {
+    const store = fakeFirestore()
+    const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), store.fetcher)
+    const now = new Date('2026-09-24T02:00:00Z')
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 3, remaining: 3 })
+    expect(store.docs.size).toBe(0)
+    await quota.consume('visitor-a', now)
+    await quota.consume('visitor-a', now)
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 3, remaining: 1 })
+    await quota.consume('visitor-a', now)
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'visitor_limited', limit: 3, remaining: 0 })
+    expect(await quota.status('visitor-b', now)).toEqual({ decision: 'ok', limit: 3, remaining: 3 })
+    expect(quotaStatus(98, 0)).toEqual({ decision: 'ok', limit: 3, remaining: 2 })
+    expect(quotaStatus(100, 0)).toEqual({ decision: 'global_limited', limit: 3, remaining: 0 })
   })
 
   it('checks both limits without writing and leaves consume as the atomic gate', async () => {
