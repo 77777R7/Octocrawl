@@ -419,7 +419,7 @@ describe('persistent URL-array batch', () => {
     const urls = [1, 2, 3].map(n => `${f.origin}/item/${n}`)
     const accepted = await client.batchScrape(urls, { formats: [{ type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }] })
     const report = await client.waitBatch(accepted.taskId)
-    expect(report).toMatchObject({ status: 'completed', requested: 3, completed: 3, remaining: 0 })
+    expect(report).toMatchObject({ status: 'completed', requested: 3, completed: 3, remaining: 0, succeeded: 3, failed: 0 })
     const first = await client.getBatchItems(accepted.taskId, { limit: 2 })
     expect(first.items).toHaveLength(2)
     expect(first.hasMore).toBe(true)
@@ -437,7 +437,28 @@ describe('persistent URL-array batch', () => {
     expect((await app.request(`/v1/batches/${accepted.taskId}/items?limit=51`)).status).toBe(400)
     const events = await app.request(`/v1/batches/${accepted.taskId}/events`)
     expect(events.headers.get('content-type')).toContain('text/event-stream')
-    expect(await events.text()).toContain('event: complete')
+    const streamed = await events.text()
+    expect(streamed).toContain('event: catchup')
+    expect(streamed.match(/event: document/g)).toHaveLength(3)
+    expect(streamed).toContain('event: done')
+    expect(streamed).not.toContain('event: complete')
+  })
+
+  it('counts succeeded and failed across a mixed batch, each URL once in its items with its json or its reason', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/missing/4`]
+    const accepted = await w2l.batchScrape(urls, { formats: [{ type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }] })
+    expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3, succeeded: 1, failed: 2, remaining: 0 })
+    const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
+    expect(items.map(item => item.url).sort()).toEqual([...urls].sort())
+    const byUrl = new Map(items.map(item => [item.url, item]))
+    expect(byUrl.get(urls[0]!)).toMatchObject({ status: 'success', failureReason: null, json: { status: 'complete', data: { title: 'Fixture item 1' } } })
+    expect(byUrl.get(urls[1]!)).toMatchObject({ status: 'failed', failureReason: 'policy_denied', json: { status: 'incomplete' } })
+    expect(byUrl.get(urls[2]!)).toMatchObject({ status: 'failed', failureReason: 'http_error', agentHints: [expect.stringContaining('check the link')] })
+    expect(f.seen).not.toContain('/private/item/2')
   })
 
   it('finishes every URL when one origin never answers its robots.txt, and does not fetch that origin', async () => {

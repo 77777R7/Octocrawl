@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
-import { createApp } from './app.js'
+import { createApp, injectJobWebSockets } from './app.js'
 import { createApiEngine } from './engine.js'
 import { parseListen, parsePort } from './listen.js'
 
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     hosted: listen.mode === 'hosted',
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
   })
-  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
+  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
   const worker = new DeliveryWorker(deliveryStore, {
@@ -33,6 +33,8 @@ async function main(): Promise<void> {
   const workerController = new AbortController()
   const workerLoop = worker.run(workerController.signal).catch((error) => { console.error(error); process.exitCode = 1 })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
+  // The job stream WebSocket routes complete their upgrades on this server; a no-op when the stream routes are off.
+  injectJobWebSockets(app, server)
   let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => {
     if (stopping) return

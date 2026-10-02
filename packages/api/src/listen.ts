@@ -42,7 +42,16 @@ export interface ListenConfig {
   rateLimit?: { perMinute: number }
   /** How this process delivers job webhooks. */
   delivery: DeliveryConfig
+  /** Whether the job stream routes (`/events`, `/ws` on crawls and batches) are served; `W2L_JOB_STREAMS=off` turns them into 404s. */
+  jobStreams: boolean
 }
+
+/** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
+function jobStreamsEnabled(env: NodeJS.ProcessEnv): boolean {
+  return (env['W2L_JOB_STREAMS'] ?? '').trim().toLowerCase() !== 'off'
+}
+
+export const JOB_STREAMS_OFF_NOTICE = 'job streams off (W2L_JOB_STREAMS=off): GET /v1/crawl/:id/events, /v1/batches/:id/events and the /ws routes answer 404; clients poll the status and listing routes'
 
 export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ListenConfig {
   const hosted = argv.includes('--hosted') || env['W2L_API_MODE'] === 'hosted'
@@ -62,9 +71,10 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       networkPolicy: withOperatorContact(tunedPolicy(hostedNetworkPolicy(), env), env),
       defaultMaxPages: 100,
       allowRobotsOverride: false,
-      notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
+      notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])].filter(notice => notice !== null),
       ...(rateLimit === undefined ? {} : { rateLimit }),
       delivery: deliveryConfig('hosted', env),
+      jobStreams: jobStreamsEnabled(env),
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -76,9 +86,10 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     networkPolicy,
     defaultMaxPages: null,
     allowRobotsOverride: true,
-    notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
+    jobStreams: jobStreamsEnabled(env),
   }
 }
 

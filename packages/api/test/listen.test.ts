@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LOCAL_PRIVATE_ALLOWLIST } from '@w2l/contracts'
-import { parseListen } from '../src/listen.js'
+import { JOB_STREAMS_OFF_NOTICE, parseListen } from '../src/listen.js'
 
 describe('parseListen', () => {
   it('defaults to loopback local mode without a token', () => {
@@ -14,6 +14,18 @@ describe('parseListen', () => {
       allowRobotsOverride: true,
     })
     expect(listen.networkPolicy.privateAllowlist.length).toBeGreaterThan(0)
+  })
+
+  it('serves the job stream routes unless W2L_JOB_STREAMS=off, which it says at startup', () => {
+    expect(parseListen([], {}).jobStreams).toBe(true)
+    expect(parseListen([], { W2L_JOB_STREAMS: 'on' }).jobStreams).toBe(true)
+    for (const env of [{ W2L_JOB_STREAMS: 'off' }, { W2L_JOB_STREAMS: ' OFF ' }]) {
+      const local = parseListen([], env)
+      expect(local.jobStreams).toBe(false)
+      expect(local.notices).toContain(JOB_STREAMS_OFF_NOTICE)
+      expect(parseListen(['--hosted', '--token', 'secret'], env)).toMatchObject({ jobStreams: false, notices: expect.arrayContaining([JOB_STREAMS_OFF_NOTICE]) })
+    }
+    expect(parseListen([], {}).notices).not.toContain(JOB_STREAMS_OFF_NOTICE)
   })
 
   it('refuses hosted mode without a token', () => {
