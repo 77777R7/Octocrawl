@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -185,6 +185,14 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchStartRequest({ urls: [url], invalidURLs: [] })).toThrow('unsupported parameter: invalidURLs')
     // An override binds to the valid list.
     expect(() => parseBatchStartRequest({ urls: mixed, ignoreInvalidURLs: true, robotsOverrides: [{ url: 'ftp://x', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    // Firecrawl's extract scope flags: false says what already holds and is kept as sent; true is refused by name, pointing at the crawl option; neither is a crawl option here.
+    expect(parseBatchStartRequest({ urls: [url], allowExternalLinks: false, includeSubdomains: false })).toMatchObject({ allowExternalLinks: false, includeSubdomains: false })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('allowExternalLinks')
+    expect(() => parseBatchStartRequest({ urls: [url], allowExternalLinks: true })).toThrow('allowExternalLinks: true is not offered on a batch: a batch fetches only the URLs given; a crawl takes allowExternalLinks, and extraction across links is the M5 multi-URL extract')
+    expect(() => parseBatchStartRequest({ urls: [url], includeSubdomains: true })).toThrow('includeSubdomains: true is not offered on a batch: a batch fetches only the URLs given; a crawl takes allowSubdomains, and extraction across links is the M5 multi-URL extract')
+    expect(() => parseBatchStartRequest({ urls: [url], includeSubdomains: 'yes' })).toThrow('includeSubdomains must be a boolean')
+    expect(() => parseCrawlStartRequest({ url, includeSubdomains: false })).toThrow('unsupported parameter: includeSubdomains')
+    expect(parseBatchStartRequest({ appendToId: 'batch-1', urls: [url], allowExternalLinks: false })).toMatchObject({ appendToId: 'batch-1', allowExternalLinks: false })
     // The scrape and crawl messages keep their field name.
     expect(() => parseScrapeRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
     expect(() => parseCrawlStartRequest({ url: '' })).toThrow('url is required')
@@ -358,9 +366,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     for (const name of Object.keys(scope)) {
       expect(parseCrawlStartRequest({ url })).not.toHaveProperty(name)
       expect(() => parseCrawlStartRequest({ url, [name]: 'yes' })).toThrow(`${name} must be a boolean`)
-      // A crawl's scope is not a scrape or batch option.
+      // A crawl's scope is not a scrape or batch option (a batch takes Firecrawl's allowExternalLinks in its no-op form alone, below).
       expect(() => parseScrapeRequest({ url, [name]: true })).toThrow(`unsupported parameter: ${name}`)
-      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(`unsupported parameter: ${name}`)
+      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(name === 'allowExternalLinks' ? 'allowExternalLinks: true is not offered on a batch' : `unsupported parameter: ${name}`)
     }
     expect(() => parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: ['other.test'] })).toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
     expect(parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: [] })).toMatchObject({ allowExternalLinks: true })
@@ -478,5 +486,61 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     // The 429 answer is not a request error: its code stays outside the set, and its body names the wait.
     expect(isApiErrorCode(RATE_LIMITED_CODE)).toBe(false)
     expect(rateLimitedBody(2, 7)).toEqual({ error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: 7, agentHints: ['wait 7 s before the next request'] })
+  })
+
+  it('takes a webhook on crawl and batch as a URL string or an object, and refuses a bad URL, an unknown key and a bad secret name', () => {
+    const url = 'https://example.com/'
+    const hook = 'https://receiver.example/hook'
+    expect(parseCrawlStartRequest({ url, webhook: hook }).webhook).toEqual({ url: hook })
+    expect(parseBatchStartRequest({ urls: [url], webhook: { url: 'http://127.0.0.1:8828/hook', secretEnv: 'W2L_WEBHOOK_SECRET_TEST' } }).webhook).toEqual({ url: 'http://127.0.0.1:8828/hook', secretEnv: 'W2L_WEBHOOK_SECRET_TEST' })
+    expect(parseCrawlStartRequest({ url, webhook: null })).not.toHaveProperty('webhook')
+    expect(parseCrawlStartRequest({ url })).not.toHaveProperty('webhook')
+    for (const value of [1, true, [], {}, { url: '' }, { headers: {} }]) expect(() => parseCrawlStartRequest({ url, webhook: value }), JSON.stringify(value)).toThrow('webhook must be a URL string or an object with url')
+    expect(() => parseCrawlStartRequest({ url, webhook: 'ftp://receiver.example/hook' })).toThrow('webhook.url must be http(s)')
+    expect(() => parseBatchStartRequest({ urls: [url], webhook: 'not a url' })).toThrow('webhook.url must be http(s)')
+    expect(() => parseCrawlStartRequest({ url, webhook: 'https://user:pw@receiver.example/hook' })).toThrow('webhook.url must not carry credentials or a fragment')
+    expect(() => parseCrawlStartRequest({ url, webhook: `${hook}#frag` })).toThrow('webhook.url must not carry credentials or a fragment')
+    expect(() => parseCrawlStartRequest({ url, webhook: `https://receiver.example/${'a'.repeat(2048)}` })).toThrow('webhook.url must be at most 2048 characters')
+    expect(() => parseCrawlStartRequest({ url, webhook: { url: hook, timeout: 5 } })).toThrow('unknown webhook option: timeout')
+    expect(() => parseBatchStartRequest({ urls: [url], webhook: { url: hook, secretEnv: 'HOME' } })).toThrow('webhook.secretEnv must name an operator W2L_WEBHOOK_SECRET_* variable')
+    // An append keeps the job's webhook as it keeps its other options.
+    expect(() => parseBatchStartRequest({ urls: [url], appendToId: 'batch-1', webhook: hook })).toThrow("appendToId keeps the job's options; webhook cannot be changed")
+  })
+
+  it('takes webhook.events as the five names without duplicates, and refuses an empty list or an unknown name', () => {
+    const url = 'https://example.com/'
+    const hook = 'https://receiver.example/hook'
+    expect(parseCrawlStartRequest({ url, webhook: { url: hook, events: ['completed', 'failed'] } }).webhook).toEqual({ url: hook, events: ['completed', 'failed'] })
+    expect(parseBatchStartRequest({ urls: [url], webhook: { url: hook, events: [...WEBHOOK_EVENTS] } }).webhook).toMatchObject({ events: ['started', 'page', 'completed', 'failed', 'cancelled'] })
+    const message = 'webhook.events must be a non-empty array of started, page, completed, failed, cancelled without duplicates'
+    for (const events of [[], ['page', 'page'], ['done'], 'completed', [1], null]) expect(() => parseCrawlStartRequest({ url, webhook: { url: hook, events } }), JSON.stringify(events)).toThrow(message)
+  })
+
+  it('takes webhook.headers within their bounds, lower-cases their names, and refuses reserved and malformed ones by name', () => {
+    const url = 'https://example.com/'
+    const hook = 'https://receiver.example/hook'
+    const parse = (headers: unknown) => parseCrawlStartRequest({ url, webhook: { url: hook, headers } }).webhook?.headers
+    expect(parse({ Authorization: 'Bearer test', 'X-Run': 'wh3' })).toEqual({ authorization: 'Bearer test', 'x-run': 'wh3' })
+    for (const name of ['Content-Type', 'content-length', 'Host', 'connection', 'transfer-encoding', 'x-w2l-event-id', 'X-W2L-Anything']) expect(() => parse({ [name]: 'v' }), name).toThrow(`webhook.headers: ${name.toLowerCase()} is reserved`)
+    expect(() => parse({ 'x test': 'v' })).toThrow('webhook.headers: x test is not a valid HTTP header name')
+    expect(() => parse({ 'x-run': 'a\r\nb' })).toThrow('webhook.headers value must not contain line breaks')
+    expect(() => parse({ 'X-Run': 'a', 'x-run': 'b' })).toThrow('webhook.headers: x-run is given twice')
+    for (const headers of [[], 'x', null, { 'x-run': 1 }, Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`x-${i}`, 'v']))]) expect(() => parse(headers), JSON.stringify(headers)).toThrow('webhook.headers must be an object of at most 32 string values')
+    expect(() => parse({ 'x-big': 'a'.repeat(8192) })).toThrow('webhook.headers must be at most 8192 bytes')
+    expect(parse({ 'x-big': 'a'.repeat(8192 - 'x-big'.length) })?.['x-big']).toHaveLength(8187)
+    expect(parseBatchStartRequest({ urls: [url], webhook: { url: hook, headers: { 'X-Run': 'b' } } }).webhook?.headers).toEqual({ 'x-run': 'b' })
+  })
+
+  it('takes webhook.metadata as at most 32 strings of at most 1000 characters within 8 KiB, and refuses the rest', () => {
+    const url = 'https://example.com/'
+    const hook = 'https://receiver.example/hook'
+    const parse = (metadata: unknown) => parseBatchStartRequest({ urls: [url], webhook: { url: hook, metadata } }).webhook?.metadata
+    expect(parse({ run: 'wh4', team: 'parity' })).toEqual({ run: 'wh4', team: 'parity' })
+    expect(parseCrawlStartRequest({ url, webhook: { url: hook, metadata: { long: 'a'.repeat(1000) } } }).webhook?.metadata?.long).toHaveLength(1000)
+    expect(parse(Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, 'a'.repeat(1000)])))).toHaveProperty('k7')
+    const message = 'webhook.metadata must be an object of at most 32 string values of at most 1000 characters'
+    const tooMany = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, 'v']))
+    const tooLarge = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, 'a'.repeat(1000)]))
+    for (const metadata of [[], 'x', null, { n: 1 }, { nested: {} }, { long: 'a'.repeat(1001) }, tooMany, tooLarge]) expect(() => parse(metadata), JSON.stringify(metadata).slice(0, 40)).toThrow(message)
   })
 })

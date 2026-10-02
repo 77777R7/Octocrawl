@@ -6,9 +6,10 @@
  * honour is rejected by name (HTTP 400, success: false), never ignored.
  */
 
-import type { AgentHints, CrawlAccepted, CrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
+import type { AgentHints, CrawlAccepted, ParsedCrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
 import { parseCrawlStartRequest, parseScrapeRequest, refusalHint, RequestError, warningOf } from './api.js'
 import type { CrawlReport } from './crawl.js'
+import type { JobWebhookEnvelope } from './delivery.js'
 import type { FetchResult } from './result.js'
 import type { StepRecord, StepStatus, TaskStatus } from './checkpoint.js'
 
@@ -54,6 +55,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them, and the Open Graph (ogTitle, ogDescription, ogUrl, ogImage, ogAudio, ogVideo, ogDeterminer, ogLocale, ogLocaleAlternate, ogSiteName), Dublin Core (dcTermsCreated, dcDateCreated, dcDate, dcTermsType, dcType, dcTermsAudience, dcTermsSubject, dcSubject, dcDescription, dcTermsKeywords) and article (publishedTime, modifiedTime, articleTag, articleSection) tags under Firecrawl\'s names, each only when the page states it, as written (no date normalisation, no fallback from another tag); twitter:* and other meta tags are not passed through, and a failed or blocked page has none.',
   'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
+  'A crawl\'s webhook (a URL string or { url, headers, metadata, events }) is mapped onto the native webhook and its receiver gets Firecrawl\'s payload shape: { success, type: crawl.started | crawl.page | crawl.completed | crawl.failed, id, data: [page], metadata, error? }, one durable delivery per event with retries, every request carrying x-w2l-event-id, x-w2l-event-version and x-w2l-delivery-id (and the signature pair with secretEnv, a native option). A cancelled crawl is crawl.failed with error "cancelled". The native rules apply: https (plain http for a loopback receiver of a local server only), no content-type, host or x-w2l-* header, at most 32 headers and 32 metadata strings; a hosted server takes public https receivers only. GET /v1/deliveries?jobId=<id> on the native API lists the deliveries.',
 ] as const
 
 export interface FirecrawlPage {
@@ -137,6 +139,24 @@ export interface FirecrawlCrawlStarted {
   success: true
   id: string
   url: string
+}
+
+/** The type of one Firecrawl-shaped webhook payload: the job kind and the event (`cancelled` is sent as `failed` with `error: 'cancelled'`). */
+export type FirecrawlWebhookType = `${'crawl' | 'batch_scrape'}.${'started' | 'page' | 'completed' | 'failed'}`
+
+/**
+ * A job event as Firecrawl's webhook receivers read it: `data` holds the page
+ * of a `page` event (as `/fc` crawl status lists it) and is empty otherwise;
+ * `metadata` is the request's `webhook.metadata`. The W2L envelope's fields
+ * are on the delivery's headers (`x-w2l-event-id`, `x-w2l-event-version`).
+ */
+export interface FirecrawlWebhookPayload {
+  success: true
+  type: FirecrawlWebhookType
+  id: string
+  data: FirecrawlPage[]
+  metadata: Readonly<Record<string, string>>
+  error?: string
 }
 
 export type FirecrawlCrawlJobStatus = 'scraping' | 'completed' | 'failed' | 'cancelled'
@@ -224,11 +244,11 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   return parseScrapeRequest({ url: rec.url, ...options, ...readShimAttribution(rec) })
 }
 
-export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
+export function parseFirecrawlCrawlRequest(body: unknown): ParsedCrawlStartRequest {
   const rec = asRecord(body)
   const problems = noProblems()
   // `idempotencyKey` is the native name of the `x-idempotency-key` header the v1 SDK sends, which the API merges into the body before parsing.
-  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain', 'idempotencyKey'], problems)
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain', 'idempotencyKey', 'webhook'], problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
     const options = rec.scrapeOptions
@@ -258,7 +278,29 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   }
   if (rec.crawlEntireDomain !== undefined) native.crawlEntireDomain = rec.crawlEntireDomain
   if (rec.idempotencyKey !== undefined) native.idempotencyKey = rec.idempotencyKey
-  return parseCrawlStartRequest(native)
+  // Firecrawl's webhook (a string, or { url, headers, metadata, events }) is the native option; the native parser checks it, and the receiver gets Firecrawl's payload shape.
+  if (rec.webhook !== undefined) native.webhook = rec.webhook
+  const parsed = parseCrawlStartRequest(native)
+  return parsed.webhook === undefined || parsed.webhook === null ? parsed : { ...parsed, webhookPayloadFormat: 'firecrawl' }
+}
+
+/**
+ * A job event in Firecrawl's webhook shape: the type from the job kind and
+ * the event (`cancelled` becomes `failed` with `error: 'cancelled'`), the
+ * page of a `page` event as `/fc` crawl status would list it, `metadata` as
+ * the request gave it.
+ */
+export function wrapJobWebhook(envelope: JobWebhookEnvelope, result: FetchResult | null): FirecrawlWebhookPayload {
+  const kind = envelope.jobKind === 'crawl' ? 'crawl' : 'batch_scrape'
+  const event = envelope.event === 'cancelled' ? 'failed' : envelope.event
+  return {
+    success: true,
+    type: `${kind}.${event}`,
+    id: envelope.jobId,
+    data: envelope.event === 'page' && result !== null ? [firecrawlPage(result)] : [],
+    metadata: { ...envelope.metadata },
+    ...(envelope.event === 'cancelled' ? { error: 'cancelled' } : envelope.error === undefined ? {} : { error: envelope.error }),
+  }
 }
 
 /** The scrape options the shim maps: formats (markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage, an attributes entry and a screenshot entry), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds and removeBase64Images; the native parser validates them. */

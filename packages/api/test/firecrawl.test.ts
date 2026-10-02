@@ -78,7 +78,8 @@ describe('Firecrawl /scrape /crawl shim', () => {
       },
     })
     expect(await post('/fc/v1/scrape', { url, actions: [{ type: 'wait', milliseconds: 500 }] })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('actions') } })
-    expect(await post('/fc/v1/crawl', { url, webhook: 'https://example.com/hook' })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('webhook') } })
+    // webhook is mapped onto the native option now; a key inside it W2L does not know is still refused by name.
+    expect(await post('/fc/v1/crawl', { url, webhook: { url: 'https://example.com/hook', retries: 3 } })).toMatchObject({ status: 400, body: { success: false, error: 'unknown webhook option: retries', code: 'invalid_request' } })
   })
 
   it('POST /fc/v1/crawl starts native crawl and GET returns Firecrawl status pages', async () => {

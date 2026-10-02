@@ -531,4 +531,26 @@ describe('W2L SDK', () => {
     expect(error).toMatchObject({ status: 502, method: 'GET', path: '/v1/monitors', body: 'Bad Gateway', message: 'GET /v1/monitors failed: 502 Bad Gateway' })
     expect((error as W2LError).code).toBeUndefined()
   })
+
+  it('sends a crawl or batch webhook as given and lists deliveries and destinations by jobId', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      calls.push({ line: `${init?.method ?? 'GET'} ${url.pathname}${url.search}`, body: init?.body === undefined ? null : JSON.parse(String(init.body)) })
+      return new Response(JSON.stringify(init?.method === 'POST' ? { taskId: 'job-1' } : url.pathname.endsWith('/page') ? { items: [], nextCursor: null, hasMore: false } : []), { status: init?.method === 'POST' ? 202 : 200 })
+    }) as typeof fetch })
+    const webhook = { url: 'https://receiver.example/hook', headers: { authorization: 'Bearer test' }, metadata: { run: 'sdk' }, events: ['completed' as const] }
+    await client.crawl('https://example.com/', { maxPages: 2, webhook })
+    await client.batchScrape(['https://example.com/a'], { webhook: 'https://receiver.example/hook' })
+    await client.listDeliveries({ jobId: 'job-1', state: 'delivered' })
+    await client.getDeliveriesPage({ jobId: 'job-1', limit: 5 })
+    await client.listDeliveryDestinations({ jobId: 'job-1' })
+    expect(calls).toEqual([
+      { line: 'POST /v1/crawl', body: { url: 'https://example.com/', maxPages: 2, webhook, origin: SDK_ORIGIN } },
+      { line: 'POST /v1/batches', body: { urls: ['https://example.com/a'], webhook: 'https://receiver.example/hook', origin: SDK_ORIGIN } },
+      { line: 'GET /v1/deliveries?jobId=job-1&state=delivered', body: null },
+      { line: 'GET /v1/deliveries/page?jobId=job-1&limit=5', body: null },
+      { line: 'GET /v1/delivery/destinations?jobId=job-1', body: null },
+    ])
+  })
 })

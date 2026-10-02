@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, SCREENSHOT_UNAVAILABLE_HINT, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -32,8 +32,13 @@ describe('agent hints', () => {
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
       'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; W2L asks for it again after five minutes, and a robotsOverride does not set that aside',
     ])
-    // A denial that was not robots.txt's (an address the policy refuses) has no rule to name.
-    expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied' }] }))).toEqual([])
+    // A denial that was not robots.txt's (an address the policy refuses) names the egress policy and the recorded reason instead of a rule.
+    expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied', detail: { to: URL_, error: 'private address 10.0.0.1' } }] }))).toEqual([
+      'the egress policy refused example.test (private address 10.0.0.1) and nothing was fetched; W2L reaches public addresses, and a local server the addresses its policy allowlists',
+    ])
+    expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 0, lane: 'http', event: 'governance_refusal', detail: { reason: 'host outside allowlist' } }] }))[0]).toContain('(host outside allowlist)')
+    // A policy_denied with neither event (a lane that recorded nothing) has nothing to name.
+    expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null }))).toEqual([])
   })
 
   it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
@@ -54,9 +59,11 @@ describe('agent hints', () => {
     // A deferred Retry-After on any result is a wait, whatever the status.
     expect(hints(result({ retryAt }))).toEqual(['wait until 2026-10-02T12:00:00.000Z before asking example.test again'])
     expect(hints(result({ truncated: true, truncatedAt: 120000 }))).toEqual(['the content was cut at character 120000; ask for rawHtml or a narrower includeTags'])
-    expect(hints(result({ status: 'failed', failureReason: 'http_error', markdown: '# Not Found', evidence: { finalUrl: URL_, httpStatus: 404 } }))).toEqual(['the server answered 404; the markdown is that error page, not the requested page'])
-    // An error status that kept no page says nothing: there is no markdown to mistake for the page.
+    expect(hints(result({ status: 'failed', failureReason: 'http_error', markdown: '# Not Found', evidence: { finalUrl: URL_, httpStatus: 404 } }))).toEqual(['the server answered 404; the markdown is that error page, not the requested page; check the link'])
+    expect(hints(result({ status: 'failed', failureReason: 'http_error', markdown: '# Gone', evidence: { finalUrl: URL_, httpStatus: 500 } }))).toEqual(['the server answered 500; the markdown is that error page, not the requested page'])
+    // An error status that kept no page says nothing: there is no markdown to mistake for the page; a 404 still says to check the link.
     expect(hints(result({ status: 'failed', failureReason: 'http_error', markdown: null, evidence: { finalUrl: URL_, httpStatus: 500 } }))).toEqual([])
+    expect(hints(result({ status: 'failed', failureReason: 'http_error', markdown: null, evidence: { finalUrl: URL_, httpStatus: 404 } }))).toEqual(['the server answered 404; check the link'])
     // The host is the final URL's, after a redirect.
     expect(hints(result({ status: 'blocked', blockReason: 'rate_limit', markdown: null, evidence: { finalUrl: 'https://www.example.test/x', httpStatus: 429 } }))[0]).toContain('www.example.test')
   })
@@ -87,6 +94,50 @@ describe('agent hints', () => {
     expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
     expect(hints(file('xlsx', null, null))).toEqual(['the response was a xlsx file not saved; it has no markdown'])
+  })
+
+  it('names what the http lane got when a browser lane served the page after it, and nothing for the ladder\'s ordinary thin-page hop', () => {
+    const served = (http: Partial<HintedAttempt['result']> & Pick<HintedAttempt['result'], 'status'>, httpStatus: number | null = 403) => agentHintsFor({}, {
+      channelsTried: ['http', 'browser_local'],
+      result: result({ lane: 'browser_local' }),
+      summary: { attempts: [{ channel: 'http', result: { failureReason: null, blockReason: null, ...http, evidence: { httpStatus } } }, { channel: 'browser_local', result: { status: 'success', failureReason: null, blockReason: null, evidence: { httpStatus: 200 } } }] },
+    })
+    expect(served({ status: 'blocked', blockReason: 'bot_detected_generic' })).toEqual(['the http lane got blocked/bot_detected_generic (HTTP 403) from example.test and the local browser lane served the page; expect other pages of example.test to need the browser lane too'])
+    expect(served({ status: 'failed', failureReason: 'http_error' }, 503)).toEqual(['the http lane got failed/http_error (HTTP 503) from example.test and the local browser lane served the page; expect other pages of example.test to need the browser lane too'])
+    // A thin or empty http answer the browser lane improved on is the ladder's ordinary hop, not a hint; so is a page the http lane served itself, and a run without its summary.
+    expect(served({ status: 'failed', failureReason: 'empty_unverified' }, 200)).toEqual([])
+    expect(served({ status: 'success' }, 200)).toEqual([])
+    expect(hints(result({ lane: 'browser_local' }), ['http', 'browser_local'])).toEqual([])
+    expect(hints(result(), ['http'])).toEqual([])
+  })
+
+  it('names a certificate that did not verify, a deadline that passed, and a page without main content, each with its honest option', () => {
+    expect(hints(result({ status: 'failed', failureReason: 'tls_error', markdown: null }))).toEqual(['the certificate of example.test did not verify and W2L keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it'])
+    expect(hints(result({ status: 'failed', failureReason: 'timeout', markdown: null }))).toEqual(["no lane answered within the request's deadline; raise timeout (up to 300000 ms)"])
+    expect(hints(result({ status: 'partial' }))).toEqual(['the result is partial: the deadline passed with this much of the page read; raise timeout (up to 300000 ms) for the rest'])
+    const empty = result({ status: 'failed', failureReason: 'empty_unverified', markdown: '# Chrome only' })
+    expect(hints(empty)).toEqual(["W2L found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
+    // A shell or thin answer already carries its own sentence; under fastMode that option's sentence stands alone.
+    expect(hints({ ...empty, warnings: [{ code: 'client_rendered_suspected', message: 'shell' }] })).toEqual(['the page fills its data with JavaScript; the browser lane was not tried'])
+    expect(hints({ ...empty, trace: [{ at: 1, lane: 'http', event: 'quality_low_yield' }] }, ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
+    // A PDF with no text layer is the one empty page W2L cannot read differently.
+    const pdf = { kind: 'pdf', detectedBy: 'content_type', contentType: 'application/pdf', declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path: 'files/aaa.pdf', markdownFrom: null, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']>
+    expect(hints(result({ status: 'failed', failureReason: 'empty_unverified', markdown: null, file: pdf }))).toEqual(['the PDF has no text layer, and W2L runs no OCR', 'the response was a pdf file kept at files/aaa.pdf; it has no markdown'])
+  })
+
+  it('names the required json fields the page did not state and a model fallback that did not run, and keeps at most five hints', () => {
+    const json = (issues: NonNullable<HintedResult['json']>['issues']): HintedResult => result({ json: { status: 'incomplete', data: { title: 'Report' }, evidence: [], issues } })
+    expect(hints(json([{ code: 'missing_required', message: 'no source', path: '/price' }]))).toEqual(['json is incomplete: the required field /price was not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL'])
+    expect(hints(json([{ code: 'missing_required', message: 'no source', path: '/price' }, { code: 'missing_required', message: 'no source', path: '/sku' }, { code: 'model_unavailable', message: 'model fallback requested but W2L extraction model is not configured' }]))).toEqual([
+      'json is incomplete: the required fields /price, /sku were not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL',
+      'the json model fallback did not run: model fallback requested but W2L extraction model is not configured',
+    ])
+    expect(hints(result({ json: { status: 'complete', data: { title: 'Report' }, evidence: [], issues: [] } }))).toEqual([])
+    expect(hints(json([{ code: 'field_unavailable', message: 'nullable field not found', path: '/isbn' }]))).toEqual([])
+    // The table's order decides which five stay.
+    const many = hints({ ...json([{ code: 'missing_required', message: 'no source', path: '/price' }, { code: 'model_unavailable', message: 'no model' }]), status: 'partial', retryAt: Date.UTC(2026, 0, 1), truncated: true, truncatedAt: 10, warnings: [{ code: 'screenshot_unavailable', message: 'no capture' }] })
+    expect(many).toHaveLength(5)
+    expect(many.map((hint) => hint.split(' ')[0])).toEqual(['the', 'wait', 'the', 'the', 'json'])
   })
 
   it('says the page stands when the browser lane could not capture the screenshot asked for, and names the lighter request', () => {

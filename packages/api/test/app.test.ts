@@ -384,7 +384,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     // A page that was not read as content has the call's facts with its page fields null, and a record of its own.
     const failed = (await postJson('/v1/scrape', { url: `${server.url}/error/404`, debug: false })).body
     expect(failed.metadata).toMatchObject({ statusCode: 404, title: null, canonicalUrl: null, scrapeId: expect.stringMatching(UUID), url: `${server.url}/error/404` })
-    expect((await (await app.request(`/v1/scrapes/${failed.metadata.scrapeId}`)).json())).toMatchObject({ status: 'failed', failureReason: 'http_error', agentHints: ['the server answered 404; the markdown is that error page, not the requested page'] })
+    expect((await (await app.request(`/v1/scrapes/${failed.metadata.scrapeId}`)).json())).toMatchObject({ status: 'failed', failureReason: 'http_error', agentHints: ['the server answered 404; the markdown is that error page, not the requested page; check the link'] })
     // Header values stay out of the record; each is replaced by its name.
     const headed = (await postJson('/v1/scrape', { url, headers: { 'X-Test': 'not-for-the-record' }, debug: false })).body
     expect((await (await app.request(`/v1/scrapes/${headed.metadata.scrapeId}`)).json()).request.headers).toEqual({ 'x-test': 'x-test' })
@@ -607,7 +607,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(reportHits).toBe(2)
       const blanket = await post({ url, ignoreRobotsTxt: true })
       expect(blanket.status).toBe(400)
-      expect(await blanket.json()).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] } })
+      expect(await blanket.json()).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
       expect(reportHits).toBe(2)
     } finally {
       await new Promise<void>(resolve => local.close(() => resolve()))

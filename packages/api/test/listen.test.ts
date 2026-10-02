@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseListen } from '../src/listen.js'
+import { LOCAL_PRIVATE_ALLOWLIST } from '@w2l/contracts'
+import { JOB_STREAMS_OFF_NOTICE, parseListen } from '../src/listen.js'
 
 describe('parseListen', () => {
   it('defaults to loopback local mode without a token', () => {
@@ -13,6 +14,18 @@ describe('parseListen', () => {
       allowRobotsOverride: true,
     })
     expect(listen.networkPolicy.privateAllowlist.length).toBeGreaterThan(0)
+  })
+
+  it('serves the job stream routes unless W2L_JOB_STREAMS=off, which it says at startup', () => {
+    expect(parseListen([], {}).jobStreams).toBe(true)
+    expect(parseListen([], { W2L_JOB_STREAMS: 'on' }).jobStreams).toBe(true)
+    for (const env of [{ W2L_JOB_STREAMS: 'off' }, { W2L_JOB_STREAMS: ' OFF ' }]) {
+      const local = parseListen([], env)
+      expect(local.jobStreams).toBe(false)
+      expect(local.notices).toContain(JOB_STREAMS_OFF_NOTICE)
+      expect(parseListen(['--hosted', '--token', 'secret'], env)).toMatchObject({ jobStreams: false, notices: expect.arrayContaining([JOB_STREAMS_OFF_NOTICE]) })
+    }
+    expect(parseListen([], {}).notices).not.toContain(JOB_STREAMS_OFF_NOTICE)
   })
 
   it('refuses hosted mode without a token', () => {
@@ -83,5 +96,21 @@ describe('parseListen', () => {
     expect(hosted.networkPolicy.egressProxy).toBeUndefined()
     expect(hosted.notices).toEqual(['hosted mode ignores HTTPS_PROXY, NO_PROXY: outbound connections stay direct to validated addresses.'])
     expect(parseListen(['--hosted', '--token', 'secret'], {}).notices).toEqual([])
+  })
+
+  it('delivers job webhooks under its own policy: local mode reaches local-network https and loopback http, hosted mode public https only', () => {
+    const local = parseListen([], { HTTPS_PROXY: 'http://127.0.0.1:7890' }).delivery
+    expect(local).toMatchObject({ allowHttpLoopback: true })
+    expect(local.networkPolicy.privateAllowlist).toEqual([...LOCAL_PRIVATE_ALLOWLIST])
+    // The shell's proxy carries the crawler's requests, never a delivery; W2L_DELIVERY_PROXY_URL does.
+    expect(local.networkPolicy.egressProxy).toBeUndefined()
+    expect(local).not.toHaveProperty('proxyUrl')
+    expect(local).not.toHaveProperty('caFile')
+    expect(local.notice).toBe('webhook deliveries: https receivers on public and local-network addresses, plain http on loopback; TLS verified; direct, the environment proxy not used')
+    const hosted = parseListen(['--hosted', '--token', 'secret'], { W2L_DELIVERY_PRIVATE_ALLOWLIST: '10.1.0.0/16, 10.2.0.0/16', W2L_DELIVERY_PROXY_URL: 'http://egress.internal:3128', W2L_DELIVERY_CA_FILE: '/etc/w2l/ca.pem' }).delivery
+    expect(hosted).toMatchObject({ allowHttpLoopback: false, proxyUrl: 'http://egress.internal:3128', caFile: '/etc/w2l/ca.pem' })
+    expect(hosted.networkPolicy.privateAllowlist).toEqual(['10.1.0.0/16', '10.2.0.0/16'])
+    expect(hosted.notice).toBe('webhook deliveries: https receivers on public addresses and 10.1.0.0/16, 10.2.0.0/16; TLS verified; through http://egress.internal:3128')
+    expect(parseListen(['--hosted', '--token', 'secret'], {}).delivery.networkPolicy.privateAllowlist).toEqual([])
   })
 })

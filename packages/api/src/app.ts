@@ -1,10 +1,15 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
+import type { WSEvents } from 'hono/ws'
+import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
 import { CrawlStateError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
+import type { JobKind } from './jobEvents.js'
+import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
 import {
   API_ERROR_STATUS,
+  WS_TOKEN_PROTOCOL_PREFIX,
   type AgentHints,
   type ApiErrorBody,
   type ApiErrorCode,
@@ -52,6 +57,26 @@ export interface AppOptions {
    * with `Retry-After`. In memory, per process; absent means no limit.
    */
   rateLimit?: { perMinute: number }
+  /**
+   * Whether the job stream routes are served: `GET /v1/crawl/:id/events`,
+   * `GET /v1/batches/:id/events` (server-sent events) and their `/ws`
+   * WebSocket upgrades. Default true; false (`W2L_JOB_STREAMS=off`) answers
+   * 404 on all four, and clients poll the status and listing routes instead.
+   */
+  jobStreams?: boolean
+}
+
+/** The WebSocket injectors of the apps that serve stream routes, for injectJobWebSockets. */
+const webSocketInjectors = new WeakMap<Hono, NodeWebSocket['injectWebSocket']>()
+
+/**
+ * Attaches the app's WebSocket routes to the http server `serve()` returned:
+ * upgrade requests are routed through the app (its bearer check included)
+ * and completed on the app's socket server. A no-op for an app created with
+ * `jobStreams: false`, which serves no such route.
+ */
+export function injectJobWebSockets(app: Hono, server: Parameters<NodeWebSocket['injectWebSocket']>[0]): void {
+  webSocketInjectors.get(app)?.(server)
 }
 
 /** Every error response: { error, code, details?, agentHints? }, after success: false under /fc for Firecrawl clients, which read the hints as agent_hints. */
@@ -80,10 +105,18 @@ function withIdempotencyHeader(c: Context, body: unknown): unknown {
   return { ...rec, idempotencyKey: header }
 }
 
-/** The bearer token a request presents, or '' when it presents none. */
+/**
+ * The bearer token a request presents, or '' when it presents none: the
+ * Authorization header, or on a WebSocket upgrade, which the WebSocket API
+ * gives no headers, the `w2l.token.<token>` subprotocol. Never a query string.
+ */
 function presentedToken(c: Context): string {
   const header = c.req.header('authorization') ?? ''
-  return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
+  if (header.toLowerCase().startsWith('bearer ')) return header.slice(7).trim()
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') return ''
+  const offered = (c.req.header('sec-websocket-protocol') ?? '').split(',').map((protocol) => protocol.trim())
+  const token = offered.find((protocol) => protocol.startsWith(WS_TOKEN_PROTOCOL_PREFIX))
+  return token === undefined ? '' : token.slice(WS_TOKEN_PROTOCOL_PREFIX.length)
 }
 
 /** The requests the rate limit counts: those that start work. Status reads are free. */
@@ -187,25 +220,67 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     return report ? c.json(report) : fail(c, 'not_found', 'not found')
   })
 
-  /** Reconnecting after a restart receives the current state and terminal event. */
-  app.get('/v1/batches/:id/events', async (c) => {
-    const id = c.req.param('id')
-    if (await engine.getBatch(id) === null) return fail(c, 'not_found', 'not found')
-    return streamSSE(c, async (stream) => {
-      let last = ''
-      while (!c.req.raw.signal.aborted) {
-        const report = await engine.getBatch(id)
-        if (!report) break
-        const data = JSON.stringify(report)
-        if (data !== last) {
-          await stream.writeSSE({ event: ['completed', 'failed', 'cancelled'].includes(report.status) ? 'complete' : report.status === 'paused' ? 'paused' : 'progress', data })
-          last = data
+  if (options.jobStreams !== false) {
+    /**
+     * The job's stream as server-sent events: `catchup`, one `document` per
+     * page (its `id:` the step cursor), `snapshot`, `done`, `error`;
+     * `?after=<cursor>` or `Last-Event-ID` resumes after a document. The
+     * stream closes after `done`. A batch id on the crawl route streams the
+     * crawl report, as `GET /v1/crawl/:id` reports a batch; a crawl id on the
+     * batch route is 404, as `GET /v1/batches/:id` is.
+     */
+    const events = (kind: JobKind) => async (c: Context) => {
+      const id = c.req.param('id') ?? ''
+      const after = c.req.query('after') ?? c.req.header('last-event-id')
+      checkStreamCursor(after)
+      if (await readJobReport(engine, kind, id) === null) return fail(c, 'not_found', 'not found')
+      return streamSSE(c, async (stream) => {
+        for await (const frame of jobStream(engine, kind, id, { ...(after === undefined ? {} : { after }), signal: c.req.raw.signal })) {
+          await stream.writeSSE(sseEvent(frame))
         }
-        if (['completed', 'failed', 'cancelled', 'paused'].includes(report.status)) break
-        await new Promise(resolve => setTimeout(resolve, 500))
+      })
+    }
+    app.get('/v1/crawl/:id/events', events('crawl'))
+    app.get('/v1/batches/:id/events', events('batch'))
+
+    // The same frames as JSON over a WebSocket. The upgrade request goes through the app, bearer check included (header or `w2l.token.<token>` subprotocol).
+    const sockets = createNodeWebSocket({ app })
+    webSocketInjectors.set(app, sockets.injectWebSocket)
+    // The token subprotocol is the one echoed back; a protocol W2L does not speak selects none, which fails the client's handshake.
+    ;(sockets.wss as unknown as { options: { handleProtocols?: (protocols: Set<string>) => string | false } }).options.handleProtocols = (protocols) => [...protocols].find((protocol) => protocol.startsWith(WS_TOKEN_PROTOCOL_PREFIX)) ?? false
+    const socket = (kind: JobKind) => (c: Context): WSEvents => {
+      const id = c.req.param('id') ?? ''
+      const after = c.req.query('after')
+      const controller = new AbortController()
+      return {
+        onOpen(_event, ws) {
+          void (async () => {
+            try {
+              if (await readJobReport(engine, kind, id) === null) { ws.close(4404, 'not found'); return }
+              try { checkStreamCursor(after) } catch (error) {
+                ws.send(JSON.stringify({ type: 'error', error: { code: 'invalid_request', message: error instanceof Error ? error.message : String(error) } }))
+                ws.close(4400, 'invalid cursor')
+                return
+              }
+              for await (const frame of jobStream(engine, kind, id, { ...(after === undefined ? {} : { after }), signal: controller.signal })) {
+                if (controller.signal.aborted) return
+                ws.send(JSON.stringify(frame))
+              }
+              if (!controller.signal.aborted) ws.close(1000, 'done')
+            } catch (error) {
+              if (controller.signal.aborted) return
+              console.error(JSON.stringify({ component: 'api', event: 'job_stream_failed', taskId: id, error: error instanceof Error ? error.message : String(error) }))
+              try { ws.close(1011, 'stream failed') } catch {}
+            }
+          })()
+        },
+        onClose() { controller.abort() },
+        onError() { controller.abort() },
       }
-    })
-  })
+    }
+    app.get('/v1/crawl/:id/ws', sockets.upgradeWebSocket(socket('crawl')))
+    app.get('/v1/batches/:id/ws', sockets.upgradeWebSocket(socket('batch')))
+  }
 
   /** The crawls this process is running; registered before the `:id` routes, which would otherwise take `active` for an id. Always 200. */
   app.get('/v1/crawl/active', async (c) => c.json(await engine.listActiveCrawls(), 200))
@@ -321,7 +396,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     try { return c.json(engine.createDeliveryDestination(await c.req.json()), 201) }
     catch (error) { return fail(c, error instanceof SyntaxError ? 'invalid_json' : 'invalid_request', error instanceof Error ? error.message : 'invalid destination') }
   })
-  app.get('/v1/delivery/destinations', (c) => c.json(engine.listDeliveryDestinations(c.req.query('monitorId'))))
+  /** The destinations of one Monitor (`monitorId`) or one crawl or batch (`jobId`); header names only, never their values. */
+  app.get('/v1/delivery/destinations', (c) => c.json(engine.listDeliveryDestinations({ monitorId: c.req.query('monitorId'), jobId: c.req.query('jobId') })))
   for (const action of ['pause', 'resume'] as const) app.post(`/v1/delivery/destinations/:id/${action}`, (c) => {
     try { return c.json(engine.setDeliveryDestinationEnabled(c.req.param('id'), action === 'resume')) }
     catch { return fail(c, 'not_found', 'destination not found') }
@@ -329,13 +405,13 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.get('/v1/deliveries', (c) => {
     const state = c.req.query('state')
     if (state && !['pending','delivering','delivered','dead_letter'].includes(state)) return fail(c, 'invalid_request', 'invalid delivery state')
-    return c.json(engine.listDeliveries({monitorId: c.req.query('monitorId'), destinationId: c.req.query('destinationId'), state: state as import('@w2l/contracts').DeliveryState | undefined}))
+    return c.json(engine.listDeliveries({monitorId: c.req.query('monitorId'), jobId: c.req.query('jobId'), destinationId: c.req.query('destinationId'), state: state as import('@w2l/contracts').DeliveryState | undefined}))
   })
   app.get('/v1/deliveries/page', (c) => {
     const state = c.req.query('state')
     if (state && !['pending','delivering','delivered','dead_letter'].includes(state)) return fail(c,'invalid_request','invalid delivery state')
     const limit = c.req.query('limit') === undefined ? undefined : Number(c.req.query('limit'))
-    try { return c.json(engine.getDeliveriesPage({monitorId:c.req.query('monitorId'),destinationId:c.req.query('destinationId'),state:state as import('@w2l/contracts').DeliveryState | undefined,cursor:c.req.query('cursor'),limit})) }
+    try { return c.json(engine.getDeliveriesPage({monitorId:c.req.query('monitorId'),jobId:c.req.query('jobId'),destinationId:c.req.query('destinationId'),state:state as import('@w2l/contracts').DeliveryState | undefined,cursor:c.req.query('cursor'),limit})) }
     catch (error) { return fail(c,'invalid_request',error instanceof Error ? error.message : 'invalid delivery query') }
   })
   app.get('/v1/deliveries/:id', (c) => {

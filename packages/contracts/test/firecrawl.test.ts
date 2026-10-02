@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CrawlReport, FetchResult, ScrapeResponse, StepRecord } from '../src/index.js'
+import type { CrawlReport, FetchResult, JobWebhookEnvelope, ScrapeResponse, StepRecord } from '../src/index.js'
 import {
   FIRECRAWL_SHIM_DIFFS,
   FIRECRAWL_SHIM_SNAPSHOT,
@@ -10,6 +10,7 @@ import {
   wrapCrawlAccepted,
   wrapCrawlStatus,
   firecrawlCrawlCounts,
+  wrapJobWebhook,
   wrapScrape,
 } from '../src/index.js'
 
@@ -483,5 +484,27 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /skipTlsVerification/.test(d) && /hosted/.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /blockAds/.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /headers never override/.test(d))).toBe(true)
+  })
+
+  it('maps a crawl webhook (a string or { url, headers, metadata, events }) onto the native option with Firecrawl\'s payload shape, and wraps job events into it', () => {
+    const url = 'https://example.com/'
+    expect(parseFirecrawlCrawlRequest({ url, webhook: 'https://receiver.example/hook' })).toMatchObject({ webhook: { url: 'https://receiver.example/hook' }, webhookPayloadFormat: 'firecrawl' })
+    const config = { url: 'https://receiver.example/hook', headers: { Authorization: 'Bearer test' }, metadata: { run: 'fc1' }, events: ['completed', 'failed'] }
+    expect(parseFirecrawlCrawlRequest({ url, webhook: config })).toMatchObject({ webhook: { url: config.url, headers: { authorization: 'Bearer test' }, metadata: { run: 'fc1' }, events: ['completed', 'failed'] }, webhookPayloadFormat: 'firecrawl' })
+    expect(parseFirecrawlCrawlRequest({ url })).not.toHaveProperty('webhookPayloadFormat')
+    expect(() => parseFirecrawlCrawlRequest({ url, webhook: { url: 'https://receiver.example/hook', retries: 2 } })).toThrow('unknown webhook option: retries')
+    expect(() => parseFirecrawlCrawlRequest({ url, webhook: { url: 'https://receiver.example/hook', headers: { 'Content-Type': 'text/plain' } } })).toThrow('webhook.headers: content-type is reserved')
+    const envelope = (event: JobWebhookEnvelope['event'], extra: Partial<JobWebhookEnvelope> = {}): JobWebhookEnvelope => ({ schemaVersion: 'w2l.job-event/v1', eventId: `job-1:${event}`, sequence: 1, jobId: 'job-1', jobKind: 'crawl', event, at: '2026-10-02T00:00:00.000Z', metadata: { run: 'fc1' }, ...extra })
+    expect(wrapJobWebhook(envelope('started'), null)).toEqual({ success: true, type: 'crawl.started', id: 'job-1', data: [], metadata: { run: 'fc1' } })
+    const result = page({ requestedUrl: 'https://example.com/a', status: 'success', markdown: '# A' })
+    const wrapped = wrapJobWebhook(envelope('page'), result)
+    expect(wrapped).toMatchObject({ success: true, type: 'crawl.page', id: 'job-1', metadata: { run: 'fc1' } })
+    expect(wrapped.data).toHaveLength(1)
+    expect(wrapped.data[0]).toMatchObject({ markdown: '# A', metadata: { sourceURL: 'https://example.com/a', url: 'https://example.com/a', statusCode: 200 } })
+    expect(wrapJobWebhook(envelope('completed'), null).type).toBe('crawl.completed')
+    expect(wrapJobWebhook(envelope('failed', { error: 'boom' }), null)).toMatchObject({ type: 'crawl.failed', error: 'boom', data: [] })
+    expect(wrapJobWebhook(envelope('cancelled'), null)).toMatchObject({ type: 'crawl.failed', error: 'cancelled' })
+    expect(wrapJobWebhook({ ...envelope('page'), jobKind: 'batch' }, result).type).toBe('batch_scrape.page')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /webhook/.test(d) && /crawl\.page/.test(d))).toBe(true)
   })
 })

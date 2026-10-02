@@ -5,11 +5,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer, type Server } from 'node:https'
-import { createServer as createHttpServer } from 'node:http'
-import { connect as connectTcp, type Socket } from 'node:net'
+import { createServer as createHttpServer, type IncomingHttpHeaders } from 'node:http'
+import { connect as connectTcp, type AddressInfo, type Socket } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { hostedNetworkPolicy, type WebhookEventEnvelope } from '@w2l/contracts'
-import { DeliveryStore } from '../src/deliveryStore.js'
+import { DeliveryStore, validateDestinationUrl } from '../src/deliveryStore.js'
 import { createHttpsWebhookTransport, DeliveryWorker, parseWebhookRetryAfter, webhookSignature } from '../src/deliveryWorker.js'
 import { WebhookInbox, verifyWebhookSignature } from '../src/webhookInbox.js'
 
@@ -295,6 +295,73 @@ describe('durable webhook store and worker', () => {
     await new DeliveryWorker(store, { networkPolicy: localPolicy(), ca, requestTimeoutMs: 30, leaseMs: 100 }).processOne()
     expect(store.getDelivery(id)).toMatchObject({ state: 'pending', attemptCount: 2 })
     expect(store.attempts(id).every(attempt => attempt.error)).toBe(true)
+  })
+  it('registers a job destination, enqueues a job event once by its id, counts and lists them, and exposes header names only', () => {
+    const store = openStore()
+    const destination = store.createDestination({ id: 'job:task-1', monitorId: 'job:task-1', url: 'https://receiver.example/hook', kind: 'job', events: ['started', 'page', 'completed'], headers: { Authorization: 'Bearer test', 'X-Run': 'wh3' }, metadata: { run: 'wh3' }, payloadFormat: 'w2l' }, 1_000)
+    expect(destination).toMatchObject({ kind: 'job', jobId: 'task-1', events: ['started', 'page', 'completed'], headerNames: ['authorization', 'x-run'], metadata: { run: 'wh3' }, payloadFormat: 'w2l' })
+    expect(JSON.stringify(destination)).not.toContain('Bearer test')
+    expect(store.getDestination('sink-a')).toBeNull()
+    const payload = { schemaVersion: 'w2l.job-event/v1', eventId: 'task-1:started', sequence: 0, jobId: 'task-1', jobKind: 'crawl', event: 'started', at: '2026-10-02T00:00:00.000Z', metadata: { run: 'wh3' } } as const
+    expect(store.enqueueJob('job:task-1', 'task-1:started', 0, payload, 1_000)).toBe(true)
+    expect(store.enqueueJob('job:task-1', 'task-1:started', 0, { ...payload, at: 'later' }, 1_001)).toBe(false)
+    expect(store.listDeliveries({ monitorId: 'job:task-1' })).toHaveLength(1)
+    // The first payload stands: a repeated enqueue changes nothing.
+    expect(store.getDeliveryByEvent('job:task-1', 'task-1:started')?.payload).toEqual(payload)
+    expect(store.listEventIds('job:task-1')).toEqual(['task-1:started'])
+    expect(store.countDeliveries('job:task-1')).toEqual({ pending: 1, delivering: 0, delivered: 0, dead_letter: 0 })
+    // The claim carries the header values the worker sends; the public destination never does.
+    const claim = store.claim(2_000, 1_000)!
+    expect(claim.headers).toEqual({ authorization: 'Bearer test', 'x-run': 'wh3' })
+    expect(claim.destination).not.toHaveProperty('headers')
+    expect(store.countDeliveries('job:task-1')).toEqual({ pending: 0, delivering: 1, delivered: 0, dead_letter: 0 })
+    // A job destination is immutable like a Monitor's, a Monitor destination takes none of the job options, W2L's header names are reserved, and a job event needs a job destination.
+    expect(() => store.createDestination({ id: 'job:task-1', monitorId: 'job:task-1', url: 'https://receiver.example/hook', kind: 'job', events: ['completed'] })).toThrow('immutable')
+    expect(() => store.createDestination({ id: 'm', monitorId: 'monitor-a', url: 'https://receiver.example/hook', headers: { 'x-run': '1' } })).toThrow('job webhook options')
+    expect(() => store.createDestination({ id: 'job:x', monitorId: 'job:x', url: 'https://receiver.example/hook', kind: 'job', headers: { 'x-w2l-event-id': 'spoof' } })).toThrow('webhook.headers: x-w2l-event-id is reserved')
+    store.createDestination({ id: 'sink-a', monitorId: 'monitor-a', url: 'https://receiver.example/webhook' }, 1_000)
+    expect(() => store.enqueueJob('sink-a', 'e', 1, payload)).toThrow('job webhook destination not found')
+  })
+  it('sends a job destination\'s headers on every attempt beside W2L\'s own, which they never override', async () => {
+    const store = openStore()
+    store.createDestination({ id: 'job:task-2', monitorId: 'job:task-2', url: 'https://receiver.example/hook', kind: 'job', headers: { authorization: 'Bearer test', 'x-run': 'wh3' } }, 1_000)
+    store.enqueueJob('job:task-2', 'task-2:started', 0, { schemaVersion: 'w2l.job-event/v1', eventId: 'task-2:started', sequence: 0, jobId: 'task-2', jobKind: 'batch', event: 'started', at: '2026-10-02T00:00:00.000Z', metadata: {} }, 1_000)
+    let now = 1_000
+    const seen: Record<string, string>[] = []
+    const worker = new DeliveryWorker(store, { now: () => now, retryBaseMs: 1, transport: async request => { seen.push(request.headers); return { status: seen.length === 1 ? 503 : 200, retryAfter: null } } })
+    await worker.processOne(); now += 10
+    await worker.processOne()
+    expect(seen).toHaveLength(2)
+    const id = store.listDeliveries({ monitorId: 'job:task-2' })[0]!.id
+    for (const headers of seen) expect(headers).toEqual({ authorization: 'Bearer test', 'x-run': 'wh3', 'x-w2l-event-id': 'task-2:started', 'x-w2l-event-version': '0', 'x-w2l-delivery-id': id })
+    expect(store.getDelivery(id)).toMatchObject({ state: 'delivered', attemptCount: 2 })
+  })
+  it('admits a plain-http receiver only on loopback and only when a local service allows it; the transport refuses the rest and sends direct', async () => {
+    expect(() => validateDestinationUrl('http://127.0.0.1:8828/hook')).toThrow('HTTPS')
+    expect(validateDestinationUrl('http://127.0.0.1:8828/hook', { allowHttpLoopback: true })).toBe('http://127.0.0.1:8828/hook')
+    expect(validateDestinationUrl('http://[::1]:8828/hook', { allowHttpLoopback: true })).toBe('http://[::1]:8828/hook')
+    expect(validateDestinationUrl('http://localhost:8828/hook', { allowHttpLoopback: true })).toBe('http://localhost:8828/hook')
+    expect(() => validateDestinationUrl('http://10.0.0.5/hook', { allowHttpLoopback: true })).toThrow('HTTPS, or plain http to a loopback receiver')
+    expect(() => validateDestinationUrl('http://receiver.example/hook', { allowHttpLoopback: true })).toThrow('HTTPS')
+    expect(() => validateDestinationUrl('http://user:pw@127.0.0.1/hook', { allowHttpLoopback: true })).toThrow('HTTPS')
+    const transport = createHttpsWebhookTransport(localPolicy(), undefined, undefined, { allowHttpLoopback: true })
+    await expect(transport({ url: 'http://10.0.0.5/hook', body: '{}', headers: {}, signal: new AbortController().signal })).rejects.toThrow('HTTPS')
+    // A loopback receiver is reached over plain http, direct, with the headers given; the response body is dropped.
+    const received: Array<{ headers: IncomingHttpHeaders; body: string }> = []
+    const server = createHttpServer(async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; received.push({ headers: req.headers, body }); res.writeHead(204, { 'retry-after': '3' }).end('ignored') })
+    closers.push(() => { server.closeAllConnections(); server.close() })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    expect(await transport({ url: `http://127.0.0.1:${port}/hook`, body: '{"a":1}', headers: { 'x-w2l-event-id': 'e1', authorization: 'Bearer test' }, signal: new AbortController().signal })).toEqual({ status: 204, retryAfter: '3' })
+    expect(received[0]).toMatchObject({ body: '{"a":1}', headers: { 'x-w2l-event-id': 'e1', authorization: 'Bearer test', 'content-type': 'application/json', 'content-length': '7' } })
+    // Without the flag the same URL is refused before any connection, and registering a job destination applies the same rule.
+    await expect(createHttpsWebhookTransport(localPolicy())({ url: `http://127.0.0.1:${port}/hook`, body: '{}', headers: {}, signal: new AbortController().signal })).rejects.toThrow('HTTPS')
+    expect(received).toHaveLength(1)
+    const store = openStore()
+    expect(() => store.createDestination({ id: 'job:t', monitorId: 'job:t', url: `http://127.0.0.1:${port}/hook`, kind: 'job' })).toThrow('HTTPS')
+    expect(store.createDestination({ id: 'job:t', monitorId: 'job:t', url: `http://127.0.0.1:${port}/hook`, kind: 'job' }, 1_000, { allowHttpLoopback: true }).url).toBe(`http://127.0.0.1:${port}/hook`)
+    // A Monitor destination stays HTTPS-only whatever the flag says.
+    expect(() => store.createDestination({ id: 'm', monitorId: 'monitor-a', url: `http://127.0.0.1:${port}/hook` }, 1_000, { allowHttpLoopback: true })).toThrow('HTTPS')
   })
 })
 

@@ -32,7 +32,8 @@ export function createManagedRuntime(options: ManagedRuntimeOptions) {
   const api = createApp(engine, {exposeInternalErrors:options.exposeInternalErrors})
   const client = new W2L({baseUrl:'http://w2l.internal',fetch:async(input,init)=>api.fetch(new Request(input,init))})
   const deliveryStore = DeliveryStore.open(join(options.taskRoot,'section-b-control.sqlite'))
-  const worker = new DeliveryWorker(deliveryStore,{networkPolicy:options.deliveryNetworkPolicy ?? hostedNetworkPolicy(),ca:process.env.W2L_DELIVERY_CA_FILE ? readFileSync(process.env.W2L_DELIVERY_CA_FILE) : undefined})
+  // A local service delivers a job webhook to a plain-http loopback receiver too (the engine admits one); the hosted host stays HTTPS-only.
+  const worker = new DeliveryWorker(deliveryStore,{networkPolicy:options.deliveryNetworkPolicy ?? hostedNetworkPolicy(),ca:process.env.W2L_DELIVERY_CA_FILE ? readFileSync(process.env.W2L_DELIVERY_CA_FILE) : undefined,allowHttpLoopback:options.hosted !== true})
   const controller = new AbortController()
   let monitorTick = Date.now(), deliveryTick = Date.now(), fault: string | null = null, closing: Promise<void> | null = null
   const sleep = (ms:number) => new Promise<void>(resolve=>{
