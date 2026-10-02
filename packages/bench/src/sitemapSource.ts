@@ -83,6 +83,8 @@ export class HttpSitemapSource implements SitemapSource {
     const soft = request.softDeadlineAt === undefined ? null : createExecutionScope({ signal: scope.signal, deadlineAt: request.softDeadlineAt })
     const work = soft ?? scope
     const timedOut = (): boolean => soft !== null && !scope.signal.aborted && (soft.signal.aborted || Date.now() >= request.softDeadlineAt!)
+    // Entry details (lastmod, news:title) are read only for a load that passes a map's options, so a crawl's parse is the one it always was.
+    const details = request.accept !== undefined || request.softDeadlineAt !== undefined
     try {
       const seed = new URL(request.seedUrl)
       const identity = this.identityFor(seed.hostname)
@@ -105,7 +107,7 @@ export class HttpSitemapSource implements SitemapSource {
         if (result.files.length >= request.maxFiles) { result.truncated = 'files'; break }
         if (timedOut()) { result.truncated = 'time'; result.unreadFiles = queue.length; break }
         const next = queue.shift()!
-        const file = await this.readFile(next.url, work, soft === null ? undefined : scope)
+        const file = await this.readFile(next.url, details, work, soft === null ? undefined : scope)
         result.files.push(file.record)
         if (file.record.error === 'timeout' && timedOut()) { result.truncated = 'time'; result.unreadFiles = queue.length; break }
         if (file.locs === null) continue
@@ -156,7 +158,7 @@ export class HttpSitemapSource implements SitemapSource {
    * cancelled. With `outer` (a load with a soft deadline), `scope` is the soft
    * one: its expiry is this file's `timeout`, and only `outer` stopping throws.
    */
-  private async readFile(url: string, scope: ExecutionContext, outer?: ExecutionContext): Promise<ReadFile> {
+  private async readFile(url: string, details: boolean, scope: ExecutionContext, outer?: ExecutionContext): Promise<ReadFile> {
     const identity = this.identityFor(new URL(url).hostname)
     const record: SitemapFileRecord = { url, finalUrl: null, status: null, contentType: null, bytes: null, sha256: null, kind: 'unreadable', entries: null, robots: null, proxyUsed: this.route.viaOperatorProxy(url) !== null, error: null }
     const unreadable = (error: string): ReadFile => ({ record: { ...record, kind: 'unreadable', error }, locs: null })
@@ -186,7 +188,7 @@ export class HttpSitemapSource implements SitemapSource {
       } catch (error) {
         return unreadable((error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE' ? 'decompressed_too_large' : 'gzip_error')
       }
-      const parsed = parseSitemapXml(text, { details: true })
+      const parsed = parseSitemapXml(text, { details })
       if (parsed.kind === 'not_sitemap') return { record: { ...record, kind: 'not_sitemap' }, locs: null }
       return {
         record: { ...record, kind: parsed.kind, entries: parsed.locs.length, error: parsed.truncated ? 'entries_over_50000' : null },

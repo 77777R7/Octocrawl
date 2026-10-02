@@ -110,7 +110,9 @@ export function parseSitemapXml(text: string, options: ParseSitemapOptions = {})
  * entry's text runs from its element's opening tag (or the loc itself) to its
  * closing tag, never past the next loc or back before the previous one, so a
  * file that is not quite well formed cannot lend one entry's fields to
- * another, and the scan stays linear.
+ * another. The opening and closing tags are each located in one pass over the
+ * body and walked with a cursor that only moves forward, so the scan stays
+ * linear also when the locs have no element around them.
  */
 function entryDetails(body: string, prefix: string, element: 'url' | 'sitemap', spans: ReadonlyArray<{ start: number; end: number }>): SitemapEntryDetail[] {
   const p = escapeRegExp(prefix)
@@ -124,14 +126,22 @@ function entryDetails(body: string, prefix: string, element: 'url' | 'sitemap', 
     const text = (match[1] === undefined ? decodeXmlEntities(match[2] ?? '') : match[1]).trim()
     return text.length === 0 ? undefined : text
   }
+  const opens: number[] = []
+  for (let match = open.exec(body); match !== null; match = open.exec(body)) opens.push(match.index)
+  const closes: number[] = []
+  for (let at = body.indexOf(close); at !== -1; at = body.indexOf(close, at + close.length)) closes.push(at)
+  let o = 0
+  let c = 0
   return spans.map((span, i) => {
     const floor = i === 0 ? 0 : spans[i - 1]!.end
     const ceiling = i + 1 < spans.length ? spans[i + 1]!.start : body.length
     // The last opening tag of the entry's element between the previous loc and this one.
     let start = span.start
-    open.lastIndex = floor
-    for (let match = open.exec(body); match !== null && match.index < span.start; match = open.exec(body)) start = match.index
-    const closing = body.indexOf(close, span.end)
+    while (o < opens.length && opens[o]! < floor) o++
+    while (o < opens.length && opens[o]! < span.start) start = opens[o++]!
+    // The first closing tag after the loc, unless the next loc comes first.
+    while (c < closes.length && closes[c]! < span.end) c++
+    const closing = c < closes.length ? closes[c]! : -1
     const end = closing === -1 || closing > ceiling ? ceiling : closing
     const text = body.slice(start, end)
     const detail: SitemapEntryDetail = {}
