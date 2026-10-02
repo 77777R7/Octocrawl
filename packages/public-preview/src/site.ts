@@ -57,6 +57,11 @@ export function dailyVisitorId(secret: string | undefined, visitorKey: string, n
   return createHmac('sha256', secret).update(`analytics:${now.toISOString().slice(0, 10)}:${visitorKey}`).digest('hex').slice(0, 16)
 }
 
+/** Do Not Track or Global Privacy Control: the visitor asked not to be counted, so nothing about them is logged. */
+export function optedOut(req: IncomingMessage): boolean {
+  return req.headers.dnt === '1' || req.headers['sec-gpc'] === '1'
+}
+
 export function looksAutomated(req: IncomingMessage): boolean {
   const agent = req.headers['user-agent']
   return typeof agent !== 'string' || /bot|crawl|spider|slurp|headless|preview|fetch|curl|wget|python|node|go-http|java\//i.test(agent)
@@ -65,7 +70,7 @@ export function looksAutomated(req: IncomingMessage): boolean {
 export const EVENT_BODY_BYTES = 2_048
 const EVENT_NAMES = new Set([
   'page_view', 'example_click', 'view_change', 'result_copy', 'result_download',
-  'get_code_open', 'get_code_copy', 'link_click', 'docs_code_copy', 'mcp_client_select',
+  'get_code_open', 'get_code_copy', 'link_click', 'docs_code_copy', 'mcp_client_select', 'example_tab', 'selfhost_tab',
 ])
 const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'view', 'tab', 'target', 'href', 'client'])
 

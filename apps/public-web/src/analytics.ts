@@ -35,6 +35,8 @@ export function trackLinkClicks(root: HTMLElement): void {
   root.addEventListener('click', event => {
     const link = (event.target as Element | null)?.closest?.('a[href]')
     if (!(link instanceof HTMLAnchorElement)) return
+    // Links taken from the page a visitor extracted (its final URL, its Markdown, its link list) are never logged.
+    if (link.closest('#detail-url, .readable-content, .link-row')) return
     let url: URL
     try { url = new URL(link.href) } catch { return }
     const target = url.host === location.host

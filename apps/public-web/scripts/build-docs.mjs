@@ -20,6 +20,7 @@ const pages = [
   { slug: 'guides/batch-results', file: 'batch-results.md', title: 'Page through batch results', description: 'Queue a durable URL batch and inspect every result through pagination.', group: 'Guides' },
   { slug: 'limits', file: 'limits.md', title: 'Limits and result states', description: 'Understand preview quotas, supported sites, incomplete fields, blocks, and timeouts.', group: 'Reference' },
   { slug: 'reference', file: 'reference.md', title: 'Advanced reference', description: 'Find REST, SDK, and self-hosted entry points after your first W2L result.', group: 'Reference' },
+  { slug: 'privacy', file: 'privacy.md', title: 'Privacy', description: 'What the public W2L page records about a visit and a preview, what it never records, and how long it keeps it.', group: 'Project' },
 ]
 
 // The preview server replaces this token with the site's public origin when it serves a page, the sitemap or
@@ -106,7 +107,19 @@ const mcpClients = [
 function mcpClientPicker() {
   const tabs = mcpClients.map((client, index) => `<button type="button" class="mcp-client-tab" role="tab" id="mcp-tab-${client.id}" aria-controls="mcp-panel-${client.id}" aria-selected="${index === 0}" tabindex="${index === 0 ? '0' : '-1'}"><img src="/docs-assets/agent-clients/${escape(client.icon)}" width="48" height="48" alt="" /><strong>${escape(client.name)}</strong><small>${escape(client.mode)}</small></button>`).join('')
   const panels = mcpClients.map((client, index) => `<section class="mcp-client-panel" role="tabpanel" id="mcp-panel-${client.id}" aria-labelledby="mcp-tab-${client.id}"${index === 0 ? '' : ' hidden'}><p class="mcp-client-intro">${escape(client.intro)}</p><div class="doc-code mcp-command-row${client.language === 'json' ? ' is-json' : ''}"><span class="mcp-command-prefix" aria-hidden="true">${client.language === 'bash' ? '$' : '{}'}</span><pre><code>${escape(client.code)}</code></pre><button type="button" class="copy-code" aria-label="Copy ${escape(client.name)} setup">Copy</button></div><p class="mcp-client-verify">${escape(client.verify)}</p><div class="mcp-client-panel-meta"><span class="mcp-client-status${index === 0 ? ' is-verified' : ''}">${escape(client.status)}</span><a href="${escape(client.source)}" rel="noopener noreferrer" target="_blank">${escape(client.name)} setup docs ↗</a></div></section>`).join('')
-  return `<div class="mcp-picker"><div class="mcp-picker-head"><div><h2>Set up W2L MCP</h2><p>Connect to the local W2L service on this computer.</p></div><a href="#start-w2l-on-your-computer">Start local service <span aria-hidden="true">→</span></a></div><div class="mcp-client-tabs" role="tablist" aria-label="Choose an MCP client">${tabs}</div>${panels}<div class="mcp-picker-foot"><p>Using another MCP client? Point it at:</p><div class="doc-code mcp-command-row"><pre><code>http://127.0.0.1:8791/mcp</code></pre><button type="button" class="copy-code" aria-label="Copy local MCP endpoint">Copy</button></div><small>Hosted HTTPS and browser login are coming soon.</small></div></div>`
+  return `<div class="mcp-picker"><div class="mcp-picker-head"><div><h2>Set up W2L MCP</h2><p>Connect to the local W2L service on this computer.</p></div><a href="#start-w2l-on-your-computer">Start local service <span aria-hidden="true">→</span></a></div><div class="mcp-client-tabs" role="tablist" aria-label="Choose an MCP client">${tabs}</div>${panels}<div class="mcp-picker-foot"><p>Using another MCP client? Point it at:</p><div class="doc-code mcp-command-row"><pre><code>http://127.0.0.1:8791/mcp</code></pre><button type="button" class="copy-code" aria-label="Copy local MCP endpoint">Copy</button></div><small>Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.</small></div></div>`
+}
+
+/** The client picker as plain Markdown, for the page's .md copy and llms-full.txt. */
+function mcpClientMarkdown() {
+  return ['## Set up W2L MCP', '', 'Connect to the local W2L service on this computer.', '',
+    ...mcpClients.flatMap(client => [`### ${client.name}`, '', `${client.intro} (${client.mode}; ${client.status}.)`, '', `\`\`\`${client.language}`, client.code, '```', '', client.verify, '', `Setup docs: ${client.source}`, '']),
+    'Using another MCP client? Point it at `http://127.0.0.1:8791/mcp`. Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.', ''].join('\n')
+}
+
+/** The page's Markdown as published beside it (index.md) and in llms-full.txt. */
+function pageMarkdown(page, source) {
+  return page.slug === 'connect-mcp' ? source.replace('{{MCP_CLIENT_PICKER}}', mcpClientMarkdown()) : source
 }
 
 function renderPageContent(page, source, toc) {
@@ -146,12 +159,13 @@ function documentHtml(page, content, index, toc) {
   const next = pages[index + 1]
   const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>← Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next →</small>${escape(next.title)}</a>` : '<span></span>'}</nav>`
   return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), `${page.title} | W2L Docs`, page.description)}<link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>${escape(page.title)} | W2L Docs</title></head>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), `${page.title} | W2L Docs`, page.description)}<link rel="alternate" type="text/markdown" href="${pathFor(page)}index.md" /><link rel="icon" type="image/webp" href="/assets/octopus-original.webp" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>${escape(page.title)} | W2L Docs</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header()}
-<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>W2L / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>The page preview runs at this site's URL. MCP setup is local; hosted MCP is pending validation.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
+<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>W2L / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>The page preview runs at this site's URL. MCP setup is local; hosted MCP is paused.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
 }
 
 await mkdir(output, { recursive: true })
+const markdown = []
 for (const [index, page] of pages.entries()) {
   const source = await readFile(join(root, 'content', page.file), 'utf8')
   const target = join(output, page.slug, 'index.html')
@@ -159,7 +173,24 @@ for (const [index, page] of pages.entries()) {
   const toc = []
   const content = renderPageContent(page, source, toc)
   await writeFile(target, documentHtml(page, content, index, toc))
+  // Every page is also published as its Markdown source, for LLM readers and llms.txt.
+  const text = pageMarkdown(page, source)
+  await writeFile(join(output, page.slug, 'index.md'), text)
+  markdown.push({ page, text })
 }
+
+// llms.txt (https://llmstxt.org): what W2L is, and a link to the Markdown copy of every page. llms-full.txt carries
+// all of them in one file.
+const summary = 'W2L turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. It is open source (AGPL-3.0) and runs on your own computer through REST, a TypeScript SDK or MCP.'
+const groups = [...new Set(pages.map(page => page.group))]
+const llms = [
+  '# W2L', '', `> ${summary}`, '',
+  `Try one public page in the browser at ${ORIGIN}/ (three previews a day). The source code is at https://github.com/77777R7/w2l.`, '',
+  ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
+  '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, '',
+].join('\n')
+await writeFile(join(root, 'dist', 'llms.txt'), llms)
+await writeFile(join(root, 'dist', 'llms-full.txt'), [`# W2L documentation\n\n> ${summary}\n`, ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`)].join('\n'))
 
 // The page the server answers with, status 404, for any path without a file: in the docs' reading layout, with the
 // docs pages beside it and the two ways back. It is never indexed.
@@ -173,4 +204,4 @@ await writeFile(join(root, 'dist', '404.html'), notFound)
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
 const locations = ['/', ...pages.map(pathFor)]
 await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(path => `  <url><loc>${ORIGIN}${path}</loc></url>`).join('\n')}\n</urlset>\n`)
-console.log(`Built ${pages.length} W2L documentation pages in ${output}, with 404.html, robots.txt and sitemap.xml`)
+console.log(`Built ${pages.length} W2L documentation pages in ${output}, with Markdown copies, llms.txt, 404.html, robots.txt and sitemap.xml`)
