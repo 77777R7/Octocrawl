@@ -185,6 +185,10 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 
 With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks, the holdout scripts and the daily Amazon.sg check keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
+### Search engines
+
+The home page carries `WebSite` and `SoftwareApplication` structured data and every docs page `TechArticle` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
+
 ### Refresh the Amazon.sg state
 
 The anonymous Singapore state in `w2l-amazon-state` stops working after some days (the first one lasted from 2026-09-24 to at most 2026-10-02). Then every Amazon.sg product comes back `incomplete` with `region_unverified`, while ordinary pages still work. `.github/workflows/amazon-state-check.yml` previews two fixed products every day at 01:17 UTC and fails, with an email from GitHub, when neither comes back complete; run it by hand with `gh workflow run amazon-state-check.yml`. To refresh:
