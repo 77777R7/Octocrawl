@@ -1,6 +1,7 @@
+import type { Page } from 'playwright'
 import { describe, expect, it } from 'vitest'
-import { BROWSER_FINGERPRINT, MOBILE_BROWSER_FINGERPRINT, modeIdentity } from '@w2l/contracts'
-import { imageSize, screenshotViewport } from '../src/subjects/screenshot.js'
+import { BROWSER_FINGERPRINT, MOBILE_BROWSER_FINGERPRINT, modeIdentity, type TraceEvent } from '@w2l/contracts'
+import { captureScreenshot, imageSize, screenshotViewport } from '../src/subjects/screenshot.js'
 
 /** A PNG signature and IHDR chunk declaring the given size; the rest of the file is not read. */
 function png(width: number, height: number): Uint8Array {
@@ -34,5 +35,27 @@ describe('screenshot helpers', () => {
     const mobile = screenshotViewport({ viewport: { width: 1280, height: 800 } }, modeIdentity('standard', undefined, null, null, 'mobile'), MOBILE_BROWSER_FINGERPRINT)
     expect(mobile.viewport).toEqual({ width: 412, height: 915 })
     expect(mobile.issues).toEqual(['screen 412x915 smaller than viewport 1280x800'])
+  })
+
+  it('leaves the page standing when Chromium cannot capture, when the bytes are no image, or when the viewport was refused: null, a screenshot_failed event and the warning', async () => {
+    const viewport = { width: 1280, height: 800 }
+    const calls: unknown[] = []
+    const page = (answer: () => Promise<Buffer>) => ({ screenshot: async (options: unknown) => { calls.push(options); return answer() } }) as unknown as Page
+    const trace: TraceEvent[] = []
+    const refused = await captureScreenshot(page(async () => Buffer.alloc(0)), { fullPage: true }, viewport, 2, {}, trace, () => 7, 'the requested viewport 1280x800 does not fit the declared identity: screen 412x915 smaller than viewport 1280x800')
+    expect(refused).toEqual({ screenshot: null, artifacts: [], warning: { code: 'screenshot_unavailable', message: 'The browser lane rendered the page but could not capture the requested screenshot (the requested viewport 1280x800 does not fit the declared identity: screen 412x915 smaller than viewport 1280x800); the page result stands without it.' } })
+    expect(calls).toEqual([])
+    const timedOut = await captureScreenshot(page(async () => { throw new Error('page.screenshot: Timeout 30000ms exceeded.') }), { quality: 60 }, viewport, 2, {}, trace, () => 9)
+    expect(timedOut.screenshot).toBeNull()
+    expect(timedOut.warning?.message).toContain('Timeout 30000ms exceeded')
+    expect(calls).toEqual([{ fullPage: false, type: 'jpeg', quality: 60, scale: 'css', timeout: 30_000 }])
+    const garbage = await captureScreenshot(page(async () => Buffer.from('not an image')), {}, viewport, 2, {}, trace, () => 11)
+    expect(garbage.screenshot).toBeNull()
+    expect(garbage.warning?.message).toContain('12 bytes that are not a image/png image')
+    expect(trace.map((event) => [event.event, event.at, event.detail?.contentType])).toEqual([['screenshot_failed', 7, 'image/png'], ['screenshot_failed', 9, 'image/jpeg'], ['screenshot_failed', 11, 'image/png']])
+    // A fetch that was stopped meanwhile is not turned into a capture failure.
+    const aborted = new AbortController()
+    aborted.abort()
+    await expect(captureScreenshot(page(async () => { throw new Error('Target closed') }), {}, viewport, 2, { signal: aborted.signal }, [], () => 0)).rejects.toThrow()
   })
 })
