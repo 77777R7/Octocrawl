@@ -23,7 +23,113 @@ export function collectPageMetadata(document: Document, baseUrl: string | null):
     robots: metaNamed(metas, 'robots'),
     favicon: linkedUrl(links, 'icon', baseUrl),
     canonicalUrl: linkedUrl(links, 'canonical', baseUrl),
+    ...openGraph(metas, baseUrl),
+    ...dublinCore(metas),
+    ...article(metas),
   }
+}
+
+/** The Open Graph fields a page states (Firecrawl's names), each present only then. */
+const OG_FIELDS: ReadonlyArray<[keyof PageMetadata, readonly string[], boolean]> = [
+  ['ogTitle', ['og:title'], false],
+  ['ogDescription', ['og:description'], false],
+  ['ogUrl', ['og:url'], true],
+  ['ogImage', ['og:image', 'og:image:secure_url', 'og:image:url'], true],
+  ['ogAudio', ['og:audio'], true],
+  ['ogVideo', ['og:video', 'og:video:secure_url', 'og:video:url'], true],
+  ['ogDeterminer', ['og:determiner'], false],
+  ['ogLocale', ['og:locale'], false],
+  ['ogSiteName', ['og:site_name'], false],
+]
+
+/**
+ * `<meta property="og:…">`, then `<meta name="og:…">`, the property matched
+ * case-insensitively; the first tag with content wins, except that every
+ * `og:locale:alternate` is collected. A URL field is resolved against the
+ * document base URL when it parses, else kept as written.
+ */
+function openGraph(metas: readonly Element[], baseUrl: string | null): Partial<PageMetadata> {
+  const out: Partial<Record<keyof PageMetadata, string | readonly string[]>> = {}
+  for (const [field, names, isUrl] of OG_FIELDS) {
+    for (const name of names) {
+      const value = metaProperty(metas, name)
+      if (value === null) continue
+      out[field] = isUrl ? resolvedUrl(value, baseUrl) : value
+      break
+    }
+  }
+  const alternates = metaProperties(metas, 'og:locale:alternate')
+  if (alternates.length > 0) out.ogLocaleAlternate = alternates
+  return out as Partial<PageMetadata>
+}
+
+/** Dublin Core element and term names, each read from `<meta name>` (matched case-insensitively), first non-empty occurrence. */
+const DC_FIELDS: ReadonlyArray<[keyof PageMetadata, string]> = [
+  ['dcTermsCreated', 'dcterms.created'],
+  ['dcDateCreated', 'dc.date.created'],
+  ['dcDate', 'dc.date'],
+  ['dcTermsType', 'dcterms.type'],
+  ['dcType', 'dc.type'],
+  ['dcTermsAudience', 'dcterms.audience'],
+  ['dcTermsSubject', 'dcterms.subject'],
+  ['dcSubject', 'dc.subject'],
+  ['dcDescription', 'dc.description'],
+  ['dcTermsKeywords', 'dcterms.keywords'],
+]
+
+function dublinCore(metas: readonly Element[]): Partial<PageMetadata> {
+  const out: Partial<Record<keyof PageMetadata, string>> = {}
+  for (const [field, name] of DC_FIELDS) {
+    const value = metaNamed(metas, name)
+    if (value !== null) out[field] = collapse(value)
+  }
+  return out as Partial<PageMetadata>
+}
+
+/** `article:published_time`, `article:modified_time` and `article:section` (property, then name), and every `article:tag`; times as written. */
+function article(metas: readonly Element[]): Partial<PageMetadata> {
+  const out: Partial<Record<keyof PageMetadata, string | readonly string[]>> = {}
+  const published = metaProperty(metas, 'article:published_time')
+  if (published !== null) out.publishedTime = published
+  const modified = metaProperty(metas, 'article:modified_time')
+  if (modified !== null) out.modifiedTime = modified
+  const section = metaProperty(metas, 'article:section')
+  if (section !== null) out.articleSection = section
+  const tags = metaProperties(metas, 'article:tag')
+  if (tags.length > 0) out.articleTag = tags
+  return out as Partial<PageMetadata>
+}
+
+/** The first non-empty `<meta property=…>` of that name, else the first non-empty `<meta name=…>`, content collapsed. */
+function metaProperty(metas: readonly Element[], name: string): string | null {
+  return metaProperties(metas, name)[0] ?? null
+}
+
+/** Every non-empty `<meta property=…>` of that name in document order, then every `<meta name=…>`, contents collapsed. */
+function metaProperties(metas: readonly Element[], name: string): string[] {
+  const values: string[] = []
+  for (const key of ['property', 'name'] as const) {
+    for (const meta of metas) {
+      if (attribute(meta, key)?.trim().toLowerCase() !== name) continue
+      const value = declared(attribute(meta, 'content'))
+      if (value !== null) values.push(collapse(value))
+    }
+  }
+  return values
+}
+
+/** The value against the document base URL when both parse, else as written. */
+function resolvedUrl(value: string, baseUrl: string | null): string {
+  try {
+    return new URL(value, baseUrl ?? undefined).href
+  } catch {
+    return value
+  }
+}
+
+/** Runs of ASCII whitespace as one space. */
+function collapse(value: string): string {
+  return value.replace(ASCII_WHITESPACE, ' ')
 }
 
 /** The first HTML `<title>`, as `document.title` reads it. */

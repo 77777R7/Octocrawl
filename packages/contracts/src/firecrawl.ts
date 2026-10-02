@@ -48,7 +48,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'includeTags keeps only the named elements, in document order, whatever onlyMainContent says; excludeTags removes elements from the main content, the whole page and an includeTags selection. A selector that does not parse, or that uses a sibling combinator, a positional pseudo-class, :has() or another pseudo-class W2L does not match, is rejected with HTTP 400.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
-  'metadata has title, description, language, keywords, robots and favicon only when the page declares them; other meta tags (og:*, twitter:* and the rest) are not passed through, and a failed or blocked page has none.',
+  'metadata has title, description, language, keywords, robots and favicon only when the page declares them, and the Open Graph (ogTitle, ogDescription, ogUrl, ogImage, ogAudio, ogVideo, ogDeterminer, ogLocale, ogLocaleAlternate, ogSiteName), Dublin Core (dcTermsCreated, dcDateCreated, dcDate, dcTermsType, dcType, dcTermsAudience, dcTermsSubject, dcSubject, dcDescription, dcTermsKeywords) and article (publishedTime, modifiedTime, articleTag, articleSection) tags under Firecrawl\'s names, each only when the page states it, as written (no date normalisation, no fallback from another tag); twitter:* and other meta tags are not passed through, and a failed or blocked page has none.',
   'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
 ] as const
 
@@ -69,6 +69,32 @@ export interface FirecrawlPage {
     keywords?: string
     robots?: string
     favicon?: string
+    /** Open Graph, Dublin Core and article tags under Firecrawl's names, each only when the page states it (see PageMetadata). */
+    ogTitle?: string
+    ogDescription?: string
+    ogUrl?: string
+    ogImage?: string
+    ogAudio?: string
+    ogVideo?: string
+    ogDeterminer?: string
+    ogLocale?: string
+    ogLocaleAlternate?: string[]
+    ogSiteName?: string
+    dcTermsCreated?: string
+    dcDateCreated?: string
+    dcDate?: string
+    dcTermsType?: string
+    dcType?: string
+    dcTermsAudience?: string
+    dcTermsSubject?: string
+    dcSubject?: string
+    dcDescription?: string
+    dcTermsKeywords?: string
+    publishedTime?: string
+    modifiedTime?: string
+    /** Every `article:tag`, joined with `, ` as Firecrawl writes it. */
+    articleTag?: string
+    articleSection?: string
     sourceURL: string
     /** The final URL, after redirects (`evidence.finalUrl`). */
     url: string
@@ -148,6 +174,12 @@ export const FIRECRAWL_STATUS_PAGE_SIZE = { default: 100, max: 1000 } as const
 const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
 /** W2L page metadata fields that Firecrawl's `metadata` also has. */
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
+/** The optional page fields (present on W2L's `metadata` only when the page states them), under the same names in Firecrawl's `metadata`. */
+const SHIM_OPTIONAL_PAGE_FIELDS = [
+  'ogTitle', 'ogDescription', 'ogUrl', 'ogImage', 'ogAudio', 'ogVideo', 'ogDeterminer', 'ogLocale', 'ogLocaleAlternate', 'ogSiteName',
+  'dcTermsCreated', 'dcDateCreated', 'dcDate', 'dcTermsType', 'dcType', 'dcTermsAudience', 'dcTermsSubject', 'dcSubject', 'dcDescription', 'dcTermsKeywords',
+  'publishedTime', 'modifiedTime', 'articleTag', 'articleSection',
+] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
 const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
 
@@ -318,10 +350,16 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
             ? undefined
             : result.status
   // Firecrawl's page fields, only those the page declares.
-  const declared: Partial<Record<(typeof SHIM_PAGE_FIELDS)[number], string>> = {}
+  const declared: Record<string, string | string[]> = {}
   for (const key of SHIM_PAGE_FIELDS) {
     const value = result.metadata?.[key]
     if (value !== undefined && value !== null) declared[key] = value
+  }
+  for (const key of SHIM_OPTIONAL_PAGE_FIELDS) {
+    const value = result.metadata?.[key]
+    if (value === undefined) continue
+    // Firecrawl writes the article tags as one string and keeps the alternate locales as a list.
+    declared[key] = typeof value === 'string' ? value : key === 'articleTag' ? value.join(', ') : [...value]
   }
   return {
     markdown: result.markdown,
@@ -331,7 +369,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
     ...(agentHints === undefined || agentHints.length === 0 ? {} : { agent_hints: [...agentHints] }),
     metadata: {
-      ...declared,
+      ...(declared as Partial<FirecrawlPage['metadata']>),
       sourceURL: result.requestedUrl,
       url: result.evidence.finalUrl,
       statusCode: result.evidence.httpStatus,

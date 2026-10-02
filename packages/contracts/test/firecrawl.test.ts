@@ -284,6 +284,26 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     })
   })
 
+  it('passes the Open Graph, Dublin Core and article fields the page states into data.metadata, and leaves absent ones out', () => {
+    const wrapped = wrapScrape(scrape({
+      requestedUrl: 'https://example.com/report',
+      status: 'success',
+      markdown: 'Report',
+      metadata: {
+        title: 'Report', description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null,
+        ogSiteName: 'Example', ogImage: 'https://example.com/og.png', ogLocaleAlternate: ['fr_FR', 'de_DE'],
+        publishedTime: '2025-12-18T09:30:08+00:00', articleTag: ['energy', 'regions'], dcDate: '18 December 2025',
+      },
+    }))
+    expect(wrapped.data.metadata).toEqual({
+      title: 'Report', ogSiteName: 'Example', ogImage: 'https://example.com/og.png', ogLocaleAlternate: ['fr_FR', 'de_DE'],
+      publishedTime: '2025-12-18T09:30:08+00:00', articleTag: 'energy, regions', dcDate: '18 December 2025',
+      sourceURL: 'https://example.com/report', url: 'https://example.com/report', statusCode: 200, contentType: 'text/html', ...CALL_FACTS,
+    })
+    expect(wrapped.data.metadata).not.toHaveProperty('ogTitle')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /ogTitle/.test(d) && /publishedTime/.test(d) && /no date normalisation/.test(d))).toBe(true)
+  })
+
   it('names the final URL after a redirect and leaves an unknown content type out', () => {
     const moved = wrapScrape(scrape({
       requestedUrl: 'http://example.com/old',

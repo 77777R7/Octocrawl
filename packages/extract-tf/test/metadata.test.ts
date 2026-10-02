@@ -31,6 +31,8 @@ describe('page metadata', () => {
       robots: 'noindex, follow',
       favicon: 'https://pottery.test/static/favicon.ico',
       canonicalUrl: 'https://pottery.test/log/kiln',
+      // The og:description is reported under its own name, never as the description.
+      ogDescription: 'A social card blurb, not the description.',
     })
   })
 
@@ -39,7 +41,7 @@ describe('page metadata', () => {
 <link rel="apple-touch-icon" href="/apple-touch-icon.png"></head><body>
 <svg role="img"><title>Harbour Pottery logo</title></svg>
 <article><h1>Harbour report</h1>${PROSE}${PROSE}</article></body></html>`, { url: 'https://pottery.test/report' })
-    expect(out.metadata).toEqual({ title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null })
+    expect(out.metadata).toEqual({ title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null, ogDescription: 'Only a social card.' })
     expect(out.title).toBe('Harbour report')
   })
 
@@ -74,5 +76,79 @@ describe('page metadata', () => {
       language: 'EN',
       favicon: 'https://stats.test/FAVICON.ICO',
     })
+  })
+
+  it('reads the Open Graph tags the page states, resolves their URLs against <base>, and leaves an empty or absent one out', () => {
+    const out = extractTf.extract(`<!doctype html><html><head><title>Kiln report</title><base href="https://cdn.pottery.test/assets/">
+<meta property="OG:Title" content=" Kiln report  2026 ">
+<meta property="og:description" content="">
+<meta property="og:url" content="https://pottery.test/report">
+<meta property="og:image:secure_url" content="https://cdn.pottery.test/og/kiln.png">
+<meta property="og:image" content="og/kiln-card.png">
+<meta name="og:audio" content="audio/intro.mp3">
+<meta property="og:video:url" content="https://media.pottery.test/kiln.mp4">
+<meta property="og:determiner" content="the">
+<meta property="og:locale" content="en_GB">
+<meta property="og:locale:alternate" content="fr_FR">
+<meta property="og:locale:alternate" content="de_DE">
+<meta property="og:site_name" content="Harbour Pottery">
+<meta property="og:image" content="og/second.png"></head><body><article><h1>Kiln report</h1>${PROSE}${PROSE}</article></body></html>`, { url: 'https://pottery.test/report' })
+    expect(out.metadata).toMatchObject({
+      ogTitle: 'Kiln report 2026',
+      ogUrl: 'https://pottery.test/report',
+      // og:image wins over its secure_url and url forms, and the first og:image wins; a relative one is resolved against <base>.
+      ogImage: 'https://cdn.pottery.test/assets/og/kiln-card.png',
+      ogAudio: 'https://cdn.pottery.test/assets/audio/intro.mp3',
+      ogVideo: 'https://media.pottery.test/kiln.mp4',
+      ogDeterminer: 'the',
+      ogLocale: 'en_GB',
+      ogLocaleAlternate: ['fr_FR', 'de_DE'],
+      ogSiteName: 'Harbour Pottery',
+    })
+    // An empty content is no declaration, and the base fields keep their shape.
+    expect(out.metadata).not.toHaveProperty('ogDescription')
+    expect(out.metadata.description).toBeNull()
+    // A page without the tags keeps exactly the seven fields.
+    const plain = extractTf.extract(`<!doctype html><html lang="en"><head><title>Glaze notes</title></head><body><article><h1>Glaze notes</h1>${PROSE}${PROSE}</article></body></html>`, { url: 'https://pottery.test/notes' })
+    expect(Object.keys(plain.metadata).sort()).toEqual(['canonicalUrl', 'description', 'favicon', 'keywords', 'language', 'robots', 'title'])
+  })
+
+  it('reads Dublin Core and article tags verbatim, in any case, and invents none from govuk:* or citation_* tags', () => {
+    const out = extractTf.extract(`<!doctype html><html><head><title>Consumption report</title>
+<meta name="DCTERMS.created" content="2025-12-18">
+<meta name="dc.date.created" content="2025-12-18T09:30:08+00:00">
+<meta name="DC.date" content="18 December 2025">
+<meta name="dcterms.type" content="Text">
+<meta name="dc.type" content="statistics">
+<meta name="dcterms.audience" content="analysts">
+<meta name="dcterms.subject" content="energy">
+<meta name="dc.subject" content="electricity, gas">
+<meta name="dc.description" content="Regional   consumption figures.">
+<meta name="dcterms.keywords" content="subnational, consumption">
+<meta property="article:published_time" content="2025-12-18T09:30:08+00:00">
+<meta name="article:modified_time" content="2026-01-05T10:00:00Z">
+<meta property="article:section" content="Statistics">
+<meta property="article:tag" content="energy">
+<meta property="article:tag" content="regions"></head><body><article><h1>Consumption report</h1>${PROSE}${PROSE}</article></body></html>`)
+    expect(out.metadata).toMatchObject({
+      dcTermsCreated: '2025-12-18',
+      dcDateCreated: '2025-12-18T09:30:08+00:00',
+      dcDate: '18 December 2025',
+      dcTermsType: 'Text',
+      dcType: 'statistics',
+      dcTermsAudience: 'analysts',
+      dcTermsSubject: 'energy',
+      dcSubject: 'electricity, gas',
+      dcDescription: 'Regional consumption figures.',
+      dcTermsKeywords: 'subnational, consumption',
+      publishedTime: '2025-12-18T09:30:08+00:00',
+      modifiedTime: '2026-01-05T10:00:00Z',
+      articleSection: 'Statistics',
+      articleTag: ['energy', 'regions'],
+    })
+    const govuk = extractTf.extract(`<!doctype html><html><head><title>Report</title>
+<meta name="govuk:first-published-at" content="2025-12-18T09:30:08+00:00">
+<meta name="citation_publication_date" content="2017/06/12"></head><body><article><h1>Report</h1>${PROSE}${PROSE}</article></body></html>`).metadata
+    for (const key of ['dcTermsCreated', 'dcDate', 'publishedTime', 'modifiedTime', 'articleTag', 'articleSection']) expect(govuk).not.toHaveProperty(key)
   })
 })

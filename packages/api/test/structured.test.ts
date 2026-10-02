@@ -120,6 +120,22 @@ const openAiEndpoint = (answer: unknown, requests: Array<Record<string, any>>) =
   return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }], usage: { prompt_tokens: 40, completion_tokens: 8 } }), { status: 200 })
 }) as typeof fetch
 
+describe('scrape response metadata', () => {
+  it('carries the Open Graph and article fields the page states beside the seven base fields and the call facts, on the compact response too', async () => {
+    const metadata = { title: 'Report', description: null, language: 'en', keywords: null, robots: null, favicon: null, canonicalUrl: null, ogTitle: 'Report card', ogImage: 'https://example.test/og.png', articleTag: ['energy'] }
+    const run = {
+      ...result, requestedUrl: 'https://example.test/report', evidence: { ...result.evidence, finalUrl: 'https://example.test/report' }, metadata, document: null,
+      channelsTried: ['http'], ladderTrace: [],
+      summary: { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] },
+    }
+    const compact = await prepareScrapeResponse(run, { url: run.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact.metadata).toMatchObject({ title: 'Report', language: 'en', description: null, ogTitle: 'Report card', ogImage: 'https://example.test/og.png', articleTag: ['energy'], sourceURL: run.requestedUrl, url: run.requestedUrl, statusCode: 200 })
+    expect(compact.metadata).not.toHaveProperty('ogDescription')
+    const full = await prepareScrapeResponse(run, { url: run.requestedUrl }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.metadata).toMatchObject({ ogTitle: 'Report card', articleTag: ['energy'] })
+  })
+})
+
 describe('structured JSON extraction', () => {
   it('defaults compact adapter responses to JSON, including unverified identities', async () => {
     const response = {

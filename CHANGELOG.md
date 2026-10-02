@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `metadata` (scrape responses, batch items, crawl pages, `/fc` `data.metadata`) carries the Open Graph tags a page states (`ogTitle`, `ogDescription`, `ogUrl`, `ogImage`, `ogAudio`, `ogVideo`, `ogDeterminer`, `ogLocale`, `ogLocaleAlternate`, `ogSiteName`), its Dublin Core tags (`dcTermsCreated`, `dcDateCreated`, `dcDate`, `dcTermsType`, `dcType`, `dcTermsAudience`, `dcTermsSubject`, `dcSubject`, `dcDescription`, `dcTermsKeywords`) and its article tags (`publishedTime`, `modifiedTime`, `articleTag`, `articleSection`), under Firecrawl's names, each present only when the page states it and as written: no date normalisation, no fallback from `twitter:*`, `govuk:*` or `citation_*` tags, JSON-LD or `<time>`. The seven existing fields keep their always-present, nullable shape.
+
 - Roadmap v2 (weeks 1–16) makes P1 core correctness the current phase and adds the Firecrawl parity audit (`research/parity/`, frozen at firecrawl-js v4.42.0) and a real-site test set with a runner (`node research/parity/run-sites.mjs`) whose runs are recorded with command and commit.
 - JSON extraction no longer reports `complete` while a required field has no source: such fields are omitted with a `missing_required` issue, nested fields are not filled from page-level values, and JSON from a non-`success` page is `incomplete` with `page_unsuccessful`.
 - Markdown keeps block boundaries, inline spacing and emphasis, numbers ordered lists (with `start`), keeps code blocks and tables inside list items, drops empty emphasis from icon elements, and resolves link and image targets against the document base (`<base href>` included). Same-page `#fragment` links stay as written.
