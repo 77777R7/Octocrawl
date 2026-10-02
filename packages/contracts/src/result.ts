@@ -194,6 +194,43 @@ export interface HandoffRequest {
   rationale: string
 }
 
+/** The values of one HTML attribute on the elements one CSS selector names (the `attributes` format). */
+export interface AttributeExtraction {
+  selector: string
+  attribute: string
+  /** As written in the HTML, in document order; an element without the attribute is skipped; `[]` when nothing matches. */
+  values: readonly string[]
+}
+
+/**
+ * The `screenshot` format: the rendered page as the browser lane captured it
+ * after load, stability and `waitFor`, before the DOM was read, so the image
+ * and the Markdown show the same page. The bytes are inline (`base64`) and
+ * hash to `sha256`; `path` names the file under W2L_CAPTURE_RAW_DIR when
+ * that is set (`<sha256>.png` or `.jpg`, listed in `evidence.artifacts`
+ * too), else null. `width` and `height` are CSS pixels (`scale: 'css'`):
+ * the viewport's for a viewport capture, the viewport's width and the
+ * document's height for `fullPage`; `deviceScaleFactor` is what the context
+ * declared, not baked into the image. The page itself is unchanged: nothing
+ * is scrolled, clicked or hidden for the capture.
+ */
+export interface ScreenshotEvidence {
+  contentType: 'image/png' | 'image/jpeg'
+  width: number
+  height: number
+  fullPage: boolean
+  /** The window the page was laid out in, in CSS pixels: the request's viewport, or the declared one. */
+  viewport: { width: number; height: number }
+  /** Device pixels per CSS pixel the context declared (2 for the desktop identity, 2.625 for the mobile one). */
+  deviceScaleFactor: number
+  /** The JPEG quality asked for; null for a PNG. */
+  quality: number | null
+  bytes: number
+  sha256: string
+  path: string | null
+  base64: string
+}
+
 /**
  * A caveat a reader of the result must see without opening the trace. Never
  * a failure reason, which `status` and its reason fields carry.
@@ -206,6 +243,11 @@ export interface FetchWarning {
    * cannot be attributed to the host with certainty. `client_rendered_suspected`:
    * the HTTP lane's page looks like a shell for data its scripts fill in
    * (see RenderSignals), so the capture may not be the page a browser shows.
+   * `low_content_yield`: a thin http answer stayed the run's answer.
+   * `screenshot_unavailable`: the `screenshot` format was asked for and the
+   * browser lane rendered the page but could not capture it
+   * (`screenshot_failed` in the trace); `screenshot` is null and the page
+   * result stands.
    */
   code: string
   message: string
@@ -293,12 +335,42 @@ export interface FetchResult {
    */
   links?: readonly string[]
   /**
+   * The image URLs of the FULL document (`img` src and srcset candidates,
+   * `picture` sources, lazy-loading attributes, video posters, `image_src`
+   * links, og:image and twitter:image), absolute http(s), fragment stripped,
+   * each once, in document order; `data:` URIs left out. Present only when
+   * the `images` format was asked for (`FetchOptions.includeImages`), on a
+   * contentful page: absent for a file and for a page that was not read as
+   * content. `[]` for a page without images.
+   */
+  images?: readonly string[]
+  /**
+   * The `attributes` format: one entry per selector of the request, in its
+   * order, with the attribute's values as written in the HTML. Present only
+   * when asked for (`FetchOptions.attributes`), on a contentful page, like
+   * `images`.
+   */
+  attributes?: readonly AttributeExtraction[]
+  /**
+   * The `screenshot` format, present only when asked for
+   * (`FetchOptions.screenshot`), on every result the browser lane built from
+   * the rendered document: a success or partial page, and an error-status or
+   * blocked page kept as evidence. Null when the page rendered but the
+   * capture failed (`screenshot_failed` in the trace, a
+   * `screenshot_unavailable` warning). Absent when no page rendered (a file,
+   * a robots.txt denial, a navigation failure), as the API then answers
+   * null. The attempt copies in a run's audit carry null, so the image
+   * travels once.
+   */
+  screenshot?: ScreenshotEvidence | null
+  /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
    * warning first when a recorded override set a robots.txt rule aside, then
    * `tls_unverified` when the fetch skipped certificate verification, then
    * `client_rendered_suspected` when the HTTP lane read the page as a shell
-   * its scripts fill in. Kept on batch items and the compact scrape response
-   * too.
+   * its scripts fill in, or `screenshot_unavailable` when the browser lane
+   * could not capture the screenshot asked for. Kept on batch items and the
+   * compact scrape response too.
    */
   warnings?: readonly FetchWarning[]
   /** True when content was cut to fit a token budget. */

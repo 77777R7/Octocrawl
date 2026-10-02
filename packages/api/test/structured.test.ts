@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
+import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
@@ -119,6 +119,85 @@ const openAiEndpoint = (answer: unknown, requests: Array<Record<string, any>>) =
   if (refusal !== null) return new Response(JSON.stringify({ error: { message: `Invalid schema for response_format 'w2l_extract': ${refusal}` } }), { status: 400 })
   return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }], usage: { prompt_tokens: 40, completion_tokens: 8 } }), { status: 200 })
 }) as typeof fetch
+
+describe('scrape response metadata', () => {
+  it('carries the Open Graph and article fields the page states beside the seven base fields and the call facts, on the compact response too', async () => {
+    const metadata = { title: 'Report', description: null, language: 'en', keywords: null, robots: null, favicon: null, canonicalUrl: null, ogTitle: 'Report card', ogImage: 'https://example.test/og.png', articleTag: ['energy'] }
+    const run = {
+      ...result, requestedUrl: 'https://example.test/report', evidence: { ...result.evidence, finalUrl: 'https://example.test/report' }, metadata, document: null,
+      channelsTried: ['http'], ladderTrace: [],
+      summary: { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] },
+    }
+    const compact = await prepareScrapeResponse(run, { url: run.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact.metadata).toMatchObject({ title: 'Report', language: 'en', description: null, ogTitle: 'Report card', ogImage: 'https://example.test/og.png', articleTag: ['energy'], sourceURL: run.requestedUrl, url: run.requestedUrl, statusCode: 200 })
+    expect(compact.metadata).not.toHaveProperty('ogDescription')
+    const full = await prepareScrapeResponse(run, { url: run.requestedUrl }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.metadata).toMatchObject({ ogTitle: 'Report card', articleTag: ['energy'] })
+  })
+})
+
+describe('warning string', () => {
+  const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
+
+  it('joins the warnings into one warning string on the full and compact responses, and leaves it out with them', async () => {
+    const warnings = [
+      { code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell.' },
+      { code: 'low_content_yield', message: 'The http lane extracted 12 tokens at confidence 0.2; the browser lane was not available to this request.' },
+    ]
+    const run = { ...result, warnings, channelsTried: ['http'], ladderTrace: [], summary }
+    const joined = 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell. The http lane extracted 12 tokens at confidence 0.2; the browser lane was not available to this request.'
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact).toMatchObject({ warnings, warning: joined })
+    const full = await prepareScrapeResponse(run, { url: result.requestedUrl }, {}, null, performance.now()) as ScrapeResponse
+    expect(full).toMatchObject({ warnings, warning: joined })
+    const clean = { ...result, channelsTried: ['http'], ladderTrace: [], summary }
+    for (const response of [await prepareScrapeResponse(clean, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()), await prepareScrapeResponse(clean, { url: result.requestedUrl }, {}, null, performance.now())]) {
+      expect(response).not.toHaveProperty('warning')
+      expect(response).not.toHaveProperty('warnings')
+      expect(response).not.toHaveProperty('agentHints')
+    }
+  })
+})
+
+describe('format entries by type', () => {
+  const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
+  const attributes = { type: 'attributes' as const, selectors: [{ selector: 'a', attribute: 'href' }] }
+
+  it('never switches on JSON extraction for an attributes entry, and reads the json entry beside it', async () => {
+    const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary }
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', attributes], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact.formats).toEqual(['markdown', 'attributes'])
+    expect(compact).not.toHaveProperty('json')
+    // Asked for, but the run carried none (a page not read as content): the key is absent, never invented.
+    expect(compact).not.toHaveProperty('attributes')
+    const extracted = { ...run, attributes: [{ selector: 'a', attribute: 'href', values: ['/x'] }], images: ['https://images.example/subject.jpg'] }
+    const both = await prepareScrapeResponse(extracted, { url: result.requestedUrl, formats: [attributes, 'images', { type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } } } }], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(both.formats).toEqual(['images', 'attributes', 'json'])
+    expect(both.json?.data).toEqual({ title: 'Subject headphones' })
+    expect(both.attributes).toEqual([{ selector: 'a', attribute: 'href', values: ['/x'] }])
+    expect(both.images).toEqual(['https://images.example/subject.jpg'])
+    // Not asked for: the result's images stay off the compact response.
+    expect(await prepareScrapeResponse(extracted, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now())).not.toHaveProperty('images')
+  })
+
+  it('carries the screenshot asked for on the full and compact responses, null when the run has none, and nulls the attempt copies so the image travels once', async () => {
+    const screenshot = { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    const browser: FetchResult = { ...result, lane: 'browser_local', screenshot }
+    const run = { ...browser, channelsTried: ['browser_local'], ladderTrace: [], summary: { ...summary, channelsTried: ['browser_local'], attempts: [{ channel: 'browser_local', result: browser }] } }
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', 'screenshot'], debug: false }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(compact.formats).toEqual(['markdown', 'screenshot'])
+    expect(compact.screenshot).toEqual(screenshot)
+    const full = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', { type: 'screenshot' }], debug: true }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.screenshot).toEqual(screenshot)
+    // debug keeps the attempt's Markdown; the image alone is not repeated.
+    expect(full.summary.attempts.map((attempt) => attempt.result.screenshot)).toEqual([null])
+    expect(full.summary.attempts[0]!.result.markdown).toBe(result.markdown)
+    // Asked for, and the run carried none (no page rendered): null, never invented. Not asked for: no key.
+    const none = await prepareScrapeResponse({ ...result, channelsTried: ['browser_local'], ladderTrace: [], summary }, { url: result.requestedUrl, formats: ['screenshot'], debug: false }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(none).toMatchObject({ formats: ['screenshot'], screenshot: null })
+    expect(await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now())).not.toHaveProperty('screenshot')
+  })
+})
 
 describe('structured JSON extraction', () => {
   it('defaults compact adapter responses to JSON, including unverified identities', async () => {

@@ -397,7 +397,8 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     // The browser found less: the http page stays the answer, warning and all, and the hop did not pay off.
     const thinner = { ...contentfulResult(url, 'browser_local'), markdown: 'LESS', usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 3 } }
     const kept = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [thinner])], { mode: 'authed' }).run(url)
-    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', warnings: [{ code: 'client_rendered_suspected' }] })
+    // The kept page says that the browser lane did not improve on it, after its own caveat; the count and confidence are the http lane's extract figures.
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', warnings: [{ code: 'client_rendered_suspected' }, { code: 'low_content_yield', message: 'The http lane extracted 12 tokens; the browser lane did not improve it.' }] })
     expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: false }])
     expect(kept.ladderTrace.at(-1)).toMatchObject({ event: 'ladder_best_kept', channel: 'http' })
   })
@@ -526,10 +527,21 @@ describe('LadderRunner — best-so-far content', () => {
     const run = await runner.run('https://example.com/p')
     expect(run.result.lane).toBe('http')
     expect(run.result.usage.contentTokens).toBe(20)
-    // The quality hop did not improve things — the record says so.
+    // The quality hop did not improve things — the record says so, in the escalations and in a warning the reader sees without the trace.
     expect(run.result.escalations).toContainEqual(
       expect.objectContaining({ from: 'http', to: 'browser_local', improved: false }),
     )
+    expect(run.result.warnings).toEqual([{ code: 'low_content_yield', message: 'The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.' }])
+  })
+
+  it('a thin http result with no further rung to offer it to says the browser lane was not available', async () => {
+    const run = await new LadderRunner([channel('http', [thinHttp('https://example.com/p')])], { mode: 'authed' }).run('https://example.com/p')
+    expect(run.channelsTried).toEqual(['http'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', escalations: [] })
+    expect(run.result.warnings).toEqual([{ code: 'low_content_yield', message: 'The http lane extracted 20 tokens at confidence 0.1; the browser lane was not available to this request.' }])
+    // A plain http success carries no such warning: the http lane raised no quality event on it.
+    const plain = await new LadderRunner([channel('http', [contentfulResult('https://example.com/p', 'http')])], { mode: 'authed' }).run('https://example.com/p')
+    expect(plain.result.warnings).toBeUndefined()
   })
 
   it('better browser content replaces the http result and the escalation is marked improved', async () => {
@@ -546,6 +558,8 @@ describe('LadderRunner — best-so-far content', () => {
     expect(run.result.lane).toBe('browser_local')
     expect(run.result.usage.contentTokens).toBe(800)
     expect(run.result.escalations.some((e) => e.improved === true)).toBe(true)
+    // The rendered page is the answer: nothing was kept thin, so no low_content_yield.
+    expect(run.result.warnings).toBeUndefined()
   })
 })
 
@@ -580,7 +594,8 @@ describe('LadderRunner — a page with no main content', () => {
       trace: [{ at: 10, lane: 'http', event: 'quality_client_rendered', detail: { reason: 'script_shell', markers: [], emptyTables: 0, textChars: 14, scriptChars: 2_258 } }],
     }
     const kept = await new LadderRunner([channel('http', [shell]), channel('browser_local', [browserFailure('connection_error')])], { mode: 'standard' }).run(url)
-    expect(kept.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: PAGE, warnings: [{ code: 'client_rendered_suspected' }] })
+    // The evidence kept says that the browser lane did not improve on it; a shell with no main content gives no token count.
+    expect(kept.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: PAGE, warnings: [{ code: 'client_rendered_suspected' }, { code: 'low_content_yield', message: 'The http lane found no main content; the browser lane did not improve it.' }] })
     expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: false }])
     expect(kept.ladderTrace.filter((t) => t.event === 'ladder_step')[0]).toMatchObject({ channel: 'http', detail: { status: 'failed', escalate: 'subject_escalations' } })
     // The rendered page replaces it without the caveat, and no second hop is stamped on it.

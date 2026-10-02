@@ -1,5 +1,6 @@
 import type { RobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
+import type { AttributeSelector, ScreenshotOptions } from './structured.js'
 
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 export interface ExecutionContext {
@@ -123,4 +124,37 @@ export interface FetchOptions {
    * it. Set from the requested formats (`rawHtml`), not by a caller.
    */
   includeRawHtml?: boolean
+  /**
+   * Carry `images` on a contentful result: every image URL of the whole
+   * document as received (the rendered DOM on a browser lane). Set from the
+   * requested formats (`images`), not by a caller.
+   */
+  includeImages?: boolean
+  /**
+   * Carry `attributes` on a contentful result: for each selector, the named
+   * attribute's values on the elements it matches in the document as
+   * received. Set from the requested formats (an `attributes` entry), not
+   * by a caller; the API has checked the selectors (`invalidSelector`).
+   */
+  attributes?: readonly AttributeSelector[]
+  /**
+   * Whether an `<img>` whose `src` is a `data:` URI is left out of the
+   * Markdown, its alt text kept (Firecrawl's `removeBase64Images`). Default
+   * true, which every lane always did; false keeps the image as
+   * `![alt](data:…)`, which the token count then counts. `html` and
+   * `rawHtml` are never rewritten. A rendering choice, not a fetch fact: no
+   * trace event or warning.
+   */
+  removeBase64Images?: boolean
+  /**
+   * Capture the rendered page as an image (the `screenshot` format): a PNG,
+   * or a JPEG at `quality`, of the viewport (the request's `viewport` within
+   * the declared screen, else the declared one) or of the document's whole
+   * height (`fullPage`, without scrolling first), taken after load,
+   * stability and `waitFor` and before the DOM is read, CSS-pixel sized. The
+   * local browser lane alone honours it, and the API selects that lane alone
+   * for such a request; the http and provider lanes ignore it. Set from the
+   * requested formats (a `screenshot` entry), not by a caller.
+   */
+  screenshot?: ScreenshotOptions
 }

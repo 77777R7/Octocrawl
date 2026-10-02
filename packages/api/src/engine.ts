@@ -63,6 +63,7 @@ import {
   type MonitorPreview,
   type MonitorRun,
   type MonitorRunDetail,
+  warningOf,
 } from '@w2l/contracts'
 import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, reportFromTaskAttempt, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
@@ -73,7 +74,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { extractionInput, extractStructured, prepareScrapeResponse, scrapeSnapshot, structuredModelConfigFromEnv } from './structured.js'
+import { attributesFormat, customJsonFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -241,6 +242,25 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     }
   }
+  /** The selectors of an attributes format, checked like includeTags: refused by name before anything is fetched or stored. */
+  const checkAttributeSelectors = (formats: readonly ScrapeFormat[] | undefined): void => {
+    const format = attributesFormat(formats ?? [])
+    if (format === undefined) return
+    const at = (formats ?? []).indexOf(format)
+    let parts = 0
+    for (const [index, { selector }] of format.selectors.entries()) {
+      const refusal = invalidSelector(selector)
+      if (refusal === null) {
+        parts += selectorParts(selector)
+        continue
+      }
+      if (refusal.kind === 'syntax') throw new RequestError(`attributes selectors[${index}].selector is not a valid CSS selector: ${selector}`)
+      throw new RequestError(`attributes selectors[${index}].selector uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].selectors[${index}]`] })
+    }
+    if (parts > MAX_SELECTOR_PARTS) {
+      throw new RequestError(`attributes selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
+    }
+  }
   /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
   const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
     if (options.allowRobotsOverride === false && value !== undefined) {
@@ -286,20 +306,30 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
   /**
    * The rungs a request gets, and the ones it does not, with why: the
-   * server's own channel policy first (never a caller's to change), then the
-   * request's `fastMode` (the http rung alone; refused by name for a URL the
-   * policy binds to the browser lane), then the options the local lanes
-   * alone honour (`headers`, `mobile`, `skipTlsVerification`), for which the
-   * vendor rungs are dropped. Each drop opens the run's ladder audit as a
-   * `ladder_channels_filtered` event.
+   * server's own channel policy first (never a caller's to change), then a
+   * `screenshot` format (the local browser rungs alone, which capture it;
+   * refused by name when none is permitted or `fastMode` declines them),
+   * then the request's `fastMode` (the http rung alone; refused by name for
+   * a URL the policy binds to the browser lane), then the options the local
+   * lanes alone honour (`headers`, `mobile`, `skipTlsVerification`), for
+   * which the vendor rungs are dropped. Each drop opens the run's ladder
+   * audit as a `ladder_channels_filtered` event.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = []): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => channel.id === (policy === 'http_only' ? 'http' : 'browser_local'))
     if (selected.length === 0) throw new RequestError(`capture channel unavailable for ${policy}`)
     const filtered: ChannelsFiltered[] = []
     const name = (channel: Channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`
+    if (hasFormat(formats, 'screenshot')) {
+      if (page.fastMode === true) throw new RequestError('screenshot requires the browser lane, which fastMode declines')
+      const kept = selected.filter(channel => BROWSER_RUNGS.has(channel.id))
+      if (kept.length === 0) throw new RequestError('screenshot requires the browser lane, which this deployment does not offer')
+      const dropped = selected.filter(channel => !BROWSER_RUNGS.has(channel.id)).map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'screenshot', dropped })
+      selected = kept
+    }
     if (page.fastMode === true) {
       if (policy === 'browser_only') throw new RequestError('fastMode is not available for this URL: it is served by the browser lane only')
       const kept = selected.filter(channel => channel.id === 'http')
@@ -384,7 +414,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // relaxation it refuses at submission.
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
-    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {})
+    // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
+    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
     const runner = new LadderRunner(rungs.channels, { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
@@ -399,21 +430,22 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // `timeout` is each page's own deadline, inside the task's.
         const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) })
         const formats = selection.formats ?? ['markdown']
-        const wants = (name: 'markdown' | 'links' | 'json') => formats.some(format => typeof format === 'string' ? format === name : name === 'json')
-        const custom = formats.find(format => typeof format === 'object')
+        const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
+        const custom = customJsonFormat(formats)
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
           const outcome = await ladder.scrape(url, page)
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
+        // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null.
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, screenshot, ...result }, ...attempt }) => ({
               ...attempt,
-              result: { ...result, markdown: null, links: [] },
+              result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
           },
         }
@@ -489,6 +521,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkFileCap(req)
     checkSelectors(req)
+    checkAttributeSelectors(req.formats)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
     const overallStart = performance.now()
@@ -500,7 +533,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
-    const rungs = channelsForUrl(mode, req.url, req)
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [])
     const policy: CrawlPolicy = {
       mode,
       ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
@@ -550,6 +583,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     async startCrawl(req) {
       checkFileCap(req)
       checkSelectors(req)
+      checkAttributeSelectors(req.formats)
       checkHostedOptions(req)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
@@ -595,6 +629,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
       checkFileCap(req)
       checkSelectors(req)
+      checkAttributeSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
       batchStartInProgress = true
@@ -847,12 +882,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
+/** The local rungs that render a page and so can capture the `screenshot` format. */
+const BROWSER_RUNGS: ReadonlySet<string> = new Set(['browser_local', 'authed_session'])
+
 /**
  * What a request or stored task asks each lane to capture. Its timeout is the
- * deadline; passed on, it lets the lanes' waits run to it. `html` and
- * `rawHtml` among its formats ask the lanes to carry them on the result.
+ * deadline; passed on, it lets the lanes' waits run to it. `html`, `rawHtml`,
+ * `images`, an `attributes` entry and a `screenshot` entry among its formats
+ * ask the lanes to carry them on the result.
  */
 function fetchOptions(options: PageOptions | undefined, formats: readonly ScrapeFormat[] = []): FetchOptions {
+  const attributes = attributesFormat(formats)
+  const screenshot = screenshotFormat(formats)
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
@@ -864,8 +905,12 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(options?.mobile === undefined ? {} : { mobile: options.mobile }),
     ...(options?.skipTlsVerification === undefined ? {} : { skipTlsVerification: options.skipTlsVerification }),
     ...(options?.blockAds === undefined ? {} : { blockAds: options.blockAds }),
+    ...(options?.removeBase64Images === undefined ? {} : { removeBase64Images: options.removeBase64Images }),
     ...(formats.includes('html') ? { includeHtml: true } : {}),
     ...(formats.includes('rawHtml') ? { includeRawHtml: true } : {}),
+    ...(formats.includes('images') ? { includeImages: true } : {}),
+    ...(attributes === undefined ? {} : { attributes: attributes.selectors }),
+    ...(screenshot === undefined ? {} : { screenshot }),
   }
 }
 
@@ -954,13 +999,19 @@ function linksRequested(task: Task): boolean {
 /**
  * `html` and `rawHtml` of a batch item or crawl page, each present when the
  * task's formats asked for it: what the stored result carries, null when it
- * carries none (a file, a page that was not read as content).
+ * carries none (a file, a page that was not read as content); `images` and
+ * `attributes` likewise, present when asked for and the page carries them;
+ * `screenshot` when asked for and the page has a result (null when the
+ * browser lane rendered no page or could not capture it).
  */
-function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPage, 'html' | 'rawHtml'> {
+function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPage, 'html' | 'rawHtml' | 'images' | 'attributes' | 'screenshot'> {
   const formats = (task.batch ?? task.crawl)?.formats ?? []
   return {
     ...(formats.includes('html') ? { html: result?.html ?? null } : {}),
     ...(formats.includes('rawHtml') ? { rawHtml: result?.rawHtml ?? null } : {}),
+    ...(formats.includes('images') && result?.images !== undefined ? { images: result.images } : {}),
+    ...(hasFormat(formats, 'attributes') && result?.attributes !== undefined ? { attributes: result.attributes } : {}),
+    ...(hasFormat(formats, 'screenshot') && result !== null ? { screenshot: result.screenshot ?? null } : {}),
   }
 }
 
@@ -978,7 +1029,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     lane: step.lane,
     markdown: result?.markdown ?? null,
     ...askedHtmlFormats(task, result),
-    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
+    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings, warning: warningOf(result.warnings) }),
     ...(agentHints.length === 0 ? {} : { agentHints }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),

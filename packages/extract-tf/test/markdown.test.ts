@@ -200,6 +200,13 @@ describe('htmlToMarkdown link and image targets', () => {
     expect(htmlToMarkdown('<img src="data:image/gif;base64,R0lGOD" alt="Dot">')).toBe('Dot')
   })
 
+  it('keeps a data: image as a target only when asked (dataUriImages keep), and still drops a data: link target', () => {
+    const html = '<p>Chart <img src="data:image/png;base64,AAAA" alt="inline pic"> and <a href="data:text/plain,x">Open</a>.</p>'
+    expect(htmlToMarkdown(html, { dataUriImages: 'keep' })).toBe('Chart ![inline pic](data:image/png;base64,AAAA) and Open.')
+    expect(htmlToMarkdown(html, { dataUriImages: 'drop' })).toBe('Chart inline pic and Open.')
+    expect(htmlToMarkdown(html)).toBe('Chart inline pic and Open.')
+  })
+
   it('drops data: link targets and keeps the link text, as for images', () => {
     const md = htmlToMarkdown(
       '<p><a href="data:text/html;base64,PGgxPg==">Open</a> and <a href=" DATA:text/plain,x"><img src="/i.png" alt="Icon"></a></p>' +

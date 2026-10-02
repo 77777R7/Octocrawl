@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
-import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS } from '@w2l/contracts'
+import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS, type FetchOptions, type ScreenshotEvidence } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
@@ -134,6 +134,138 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const shim = await postJson('/fc/v1/scrape', { url, formats: ['html', 'rawHtml'], includeTags: ['h1'] })
     expect(shim.body).toMatchObject({ success: true, data: { markdown: null, html: '<body><h1>Harbour lantern catalog</h1></body>' } })
     expect(shim.body.data.rawHtml).toMatch(/^<!doctype html>/)
+  })
+
+  it('serves the images and attributes formats when asked, on the full and compact responses, /fc and crawl pages, and refuses an attributes selector by name', async () => {
+    const page = (n: number) => `<!doctype html><html><head><title>Gallery ${n}</title><meta property="og:image" content="/og/${n}.png"></head><body><main><h1>Gallery ${n}</h1><p>${PROSE}</p>` +
+      `<figure><img src="/media/${n}.jpg" srcset="/media/${n}-2x.jpg 2x" alt="Plate ${n}"><img src="data:image/gif;base64,R0lGOD" alt="Spacer"></figure>${n === 1 ? '<p><a href="/gallery/2">Next</a></p>' : ''}</main></body></html>`
+    const local = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(req.url === '/gallery/2' ? 2 : 1))
+    })
+    await new Promise<void>((resolve) => local.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(local.address() as AddressInfo).port}`
+    const images = (n: number) => [`${origin}/og/${n}.png`, `${origin}/media/${n}.jpg`, `${origin}/media/${n}-2x.jpg`]
+    try {
+      const attributes = { type: 'attributes', selectors: [{ selector: 'main ul a', attribute: 'href' }, { selector: 'main h1', attribute: 'id' }] }
+      const listing = `${server.url}/crawl/listing`
+      // Values as written, in request then document order; a selector that matches nothing gives []; no json extraction runs.
+      const compact = await postJson('/v1/scrape', { url: listing, formats: ['markdown', attributes], debug: false })
+      expect(compact.body).toMatchObject({ status: 'success', formats: ['markdown', 'attributes'], attributes: [{ selector: 'main ul a', attribute: 'href', values: ['/crawl/item/1', '/crawl/item/2', '/crawl/item/3'] }, { selector: 'main h1', attribute: 'id', values: [] }] })
+      expect(compact.body).not.toHaveProperty('json')
+      expect(compact.body).not.toHaveProperty('images')
+      const full = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown', 'images'] })
+      expect(full.body.images).toEqual(images(1))
+      expect(full.body.trace).toContainEqual(expect.objectContaining({ event: 'images_collected', detail: { count: 3, srcsetCandidates: 1, lazy: 0, dataUrisDropped: 1 } }))
+      expect(full.body.summary.attempts[0].result).not.toHaveProperty('images')
+      // The default Markdown leaves the data: image out and keeps its alt text.
+      expect(full.body.markdown).toContain('Spacer')
+      expect(full.body.markdown).not.toContain('data:image')
+      const kept = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown'], removeBase64Images: false, debug: false })
+      expect(kept.body.markdown).toContain('![Spacer](data:image/gif;base64,R0lGOD)')
+      expect(kept.body.usage.contentTokens).toBeGreaterThan(full.body.usage.contentTokens)
+      const shim = await postJson('/fc/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown', 'images', attributes] })
+      expect(shim.body.data).toMatchObject({ images: images(1), attributes: [{ selector: 'main ul a', attribute: 'href', values: [] }, { selector: 'main h1', attribute: 'id', values: [] }] })
+      const plain = await postJson('/v1/scrape', { url: `${origin}/gallery`, formats: ['markdown'], debug: false })
+      expect(plain.body.formats).toEqual(['markdown'])
+      expect(plain.body).not.toHaveProperty('images')
+      expect(await postJson('/v1/scrape', { url: listing, formats: ['markdown', { type: 'attributes', selectors: [{ selector: 'div[[', attribute: 'id' }] }] }))
+        .toMatchObject({ status: 400, body: { error: 'attributes selectors[0].selector is not a valid CSS selector: div[[', code: 'invalid_request' } })
+      expect(await postJson('/v1/scrape', { url: listing, formats: [{ type: 'attributes', selectors: [{ selector: 'li:nth-child(2)', attribute: 'id' }] }] }))
+        .toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['formats[0].selectors[0]'] } } })
+      // A crawl carries images on each of its pages.
+      const crawl = await postJson('/v1/crawl', { url: `${origin}/gallery`, formats: ['markdown', 'images'], maxPages: 2 })
+      await engine.close()
+      const pages = await (await createApp(engine).request(`/v1/crawl/${crawl.body.taskId}/pages`)).json()
+      expect(pages.items.map((item: { url: string; images?: string[] }) => [new URL(item.url).pathname, item.images]).sort()).toEqual([['/gallery', images(1)], ['/gallery/2', images(2)]])
+    } finally {
+      local.closeAllConnections()
+      await new Promise<void>((resolve) => local.close(() => resolve()))
+    }
+  })
+
+  it('binds a screenshot request to the browser lane alone and serves the capture on the compact and full responses, /fc and batch items, never repeated in the audit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-shot-'))
+    let httpCalls = 0
+    const asked: unknown[] = []
+    // The capture a browser lane would attach, shaped from what the engine asked it for.
+    const shot = (options?: FetchOptions): ScreenshotEvidence => {
+      const request = options?.screenshot ?? {}
+      const viewport = request.viewport ?? { width: 1280, height: 800 }
+      return { contentType: request.quality === undefined ? 'image/png' : 'image/jpeg', width: viewport.width, height: request.fullPage === true ? 3000 : viewport.height, fullPage: request.fullPage === true, viewport, deviceScaleFactor: 2, quality: request.quality ?? null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    }
+    const browserOnly = createApiEngine({ taskRoot: root, channelsFor: (mode) => buildChannels(mode, {
+      localSubjects: {
+        http: { fetch: async (url) => { httpCalls++; return httpOnlyChannels('standard')[0]!.fetch(url) } },
+        browser_local: { fetch: async (url, _deadline, _signal, _execution, options) => { asked.push(options?.screenshot); return { ...(await httpOnlyChannels('standard')[0]!.fetch(url)), lane: 'browser_local', screenshot: shot(options) } } },
+      },
+    }) })
+    try {
+      const app = createApp(browserOnly)
+      const post = async (path: string, body: unknown) => {
+        const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        return { status: res.status, body: await res.json() }
+      }
+      const url = `${server.url}/crawl/listing`
+      const compact = await post('/v1/scrape', { url, formats: ['markdown', { type: 'screenshot', viewport: { width: 800, height: 600 } }], debug: false })
+      expect(compact.body).toMatchObject({ status: 'success', lane: 'browser_local', channelsTried: ['browser_local'], formats: ['markdown', 'screenshot'], screenshot: { contentType: 'image/png', width: 800, height: 600, fullPage: false, viewport: { width: 800, height: 600 }, quality: null, base64: 'iVBO' } })
+      expect(asked.at(-1)).toEqual({ viewport: { width: 800, height: 600 } })
+      const full = await post('/v1/scrape', { url, formats: ['markdown', 'screenshot@fullPage'] })
+      expect(full.body).toMatchObject({ channelsTried: ['browser_local'], screenshot: { fullPage: true, width: 1280, height: 3000 } })
+      expect(full.body.ladderTrace[0]).toMatchObject({ event: 'ladder_channels_filtered', detail: { reason: 'screenshot', dropped: ['http'] } })
+      expect(full.body.summary.attempts.map((attempt: { result: { screenshot?: unknown } }) => attempt.result.screenshot)).toEqual([null])
+      expect(asked.at(-1)).toEqual({ fullPage: true })
+      const shim = await post('/fc/v1/scrape', { url, formats: ['markdown', { type: 'screenshot', quality: 60 }] })
+      expect(shim.body).toMatchObject({ success: true, data: { screenshot: 'data:image/jpeg;base64,iVBO' } })
+      expect(httpCalls).toBe(0)
+      // fastMode and a screenshot contradict each other; the refusal names both.
+      expect(await post('/v1/scrape', { url, formats: ['screenshot'], fastMode: true })).toMatchObject({ status: 400, body: { error: 'screenshot requires the browser lane, which fastMode declines', code: 'invalid_request' } })
+      // Without the format the ladder is the usual one, and the response has no screenshot key.
+      const plain = await post('/v1/scrape', { url, formats: ['markdown'], debug: false })
+      expect(plain.body).toMatchObject({ lane: 'http', channelsTried: ['http'] })
+      expect(plain.body).not.toHaveProperty('screenshot')
+      // A batch takes every URL on the browser lane and stores the capture once, on the item.
+      const batch = await post('/v1/batches', { urls: [url], formats: ['markdown', 'screenshot'] })
+      expect(batch.status).toBe(202)
+      await browserOnly.close()
+      const items = await (await createApp(browserOnly).request(`/v1/batches/${batch.body.taskId}/items?debug=true`)).json()
+      expect(items.items).toHaveLength(1)
+      expect(items.items[0]).toMatchObject({ status: 'success', lane: 'browser_local', screenshot: { contentType: 'image/png', width: 1280, height: 800, fullPage: false } })
+      expect(items.items[0].audit.summary.attempts.map((attempt: { result: { screenshot?: unknown } }) => attempt.result.screenshot)).toEqual([null])
+      expect(items.items[0].evidenceRecord.artifacts).toEqual([])
+      expect(httpCalls).toBe(1)
+    } finally {
+      await browserOnly.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a screenshot by name on a server without a browser lane, before anything is fetched', async () => {
+    const roots = await Promise.all([mkdtemp(join(tmpdir(), 'w2l-shot-')), mkdtemp(join(tmpdir(), 'w2l-shot-'))])
+    const engines = [
+      createApiEngine({ taskRoot: roots[0], httpOnly: true }),
+      createApiEngine({ taskRoot: roots[1], channelsFor: httpOnlyChannels, channelPolicy: () => 'http_only' }),
+    ]
+    try {
+      const url = `${server.url}/crawl/listing`
+      for (const engine of engines) {
+        const app = createApp(engine)
+        const post = async (path: string, body: unknown) => {
+          const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+          return { status: res.status, body: await res.json() }
+        }
+        const refusal = { status: 400, body: { error: 'screenshot requires the browser lane, which this deployment does not offer', code: 'invalid_request' } }
+        expect(await post('/v1/scrape', { url, formats: ['markdown', 'screenshot'] })).toMatchObject(refusal)
+        expect(await post('/v1/batches', { urls: [url], formats: ['screenshot@fullPage'] })).toMatchObject(refusal)
+        expect(await post('/v1/crawl', { url, formats: [{ type: 'screenshot' }] })).toMatchObject(refusal)
+        expect(await post('/fc/v1/scrape', { url, formats: ['screenshot'] })).toMatchObject({ status: 400, body: { success: false, error: refusal.body.error } })
+        // Nothing was stored for the refused batch and crawl.
+        expect((await (await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], debug: false }) })).json()).status).toBe('success')
+      }
+    } finally {
+      await Promise.all(engines.map((engine) => engine.close()))
+      await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })))
+    }
   })
 
   it('refuses by name a selector that does not parse, and one whose matching the page does not bound', async () => {
@@ -347,6 +479,31 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       local.closeAllConnections()
       await new Promise<void>(resolve => local.close(() => resolve()))
       await rm(hintRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('carries low_content_yield, the warning string and the hints for a shell on an http-only engine, through /fc too, and none on the listing fixture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-api-yield-'))
+    const httpOnly = createApiEngine({ taskRoot: root, channelsFor: (mode) => httpOnlyChannels(mode).filter((channel) => channel.id === 'http') })
+    try {
+      const app = createApp(httpOnly)
+      const post = async (path: string, body: unknown) => (await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()
+      const shell = await post('/v1/scrape', { url: `${server.url}/spa/shell`, debug: false })
+      expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', channelsTried: ['http'] })
+      expect(shell.warnings.map((warning: { code: string }) => warning.code)).toEqual(['client_rendered_suspected', 'low_content_yield'])
+      expect(shell.warnings[1].message).toMatch(/^The http lane found no main content at confidence [0-9.]+; the browser lane was not available to this request\.$/)
+      expect(shell.warning).toBe(shell.warnings.map((warning: { message: string }) => warning.message).join(' '))
+      expect(shell.agentHints).toEqual(['the page fills its data with JavaScript; the browser lane was not tried', expect.stringContaining('pass waitFor (up to 60000 ms)')])
+      const full = await post('/v1/scrape', { url: `${server.url}/spa/shell` })
+      expect(full).toMatchObject({ warning: shell.warning, agentHints: shell.agentHints })
+      const shim = await post('/fc/v1/scrape', { url: `${server.url}/spa/shell` })
+      expect(shim).toMatchObject({ success: false, data: { warning: shell.warning, agent_hints: shell.agentHints } })
+      const plain = await post('/v1/scrape', { url: `${server.url}/crawl/listing`, debug: false })
+      expect(plain.status).toBe('success')
+      for (const key of ['warning', 'warnings', 'agentHints']) expect(plain).not.toHaveProperty(key)
+    } finally {
+      await httpOnly.close()
+      await rm(root, { recursive: true, force: true })
     }
   })
 
@@ -595,8 +752,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       return { status: res.status, error: ((await res.json()) as { error?: string }).error }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)' })
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, screenshot, attributes)' })
     expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], proxy: 'auto' })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: proxy') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })

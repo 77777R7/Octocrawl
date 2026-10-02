@@ -190,6 +190,62 @@ export interface PageMetadata {
   favicon: string | null
   /** The first `<link rel~="canonical">` that resolves to an http(s) URL. */
   canonicalUrl: string | null
+  /*
+   * The fields below depart from the seven above: each is present only when
+   * the page states it, and absent otherwise (never null), so a page without
+   * Open Graph, Dublin Core or article tags keeps exactly the seven-field
+   * object. Firecrawl's names; the values are the page's own words, with
+   * whitespace collapsed, the first occurrence of a tag winning (except the
+   * two lists). Nothing is inferred from another tag, JSON-LD or the content.
+   */
+  /** `<meta property="og:title">` (or `name=`). */
+  ogTitle?: string
+  /** `og:description`; an empty `content` is no declaration. */
+  ogDescription?: string
+  /** `og:url`, resolved against the document base URL when it parses, else as written. */
+  ogUrl?: string
+  /** `og:image`, else `og:image:secure_url`, else `og:image:url`; resolved like `ogUrl`. */
+  ogImage?: string
+  /** `og:audio`, resolved like `ogUrl`. */
+  ogAudio?: string
+  /** `og:video`, else `og:video:secure_url`, else `og:video:url`; resolved like `ogUrl`. */
+  ogVideo?: string
+  /** `og:determiner`. */
+  ogDeterminer?: string
+  /** `og:locale`. */
+  ogLocale?: string
+  /** Every `og:locale:alternate`, in document order. */
+  ogLocaleAlternate?: readonly string[]
+  /** `og:site_name`. */
+  ogSiteName?: string
+  /** `<meta name="dcterms.created">`. */
+  dcTermsCreated?: string
+  /** `<meta name="dc.date.created">`. */
+  dcDateCreated?: string
+  /** `<meta name="dc.date">`. */
+  dcDate?: string
+  /** `<meta name="dcterms.type">`. */
+  dcTermsType?: string
+  /** `<meta name="dc.type">`. */
+  dcType?: string
+  /** `<meta name="dcterms.audience">`. */
+  dcTermsAudience?: string
+  /** `<meta name="dcterms.subject">`. */
+  dcTermsSubject?: string
+  /** `<meta name="dc.subject">`. */
+  dcSubject?: string
+  /** `<meta name="dc.description">`. */
+  dcDescription?: string
+  /** `<meta name="dcterms.keywords">`. */
+  dcTermsKeywords?: string
+  /** `article:published_time`, as the page writes it: no date normalisation. */
+  publishedTime?: string
+  /** `article:modified_time`, as written. */
+  modifiedTime?: string
+  /** Every `article:tag`, in document order. */
+  articleTag?: readonly string[]
+  /** `article:section`. */
+  articleSection?: string
 }
 
 export interface DocumentExtraction {
