@@ -79,13 +79,13 @@ export interface FetchOptions {
    * (`readHeaders`): never the User-Agent, a client hint, a credential or a
    * transport header. The HTTP and local browser lanes send them with the
    * requested URL and its same-origin hops and subresources, after the
-   * declared identity, and record them (`request_headers_added`). The HTTP
-   * lane fetches a cross-origin hop with the identity alone
-   * (`custom_headers_withheld`); the browser lane's Chromium follows a server
-   * redirect with the request's headers, as a browser does, and says so
-   * (`custom_headers_forwarded`), while a navigation the page makes to another
-   * origin gets none. robots.txt is fetched with the identity alone.
-   * Everything here is on the record.
+   * declared identity, and record them (`request_headers_added`). Both lanes
+   * fetch a redirect hop to another origin with the identity alone and say so
+   * (`custom_headers_withheld`); on the browser lane the headers are added per
+   * request through Chromium's request interception, which judges every hop
+   * and every file the page loads by its own origin, so a navigation the page
+   * makes to another origin gets none either. robots.txt is fetched with the
+   * identity alone. Everything here is on the record.
    */
   headers?: Readonly<Record<string, string>>
   /**

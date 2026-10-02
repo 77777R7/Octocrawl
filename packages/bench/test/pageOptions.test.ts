@@ -38,6 +38,7 @@ function handler(label: string) {
     if (req.url === '/app.js') { res.writeHead(200, { 'content-type': 'text/javascript' }).end('// nothing to run'); return }
     if (req.url === '/echo-headers') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(echoPage(req, 'Echo')); return }
     if (req.url === '/moved-away') { res.writeHead(302, { location: `${otherOrigin}/echo-headers` }).end(); return }
+    if (req.url === '/moved-here') { res.writeHead(302, { location: '/echo-headers' }).end(); return }
     if (req.url === '/device') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       // A responsive page: without a viewport meta a mobile browser lays a page out at 980 CSS pixels and scales it, as a phone does.
@@ -140,6 +141,7 @@ describe('BrowserLocalSubject wire options', () => {
     expect(out.trace).toContainEqual(expect.objectContaining({ event: 'request_headers_added', detail: { headers: [{ name: 'x-test', value: 'w2l' }, { name: 'accept-language', value: 'de' }] } }))
     expect(out.trace).toContainEqual(expect.objectContaining({ event: 'identity_declared', detail: { mode: 'standard', device: 'desktop' } }))
     expect(out.trace.some((t) => t.event === 'identity_mismatch')).toBe(false)
+    expect(out.trace.some((t) => t.event === 'custom_headers_withheld')).toBe(false)
     // The page's own requests carry the declared client hints too, never the headless shell's own brands.
     const declaredHints = out.compliance!.sentHeaders.headers.find((h) => h.name === 'sec-ch-ua')!.value
     expect(declaredHints).toMatch(/"Google Chrome";v="\d+"/)
@@ -148,7 +150,7 @@ describe('BrowserLocalSubject wire options', () => {
     expect(JSON.stringify(received)).not.toContain('HeadlessChrome')
   }, 60_000)
 
-  it('carries the declared identity across a server redirect, where Chromium regenerates its own hints, and records what became of the custom headers', async () => {
+  it('withholds custom headers from a server redirect to another origin, where Chromium regenerates its own hints, and says so', async () => {
     received.length = 0
     const out = await subject.fetch(`${origin}/moved-away`, Date.now() + 60_000, undefined, undefined, { headers: { 'x-test': 'w2l' } })
     expect(out).toMatchObject({ status: 'success', evidence: { finalUrl: `${otherOrigin}/echo-headers`, redirectChain: [`${origin}/moved-away`, `${otherOrigin}/echo-headers`] } })
@@ -156,14 +158,27 @@ describe('BrowserLocalSubject wire options', () => {
     const hop = sentTo('b', '/echo-headers').at(-1)!.headers
     expect(hop['sec-ch-ua']).toBe(out.compliance!.sentHeaders.headers.find((h) => h.name === 'sec-ch-ua')!.value)
     expect(hop['sec-ch-ua']).not.toContain('HeadlessChrome')
+    // The requested origin gets the headers; the origin the redirect led to gets the identity alone, on the
+    // document as on its own requests, and the trace and the signed record say so.
     expect(sentTo('a', '/moved-away').at(-1)!.headers).toMatchObject({ 'x-test': 'w2l' })
-    // Chromium follows a server redirect with the request's headers, as a browser does, and no route sees the
-    // hop: the browser lane cannot withhold them there, so it says they were forwarded, and the record carries them as sent.
-    expect(hop).toMatchObject({ 'x-test': 'w2l' })
-    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'custom_headers_forwarded', detail: expect.objectContaining({ to: `${otherOrigin}/echo-headers`, names: ['x-test'] }) }))
-    expect(out.compliance!.sentHeaders.headers).toContainEqual({ name: 'x-test', value: 'w2l' })
-    // The other origin's own requests are new requests the route saw, and got none.
+    expect(hop).not.toHaveProperty('x-test')
     expect(sentTo('b', '/app.js').at(-1)!.headers).not.toHaveProperty('x-test')
+    expect(out.markdown).not.toContain('x-test')
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'custom_headers_withheld', detail: { to: `${otherOrigin}/echo-headers`, names: ['x-test'] } }))
+    expect(out.trace.some((t) => t.event === 'custom_headers_forwarded')).toBe(false)
+    expect(out.compliance!.sentHeaders.headers.some((h) => h.name === 'x-test')).toBe(false)
+  }, 60_000)
+
+  it('keeps custom headers on a same-origin redirect hop, and the record carries them as sent', async () => {
+    received.length = 0
+    const out = await subject.fetch(`${origin}/moved-here`, Date.now() + 60_000, undefined, undefined, { headers: { 'x-test': 'w2l' } })
+    expect(out).toMatchObject({ status: 'success', evidence: { finalUrl: `${origin}/echo-headers`, redirectChain: [`${origin}/moved-here`, `${origin}/echo-headers`] } })
+    expect(sentTo('a', '/moved-here').at(-1)!.headers).toMatchObject({ 'x-test': 'w2l' })
+    expect(sentTo('a', '/echo-headers').at(-1)!.headers).toMatchObject({ 'x-test': 'w2l' })
+    expect(out.markdown).toContain('x-test: w2l')
+    expect(out.compliance?.sentHeaders.headers).toContainEqual({ name: 'x-test', value: 'w2l' })
+    expect(out.trace.some((t) => t.event === 'custom_headers_withheld')).toBe(false)
+    expect(out.trace.some((t) => t.event === 'identity_mismatch')).toBe(false)
   }, 60_000)
 
   it('declares the mobile identity, which the page sees as Android with a phone viewport and touch', async () => {

@@ -18,7 +18,7 @@ import {
   type ComplianceRecord,
   type ComplianceSentHeader,
 } from '@w2l/http-core'
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Response } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response } from 'playwright'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -66,25 +66,80 @@ function asSentHeaders(headers: Readonly<Record<string, string>>): ComplianceSen
 }
 
 /**
- * What became of the caller's headers when the document came from another
- * origin than the one requested. A server redirect is followed by Chromium
- * with the request's headers, custom ones included, as a browser does, and
- * no route sees the hop: the record says they were forwarded
- * (`custom_headers_forwarded`). A navigation the page itself made (a script,
- * a meta refresh) is a new request the route saw, and got none
- * (`custom_headers_withheld`). The HTTP lane withholds on every hop itself.
+ * The caller's custom headers on the browser lane, added through the page's
+ * own CDP session (the Fetch domain, request stage) to every request whose
+ * origin is the fetched URL's: the document, its same-origin redirect hops
+ * and the files the page loads from that origin. They go after the request's
+ * own headers; wireHeaders refused the identity's names, so the identity is
+ * never overridden. A request to another origin is continued as Chromium
+ * made it: a redirect of the document there gets the identity alone and the
+ * trace says so (`custom_headers_withheld`, as on the HTTP lane), and so does
+ * a navigation the page itself makes elsewhere. The Fetch domain's rule makes
+ * the hop safe: a request-stage header override does not extend to a redirect
+ * hop (Fetch.continueRequest), so every hop is judged by its own origin here.
+ * A Playwright route cannot do this: Playwright gives a redirected request no
+ * route and re-applies the first request's continue() overrides to every hop,
+ * as a browser carries its own headers, so headers given that way reached the
+ * origin a redirect led to.
  */
-function recordCrossOriginHeaders(trace: TraceEvent[], at: number, requestedOrigin: string, finalUrl: string, customHeaders: Readonly<Record<string, string>>, sent: readonly ComplianceSentHeader[]): void {
-  const names = Object.keys(customHeaders)
-  if (names.length === 0) return
-  let finalOrigin: string
-  try { finalOrigin = new URL(finalUrl).origin } catch { return }
-  if (finalOrigin === requestedOrigin) return
-  const sentNames = new Set(sent.map((header) => header.name))
-  const forwarded = names.filter((name) => sentNames.has(name))
-  const withheld = names.filter((name) => !sentNames.has(name))
-  if (forwarded.length > 0) trace.push({ at, lane: 'browser_local', event: 'custom_headers_forwarded', detail: { to: finalUrl, names: forwarded, reason: 'Chromium followed a server redirect with the request\'s headers' } })
-  if (withheld.length > 0) trace.push({ at, lane: 'browser_local', event: 'custom_headers_withheld', detail: { to: finalUrl, names: withheld } })
+class CustomHeaderGate {
+  private readonly names: ReadonlySet<string>
+  private readonly entries: readonly ComplianceSentHeader[]
+  /** The documents (the main frame's and frames') the headers were added to, by URL, for the record. */
+  private readonly documents = new Set<string>()
+  private mainFrameId: string | null = null
+
+  constructor(
+    private readonly session: CDPSession,
+    private readonly origin: string,
+    headers: Readonly<Record<string, string>>,
+    private readonly onWithheld: (to: string, names: readonly string[]) => void,
+  ) {
+    this.entries = Object.entries(headers).map(([name, value]) => ({ name, value }))
+    this.names = new Set(this.entries.map(({ name }) => name))
+  }
+
+  /** Installs the gate: from here until the session detaches, every request of the page pauses in it and `admit` continues it. */
+  async enable(): Promise<void> {
+    this.mainFrameId = (await this.session.send('Page.getFrameTree')).frameTree.frame.id
+    this.session.on('Fetch.requestPaused', (event) => { void this.admit(event) })
+    await this.session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
+  }
+
+  private async admit(event: { requestId: string; frameId: string; resourceType: string; request: { url: string; headers: Record<string, string> } }): Promise<void> {
+    const { url, headers } = event.request
+    let origin: string | null = null
+    try { origin = new URL(url).origin } catch { origin = null }
+    const own = Object.entries(headers).filter(([name]) => !this.names.has(name.toLowerCase())).map(([name, value]) => ({ name, value }))
+    const document = event.resourceType === 'Document'
+    if (origin === this.origin) {
+      if (document) this.documents.add(url)
+      await this.session.send('Fetch.continueRequest', { requestId: event.requestId, headers: [...own, ...this.entries] }).catch(() => {})
+      return
+    }
+    // The main frame's document from another origin: a redirect hop, or a navigation the page made.
+    if (document && event.frameId === this.mainFrameId) this.onWithheld(url, [...this.names])
+    // Chromium carries no override to a redirect hop; a custom header found here is stripped all the same.
+    const carried = own.length !== Object.keys(headers).length
+    await this.session.send('Fetch.continueRequest', carried ? { requestId: event.requestId, headers: own } : { requestId: event.requestId }).catch(() => {})
+  }
+
+  /**
+   * The as-sent headers of the document at `url`: Playwright's view, with the
+   * custom headers this gate added to that request when Playwright's own
+   * interception ran before the gate's and did not see them.
+   */
+  sent(url: string, reported: readonly ComplianceSentHeader[]): ComplianceSentHeader[] {
+    if (!this.documents.has(url)) return [...reported]
+    const present = new Set(reported.map(({ name }) => name))
+    return [...reported, ...this.entries.filter(({ name }) => !present.has(name))].sort((a, b) => a.name.localeCompare(b.name))
+  }
+}
+
+/** What went on the wire with `request`: as Playwright saw it, credentials excepted (asSentHeaders), with what the custom-header gate added to it. */
+function sentHeadersOf(gate: CustomHeaderGate | null, request: Request | null): ComplianceSentHeader[] {
+  const reported = asSentHeaders(request?.headers() ?? {})
+  return gate === null || request === null ? reported : gate.sent(request.url(), reported)
 }
 
 /**
@@ -294,8 +349,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
     let context: BrowserContext | undefined
     let page: Page | undefined
-    /** The CDP session that holds the page's user-agent metadata override; open for the page's lifetime. */
-    let emulation: CDPSession | undefined
+    /** The page's own CDP session, open for the page's lifetime: the user-agent metadata override and the custom-header gate live as long as it. */
+    let session: CDPSession | undefined
+    let headerGate: CustomHeaderGate | null = null
     const onAbort = () => {
       void page?.close().catch(() => {})
       if (context !== this.managedContext) void context?.close().catch(() => {})
@@ -487,14 +543,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const blockAds = options.blockAds !== false
       const pageOrigin = new URL(url).origin
       const hasCustomHeaders = Object.keys(customHeaders).length > 0
-      if (allowedHosts !== null || blockAds || hasCustomHeaders) {
-        // One route for the three concerns, installed before creating a page
+      if (allowedHosts !== null || blockAds) {
+        // One route for the two concerns, installed before creating a page
         // so the first navigation of a popup or worker cannot bypass it: the
         // hosted host allowlist first (an ad host is never on it, and
-        // blockAds: false cannot widen it), then the ad hosts, then the
-        // caller's headers on requests to the fetched URL's origin alone (the
-        // document, its same-origin hops and subresources), merged after the
-        // request's own so the identity is never overridden.
+        // blockAds: false cannot widen it), then the ad hosts. The caller's
+        // headers are not a route's business: a route's continue() overrides
+        // ride every redirect hop (see CustomHeaderGate).
         await context.route('**/*', async route => {
           const request = route.request()
           const target = request.url()
@@ -516,10 +571,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
             adsBlocked++
             if (adHostsBlocked.size < 20) adHostsBlocked.add(targetUrl.hostname.toLowerCase())
             await route.abort('blockedbyclient').catch(() => {})
-            return
-          }
-          if (hasCustomHeaders && targetUrl !== null && targetUrl.origin === pageOrigin) {
-            await route.continue({ headers: { ...request.headers(), ...customHeaders } }).catch(() => {})
             return
           }
           await route.continue().catch(() => {})
@@ -566,16 +617,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // The override lives as long as the session that set it (Chromium drops
       // a session's emulation when it detaches), so the session stays open
       // until the page is closed.
-      if (identity.device !== undefined) {
+      if (identity.device !== undefined || hasCustomHeaders) session = await raceWithSignal(context.newCDPSession(page), signal)
+      if (identity.device !== undefined && session !== undefined) {
         const chromeMajor = Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR
         const metadata = browserUserAgentMetadata(chromeMajor, identity.device)
-        emulation = await raceWithSignal(context.newCDPSession(page), signal)
-        await raceWithSignal(emulation.send('Emulation.setUserAgentOverride', {
+        await raceWithSignal(session.send('Emulation.setUserAgentOverride', {
           userAgent: identity.userAgent,
           acceptLanguage: fingerprint.locale,
           platform: identity.device === 'mobile' ? 'Linux armv8l' : 'MacIntel',
           userAgentMetadata: { ...metadata, brands: [...metadata.brands], fullVersionList: [...metadata.fullVersionList] },
         }), signal)
+      }
+      // The caller's headers, per request and by origin (CustomHeaderGate),
+      // installed before the first navigation; the trace names every
+      // document of another origin they were kept from.
+      if (hasCustomHeaders && session !== undefined) {
+        headerGate = new CustomHeaderGate(session, pageOrigin, customHeaders, (to, names) => trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'custom_headers_withheld', detail: { to, names: [...names] } }))
+        await raceWithSignal(headerGate.enable(), signal)
       }
       // A file (PDF, CSV, ZIP, ...) starts a download instead of a page: the
       // navigation fails with "Download is starting". Keep the download and
@@ -702,7 +760,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         sentHeaders: { headers: sentHeaders },
         rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
         access: this.access,
-      }), identity)
+      }), identity, headerGate)
       if (file !== null) return file
       // waitFor: the caller's extra wait after load and stability. It counts
       // toward the scrape's deadline; when the deadline would end it, the
@@ -781,10 +839,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
       trace.push({ at: wallMs, lane: 'browser_local', event: 'rendered', detail: { status, attemptCount } })
 
       // What actually went on the wire, as Playwright saw it, credentials
-      // excepted (asSentHeaders): the fact the honesty check compares
-      // against, and the record signs.
-      const sentHeaders: ComplianceSentHeader[] = asSentHeaders((documentResponse ?? response)?.request().headers() ?? {})
-      recordCrossOriginHeaders(trace, wallMs, pageOrigin, finalUrl, customHeaders, sentHeaders)
+      // excepted, with the custom headers the gate added (sentHeadersOf): the
+      // fact the honesty check compares against, and the record signs.
+      const sentHeaders: ComplianceSentHeader[] = sentHeadersOf(headerGate, (documentResponse ?? response)?.request() ?? null)
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
       if (!honesty.honest) {
         trace.push({
@@ -1047,7 +1104,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     } finally {
       signal?.removeEventListener('abort', onAbort)
       if (page !== undefined) await closePage(page)
-      await emulation?.detach().catch(() => {})
+      await session?.detach().catch(() => {})
       if (context !== this.managedContext) await context?.close().catch(() => {})
       await relaxedRoutes?.close()
     }
@@ -1072,6 +1129,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     attemptCount: number,
     mint: (finalUrl: string, sentHeaders: ComplianceSentHeader[]) => ComplianceRecord,
     identity: Parameters<typeof checkIdentityHonesty>[0],
+    headerGate: CustomHeaderGate | null,
   ): Promise<FetchResult | null> {
     const { download } = seen
     const navigation = download === null ? response : [...seen.navigations].reverse().find(item => item.url() === download.url()) ?? null
@@ -1089,9 +1147,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const maxBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     const declaredBytes = declaredLength(headers['content-length'])
     const base = (): Omit<FetchResult, 'status' | 'failureReason'> => {
-      // What went on the wire, as Playwright saw it, credentials excepted, checked and signed as for a page.
-      const sentHeaders: ComplianceSentHeader[] = asSentHeaders(navigation === null ? {} : navigation.request().headers())
-      recordCrossOriginHeaders(trace, at(), new URL(url).origin, finalUrl, wireHeaders(options.headers), sentHeaders)
+      // What went on the wire, as Playwright saw it, credentials excepted, with what the gate added, checked and signed as for a page.
+      const sentHeaders: ComplianceSentHeader[] = sentHeadersOf(headerGate, navigation?.request() ?? null)
       const honesty: HonestyVerdict = checkIdentityHonesty(identity, { headers: sentHeaders })
       if (!honesty.honest) trace.push({ at: at(), lane: 'browser_local', event: 'identity_mismatch', detail: { mismatches: honesty.mismatches } })
       return {
