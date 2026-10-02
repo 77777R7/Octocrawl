@@ -1,6 +1,6 @@
 # Privacy
 
-This page covers the public OctoCrawl page and its preview service. When you run OctoCrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
+This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
 Last updated 2 October 2026.
 
