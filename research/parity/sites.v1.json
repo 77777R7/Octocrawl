@@ -1846,6 +1846,150 @@
         {"item": "scrape-formats.markdown", "type": "tableShape", "minTables": 1},
         {"item": "scrape-formats.markdown", "type": "markdownLinksAbsolute"}
       ]
+    },
+    {
+      "id": "MP01",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-endpoint",
+      "url": "https://www.sitemaps.org/",
+      "request": {},
+      "note": "Added 2026-10-03 for the map endpoint (frozen row #34; map-endpoint, map-link-metadata). Seen 2026-10-03 with curl through the shell proxy and main's collectLinks + Frontier: robots.txt names /sitemap.xml, a urlset of 84 <loc>, all with lastmod; the home page links /, faq.php, protocol.php and terms.php, and creativecommons.org. Expected: 87 links (84 sitemap entries plus the 3 .php pages), the home URL once with via [start, sitemap], all on www.sitemaps.org, one sitemap file read, one page body requested (the start page, lane http). Counts are ranges around what was seen, since the site may change.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "stoppedBy", "equals": null},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "min": 84, "max": 92, "record": true},
+        {"item": "map-search.map-endpoint", "type": "uniqueUrls"},
+        {"item": "map-search.map-endpoint", "type": "itemUrls", "pattern": "^https://www\\.sitemaps\\.org/"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "links.0.url", "equals": "https://www.sitemaps.org/"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "links.0.via", "equals": ["start", "sitemap"]},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.sources", "equals": ["robots"]},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.length", "equals": 1},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.kind", "equals": "urlset"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.entries", "min": 84, "record": true},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.robots", "equals": "allowed"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.startPage.httpStatus", "equals": 200},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.startPage.lane", "equals": "http"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.hostDenied", "min": 1, "record": true},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "elapsedMs", "max": 10000, "record": true},
+        {"item": "map-search.map-link-metadata", "type": "field", "path": "links.0.titleSource", "equals": "page"},
+        {"item": "map-search.map-link-metadata", "type": "countWhere", "field": "via", "includes": "sitemap", "min": 84, "record": true},
+        {"item": "map-search.map-link-metadata", "type": "countWhere", "field": "lastmod", "present": true, "min": 84, "record": true}
+      ]
+    },
+    {
+      "id": "MP02",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-endpoint",
+      "url": "https://books.toscrape.com/",
+      "request": {},
+      "note": "Added 2026-10-03 for the map endpoint (frozen row #1). Seen 2026-10-03: robots.txt 404, /sitemap.xml 404, the home page gives 73 links in scope (72 accepted plus the seed; index.html is collapsed into /). Expected: about 73 links, the guessed sitemap file recorded as absent with status 404, every link no_robots, status completed. A practice site: any failure is a W2L bug, or the proxy's (SSL_ERROR_SYSCALL was seen once on the first curl and not on retry).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "stoppedBy", "equals": null},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "min": 65, "max": 80, "record": true},
+        {"item": "map-search.map-endpoint", "type": "uniqueUrls"},
+        {"item": "map-search.map-endpoint", "type": "itemUrls", "pattern": "^https://books\\.toscrape\\.com/"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.sources", "equals": ["guess"]},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.kind", "equals": "absent"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.status", "equals": 404},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "field": "robots", "value": "no_robots", "min": 65, "record": true},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "field": "robots", "value": "allowed", "max": 0},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.collapsed", "min": 1, "record": true}
+      ]
+    },
+    {
+      "id": "MP03",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-endpoint",
+      "url": "https://docs.python.org/3/",
+      "request": {},
+      "note": "Added 2026-10-03 for the map endpoint (frozen row #32). Seen 2026-10-03: robots.txt names /sitemap.xml, a urlset of 8 <loc> (version roots, one under /3/); the /3/ page gives 57 links, 24 in /3/ with the seed, 45 on the host. Expected: about 24 links, all under https://docs.python.org/3/; the sitemap's /3/ entry merges into the start link and its other 7 entries count in subtreeDenied (about 28 with 21 page links); refused.robots 0. The row's 'at least as many URLs as the sitemap lists under /3/' holds trivially (1). The audit's '100 docs.python.org URLs' cannot be met by one page read plus this sitemap; that gap is recorded, not tested.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "min": 18, "max": 32, "record": true},
+        {"item": "map-search.map-endpoint", "type": "uniqueUrls"},
+        {"item": "map-search.map-endpoint", "type": "itemUrls", "pattern": "^https://docs\\.python\\.org/3/"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "links.0.via", "equals": ["start", "sitemap"]},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.0.entries", "equals": 8},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.robots", "equals": 0},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.subtreeDenied", "min": 20, "record": true},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.hostDenied", "min": 5, "record": true}
+      ]
+    },
+    {
+      "id": "MP04",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-link-metadata",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP",
+      "request": {},
+      "note": "Added 2026-10-03 for map link metadata (the audit's MDN check; not in the frozen set). Seen 2026-10-03: robots.txt names /sitemap.xml, an index of 10 .xml.gz children (every locale); en-us is 126.7 KB gzipped with 14,820 <loc>, 377 under /en-US/docs/Web/HTTP; the page gives 375 in-scope links, all in that sitemap. Expected: about 377 links, at least 370 titled, the start URL titled by its page, at least 370 with via including sitemap, 11 sitemap files read, refused.robots 0. Unverified by this case: whether anchor titles are contained in each target page's own <title> (titles are anchor text by design).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "stoppedBy", "equals": null},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "min": 360, "max": 420, "record": true},
+        {"item": "map-search.map-endpoint", "type": "uniqueUrls"},
+        {"item": "map-search.map-endpoint", "type": "itemUrls", "pattern": "^https://developer\\.mozilla\\.org/en-US/docs/Web/HTTP"},
+        {"item": "map-search.map-link-metadata", "type": "field", "path": "links.0.titleSource", "equals": "page"},
+        {"item": "map-search.map-link-metadata", "type": "countWhere", "field": "title", "present": true, "min": 370, "record": true},
+        {"item": "map-search.map-link-metadata", "type": "countWhere", "field": "titleSource", "value": "anchor", "min": 360, "record": true},
+        {"item": "map-search.map-link-metadata", "type": "countWhere", "field": "via", "includes": "sitemap", "min": 370, "record": true},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "sources.sitemap.files.length", "equals": 11, "record": true},
+        {"item": "map-search.map-endpoint", "type": "countWhere", "path": "sources.sitemap.files", "field": "kind", "value": "urlset", "count": 10},
+        {"item": "map-search.map-endpoint", "type": "field", "path": "refused.robots", "equals": 0}
+      ]
+    },
+    {
+      "id": "MP05",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-limit",
+      "url": "https://www.gov.uk/",
+      "request": {"limit": 500},
+      "probes": [{"limit": 0}, {"limit": -1}],
+      "note": "Added 2026-10-03 for map limit (frozen row #33; Wikipedia, the audit's limit site, is unreachable on this network). Seen 2026-10-03: robots.txt names /sitemap.xml, an index of 35 children; sitemap_1.xml is 5.57 MB with 25,000 <loc>, all on www.gov.uk. Expected with limit 500: exactly 500 unique links on www.gov.uk, stoppedBy limit, status completed, the index plus one child read with truncated urls, refused.overLimit above 0, no robots-disallowed /print URL. limit 0 and -1 answer 400 with the range message.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-limit", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "map-search.map-limit", "type": "field", "path": "stoppedBy", "equals": "limit"},
+        {"item": "map-search.map-limit", "type": "countWhere", "count": 500},
+        {"item": "map-search.map-limit", "type": "uniqueUrls"},
+        {"item": "map-search.map-limit", "type": "itemUrls", "pattern": "^https://www\\.gov\\.uk/"},
+        {"item": "map-search.map-limit", "type": "field", "path": "sources.sitemap.files.length", "equals": 2, "record": true},
+        {"item": "map-search.map-limit", "type": "field", "path": "sources.sitemap.truncated", "equals": "urls"},
+        {"item": "map-search.map-limit", "type": "field", "path": "refused.overLimit", "min": 1, "record": true},
+        {"item": "map-search.map-limit", "type": "countWhere", "field": "url", "pattern": "/print$", "max": 0},
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.0.httpStatus", "equals": 400},
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.0.error", "equals": "limit must be an integer from 1 to 100000"},
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.1.httpStatus", "equals": 400},
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.1.error", "equals": "limit must be an integer from 1 to 100000"}
+      ]
+    },
+    {
+      "id": "MP06",
+      "batch": "map",
+      "endpoint": "map",
+      "feature": "map-search.map-timeout",
+      "url": "https://www.gov.uk/",
+      "request": {"limit": 100000, "timeout": 3000},
+      "note": "Added 2026-10-03 for map timeout (frozen row #33). The index's 35 children, about 25,000 <loc> and 5.6 MB each as seen on 2026-10-03, cannot all be read in 3 s, so the outcome is partial. Expected: an answer within about 3-5 s, status partial, stoppedBy timeout, a map_timeout warning, links found (never an empty success), sources.sitemap.truncated time.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "map-search.map-timeout", "type": "field", "path": "status", "equals": "partial"},
+        {"item": "map-search.map-timeout", "type": "field", "path": "stoppedBy", "equals": "timeout"},
+        {"item": "map-search.map-timeout", "type": "countWhere", "min": 1, "record": true},
+        {"item": "map-search.map-timeout", "type": "countWhere", "path": "warnings", "field": "code", "value": "map_timeout", "count": 1},
+        {"item": "map-search.map-timeout", "type": "field", "path": "sources.sitemap.truncated", "equals": "time"},
+        {"item": "map-search.map-timeout", "type": "field", "path": "elapsedMs", "max": 5000, "record": true},
+        {"item": "map-search.map-timeout", "type": "field", "path": "roundTripMs", "max": 6000, "record": true}
+      ]
     }
   ]
 }

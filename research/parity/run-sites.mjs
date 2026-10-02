@@ -114,6 +114,15 @@
 //   checks      tableTargets: the Markdown link and image targets inside GFM table rows (header
 //               rows included) that match spec.pattern (default ^https?://), at least spec.min of them;
 //               the observed value gives how many matched out of all targets in table rows.
+// Added for the map endpoint (M3, 2026-10-03):
+//   map         POST /v1/map with { url, ...case.request }; doc is the response with doc.items = its links
+//               (so itemCount, uniqueUrls, itemUrls and eachItem read the links) and doc.roundTripMs, the
+//               runner's own round trip beside the response's elapsedMs. case.probes lists further request
+//               bodies sent to the same URL, each recorded in doc.probes as { httpStatus, error, code }.
+//   checks      countWhere: the items at spec.path (default items) whose value at spec.field (the item
+//               itself when absent) includes spec.includes (an array member or a substring), matches
+//               spec.pattern, is present (spec.present) or equals spec.value; their number is at least
+//               spec.min, at most spec.max and, with spec.count, exactly that.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -251,6 +260,21 @@ const runners = {
       const reportedIp = ipv4(typeof doc.markdown === 'string' ? doc.markdown : '')
       doc.egress = { ...ips, reportedIp, reportedIsDirect: reportedIp !== null && reportedIp === ips.directIp }
       response.egress = doc.egress
+    }
+    return { response, doc }
+  },
+  async map(c) {
+    const began = Date.now()
+    const response = await call('POST', '/v1/map', { url: c.url, ...c.request })
+    const doc = { ...(response.json ?? {}), roundTripMs: Date.now() - began }
+    doc.items = Array.isArray(doc.links) ? doc.links : []
+    if (Array.isArray(c.probes)) {
+      doc.probes = []
+      for (const body of c.probes) {
+        const probe = await call('POST', '/v1/map', { url: c.url, ...body })
+        doc.probes.push({ request: body, httpStatus: probe.httpStatus, error: probe.json?.error ?? null, code: probe.json?.code ?? null })
+      }
+      response.probes = doc.probes
     }
     return { response, doc }
   },
@@ -677,6 +701,20 @@ function check(doc, spec, response) {
       }
       const required = [...new Set(events.filter(Boolean).map((event) => event.requiredDelayMs))].join('/')
       return { pass: events.length > 0 && missing === 0 && short === 0 && byHost.size >= (spec.minHosts ?? 1), actual: `${events.length} fetches on ${byHost.size} hosts, ${missing} without a crawl_delay event, smallest same-host gap ${smallest ?? 'n/a'} ms, required ${required || 'n/a'} ms, ${short} gaps shorter` }
+    }
+    case 'countWhere': {
+      const items = get(doc, spec.path ?? 'items')
+      const list = Array.isArray(items) ? items : []
+      const matching = list.filter((item) => {
+        const value = spec.field === undefined ? item : get(item, spec.field)
+        if ('includes' in spec) return Array.isArray(value) ? value.includes(spec.includes) : typeof value === 'string' && value.includes(spec.includes)
+        if ('pattern' in spec) return typeof value === 'string' && new RegExp(spec.pattern).test(value)
+        if ('present' in spec) return (value !== undefined && value !== null && value !== '') === spec.present
+        if ('value' in spec) return value === spec.value
+        return true
+      })
+      const n = matching.length
+      return { pass: Array.isArray(items) && n >= (spec.min ?? -Infinity) && n <= (spec.max ?? Infinity) && (spec.count === undefined || n === spec.count), actual: Array.isArray(items) ? `${n} of ${list.length}` : `no array at ${spec.path ?? 'items'}` }
     }
     case 'anyOf': {
       const results = spec.checks.map((group) => group.map((inner) => check(doc, inner, response)))
