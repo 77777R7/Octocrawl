@@ -50,6 +50,17 @@ const unreachableBrowser: BrowserStub = {
   }),
 }
 
+/** A browser rung that meets a sign-in wall once the page's scripts have run. */
+const walledBrowser: BrowserStub = {
+  fetch: async url => ({
+    requestedUrl: url, status: 'blocked', failureReason: null, blockReason: 'login_wall', budgetExceeded: null, lane: 'browser_local', escalations: [],
+    markdown: null, truncated: false, truncatedAt: null, compliance: null,
+    evidence: { finalUrl: url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] },
+    usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 10, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: 1, externalCostUsd: null },
+    trace: [],
+  }),
+}
+
 function recordingBrowser(seen: Seen[]): BrowserStub {
   return {
     fetch: async (url, deadlineAt, _signal, _execution, options) => {
@@ -165,6 +176,21 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     // Naming the wall's own heading does not make it the page that was asked for.
     expect((await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['h1'] })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall', markdown: null, html: null })
     expect((await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'], onlyMainContent: false })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+  })
+
+  it('gives up an empty includeTags answer when the browser rung then finds the page blocked', async () => {
+    const { origin, post } = await setup(walledBrowser)
+    // The HTTP rung reads a page with no main content on which nothing is named: an empty answer it offers to
+    // the browser rung, which meets the wall the page's scripts put up. The block is the answer, not the empty success.
+    const url = `${origin}/nav-only`
+    const blocked = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['table'] })).body
+    expect(blocked).toMatchObject({ status: 'blocked', blockReason: 'login_wall', lane: 'browser_local', markdown: null, html: null, channelsTried: ['http', 'browser_local'] })
+    expect(blocked.ladderTrace.map((event: { event: string; channel: string }) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+    expect(blocked.ladderTrace[1].detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: 'login_wall' })
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'], debug: false })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall', markdown: null })
+    expect((await post('/fc/v1/scrape', { url, includeTags: ['table'] })).body).toMatchObject({ success: false, error: 'blocked: login_wall', data: { markdown: null } })
+    // A page that reads well keeps its empty answer without asking the browser rung at all.
+    expect((await post('/v1/scrape', { url: `${origin}/chrome`, formats: ['markdown'], includeTags: ['table'] })).body).toMatchObject({ status: 'success', markdown: '', lane: 'http', channelsTried: ['http'] })
   })
 
   it('batch items and crawl pages carry html and rawHtml when their formats ask, and their stored audit repeats neither', async () => {

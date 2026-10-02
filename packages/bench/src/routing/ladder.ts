@@ -210,6 +210,12 @@ export class LadderRunner {
    * the winning subject's own; the ladder audit travels alongside it,
    * unrewritten and unsigned — that boundary is deliberate.
    *
+   * An answer without content is kept only for want of a better one: the
+   * HTTP rung's `success` with empty Markdown, when `includeTags` named
+   * nothing on a page it offers to the next rung. A later rung that finds
+   * the page blocked replaces it (`ladder_empty_answer_dropped`), and one
+   * that repeats it confirms it and ends the run.
+   *
    * The caller's deadline (a scrape's `timeout`) ends the run with a result,
    * never an error: the best content a rung produced so far as `partial`,
    * or `failed`/`timeout`. Cancellation and shutdown still reject.
@@ -417,7 +423,11 @@ export class LadderRunner {
         // Worse-than-best: a later channel DID answer, but with less content
         // than an earlier one already produced. That is not an improvement —
         // the ladder keeps going, and if nothing better shows up the best
-        // result is the answer.
+        // result is the answer. One case ends the run instead: an answer
+        // without content (an `includeTags` selection that named nothing)
+        // that a second rung repeats is confirmed, and no later rung, a
+        // vendor's least of all, is asked for it a third time.
+        const emptyConfirmed = !thinHttp && worseThanBest && bestSize === 0
         if (thinHttp || worseThanBest) {
           if (thinHttp && qualityEscalation === null) {
             // The ladder itself proposed this hop; remember it so the final
@@ -436,9 +446,11 @@ export class LadderRunner {
             detail: {
               vendorId: channel.vendorId ?? null,
               status: result.status,
-              escalate: thinHttp ? 'quality_low_yield' : 'worse_than_best',
+              escalate: thinHttp ? 'quality_low_yield' : emptyConfirmed ? null : 'worse_than_best',
+              ...(emptyConfirmed ? { confirmsEmpty: bestChannel?.id ?? null } : {}),
             },
           })
+          if (emptyConfirmed) break
           continue
         }
 
@@ -463,6 +475,23 @@ export class LadderRunner {
           ? result.escalations
           : [...result.escalations, { ...qualityEscalation, improved: true }]
         return finish({ ...result, escalations: withImprovement }, false)
+      }
+
+      // A rung that found the page blocked says more about it than an
+      // answer without content from an earlier rung (an `includeTags`
+      // selection that named nothing, read before the page's scripts ran):
+      // that answer is given up, and the run goes on as if the earlier rung
+      // had found no content.
+      if (result.status === 'blocked' && best !== null && bestSize === 0) {
+        ladderTrace.push({
+          at: result.usage.wallMs,
+          event: 'ladder_empty_answer_dropped',
+          channel: bestChannel?.id ?? '—',
+          detail: { dropped: bestChannel?.id ?? null, blockedAt: channel.id, blockReason: result.blockReason },
+        })
+        best = null
+        bestSize = -1
+        bestChannel = null
       }
 
       if (result.handoff) {
@@ -789,6 +818,8 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
   let best: LadderAttempt | null = null
   for (const attempt of attempts) {
     const { result } = attempt
+    // As in the run: a rung that found the page blocked gives up an earlier answer without content.
+    if (result.status === 'blocked' && best !== null && contentSize(best.result) === 0) best = null
     if (!CONTENTFUL_STATUS.has(result.status) || identityCompromised(result.trace)) continue
     if (best === null || contentSize(result) > contentSize(best.result)) best = attempt
   }

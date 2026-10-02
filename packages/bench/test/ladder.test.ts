@@ -566,6 +566,66 @@ describe('LadderRunner — a page with no main content', () => {
   })
 })
 
+describe('LadderRunner — an answer without content', () => {
+  const url = 'https://example.com/p'
+  /** `includeTags` named nothing: success with empty Markdown, which the HTTP rung offers to the browser when the page itself reads as thin. */
+  function emptyAnswer(lane: FetchResult['lane']): FetchResult {
+    const result = contentfulResult(url, lane)
+    return {
+      ...result,
+      markdown: '',
+      usage: { ...result.usage, contentTokens: 0 },
+      trace: lane === 'http' ? [{ at: 5, lane, event: 'quality_low_yield', detail: { contentTokens: 0, confidence: 0 } }] : [],
+    }
+  }
+  const vendors = () => [channel('provider', [emptyAnswer('provider')], 'browserbase'), channel('provider', [emptyAnswer('provider')], 'steel')] as const
+
+  it('gives way to a later rung that finds the page blocked', async () => {
+    for (const reason of ['login_wall', 'cloudflare_challenge'] as const) {
+      const blocked = { ...blockedResult(url, reason), lane: 'browser_local' as const }
+      const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
+      expect(run.result).toMatchObject({ status: 'blocked', blockReason: reason, lane: 'browser_local', markdown: null })
+      expect(run.ladderTrace.map((event) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+      expect(run.ladderTrace[1]!.detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: reason })
+    }
+    // A vendor rung that then reads the page answers, as after any block; content the HTTP rung did produce stays the answer.
+    const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const [browserbase, steel] = vendors()
+    const viaVendor = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked]), browserbase, steel], { mode: 'authed' }).run(url)
+    expect(viaVendor.result).toMatchObject({ status: 'success', lane: 'provider', markdown: '' })
+    expect(viaVendor.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    const thin: FetchResult = { ...emptyAnswer('http'), markdown: 'MAIN CONTENT', usage: { ...emptyAnswer('http').usage, contentTokens: 12 } }
+    const kept = await new LadderRunner([channel('http', [thin]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT' })
+  })
+
+  it('is confirmed by the next rung that repeats it, and no vendor rung is asked', async () => {
+    const [browserbase, steel] = vendors()
+    const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [emptyAnswer('browser_local')]), browserbase, steel], { mode: 'authed' }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
+    expect(run.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_low_yield', improved: false }])
+    expect(run.ladderTrace[1]).toMatchObject({ event: 'ladder_step', channel: 'browser_local', detail: { status: 'success', escalate: null, confirmsEmpty: 'http' } })
+    expect([...browserbase.calls, ...steel.calls]).toEqual([])
+  })
+
+  it('stays the answer when the next rung fails without a page, and is not the partial answer of a run that met a block', async () => {
+    const unreachable = { ...failedResult(url, 'connection_error'), lane: 'browser_local' as const }
+    const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [unreachable])], { mode: 'standard' }).run(url)
+    expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
+    // The deadline ends a vendor rung after the browser rung found the page blocked.
+    const hanging: Channel = {
+      id: 'provider',
+      vendorId: 'steel',
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
+    }
+    const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const cut = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked]), hanging], { mode: 'authed' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', markdown: null, usage: { deadlineExceeded: true } })
+  })
+})
+
 describe('LadderRunner — identity on contentful results', () => {
   function mismatchedContentful(url: string): FetchResult {
     return {
