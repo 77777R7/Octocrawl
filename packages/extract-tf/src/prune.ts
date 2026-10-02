@@ -10,7 +10,7 @@
  *    trafilatura; our table covers those word families).
  */
 
-import { detach, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
+import { detach, detachAll, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
@@ -236,7 +236,7 @@ function stripNeverShown(root: Element, dropped: ReadonlySet<Element> = new Set(
  */
 export function wholePageBody(html: string, exclusions: readonly string[] = []): string {
   const doc = parse(html)
-  for (const el of namedBy(doc.document, exclusions)) detach(el)
+  detachAll(namedBy(doc.document, exclusions))
   const root = pageRoot(doc.document)
   if (root === null) {
     doc.close()
@@ -254,32 +254,39 @@ export function wholePageBody(html: string, exclusions: readonly string[] = []):
  * `<body>` holding them in document order, an element inside another named
  * one not repeated. The selectors are matched against the page as it was
  * received, before any cleaning, so a named navigation stays. The caller's
- * exclusions, matched against that same page, and what Markdown never shows
- * are then removed from the named elements. Naming the body, or the root
- * element, names all it holds. `matched` counts the named elements kept;
- * with none the HTML is empty. `blank` says that what was kept holds no text
- * and no image: nothing was named, or only empty elements, such as the root
- * of an application its scripts have yet to fill.
+ * exclusions are matched against that same page, and an excluded element
+ * goes with everything inside it: it is removed from a named element, and a
+ * named element inside it is not kept (`p` named and `footer` excluded
+ * leaves out the footer's paragraphs). What Markdown never shows is removed
+ * too. Naming the body, or the root element, names all it holds. `matched`
+ * counts the named elements kept; with none the HTML is empty. `blank` says
+ * that what was kept holds no text and no image: nothing was named, or only
+ * empty elements, such as the root of an application its scripts have yet
+ * to fill.
  */
 export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = []): { html: string; matched: number; blank: boolean } {
   const doc = parse(html)
   const document = doc.document
-  const root = pageRoot(document)
   const named = namedBy(document, selectors)
   const excluded = namedBy(document, exclusions)
+  const top = document.documentElement
+  const page = pageRoot(document)
+  // An excluded body, or root element, takes the whole page along.
+  const root = page === null || excluded.has(page) || (top !== null && excluded.has(top)) ? null : page
   let kept: Node[] = []
   let matched = 0
-  if (root !== null && (named.has(root) || (document.documentElement !== null && named.has(document.documentElement)))) {
+  if (root !== null && (named.has(root) || (top !== null && named.has(top)))) {
     kept = Array.from(root.childNodes)
     matched = 1
   } else if (root !== null) {
-    // Document order, never below a named element: one pass, without
-    // recursion, so a deep page costs no more than a wide one.
+    // Document order, never below a named or an excluded element: one pass,
+    // without recursion, so a deep page costs no more than a wide one.
     let el: Element | null = root.firstElementChild
     while (el !== null) {
-      const isNamed = named.has(el)
+      const isExcluded = excluded.has(el)
+      const isNamed = !isExcluded && named.has(el)
       if (isNamed) kept.push(el)
-      if (!isNamed && el.firstElementChild !== null) {
+      if (!isNamed && !isExcluded && el.firstElementChild !== null) {
         el = el.firstElementChild
         continue
       }
@@ -316,9 +323,11 @@ export function withoutLayoutMarkers(html: string): string {
 }
 
 /**
- * Strip elements that can never be main content. Idempotent.
+ * Strip elements that can never be main content. Idempotent. `excluded` are
+ * elements the caller removes whole afterwards (its exclusions): a form
+ * among them is not unwrapped, so its content goes with it.
  */
-export function cleanTree(doc: Document): void {
+export function cleanTree(doc: Document, excluded: ReadonlySet<Element> = new Set()): void {
   // What the page's CSS hides, where a browser capture marked it, is not
   // content either.
   for (const el of qsa(doc, `[${LAYOUT_MARKERS.hidden}]`)) detach(el)
@@ -326,7 +335,7 @@ export function cleanTree(doc: Document): void {
   // statistics table viewer with filter controls) is unwrapped rather than
   // removed: its controls still go below, its content stays.
   for (const form of qsa(doc, 'form')) {
-    if (!formHoldsContent(form)) continue
+    if (excluded.has(form) || !formHoldsContent(form)) continue
     while (form.firstChild) form.parentNode?.insertBefore(form.firstChild, form)
     detach(form)
   }
@@ -385,7 +394,7 @@ export function pruneTree(doc: Document, options: PruneOptions = {}): void {
 
   // User-provided selectors take precedence: they run last so they can
   // remove anything the built-ins missed.
-  for (const el of namedBy(doc, options.selectors ?? [])) detach(el)
+  detachAll(namedBy(doc, options.selectors ?? []))
 
   void tagOf
 }

@@ -363,9 +363,15 @@ describe('extractTf selection and whole page', () => {
     const out = extractTf.extract(PAGE, { includeSelectors: ['table', 'html.js h1'], pruneSelectors: ['#legend', 'td .ref'] })
     expect(out.mainHtml).toBe('<body><h1>Kiln archive</h1><table id="readings"><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41 </td></tr></table></body>')
     expect(htmlToMarkdown(out.mainHtml)).toBe('# Kiln archive\n\n| Station | Flow |\n| --- | --- |\n| Meridian | 41 |')
-    // Exclusions are matched against the whole page too: the footer's paragraph is named by where it was.
-    expect(extractTf.extract(PAGE, { includeSelectors: ['p'], pruneSelectors: ['footer p'] }).mainHtml)
-      .toBe('<body><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the harbour office ledger.</p></body>')
+    // Exclusions are matched against the whole page too: the footer's paragraph is named by where it was,
+    // and an excluded element takes the named elements inside it along.
+    for (const excluded of ['footer p', 'footer', 'html > body > footer']) {
+      expect(extractTf.extract(PAGE, { includeSelectors: ['p'], pruneSelectors: [excluded] }).mainHtml, excluded)
+        .toBe('<body><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading was logged in the harbour office ledger.</p></body>')
+    }
+    expect(extractTf.extract(PAGE, { includeSelectors: ['p', 'td'], pruneSelectors: ['article', '#legend tr'] }).mainHtml).toBe('<body><p>Copyright 2026</p></body>')
+    expect(extractTf.extract(PAGE, { includeSelectors: ['body'], pruneSelectors: ['html'] }).mainHtml).toBe('')
+    expect(extractTf.extract(PAGE, { includeSelectors: ['p'], pruneSelectors: ['body'] }).mainHtml).toBe('')
     // The page itself is still read for its type and metadata.
     expect(out).toMatchObject({ confidence: 1, escalate: false, pageType: 'article', metadata: { title: 'Kiln archive | Harbour office' } })
     // The same page without the option is unchanged: its main content, not the selection.
@@ -395,6 +401,28 @@ describe('extractTf selection and whole page', () => {
     expect(extractTf.extract(shell, { includeSelectors: ['table'] })).toMatchObject({ mainHtml: '', escalate: true })
     // Its empty root, when named, is returned, and says no more about the page than no match does.
     expect(extractTf.extract(shell, { includeSelectors: ['#root'] })).toMatchObject({ mainHtml: '<body><div id="root"></div></body>', escalate: true, confidence: 0 })
+  })
+
+  it('matches exclusions against the page as it was received, for the main content as for the whole page', () => {
+    // A page whose form wraps its content, as an ASP.NET page's does: cleaning unwraps the form.
+    const prose = 'The harbour office records tide height, wind and visibility for every hour of the day. '.repeat(5)
+    const page = `<!doctype html><html><body><form id="aspnetForm"><div class="wrap"><h1>Report</h1><p>${prose}</p>
+<table class="filters"><tr><td>Filter A</td><td>Filter B</td></tr></table>
+<table class="data"><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41</td></tr></table></div></form></body></html>`
+    expect(extractTf.extract(page).mainHtml).toContain('Filter A')
+    for (const selector of ['table.filters', 'form table.filters', '#aspnetForm > .wrap > .filters', 'body > form .filters']) {
+      const main = extractTf.extract(page, { pruneSelectors: [selector] }).mainHtml
+      expect(main, selector).toContain('Meridian')
+      expect(main, selector).not.toContain('Filter A')
+      expect(wholePageBody(page, [selector]), selector).not.toContain('Filter A')
+      expect(htmlToMarkdown(page, { exclude: [selector] }), selector).not.toContain('Filter A')
+    }
+    // An excluded form goes with all it holds, although cleaning would unwrap it; so does the page with its root element.
+    for (const selector of ['#aspnetForm', 'html', '*']) {
+      expect(extractTf.extract(page, { pruneSelectors: [selector] }), selector).toMatchObject({ mainHtml: '', escalate: true })
+      expect(htmlToMarkdown(page, { exclude: [selector] }), selector).toBe('')
+      expect(wholePageBody(page, [selector]), selector).not.toContain('Report')
+    }
   })
 
   it('wholePageBody keeps header, navigation and footer, and leaves out exclusions and what Markdown never shows', () => {

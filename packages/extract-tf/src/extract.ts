@@ -12,8 +12,9 @@
  */
 
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
-import { outerHtml, parse, textOf } from './dom.js'
+import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
+import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
@@ -117,8 +118,15 @@ export class ExtractTf implements Extractor {
       (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('preload') &&
       (link.getAttribute('as') ?? '').trim().toLowerCase() === 'fetch').length
 
-    cleanTree(doc.document)
-    pruneTree(doc.document, { selectors: pruneSelectors })
+    // The caller's exclusions (pruneSelectors) are matched here, against
+    // the page as it was received: cleaning unwraps a form and removes a
+    // navigation that a selector such as `form table.filters` leans on.
+    // What is cleaned and pruned is decided on that page too, and the
+    // excluded elements are removed after it, with everything inside them.
+    const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    cleanTree(doc.document, excluded)
+    pruneTree(doc.document)
+    detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
 

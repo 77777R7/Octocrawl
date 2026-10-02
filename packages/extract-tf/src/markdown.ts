@@ -16,7 +16,7 @@
  * it contains. HTML without markers converts by its tags alone.
  */
 
-import { detach, isLayoutTable, parse } from './dom.js'
+import { detachAll, isLayoutTable, parse } from './dom.js'
 import { namedBy } from './selectors.js'
 import { documentBaseUrl } from './links.js'
 
@@ -722,7 +722,7 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
   // A whole document may carry its own <base href>; a fragment such as
   // mainHtml is resolved against the base the caller passes.
   const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
-  for (const el of namedBy(document, options.exclude ?? [])) detach(el)
+  detachAll(namedBy(document, options.exclude ?? []))
   const root =
     document.body && document.body.childNodes.length > 0 ? document.body : (document.documentElement ?? document.body)
   if (!root) {

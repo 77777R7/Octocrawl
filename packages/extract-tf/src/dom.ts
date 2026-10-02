@@ -69,6 +69,18 @@ export function detach(node: Node): void {
   node.parentNode?.removeChild(node)
 }
 
+/**
+ * Detach elements a caller named, each with all it holds. A document's root
+ * element is emptied instead: linkedom's `head` and `body` getters throw on
+ * a document that has none (see `parse`).
+ */
+export function detachAll(elements: Iterable<Element>): void {
+  for (const el of elements) {
+    if (el === el.ownerDocument?.documentElement) el.replaceChildren()
+    else detach(el)
+  }
+}
+
 export function textOf(el: Element): string {
   return el.textContent ?? ''
 }
