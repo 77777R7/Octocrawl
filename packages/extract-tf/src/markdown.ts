@@ -16,7 +16,8 @@
  * it contains. HTML without markers converts by its tags alone.
  */
 
-import { isLayoutTable, parse } from './dom.js'
+import { detachAll, isLayoutTable, parse } from './dom.js'
+import { namedBy } from './selectors.js'
 import { documentBaseUrl } from './links.js'
 
 export interface MarkdownOptions {
@@ -26,6 +27,11 @@ export interface MarkdownOptions {
    * resolved against it. Without a base, targets stay as written.
    */
   baseUrl?: string | null
+  /**
+   * CSS selectors whose elements are left out with all they contain: the
+   * caller's exclusions on a whole page, which no extraction pruned.
+   */
+  exclude?: readonly string[]
 }
 
 const ELEMENT_NODE = 1
@@ -69,6 +75,29 @@ export const LAYOUT_MARKERS = {
 
 /** HTML's collapsible whitespace, plus the no-break space, which becomes a plain space. */
 const WHITESPACE = /[\t\n\f\r \u00a0]+/g
+
+/** Script forms for `<sup>` and `<sub>`: digits, signs and the few letters Unicode has. */
+const SUPERSCRIPT: Readonly<Record<string, string>> = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ',
+}
+const SUBSCRIPT: Readonly<Record<string, string>> = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎', a: 'ₐ', e: 'ₑ', o: 'ₒ', x: 'ₓ', h: 'ₕ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', p: 'ₚ', s: 'ₛ', t: 'ₜ',
+}
+
+/**
+ * The script form of a superscript or subscript when every character has
+ * one (`m<sup>2</sup>` is m², `H<sub>2</sub>O` is H₂O), else null. Without
+ * it a unit's exponent joins the number the page writes next to it: a data
+ * centre's `12,000 ft<sup>2</sup> 1,100 m<sup>2</sup>` read "12,000 ft 21,100
+ * m 2", and the square-metre figure could not be found in the text.
+ */
+function scriptText(text: string, tag: string): string | null {
+  const map = tag === 'sup' ? SUPERSCRIPT : SUBSCRIPT
+  const mapped = Array.from(text).map((c) => map[c])
+  return text.length > 0 && mapped.every((c) => c !== undefined) ? mapped.join('') : null
+}
 
 interface Context {
   base: URL | null
@@ -369,6 +398,17 @@ function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): vo
       if (marks.em || marks.plain) rendered = false
       else emphasis(el, out, ctx, { ...marks, em: true }, '*')
       break
+    case 'sup':
+    case 'sub': {
+      // Digits and signs keep their script form; a footnote mark or a word
+      // in a superscript stays as written.
+      const inner = new Inline()
+      inlineChildren(el, inner, ctx, marks)
+      const run = inner.finish()
+      const script = scriptText(run.text, tag)
+      out.wrap(script === null ? run : { ...run, text: script }, '', '')
+      break
+    }
     default:
       rendered = false
   }
@@ -679,15 +719,16 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
   const whole = /<html[\s>]|<!doctype/i.test(html)
   const doc = parse(whole ? html : `<!doctype html><html><body>${html}</body></html>`)
   const document = doc.document
+  // A whole document may carry its own <base href>; a fragment such as
+  // mainHtml is resolved against the base the caller passes.
+  const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
+  detachAll(namedBy(document, options.exclude ?? []))
   const root =
     document.body && document.body.childNodes.length > 0 ? document.body : (document.documentElement ?? document.body)
   if (!root) {
     doc.close()
     return ''
   }
-  // A whole document may carry its own <base href>; a fragment such as
-  // mainHtml is resolved against the base the caller passes.
-  const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
   const markdown = blocksOf(root, { base, blockMemo: new Map(), layout })
     .map((block) => block.text)

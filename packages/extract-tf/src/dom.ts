@@ -46,6 +46,19 @@ export function qs(scope: ParentNode, selector: string): Element | null {
   }
 }
 
+let probe: Document | undefined
+
+/** The DOM layer's complaint about a CSS selector it cannot parse or compile, or null when it can. */
+export function selectorSyntaxError(selector: string): string | null {
+  try {
+    probe ??= parse('<html><body></body></html>').document
+    probe.querySelector(selector)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 /** Serialize an element back to HTML. */
 export function outerHtml(el: Element): string {
   return el.outerHTML
@@ -54,6 +67,18 @@ export function outerHtml(el: Element): string {
 /** Detach a node from the tree (deletion, not hiding). */
 export function detach(node: Node): void {
   node.parentNode?.removeChild(node)
+}
+
+/**
+ * Detach elements a caller named, each with all it holds. A document's root
+ * element is emptied instead: linkedom's `head` and `body` getters throw on
+ * a document that has none (see `parse`).
+ */
+export function detachAll(elements: Iterable<Element>): void {
+  for (const el of elements) {
+    if (el === el.ownerDocument?.documentElement) el.replaceChildren()
+    else detach(el)
+  }
 }
 
 export function textOf(el: Element): string {

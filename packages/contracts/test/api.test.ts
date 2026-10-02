@@ -122,11 +122,29 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
-      .toThrow('unsupported formats: html, rawHtml (supported: markdown, links, json)')
+    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
+      .toThrow('unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'screenshot' }] })).toThrow('unsupported format: screenshot')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
+  })
+
+  it('accepts the html and rawHtml formats and CSS selector lists on scrape, batch and crawl', () => {
+    const url = 'https://example.com/'
+    const req = parseScrapeRequest({ url, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['main', ' table.wikitable '], excludeTags: ['.mw-editsection'] })
+    expect(req.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(req.includeTags).toEqual(['main', 'table.wikitable'])
+    expect(req.excludeTags).toEqual(['.mw-editsection'])
+    expect(parseBatchStartRequest({ urls: [url], formats: ['html'], includeTags: ['article'] })).toMatchObject({ formats: ['html'], includeTags: ['article'] })
+    expect(parseCrawlStartRequest({ url, formats: ['rawHtml'], excludeTags: ['nav'] })).toMatchObject({ formats: ['rawHtml'], excludeTags: ['nav'] })
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('includeTags')
+    expect(() => parseScrapeRequest({ url, formats: ['html', 'html'] })).toThrow('formats must not contain duplicates')
+    expect(() => parseScrapeRequest({ url, includeTags: 'main' })).toThrow('includeTags must be an array of at most 100 CSS selectors of 1 to 200 characters')
+    expect(() => parseBatchStartRequest({ urls: [url], excludeTags: [' '] })).toThrow('excludeTags must be an array of at most 100 CSS selectors of 1 to 200 characters')
+    expect(() => parseCrawlStartRequest({ url, excludeTags: ['a'.repeat(201)] })).toThrow('excludeTags must be an array of at most 100 CSS selectors')
+    expect(() => parseScrapeRequest({ url, includeTags: Array.from({ length: 101 }, () => 'p') })).toThrow('includeTags must be an array of at most 100 CSS selectors')
+    // The lanes' own switches are not request fields: the formats ask for the HTML.
+    expect(() => parseScrapeRequest({ url, includeHtml: true })).toThrow('unsupported parameter: includeHtml')
   })
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
@@ -134,6 +152,35 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, actions: [], mobile: true })).toThrow('unsupported parameters: actions, mobile')
     expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
+  })
+
+  it('parses a recorded robots override, insists on its reason, and names an unknown key inside it', () => {
+    const url = 'https://example.test/report.pdf'
+    expect(parseScrapeRequest({ url, robotsOverride: { reason: 'linked publicly by the publisher', recordedBy: 'analyst' } }).robotsOverride).toEqual({ reason: 'linked publicly by the publisher', recordedBy: 'analyst' })
+    expect(parseScrapeRequest({ url, robotsOverride: { reason: 'r' } }).robotsOverride).toEqual({ reason: 'r' })
+    expect(() => parseScrapeRequest({ url, robotsOverride: true })).toThrow('robotsOverride must be an object with a reason')
+    expect(() => parseScrapeRequest({ url, robotsOverride: {} })).toThrow('robotsOverride.reason must be a non-empty string of at most 500 characters')
+    expect(() => parseScrapeRequest({ url, robotsOverride: { reason: ' ' } })).toThrow('robotsOverride.reason must be a non-empty string')
+    expect(() => parseScrapeRequest({ url, robotsOverride: { reason: 'r', recordedBy: 'x'.repeat(201) } })).toThrow('robotsOverride.recordedBy must be a non-empty string of at most 200 characters')
+    expect(thrown(() => parseScrapeRequest({ url, robotsOverride: { reason: 'x', ignoreRobotsTxt: true } })))
+      .toMatchObject({ status: 400, code: 'unsupported_parameter', message: 'unsupported parameter: robotsOverride.ignoreRobotsTxt (supported: robotsOverride.reason, robotsOverride.recordedBy)', details: { parameters: ['robotsOverride.ignoreRobotsTxt'] } })
+    // The blanket switch stays refused by name, on scrape as on batch and crawl.
+    expect(() => parseScrapeRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
+    expect(() => parseBatchStartRequest({ urls: [url], robotsOverride: { reason: 'r' } })).toThrow('unsupported parameter: robotsOverride')
+    expect(() => parseCrawlStartRequest({ url, robotsOverrides: [] })).toThrow('unsupported parameter: robotsOverrides')
+  })
+
+  it('binds each batch robots override to one of the batch urls, once', () => {
+    const urls = ['https://a.test/one.pdf', 'https://b.test/two.pdf']
+    expect(parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://b.test/two.pdf', reason: 'publisher link' }] }).robotsOverrides).toEqual([{ url: 'https://b.test/two.pdf', reason: 'publisher link' }])
+    expect(parseBatchStartRequest({ urls })).not.toHaveProperty('robotsOverrides')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: { url: urls[0], reason: 'r' } })).toThrow('robotsOverrides must be an array')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: 'https://c.test/', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0], reason: 'r' }, { url: urls[0], reason: 'again' }] })).toThrow('robotsOverrides[1].url is overridden twice')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0] }] })).toThrow('robotsOverrides[0].reason must be a non-empty string')
+    expect(() => parseBatchStartRequest({ urls, robotsOverrides: [{ reason: 'r' }] })).toThrow('robotsOverrides[0].url is required')
+    expect(thrown(() => parseBatchStartRequest({ urls, robotsOverrides: [{ url: urls[0], reason: 'r', ignoreRobotsTxt: true }] })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['robotsOverrides[0].ignoreRobotsTxt'] } })
   })
 
   it('accepts onlyMainContent, waitFor and timeout on scrape, batch and crawl within their bounds', () => {
@@ -197,7 +244,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const url = 'https://example.com/'
     expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
     expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
-    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'html', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['html', 'screenshot'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'screenshot'] } })
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
     expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
     expect((invalid as { details?: unknown }).details).toBeUndefined()

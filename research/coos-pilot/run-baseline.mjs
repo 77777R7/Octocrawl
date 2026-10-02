@@ -5,6 +5,8 @@
 // Usage: npm run api   (in another terminal, from the repo root)
 //        node research/coos-pilot/run-baseline.mjs [urls.txt] [outDir]
 // Env:   W2L_API_URL (default http://127.0.0.1:8787)
+//        W2L_ROBOTS_OVERRIDES (default robots-overrides.json next to this script; "off" sends none).
+//        Only entries whose url is in urls.txt are sent, as the batch's recorded robots overrides.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -28,12 +30,24 @@ async function call(method, path, body) {
 
 const urlsText = await readFile(urlsFile, 'utf8')
 const urls = urlsText.split('\n').map((line) => line.trim()).filter((line) => line && !line.startsWith('#'))
+const overridesFile = process.env.W2L_ROBOTS_OVERRIDES ?? join(here, 'robots-overrides.json')
+let robotsOverrides = []
+if (overridesFile !== 'off') {
+  try {
+    const wanted = new Set(urls)
+    robotsOverrides = JSON.parse(await readFile(overridesFile, 'utf8')).overrides
+      .filter((entry) => wanted.has(entry.url))
+      .map(({ url, reason, recordedBy }) => ({ url, reason, ...(recordedBy ? { recordedBy } : {}) }))
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+}
 let commit = null
 try { commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() } catch {}
 
 const startedAt = new Date().toISOString()
-const { taskId } = await call('POST', '/v1/batches', { urls, formats: ['markdown'] })
-console.log(`batch ${taskId}: ${urls.length} URLs submitted`)
+const { taskId } = await call('POST', '/v1/batches', { urls, formats: ['markdown'], ...(robotsOverrides.length ? { robotsOverrides } : {}) })
+console.log(`batch ${taskId}: ${urls.length} URLs submitted, ${robotsOverrides.length} recorded robots overrides`)
 
 let status
 for (;;) {
@@ -59,6 +73,7 @@ const record = {
   finishedAt: new Date().toISOString(),
   operatorCheckoutCommit: commit,
   urlsFileSha256: createHash('sha256').update(urlsText).digest('hex'),
+  robotsOverrides,
   batch: status,
   items,
 }

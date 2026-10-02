@@ -7,6 +7,7 @@ import {
   type ExecutionContext,
   type FetchOptions,
   type FetchResult,
+  type FetchWarning,
   type FileDescription,
   type NetworkPolicy,
   type TraceEvent,
@@ -16,10 +17,10 @@ import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionS
 import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -125,7 +126,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? null : this.egress.proxyFor(url)?.endpoint ?? null
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
@@ -140,7 +141,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, scope, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
@@ -155,7 +156,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions): Promise<FetchResult> {
-    const { signal, deadlineAt, onRetryAfter } = execution
+    const { signal, deadlineAt, onRetryAfter, onRobotsOverride } = execution
     const start = Date.now()
     let robotsMs = 0
     let queueMs = initialQueueMs
@@ -182,12 +183,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
       modelMs: 0,
       totalMs,
     })
+    // Set when a robots disallow was set aside by the caller's recorded
+    // decision; every result of this fetch then carries the warning.
+    let overrideWarning: FetchWarning | null = null
     const timedDenied = (failureReason: FetchResult['failureReason'], retryAt?: number): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const denied = this.denied(url, start, trace, failureReason)
       return {
         ...denied,
         ...(retryAt === undefined ? {} : { retryAt }),
+        ...(overrideWarning === null ? {} : { warnings: [overrideWarning] }),
         usage: {
           ...denied.usage,
           wallMs: totalMs,
@@ -253,7 +258,23 @@ export class ResilientHttpSubject implements SubjectAdapter {
           event: 'robots_disallowed',
           detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
-        return timedDenied('policy_denied')
+        // The caller's recorded decision sets a rule the publisher wrote
+        // aside for this one URL; an unreachable robots.txt is not a rule and
+        // stays a complete disallow. The verdict stays in the trace above;
+        // this says who set it aside and why, and the result's warnings
+        // repeat it.
+        const override = options.robotsOverride
+        if (override === undefined || robotsDecision.unreachable !== undefined) return timedDenied('policy_denied')
+        trace.push({
+          at: Date.now() - start,
+          lane: 'http',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        overrideWarning = robotsOverrideWarning(robotsDecision, override)
+        // Said now, before the request goes out: the run's answer keeps the
+        // override even when the deadline ends this fetch before it returns.
+        onRobotsOverride?.(robotsOverrideApplied(trace, overrideWarning))
       }
     }
 
@@ -399,6 +420,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       return {
         ...result,
+        ...(overrideWarning === null ? {} : { warnings: [overrideWarning, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -517,9 +539,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // flag the browser lane, never a contentful success. The whole page stays
     // on that result as evidence, never content. onlyMainContent: false asks
     // for the whole page, not the main content, so there it is the answer,
-    // still offered to the browser lane like a thin success.
+    // still offered to the browser lane like a thin success. So is what
+    // includeTags names, which is the answer on any page that is not
+    // blocked; excludeTags is left out of all of these.
     const extractStart = performance.now()
-    const extracted = extractTf.extract(body, { url: out.finalUrl })
+    const extracted = extractTf.extract(body, { url: out.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
     const extractionTotalMs = performance.now() - extractStart
     parseMs = extracted.timings.parseMs
     extractMs = Math.max(extracted.timings.extractMs, extractionTotalMs - parseMs)
@@ -535,16 +559,50 @@ export class ResilientHttpSubject implements SubjectAdapter {
         escalate: extracted.escalate,
         linkCount: links.length,
         ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
+        ...tagOptions(options),
       },
     })
 
+    // Client-side rendering: the page as received looks like a shell for
+    // data its scripts fill in (a table with no cells beside scripts, an
+    // empty app root, an "enable JavaScript" fallback; extract-tf's
+    // render.ts). The status stays what the content earned: a success, or
+    // the failed result that keeps the page as evidence when the extractor
+    // found no main region, which is how the plainest shells arrive here (a
+    // page of site chrome around the script that writes its content). Either
+    // result says so in a warning, and the ladder reads the event as it
+    // reads quality_low_yield: an offer to the browser lane, which captures
+    // the rendered page and never raises it. On the failed result the lane's
+    // own extract_low_confidence ask already names that hop.
+    const render = extracted.render
+    const clientRenderedCaveat = (): FetchWarning[] => {
+      if (render === undefined || !render.clientRendered) return []
+      trace.push({
+        at: wallMs,
+        lane: 'http',
+        event: 'quality_client_rendered',
+        detail: {
+          reason: render.reason,
+          markers: render.markers,
+          emptyTables: render.emptyTables,
+          textChars: render.textChars,
+          scriptChars: render.scriptChars,
+        },
+      })
+      return [{
+        code: 'client_rendered_suspected',
+        message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
+      }]
+    }
+
     let wholePage: string | null = null
-    if (extracted.escalate) {
-      if (gate !== null) return blocked(gate)
+    if (extracted.escalate && gate !== null) return blocked(gate)
+    if (extracted.escalate && !selectionAsked(options)) {
       const formatStart = performance.now()
-      wholePage = wholePageMarkdown(body, out.finalUrl)
+      wholePage = wholePageMarkdown(body, out.finalUrl, options.excludeTags)
       formatMs = performance.now() - formatStart
       if (options.onlyMainContent !== false || wholePage === null) {
+        const warnings = clientRenderedCaveat()
         return finish({
           ...base,
           status: 'failed',
@@ -557,6 +615,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           ],
           markdown: wholePage,
           ...(wholePage === null ? {} : { links }),
+          ...(warnings.length > 0 ? { warnings } : {}),
         })
       }
     }
@@ -575,7 +634,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // footer kept) through the same converter and base URL. The quality
     // signal below still reads the main content, so the mode never changes
     // which lane answers.
-    const markdown = options.onlyMainContent === false ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl }) : mainMarkdown
+    const markdown = wholePageAsked(options) ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags }) : mainMarkdown
     formatMs += performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
     const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
@@ -611,6 +670,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
       })
     }
 
+    // The shell caveat follows quality_low_yield: when both fire, the first
+    // quality event in the trace names the ladder's hop.
+    const warnings = clientRenderedCaveat()
+
     return finish({
       ...base,
       status: 'success',
@@ -620,6 +683,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       lane: 'http',
       escalations: [],
       markdown,
+      ...(warnings.length > 0 ? { warnings } : {}),
       links,
       metadata: extracted.metadata,
       document: {
@@ -633,6 +697,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         adapterValidation: extracted.adapterValidation,
         labelledValues: extracted.labelledValues,
       },
+      ...htmlFormats(body, body, extracted.mainHtml, options),
       usage: { ...base.usage, contentTokens },
     })
   }

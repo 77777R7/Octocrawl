@@ -6,6 +6,7 @@ import {
   type FetchResult,
   type HandoffRequest,
   type IdentityBundle,
+  type RobotsOverrideApplied,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
@@ -374,6 +375,33 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
   })
 
+  function clientRenderedHttpSuccess(url: string): FetchResult {
+    const r = contentfulResult(url, 'http')
+    return {
+      ...r,
+      warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (empty_table_with_scripts); this HTTP capture may be a shell.' }],
+      trace: [...r.trace, { at: 10, lane: 'http', event: 'quality_client_rendered', detail: { reason: 'empty_table_with_scripts', markers: [], emptyTables: 1, textChars: 180, scriptChars: 1_500 } }],
+    }
+  }
+
+  it('offers a client-rendered http success to the browser and keeps whichever answer holds more', async () => {
+    const url = 'https://example.com/p'
+    const rendered = { ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }
+    const better = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [rendered])], { mode: 'authed' }).run(url)
+    expect(better.channelsTried).toEqual(['http', 'browser_local'])
+    expect(better.result).toMatchObject({ status: 'success', lane: 'browser_local' })
+    expect(better.result.warnings).toBeUndefined()
+    expect(better.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: true }])
+    expect(better.ladderTrace[0]).toMatchObject({ event: 'ladder_step', channel: 'http', detail: { status: 'success', escalate: 'quality_client_rendered' } })
+
+    // The browser found less: the http page stays the answer, warning and all, and the hop did not pay off.
+    const thinner = { ...contentfulResult(url, 'browser_local'), markdown: 'LESS', usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 3 } }
+    const kept = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [thinner])], { mode: 'authed' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', warnings: [{ code: 'client_rendered_suspected' }] })
+    expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: false }])
+    expect(kept.ladderTrace.at(-1)).toMatchObject({ event: 'ladder_best_kept', channel: 'http' })
+  })
+
   it('accepts the browser result even when it is also thin — one quality pass, not a loop', async () => {
     const http = channel('http', [thinHttpSuccess('https://example.com/p')])
     const browser = channel('browser_local', [thinHttpSuccess('https://example.com/p')])
@@ -544,6 +572,23 @@ describe('LadderRunner — a page with no main content', () => {
     expect(run.summary.attempts.map((attempt) => attempt.result.failureReason)).toEqual(['empty_unverified', 'connection_error'])
   })
 
+  it('keeps a client-rendered shell\'s caveat on the evidence it keeps, and the rung\'s own ask names the hop once', async () => {
+    // The HTTP rung found no main region on a shell: its failed result carries the warning and the event beside its ask.
+    const shell: FetchResult = {
+      ...noMainContent(),
+      warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell.' }],
+      trace: [{ at: 10, lane: 'http', event: 'quality_client_rendered', detail: { reason: 'script_shell', markers: [], emptyTables: 0, textChars: 14, scriptChars: 2_258 } }],
+    }
+    const kept = await new LadderRunner([channel('http', [shell]), channel('browser_local', [browserFailure('connection_error')])], { mode: 'standard' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: PAGE, warnings: [{ code: 'client_rendered_suspected' }] })
+    expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: false }])
+    expect(kept.ladderTrace.filter((t) => t.event === 'ladder_step')[0]).toMatchObject({ channel: 'http', detail: { status: 'failed', escalate: 'subject_escalations' } })
+    // The rendered page replaces it without the caveat, and no second hop is stamped on it.
+    const rendered = await new LadderRunner([channel('http', [shell]), channel('browser_local', [contentfulResult(url, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(rendered.result).toMatchObject({ status: 'success', lane: 'browser_local', markdown: 'MAIN CONTENT', escalations: [] })
+    expect(rendered.result.warnings).toBeUndefined()
+  })
+
   it('answers with the browser rung\'s own page or block instead', async () => {
     const rendered: FetchResult = { ...noMainContent(), lane: 'browser_local', escalations: [], markdown: 'Rendered whole page' }
     const renderedRun = await new LadderRunner([channel('http', [noMainContent()]), channel('browser_local', [rendered])], { mode: 'standard' }).run(url)
@@ -562,6 +607,66 @@ describe('LadderRunner — a page with no main content', () => {
     const run = await new LadderRunner([channel('http', [noMainContent()]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
     expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', markdown: PAGE, usage: { deadlineExceeded: true } })
     expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'deadline_exceeded', detail: { channel: 'browser_local', kept: null, evidence: 'http' } }))
+  })
+})
+
+describe('LadderRunner — an answer without content', () => {
+  const url = 'https://example.com/p'
+  /** `includeTags` named nothing: success with empty Markdown, which the HTTP rung offers to the browser when the page itself reads as thin. */
+  function emptyAnswer(lane: FetchResult['lane']): FetchResult {
+    const result = contentfulResult(url, lane)
+    return {
+      ...result,
+      markdown: '',
+      usage: { ...result.usage, contentTokens: 0 },
+      trace: lane === 'http' ? [{ at: 5, lane, event: 'quality_low_yield', detail: { contentTokens: 0, confidence: 0 } }] : [],
+    }
+  }
+  const vendors = () => [channel('provider', [emptyAnswer('provider')], 'browserbase'), channel('provider', [emptyAnswer('provider')], 'steel')] as const
+
+  it('gives way to a later rung that finds the page blocked', async () => {
+    for (const reason of ['login_wall', 'cloudflare_challenge'] as const) {
+      const blocked = { ...blockedResult(url, reason), lane: 'browser_local' as const }
+      const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
+      expect(run.result).toMatchObject({ status: 'blocked', blockReason: reason, lane: 'browser_local', markdown: null })
+      expect(run.ladderTrace.map((event) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+      expect(run.ladderTrace[1]!.detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: reason })
+    }
+    // A vendor rung that then reads the page answers, as after any block; content the HTTP rung did produce stays the answer.
+    const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const [browserbase, steel] = vendors()
+    const viaVendor = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked]), browserbase, steel], { mode: 'authed' }).run(url)
+    expect(viaVendor.result).toMatchObject({ status: 'success', lane: 'provider', markdown: '' })
+    expect(viaVendor.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    const thin: FetchResult = { ...emptyAnswer('http'), markdown: 'MAIN CONTENT', usage: { ...emptyAnswer('http').usage, contentTokens: 12 } }
+    const kept = await new LadderRunner([channel('http', [thin]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT' })
+  })
+
+  it('is confirmed by the next rung that repeats it, and no vendor rung is asked', async () => {
+    const [browserbase, steel] = vendors()
+    const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [emptyAnswer('browser_local')]), browserbase, steel], { mode: 'authed' }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
+    expect(run.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_low_yield', improved: false }])
+    expect(run.ladderTrace[1]).toMatchObject({ event: 'ladder_step', channel: 'browser_local', detail: { status: 'success', escalate: null, confirmsEmpty: 'http' } })
+    expect([...browserbase.calls, ...steel.calls]).toEqual([])
+  })
+
+  it('stays the answer when the next rung fails without a page, and is not the partial answer of a run that met a block', async () => {
+    const unreachable = { ...failedResult(url, 'connection_error'), lane: 'browser_local' as const }
+    const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [unreachable])], { mode: 'standard' }).run(url)
+    expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
+    // The deadline ends a vendor rung after the browser rung found the page blocked.
+    const hanging: Channel = {
+      id: 'provider',
+      vendorId: 'steel',
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
+    }
+    const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const cut = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked]), hanging], { mode: 'authed' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', markdown: null, usage: { deadlineExceeded: true } })
   })
 })
 
@@ -609,13 +714,16 @@ describe('LadderRunner — identity on contentful results', () => {
   })
 
   it('ONLY vendor + mismatch = a clear non-contentful failure, never a success', async () => {
-    const bb = channel('provider', [mismatchedContentful('https://example.com/p')], 'browserbase')
+    // The page came with its html formats: they go with the Markdown.
+    const bb = channel('provider', [{ ...mismatchedContentful('https://example.com/p'), html: '<main>MAIN CONTENT</main>', rawHtml: '<html><body><main>MAIN CONTENT</main></body></html>' }], 'browserbase')
     const runner = new LadderRunner([bb], { mode: 'research' })
 
     const run = await runner.run('https://example.com/p')
     expect(run.result.status).toBe('failed')
     expect(run.result.failureReason).toBe('identity_compromised')
     expect(run.result.markdown).toBeNull()
+    expect(run.result).not.toHaveProperty('html')
+    expect(run.result).not.toHaveProperty('rawHtml')
     expect(CONTENTFUL_STATUS.has(run.result.status)).toBe(false)
   })
 
@@ -823,5 +931,80 @@ describe('LadderRunner — deadline and fetch options', () => {
     expect(http.calls).toEqual([])
     expect(run.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied', markdown: null })
     expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
+  })
+})
+
+describe('LadderRunner — a recorded robots override', () => {
+  const url = 'https://example.com/report'
+  const robotsOverride = { reason: 'The publisher links this report itself.', recordedBy: 'analyst' }
+  const rules = [{ pattern: '/', allow: false }]
+  /** What the HTTP lane reports the moment it sets a rule aside (ExecutionContext.onRobotsOverride). */
+  function applied(): RobotsOverrideApplied {
+    return {
+      trace: [
+        { at: 1, lane: 'http', event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://example.com/robots.txt', robotsSha256: 'a'.repeat(64), crawlDelayMs: null } },
+        { at: 1, lane: 'http', event: 'robots_disallowed', detail: { url, appliedRules: rules } },
+        { at: 1, lane: 'http', event: 'robots_overridden', detail: { url, appliedRules: rules, ...robotsOverride } },
+      ],
+      warning: { code: 'robots_overridden', message: 'https://example.com/robots.txt disallows this URL (rule /); it was fetched under an override recorded by analyst: The publisher links this report itself.' },
+    }
+  }
+  /** A rung's own result after it set the rule aside: its trace and warnings say so. */
+  const overridden = (result: FetchResult): FetchResult => ({ ...result, trace: [...applied().trace, ...result.trace], warnings: [applied().warning] })
+  /** A rung that sets the rule aside, says so, and answers with `result`; with null it only ends when its execution stops. */
+  function overriding(id: string, result: FetchResult | null): Channel {
+    return {
+      id,
+      identity: COHERENT,
+      fetch: (_url, _session, execution) => {
+        execution?.onRobotsOverride?.(applied())
+        if (result !== null) return Promise.resolve(result)
+        return new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true }))
+      },
+    }
+  }
+  const events = (result: FetchResult) => result.trace.map((event) => event.event)
+
+  it('keeps the override on the timeout it builds for a rung the deadline cut before it answered', async () => {
+    const heard: RobotsOverrideApplied[] = []
+    const run = await new LadderRunner([overriding('http', null)], { mode: 'standard' })
+      .run(url, undefined, { deadlineAt: Date.now() + 100, onRobotsOverride: (report) => heard.push(report) }, { robotsOverride })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', warnings: [applied().warning], usage: { deadlineExceeded: true } })
+    expect(events(run.result)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden', 'deadline_exceeded'])
+    // The rung returned nothing: what it reported is all the run has, and the run's own caller hears it too.
+    expect(run.summary.attempts).toEqual([])
+    expect(heard).toEqual([applied()])
+  })
+
+  it('keeps it on a later rung\'s answer, once, and leaves the result of the rung that applied it as it is', async () => {
+    const skipped: FetchResult = { ...failedResult(url, 'policy_denied'), lane: 'browser_local_authed', trace: [{ at: 0, lane: 'browser_local_authed', event: 'authed_session_skipped', detail: { reason: 'no_local_session' } }] }
+    const run = await new LadderRunner([overriding('http', overridden(blockedResult(url, 'cloudflare_challenge'))), channel('authed_session', [skipped])], { mode: 'authed' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(run.channelsTried).toEqual(['http', 'authed_session'])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied', lane: 'browser_local_authed', warnings: [applied().warning] })
+    expect(events(run.result)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden', 'authed_session_skipped'])
+    expect(run.result.trace.slice(0, 3).every((event) => event.lane === 'http')).toBe(true)
+
+    const own = overridden(contentfulResult(url, 'http'))
+    const answered = await new LadderRunner([overriding('http', own)], { mode: 'standard' }).run(url, undefined, {}, { robotsOverride })
+    expect(answered.result).toEqual(own)
+  })
+
+  it('ends at the local rungs once a rule was set aside: no vendor rung runs, and the answer says why', async () => {
+    const provider = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const run = await new LadderRunner([overriding('http', overridden(blockedResult(url, 'cloudflare_challenge'))), provider], { mode: 'research' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(provider.calls).toEqual([])
+    expect(run.channelsTried).toEqual(['http'])
+    expect(run.result).toMatchObject({ status: 'blocked', lane: 'http', warnings: [applied().warning] })
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider', detail: { vendorId: 'steel', reason: expect.stringContaining('robots override') } }))
+
+    // An override no rung had to apply (robots.txt allowed the URL) changes nothing: the block escalates to the vendor as before.
+    const reached = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const escalated = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), reached], { mode: 'research' })
+      .run(url, undefined, {}, { robotsOverride })
+    expect(escalated.channelsTried).toEqual(['http', 'provider'])
+    expect(escalated.result).toMatchObject({ status: 'success', lane: 'provider' })
+    expect(escalated.result.warnings).toBeUndefined()
   })
 })

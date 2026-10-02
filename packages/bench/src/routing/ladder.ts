@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, TraceEvent } from '@w2l/contracts'
+import type { ExecutionContext, Escalation, FetchOptions, FetchResult, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, TraceEvent } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, identityBundleIssues } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -50,7 +50,11 @@ export interface Channel {
    * waits before capture. A request with waitFor skips rungs without it.
    */
   readonly waitsFor?: boolean
-  /** Run the channel against url, optionally with a user session attached. */
+  /**
+   * Run the channel against url, optionally with a user session attached. A
+   * channel that sets a robots.txt rule aside (`options.robotsOverride`) says
+   * so through `execution.onRobotsOverride` before its request goes out.
+   */
   fetch(url: string, session?: SessionSnapshot | null, execution?: ExecutionContext, options?: FetchOptions): Promise<FetchResult>
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
@@ -92,6 +96,8 @@ interface LadderProgress {
   channelsTried: string[]
   ladderTrace: LadderRunResult['ladderTrace'][number][]
   attempts: LadderAttempt[]
+  /** What each rung reported when it set a robots.txt rule aside under the run's recorded override. */
+  robotsOverrides: RobotsOverrideApplied[]
 }
 
 function summarize(channelsTried: readonly string[], attempts: readonly { channel: string; result: FetchResult }[]): LadderExecutionSummary {
@@ -130,14 +136,25 @@ function summarize(channelsTried: readonly string[], attempts: readonly { channe
 /**
  * Whether a result is asking to escalate: the subject itself flagged the
  * escalation (escalations carries an unresolved hop) or — the quality case —
- * a successful HTTP extraction was thin and low-confidence. The ladder
- * honours the subject's own ask rather than re-deriving it.
+ * a successful HTTP extraction was thin and low-confidence, or read as a
+ * client-rendered shell. The ladder honours the subject's own ask rather
+ * than re-deriving it.
  */
 function resultRequestsEscalation(result: FetchResult): boolean {
-  return (
-    result.escalations.some((e) => e.improved === null) ||
-    result.trace.some((t) => t.event === 'quality_low_yield')
-  )
+  return result.escalations.some((e) => e.improved === null) || qualityEscalationEvent(result) !== null
+}
+
+/**
+ * Quality signals the http lane attaches to a contentful result: the content
+ * is thin and low-confidence (`quality_low_yield`), or the page looks
+ * client-rendered, so the HTTP capture may be a shell
+ * (`quality_client_rendered`). Either is an offer to the next lane, not a
+ * rewritten verdict; the first one in the trace names the hop.
+ */
+const QUALITY_ESCALATION_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
+
+function qualityEscalationEvent(result: FetchResult): string | null {
+  return result.trace.find((t) => QUALITY_ESCALATION_EVENTS.has(t.event))?.event ?? null
 }
 
 /** Content size as the ladder's improvement metric: main-content tokens,
@@ -156,8 +173,10 @@ function contentSize(result: FetchResult): number {
  */
 function sanitizeResult(result: FetchResult): FetchResult {
   if (CONTENTFUL_STATUS.has(result.status) && identityCompromised(result.trace)) {
+    // The page goes with its Markdown, in every form the result carried it.
+    const { html: _html, rawHtml: _rawHtml, ...rest } = result
     return {
-      ...result,
+      ...rest,
       status: 'failed',
       failureReason: 'identity_compromised',
       blockReason: null,
@@ -196,28 +215,43 @@ export class LadderRunner {
    *   2. the result's own `escalations` array — empty_unverified /
    *      extract_low_confidence requests from the subject are honoured as
    *      asks, not re-derived;
-   *   3. `quality_low_yield` — a thin, low-confidence success from the http
-   *      lane gets offered to a higher lane instead of being the answer.
+   *   3. `quality_low_yield` / `quality_client_rendered` — a thin,
+   *      low-confidence success from the http lane, or one whose page reads
+   *      as a shell its scripts fill in, gets offered to a higher lane
+   *      instead of being the answer.
    * All of it lands in `ladderTrace`. The signed compliance record remains
    * the winning subject's own; the ladder audit travels alongside it,
    * unrewritten and unsigned — that boundary is deliberate.
    *
+   * An answer without content is kept only for want of a better one: the
+   * HTTP rung's `success` with empty Markdown, when `includeTags` named
+   * nothing on a page it offers to the next rung. A later rung that finds
+   * the page blocked replaces it (`ladder_empty_answer_dropped`), and one
+   * that repeats it confirms it and ends the run.
+   *
    * The caller's deadline (a scrape's `timeout`) ends the run with a result,
    * never an error: the best content a rung produced so far as `partial`,
    * or `failed`/`timeout`. Cancellation and shutdown still reject.
+   *
+   * A recorded robots override (`options.robotsOverride`) is for the local
+   * rungs. Whatever result the run ends with says when one of them set a
+   * rule aside (carryRobotsOverride), and such a run never goes on to a
+   * vendor rung.
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [] }
-    try { return await this.runWithinBudget(url, session, scope, options, progress) }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [] }
+    // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
+    const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
+    try { return carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides) }
     catch (error) {
       if (!deadlineReached(scope)) throw error
-      return deadlineOutcome(url, progress, null)
+      return carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides)
     } finally { scope.dispose() }
   }
 
   private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress): Promise<LadderRunResult> {
-    const { startedAt, channelsTried, ladderTrace, attempts } = progress
+    const { startedAt, channelsTried, ladderTrace, attempts, robotsOverrides } = progress
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
     const finish = (result: FetchResult, handoffRequested: boolean): LadderRunResult => {
@@ -303,6 +337,14 @@ export class LadderRunner {
     let qualityEscalation: Escalation | null = null
       for (const channel of ordered) {
         throwIfExecutionStopped(execution)
+        // A recorded robots override is the caller's decision for a fetch
+        // from this machine, and the provider rung takes none. A run that set
+        // a rule aside ends at its local rungs: no vendor session is opened
+        // for that URL, and no vendor refusal replaces the local answer.
+        if (channel.vendorId !== undefined && robotsOverrides.length > 0) {
+          ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a local rung set a robots.txt rule aside under a recorded robots override; a vendor rung takes no override' } })
+          continue
+        }
         const identityBlock = refuseChannelIdentity(url, channel)
         if (identityBlock !== null) {
           channelsTried.push(channel.id)
@@ -384,17 +426,22 @@ export class LadderRunner {
           })
         }
 
-        // Quality escalation: a thin, low-confidence http success is offered
-        // to the next lane rather than accepted as the answer. The status is
-        // NOT rewritten — the record keeps the real success and its real
-        // token count; the ladder just isn't done yet.
-        const thinHttp =
-          channel.id === 'http' && result.trace.some((t) => t.event === 'quality_low_yield')
+        // Quality escalation: a thin, low-confidence http success, or one
+        // whose page reads as a client-rendered shell, is offered to the next
+        // lane rather than accepted as the answer. The status is NOT
+        // rewritten — the record keeps the real success and its real token
+        // count; the ladder just isn't done yet.
+        const qualityEvent = channel.id === 'http' ? qualityEscalationEvent(result) : null
+        const thinHttp = qualityEvent !== null
 
         // Worse-than-best: a later channel DID answer, but with less content
         // than an earlier one already produced. That is not an improvement —
         // the ladder keeps going, and if nothing better shows up the best
-        // result is the answer.
+        // result is the answer. One case ends the run instead: an answer
+        // without content (an `includeTags` selection that named nothing)
+        // that a second rung repeats is confirmed, and no later rung, a
+        // vendor's least of all, is asked for it a third time.
+        const emptyConfirmed = !thinHttp && worseThanBest && bestSize === 0
         if (thinHttp || worseThanBest) {
           if (thinHttp && qualityEscalation === null) {
             // The ladder itself proposed this hop; remember it so the final
@@ -402,7 +449,7 @@ export class LadderRunner {
             qualityEscalation = {
               from: 'http',
               to: 'browser_local',
-              trigger: 'quality_low_yield',
+              trigger: qualityEvent,
               improved: null,
             }
           }
@@ -413,9 +460,11 @@ export class LadderRunner {
             detail: {
               vendorId: channel.vendorId ?? null,
               status: result.status,
-              escalate: thinHttp ? 'quality_low_yield' : 'worse_than_best',
+              escalate: thinHttp ? qualityEvent : emptyConfirmed ? null : 'worse_than_best',
+              ...(emptyConfirmed ? { confirmsEmpty: bestChannel?.id ?? null } : {}),
             },
           })
+          if (emptyConfirmed) break
           continue
         }
 
@@ -440,6 +489,23 @@ export class LadderRunner {
           ? result.escalations
           : [...result.escalations, { ...qualityEscalation, improved: true }]
         return finish({ ...result, escalations: withImprovement }, false)
+      }
+
+      // A rung that found the page blocked says more about it than an
+      // answer without content from an earlier rung (an `includeTags`
+      // selection that named nothing, read before the page's scripts ran):
+      // that answer is given up, and the run goes on as if the earlier rung
+      // had found no content.
+      if (result.status === 'blocked' && best !== null && bestSize === 0) {
+        ladderTrace.push({
+          at: result.usage.wallMs,
+          event: 'ladder_empty_answer_dropped',
+          channel: bestChannel?.id ?? '—',
+          detail: { dropped: bestChannel?.id ?? null, blockedAt: channel.id, blockReason: result.blockReason },
+        })
+        best = null
+        bestSize = -1
+        bestChannel = null
       }
 
       if (result.handoff) {
@@ -718,6 +784,31 @@ export class LadderRunner {
   }
 }
 
+/**
+ * A rung that set a robots.txt rule aside went on to fetch, whatever answer
+ * the run ends with. When that answer is not such a rung's own result (a
+ * later rung's refusal or skip, a timeout built for a rung the deadline cut
+ * before it returned), it still says so: the rungs' robots events open its
+ * trace, each with its lane, and the `robots_overridden` warning leads its
+ * warnings. A result that already carries them is left as it is.
+ */
+function carryRobotsOverride(run: LadderRunResult, applied: readonly RobotsOverrideApplied[]): LadderRunResult {
+  const last = applied.at(-1)
+  if (last === undefined) return run
+  const { result } = run
+  const traced = result.trace.some((event) => event.event === 'robots_overridden')
+  const warned = result.warnings?.some((warning) => warning.code === 'robots_overridden') === true
+  if (traced && warned) return run
+  return {
+    ...run,
+    result: {
+      ...result,
+      ...(warned ? {} : { warnings: [last.warning, ...(result.warnings ?? [])] }),
+      ...(traced ? {} : { trace: [...applied.flatMap((rung) => rung.trace), ...result.trace] }),
+    },
+  }
+}
+
 /** The caller's deadline ended this execution. Cancellation and shutdown are not deadlines. */
 function deadlineReached(execution: ExecutionContext): boolean {
   if (execution.signal?.aborted) return (execution.signal.reason as { name?: unknown } | null | undefined)?.name === 'TimeoutError'
@@ -741,6 +832,8 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
   let best: LadderAttempt | null = null
   for (const attempt of attempts) {
     const { result } = attempt
+    // As in the run: a rung that found the page blocked gives up an earlier answer without content.
+    if (result.status === 'blocked' && best !== null && contentSize(best.result) === 0) best = null
     if (!CONTENTFUL_STATUS.has(result.status) || identityCompromised(result.trace)) continue
     if (best === null || contentSize(result) > contentSize(best.result)) best = attempt
   }

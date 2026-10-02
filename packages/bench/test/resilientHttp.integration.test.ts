@@ -209,6 +209,12 @@ describe('HTTP lane on a page with no main content', () => {
     '/nav-only': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
       '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="notices">Notices</a></li></ul></nav><footer><p>Published by the harbour office</p></footer></body></html>',
     '/shell': '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><noscript>Enable JavaScript to run this app.</noscript></body></html>',
+    // Site chrome around the script that writes the page (quotes.toscrape.com/js/ reads this way), and an app root with nothing but its script.
+    '/tide-board': '<!doctype html><html><head><title>Harbour office</title></head><body><header><a href="/">Harbour office</a></header>' +
+      '<nav><ul><li><a href="/tides">Tide tables</a></li></ul></nav><div class="board"></div>' +
+      `<script>/* ${'tide board loader '.repeat(120)} */ document.querySelector('.board').innerHTML = '<p>Ravine gauge station: 1.10 m at 06:40</p>'</script>` +
+      '<footer><p>Published by the harbour office</p></footer></body></html>',
+    '/app': `<!doctype html><html><head><title>App</title></head><body><div id="root"></div><script>/* ${'app loader '.repeat(300)} */ document.getElementById('root').innerHTML = '<h1>Hello</h1>'</script></body></html>`,
   }
   let origin: string
   let server: import('node:http').Server
@@ -252,6 +258,55 @@ describe('HTTP lane on a page with no main content', () => {
     expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_low_yield' }))
     const shell = await http.fetch(`${origin}/shell`, undefined, undefined, {}, undefined, { onlyMainContent: false })
     expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
+  })
+
+  it('says why a client-rendered shell has no main content: the warning and the event travel with the evidence', async () => {
+    const board = await http.fetch(`${origin}/tide-board`)
+    expect(board).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: `[Harbour office](${origin}/)\n\n- [Tide tables](${origin}/tides)\n\nPublished by the harbour office` })
+    expect(board.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null }])
+    expect(board.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell.' }])
+    expect(board.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'script_shell', markers: [], emptyTables: 0, textChars: expect.any(Number), scriptChars: expect.any(Number) }) }))
+    // Asked for whole, the same page is a success with the same caveat.
+    const whole = await http.fetch(`${origin}/tide-board`, undefined, undefined, {}, undefined, { onlyMainContent: false })
+    expect(whole).toMatchObject({ status: 'success', markdown: board.markdown, warnings: [{ code: 'client_rendered_suspected' }] })
+    // A shell with no text has no evidence page, and still says why it is empty.
+    const app = await http.fetch(`${origin}/app`)
+    expect(app).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null, warnings: [{ code: 'client_rendered_suspected', message: expect.stringContaining('(empty_app_root)') }] })
+    expect(app.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'empty_app_root', markers: ['app_root_empty'] }) }))
+  })
+})
+
+describe('HTTP lane on a client-rendered shell', () => {
+  it('keeps the success, warns that the capture may be a shell, and says why in the trace', async () => {
+    const { createServer } = await import('node:http')
+    // A data page whose grid a script fills in: prose the lane extracts as a
+    // success, and a table with a row but no cells beside the grid's script.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Monthly index</title></head><body><main><h1>Monthly index</h1>' +
+          '<p>The monthly index is published for every gauge station in the survey area, and revised when late readings arrive.</p>' +
+          '<table id="grid"><thead><tr></tr></thead><tbody></tbody></table>' +
+          `<script>/* ${'grid loader '.repeat(120)} */ document.getElementById('grid').innerHTML = '<tr><td>Ravine gauge station</td><td>1.10</td></tr>'</script>` +
+          '</main></body></html>',
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/index`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Monthly index')
+      expect(out.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (empty_table_with_scripts); this HTTP capture may be a shell.' }])
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'empty_table_with_scripts', markers: [], emptyTables: 1, scriptChars: expect.any(Number), textChars: expect.any(Number) }) }))
+      // The table has a row, so it is not one of the row-less shells quality_low_yield counts: this signal stands on its own.
+      expect(out.trace.some((event) => event.event === 'quality_low_yield')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
 

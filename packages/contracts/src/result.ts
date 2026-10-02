@@ -187,6 +187,21 @@ export interface HandoffRequest {
 }
 
 /**
+ * A caveat a reader of the result must see without opening the trace. Never
+ * a failure reason, which `status` and its reason fields carry.
+ */
+export interface FetchWarning {
+  /**
+   * Machine-readable code. `robots_overridden`: a robots.txt rule was set
+   * aside by a recorded override. `client_rendered_suspected`: the HTTP
+   * lane's page looks like a shell for data its scripts fill in (see
+   * RenderSignals), so the capture may not be the page a browser shows.
+   */
+  code: string
+  message: string
+}
+
+/**
  * A page-level fetch outcome. `status` is the single source of truth
  * (see RESULT_STATUS); the reason fields narrow it.
  */
@@ -215,8 +230,9 @@ export interface FetchResult {
    */
   resumeContext?: unknown | null
   /**
-   * The page as Markdown: its main content, or the whole page when
-   * `onlyMainContent` is false. `data:` link and image targets are dropped,
+   * The page as Markdown: its main content, the whole page when
+   * `onlyMainContent` is false, or the elements `includeTags` names, in each
+   * case without `excludeTags`. `data:` link and image targets are dropped,
    * the link text and alt text kept. Null unless status is contentful,
    * except on a failed or blocked result that kept a page as evidence, never
    * content: the page an error status carried, or the whole page when the
@@ -233,6 +249,23 @@ export interface FetchResult {
    * the content's title, usually its first heading.
    */
   metadata?: PageMetadata
+  /**
+   * The cleaned HTML the Markdown was written from, present only when the
+   * `html` format was asked for: the main content; with
+   * `onlyMainContent: false` the whole page without what Markdown never
+   * shows (scripts, styles, form controls, embedded media) and without the
+   * caller's `excludeTags`; with `includeTags` a `<body>` holding the named
+   * elements. A lane sets it on a contentful page only; the API returns
+   * null for a file and for a page that was not read as content.
+   */
+  html?: string | null
+  /**
+   * The page as the lane received it, present only when the `rawHtml` format
+   * was asked for: the response body on the HTTP lane, the rendered DOM on a
+   * browser lane, scripts and all. Its UTF-8 bytes hash to
+   * `evidence.rawBodySha256`. Set and returned as `html` is.
+   */
+  rawHtml?: string | null
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
   /**
@@ -249,6 +282,14 @@ export interface FetchResult {
    * HTML itself.
    */
   links?: readonly string[]
+  /**
+   * The fetch's caveats, present only when it has any: a `robots_overridden`
+   * warning first when a recorded override set a robots.txt rule aside, then
+   * `client_rendered_suspected` when the HTTP lane read the page as a shell
+   * its scripts fill in. Kept on batch items and the compact scrape response
+   * too.
+   */
+  warnings?: readonly FetchWarning[]
   /** True when content was cut to fit a token budget. */
   truncated: boolean
   /** Character offset where truncation occurred; null when not truncated. */

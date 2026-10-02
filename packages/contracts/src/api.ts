@@ -5,7 +5,7 @@
  * CrawlReport — no second result enum. Types only.
  */
 
-import type { CrawlMode } from './compliance.js'
+import type { CrawlMode, RobotsOverride } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
@@ -25,9 +25,12 @@ export const MAX_WAIT_FOR_MS = 60_000
 
 /**
  * Per-page capture options shared by scrape, batch and crawl (for batch and
- * crawl they apply to every page).
+ * crawl they apply to every page). A robots override is never one of them:
+ * it names one URL (`ScrapeRequest.robotsOverride`, `BatchStartRequest.robotsOverrides`).
+ * Nor are `includeHtml` and `includeRawHtml`: the `html` and `rawHtml`
+ * formats ask for those.
  */
-export interface PageOptions extends FetchOptions {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -45,6 +48,19 @@ export interface ScrapeRequest extends PageOptions {
   includeLinks?: boolean
   /** Omitted preserves the legacy full REST/SDK response. MCP sends false by default. */
   debug?: boolean
+  /**
+   * A recorded decision to fetch this URL although its host's robots.txt
+   * disallows it. The reason is required; robots.txt is still read, and the
+   * override is reported in the trace, the warnings and, in the browser lane,
+   * the compliance record. A hosted server refuses the field
+   * (`unsupported_parameter`).
+   */
+  robotsOverride?: RobotsOverride
+}
+
+/** A recorded robots override for one URL of a batch. */
+export interface RobotsUrlOverride extends RobotsOverride {
+  url: string
 }
 
 /** `evidenceRecord` is set on every response the API sends (see evidenceRecord.ts). */
@@ -69,14 +85,20 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'links' | 'json')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json')[]
   markdown?: string | null
+  /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
+  html?: string | null
+  /** Present when `rawHtml` was asked for, as on the full response; null when the result carries none. */
+  rawHtml?: string | null
   links?: readonly string[]
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   metadata?: FetchResult['metadata']
   json?: StructuredExtractionResult | null
   /** The file the response was, as on the full response; absent for a web page. */
   file?: FetchResult['file']
+  /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell), as on the full response; absent when it had none. */
+  warnings?: FetchResult['warnings']
   truncated: boolean
   truncatedAt: number | null
   usage: FetchResult['usage'] & { totalMs: number }
@@ -109,6 +131,8 @@ export interface BatchStartRequest extends PageOptions {
   mode?: ApiCrawlMode
   formats?: readonly ScrapeFormat[]
   includeLinks?: boolean
+  /** Recorded robots overrides, each for one URL of `urls`. A hosted server refuses the field (`unsupported_parameter`). */
+  robotsOverrides?: readonly RobotsUrlOverride[]
 }
 
 export interface BatchStatusResponse extends CrawlReport {
@@ -192,17 +216,53 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes'] as const
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', ...PAGE_KEYS] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags'] as const
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', ...PAGE_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS] as const
+const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
-/** An option W2L does not know is an error, never silently dropped. */
-function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[]): void {
-  const unknown = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key))
+/** An option W2L does not know is an error, never silently dropped; `at` names a nested object's place in the request. */
+function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[], at = ''): void {
+  const prefix = at === '' ? '' : `${at}.`
+  const unknown = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key)).map((key) => prefix + key)
   if (unknown.length > 0) {
-    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.join(', ')})`, 'unsupported_parameter', { parameters: unknown })
+    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.map((key) => prefix + key).join(', ')})`, 'unsupported_parameter', { parameters: unknown })
   }
+}
+
+/** A recorded robots override must say why; a bare flag is the blanket switch W2L does not offer. */
+function readRobotsOverride(value: unknown, name: string, extraKeys: readonly string[] = []): RobotsOverride {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${name} must be an object with a reason`)
+  const rec = value as Record<string, unknown>
+  rejectUnknownKeys(rec, [...ROBOTS_OVERRIDE_KEYS, ...extraKeys], name)
+  if (typeof rec.reason !== 'string' || rec.reason.trim().length === 0 || rec.reason.length > 500) {
+    throw new RequestError(`${name}.reason must be a non-empty string of at most 500 characters`)
+  }
+  if (rec.recordedBy !== undefined && (typeof rec.recordedBy !== 'string' || rec.recordedBy.trim().length === 0 || rec.recordedBy.length > 200)) {
+    throw new RequestError(`${name}.recordedBy must be a non-empty string of at most 200 characters`)
+  }
+  return { reason: rec.reason, ...(rec.recordedBy === undefined ? {} : { recordedBy: rec.recordedBy }) }
+}
+
+/** Each override names one of the batch's own URLs, once. */
+function readRobotsOverrides(value: unknown, urls: readonly string[]): readonly RobotsUrlOverride[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new RequestError('robotsOverrides must be an array')
+  const batchUrls = new Set(urls.map((url) => new URL(url).href))
+  const seen = new Set<string>()
+  return value.map((item, index) => {
+    const name = `robotsOverrides[${index}]`
+    const override = readRobotsOverride(item, name, ['url'])
+    const url = (item as Record<string, unknown>).url
+    if (typeof url !== 'string' || url.length === 0) throw new RequestError(`${name}.url is required`)
+    let href: string
+    try { href = new URL(url).href } catch { throw new RequestError(`${name}.url must be http(s)`) }
+    if (!batchUrls.has(href)) throw new RequestError(`${name}.url is not one of the batch urls`)
+    if (seen.has(href)) throw new RequestError(`${name}.url is overridden twice`)
+    seen.add(href)
+    return { url, ...override }
+  })
 }
 
 function readUrl(value: unknown): string {
@@ -402,7 +462,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
   return value as import('./structured.js').JsonSchema
 }
 
-const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json']
+const FORMAT_NAMES: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml']
 
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
@@ -419,13 +479,13 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   const formats: ScrapeFormat[] = []
   const logical = new Set<string>()
   for (const [index, item] of value.entries()) {
-    if (item === 'markdown' || item === 'links' || item === 'json') {
+    if (item === 'markdown' || item === 'links' || item === 'json' || item === 'html' || item === 'rawHtml') {
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
       formats.push(item)
       continue
     }
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, or a json schema request')
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new RequestError('formats entries must be markdown, links, json, html, rawHtml, or a json schema request')
     const rec = item as Record<string, unknown>
     for (const key of Object.keys(rec)) if (!['type', 'schema', 'prompt', 'modelFallback'].includes(key)) throw new RequestError(`unsupported json format option: ${key}`)
     if (rec.type !== 'json' || rec.schema === undefined) throw new RequestError('json format requires type=json and schema')
@@ -483,18 +543,36 @@ function readMilliseconds(value: unknown, name: string, min: number, max: number
   return value
 }
 
-/** onlyMainContent, waitFor, timeout and maxFileBytes, shared by scrape, batch and crawl. */
+/**
+ * A list of CSS selectors (`includeTags`, `excludeTags`), each trimmed.
+ * Whether a selector can be used (it parses, and is one the extractor
+ * matches) is checked where a DOM is at hand, in the API engine, which
+ * refuses by name one that cannot.
+ */
+function readSelectors(value: unknown, name: string): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100 || value.some((item) => typeof item !== 'string' || item.trim().length === 0 || item.length > 200)) {
+    throw new RequestError(`${name} must be an array of at most 100 CSS selectors of 1 to 200 characters`)
+  }
+  return (value as string[]).map((item) => item.trim())
+}
+
+/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags and excludeTags, shared by scrape, batch and crawl. */
 function readPageOptions(rec: Record<string, unknown>): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
   if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > MAX_FILE_BYTES_CEILING)) {
     throw new RequestError(`maxFileBytes must be an integer number of bytes from 1 to ${MAX_FILE_BYTES_CEILING}`)
   }
+  const includeTags = readSelectors(rec.includeTags, 'includeTags')
+  const excludeTags = readSelectors(rec.excludeTags, 'excludeTags')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
     timeout: readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS),
     ...(maxFileBytes === undefined ? {} : { maxFileBytes: maxFileBytes as number }),
+    ...(includeTags === undefined ? {} : { includeTags }),
+    ...(excludeTags === undefined ? {} : { excludeTags }),
   }
 }
 
@@ -503,6 +581,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   rejectUnknownKeys(rec, SCRAPE_KEYS)
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
+  const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
   return {
     url: readUrl(rec.url),
     mode: readMode(rec.mode),
@@ -511,6 +590,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     includeLinks: rec.includeLinks as boolean | undefined,
     debug: rec.debug as boolean | undefined,
     ...readPageOptions(rec),
+    ...(robotsOverride === undefined ? {} : { robotsOverride }),
   }
 }
 
@@ -546,7 +626,12 @@ export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   const urls = rec.urls.map(readUrl)
   if (new Set(urls.map(url => new URL(url).href)).size !== urls.length) throw new RequestError('urls must be unique')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
-  return { urls, mode: readMode(rec.mode), formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined, ...readPageOptions(rec) }
+  const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
+  return {
+    urls, mode: readMode(rec.mode), formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
+    ...readPageOptions(rec),
+    ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
+  }
 }
 
 export function parseCrawlPageQuery(query: Record<string, string | undefined>): CrawlPageQuery {

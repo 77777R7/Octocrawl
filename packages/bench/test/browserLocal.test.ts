@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { localNetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 
@@ -245,6 +245,33 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('fetches a robots-disallowed path under a recorded override and signs the override into its record', async () => {
+    const subject = new BrowserLocalSubject()
+    const before = privateHits
+    try {
+      const heard: Array<{ applied: RobotsOverrideApplied; pageHits: number }> = []
+      const out = await subject.fetch(`${url}/private/secret`, undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } }, (applied) => heard.push({ applied, pageHits: privateHits }))
+      expect(privateHits).toBe(before + 1)
+      expect(out.status).toBe('success')
+      expect(out.markdown).toContain('Private area')
+      // The verdict stays on the record next to the decision that set it aside.
+      const record = out.compliance!
+      expect(record.robots).toMatchObject({ decision: 'disallowed', skippedFetch: false, override: { reason: 'The publisher links this page itself; the rule addresses crawlers.', recordedBy: 'test researcher' } })
+      expect(record.robots.appliedRules.map((r) => r.pattern)).toContain('/private')
+      const events = out.trace.map((t) => t.event)
+      expect(events.indexOf('robots_overridden')).toBe(events.indexOf('robots_disallowed') + 1)
+      expect(out.warnings?.[0]).toMatchObject({ code: 'robots_overridden' })
+      expect(out.warnings?.[0]?.message).toContain('recorded by test researcher')
+      // The lane said so before it navigated, so a run the deadline cuts short still has the override.
+      expect(heard).toEqual([{ applied: { trace: out.trace.filter((t) => t.event.startsWith('robots_')), warning: out.warnings![0] }, pageHits: before }])
+      expect(heard[0]!.applied.trace.map((t) => t.event)).toEqual(['robots_checked', 'robots_disallowed', 'robots_overridden'])
+      // The override is part of what the record's hash commits to.
+      expect(verifyLedger(subject.ledger()).valid).toBe(true)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
     let pageHits = 0
     const failing = createServer((req, res) => {
@@ -263,6 +290,13 @@ describe('BrowserLocalSubject transport', () => {
       // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
       expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
+      // No rule was read, so a recorded override has nothing to set aside.
+      const overridden = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, undefined, { robotsOverride: { reason: 'a rule I know of' } })
+      expect(overridden).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(overridden.compliance!.robots).toMatchObject({ unreachable: 'server_error', skippedFetch: true })
+      expect(overridden.compliance!.robots).not.toHaveProperty('override')
+      expect(overridden.warnings).toBeUndefined()
+      expect(pageHits).toBe(0)
       expect(verifyLedger(subject.ledger()).valid).toBe(true)
     } finally {
       await subject.teardown()
@@ -447,6 +481,33 @@ describe('BrowserLocalSubject transport', () => {
       if (previous === undefined) delete process.env.W2L_CAPTURE_RAW_DIR
       else process.env.W2L_CAPTURE_RAW_DIR = previous
       await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('carries the rendered DOM as rawHtml and html without its layout markers, only when asked', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const plain = await subject.fetch(`${url}/css-layout`)
+      expect(plain).not.toHaveProperty('html')
+      expect(plain).not.toHaveProperty('rawHtml')
+      const out = await subject.fetch(`${url}/css-layout`, undefined, undefined, undefined, { includeHtml: true, includeRawHtml: true })
+      expect(out.status).toBe('success')
+      // The page as rendered, the one the evidence hashes: the quote a script wrote and the platform names the CSS hides.
+      expect(out.rawHtml).toContain('<div class="quote"><span class="text">')
+      expect(out.rawHtml).toContain('Git Bash')
+      expect(sha256Utf8(out.rawHtml!)).toBe(out.evidence.rawBodySha256)
+      // The capture's markers shaped the Markdown; html is the page's own markup, without what the page hides.
+      expect(out.markdown).toContain('thinking.”\n\nby Albert Einstein')
+      expect(out.html).toContain('<span class="text">“The world as we have created it is a process of our thinking.”</span>')
+      expect(out.html).toContain('Open <span class="platform-mac">Terminal</span>.')
+      expect(out.html).not.toContain('data-w2l')
+      const named = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false, includeTags: ['nav', 'footer'], excludeTags: ['footer p'], includeHtml: true })
+      expect(named).toMatchObject({ status: 'success', markdown: `[Navigation entry](${url}/a)`, html: '<body><nav><a href="/a">Navigation entry</a></nav><footer></footer></body>' })
+      const whole = await subject.fetch(`${url}/chrome`, undefined, undefined, undefined, { onlyMainContent: false, excludeTags: ['nav', 'main'], includeHtml: true })
+      expect(whole.markdown).toBe(`[Site header link](${url}/)\n\nFooter notice text`)
+      expect(whole.html).toBe('<body><header><a href="/">Site header link</a></header><footer><p>Footer notice text</p></footer></body>')
+    } finally {
+      await subject.teardown()
     }
   })
 

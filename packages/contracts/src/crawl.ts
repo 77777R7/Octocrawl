@@ -7,7 +7,7 @@
 
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
-import type { Evidence, FetchResult, LadderRunAudit, TraceEvent } from './result.js'
+import type { Evidence, FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
@@ -78,6 +78,12 @@ export interface CrawlPage {
   status: StepStatus
   lane: Lane | null
   markdown: string | null
+  /** The fetch's caveats (a recorded robots override), as on a scrape result; absent when it had none. */
+  warnings?: readonly FetchWarning[]
+  /** Present when the task asked for the `html` format, as on a scrape result; null when the page has none. */
+  html?: string | null
+  /** Present when the task asked for the `rawHtml` format, as on a scrape result; null when the page has none. */
+  rawHtml?: string | null
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */

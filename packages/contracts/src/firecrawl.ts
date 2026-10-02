@@ -27,6 +27,7 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
 export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
   'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
+  'A page whose server HTML is a shell for data its scripts fill in is fetched again on the browser rung, and the rendered page is the answer when it holds more; otherwise the HTTP page is returned with a client_rendered_suspected warning on the native response, which /fc does not pass through. Firecrawl renders every page in a browser.',
   'No fire-engine, proxy pools, actions, JSON extract, or screenshots.',
   'Resume / cache defaults to refetch (useCached is never set from a Firecrawl body).',
   'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
@@ -34,7 +35,9 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Formats other than markdown/links and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
+  'Formats other than markdown/links/html/rawHtml and parameters the shim does not map are rejected by name with HTTP 400 and success: false.',
+  'html is the cleaned HTML the markdown is written from: the main content, the whole page without scripts, styles, form controls and embedded media when onlyMainContent is false, or a <body> holding the includeTags elements. rawHtml is the page as the answering rung received it: the response body on the HTTP rung, the rendered DOM on a browser rung. Both are null for a file and for a page that is success: false.',
+  'includeTags keeps only the named elements, in document order, whatever onlyMainContent says; excludeTags removes elements from the main content, the whole page and an includeTags selection. A selector that does not parse, or that uses a sibling combinator, a positional pseudo-class, :has() or another pseudo-class W2L does not match, is rejected with HTTP 400.',
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them; other meta tags (og:*, twitter:* and the rest) are not passed through, and a failed or blocked page has none.',
@@ -43,6 +46,10 @@ export const FIRECRAWL_SHIM_DIFFS = [
 
 export interface FirecrawlPage {
   markdown: string | null
+  /** Present when the `html` format was asked for; null when the page has none (a file, a page that did not succeed). */
+  html?: string | null
+  /** Present when the `rawHtml` format was asked for; null when the page has none. */
+  rawHtml?: string | null
   links?: string[]
   /** Page fields appear only when the page declares them (W2L's `metadata`, null values left out). */
   metadata: {
@@ -120,11 +127,11 @@ export function firecrawlCrawlCounts(status: TaskStatus, steps: Partial<Record<S
 /** Default and largest number of steps one `GET /fc/v1/crawl/:id` returns in `data`. */
 export const FIRECRAWL_STATUS_PAGE_SIZE = { default: 100, max: 1000 } as const
 
-const SHIM_FORMATS: readonly string[] = ['markdown', 'links']
+const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
 /** W2L page metadata fields that Firecrawl's `metadata` also has. */
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
-const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout'] as const
+const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags'] as const
 
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
@@ -167,7 +174,7 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   return parseCrawlStartRequest(native)
 }
 
-/** The scrape options the shim maps: formats (markdown, links), onlyMainContent, waitFor and timeout; removeBase64Images only as true, which W2L always does. */
+/** The scrape options the shim maps: formats (markdown, links, html, rawHtml), onlyMainContent, waitFor, timeout, includeTags and excludeTags; removeBase64Images only as true, which W2L always does. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
   checkShimKeys(rec, prefix, [...keys, 'formats', 'removeBase64Images', ...SHIM_PAGE_OPTIONS], problems)
   checkShimFixedValue(rec, prefix, 'removeBase64Images', problems)
@@ -282,6 +289,9 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
   }
   return {
     markdown: result.markdown,
+    // On the result only when the request asked for the format.
+    ...(result.html === undefined ? {} : { html: result.html }),
+    ...(result.rawHtml === undefined ? {} : { rawHtml: result.rawHtml }),
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
     metadata: {
       ...declared,

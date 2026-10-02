@@ -134,6 +134,51 @@ describe('MCP tools', () => {
     }
   })
 
+  it('offers the html and rawHtml formats and forwards includeTags and excludeTags for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { formats: ['markdown', 'html', 'rawHtml'], includeTags: ['article'], excludeTags: ['.ad'] }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...options },
+      { url: 'https://example.com/', ...options },
+      { urls: ['https://example.com/a'], ...options },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml"]')
+      expect(properties).toMatchObject({
+        includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+        excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+      })
+    }
+    // The list's shape is checked before any API call, as for every other option.
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', includeTags: 'article' })).rejects.toThrow('includeTags must be an array of at most 100 CSS selectors')
+    expect(bodies).toHaveLength(3)
+  })
+
+  it('declares and forwards a recorded robots override, and still refuses the blanket switch', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(init?.body ? JSON.parse(String(init.body)) : null)
+      return String(input).endsWith('/v1/batches') ? json({ taskId: 'batch-2' }, 202) : json({ status: 'success', markdown: 'ok', requestedUrl: 'https://example.com/r.pdf' })
+    }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/r.pdf', robotsOverride: { reason: 'publisher link' } })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/r.pdf'], robotsOverrides: [{ url: 'https://example.com/r.pdf', reason: 'publisher link', recordedBy: 'analyst' }] })
+    expect(bodies[0]).toMatchObject({ robotsOverride: { reason: 'publisher link' } })
+    expect(bodies[1]).toMatchObject({ robotsOverrides: [{ url: 'https://example.com/r.pdf', reason: 'publisher link', recordedBy: 'analyst' }] })
+    expect((TOOLS.find(tool => tool.name === 'scrape')?.inputSchema.properties as Record<string, unknown>).robotsOverride).toMatchObject({ type: 'object', required: ['reason'] })
+    expect((TOOLS.find(tool => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>).robotsOverrides).toMatchObject({ type: 'array' })
+    expect(TOOLS.find(tool => tool.name === 'crawl')?.inputSchema.properties).not.toHaveProperty('robotsOverride')
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', ignoreRobotsTxt: true })).rejects.toThrow('unsupported parameter: ignoreRobotsTxt')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], robotsOverrides: [{ url: 'https://other.example/', reason: 'r' }] })).rejects.toThrow('robotsOverrides[0].url is not one of the batch urls')
+  })
+
   it('dispatches URL arrays and paginated batch results through the SDK', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

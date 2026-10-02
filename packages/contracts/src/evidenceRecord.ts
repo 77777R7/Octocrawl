@@ -65,7 +65,7 @@ export interface EvidenceRobotsDecision {
   /** Why robots.txt could not be fetched (then `decision` is `disallowed`, RFC 9309 §2.3.1.4); null when it was. */
   unreachable: RobotsUnreachable | null
   crawlDelayMs: number | null
-  /** Whether a user override replaced the decision. W2L has no override yet, so this is false. */
+  /** Whether the fetch went ahead under a recorded robots override although `decision` is `disallowed`; the reason is in the trace, the warnings and, in the browser lane, the compliance record. */
   userOverride: boolean
 }
 

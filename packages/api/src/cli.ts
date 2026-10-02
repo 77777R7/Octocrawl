@@ -13,6 +13,7 @@ async function main(): Promise<void> {
     taskRoot: process.env.W2L_TASK_ROOT ?? '.w2l/api',
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
+    allowRobotsOverride: listen.allowRobotsOverride,
   })
   const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local' })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })

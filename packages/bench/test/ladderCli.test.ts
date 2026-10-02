@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { buildChannels, formatScrapeReport, parseArgs, USAGE } from '../src/ladderCli.js'
-import { identityBundleFrom, modeIdentity } from '@w2l/contracts'
+import { identityBundleFrom, modeIdentity, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
@@ -330,6 +330,33 @@ describe('lazy vendor connection', () => {
     expect(run.result.failureReason).toBe('policy_denied')
     expect(run.channelsTried).toEqual([])
     expect(created).toEqual([])
+    await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+  })
+
+  it('a run that set a robots.txt rule aside under a recorded override never opens a vendor session', async () => {
+    const url = 'https://example.com/p'
+    // A local rung that sets the rule aside, says so, and is then blocked by a bot gate: without the override the ladder would go on to the vendor.
+    const blockedUnderOverride = (lane: 'http' | 'browser_local') => ({
+      fetch: async (_url: string, _deadlineAt?: number, _signal?: AbortSignal, execution?: ExecutionContext): Promise<FetchResult> => {
+        const trace: TraceEvent[] = ['robots_checked', 'robots_disallowed', 'robots_overridden'].map((event) => ({ at: 1, lane, event }))
+        const warning = { code: 'robots_overridden', message: 'https://example.com/robots.txt disallows this URL (rule /); it was fetched under an override recorded: publisher link' }
+        execution?.onRobotsOverride?.({ trace, warning })
+        return { ...(await failingSubject('connection_error').fetch()), status: 'blocked', failureReason: null, blockReason: 'cloudflare_challenge', lane, escalations: [], trace, warnings: [warning] }
+      },
+    })
+    const created: string[] = []
+    const channels = buildChannels('research', {
+      localSubjects: { http: blockedUnderOverride('http'), browser_local: blockedUnderOverride('browser_local') },
+      vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
+      vendorConnector: async () => fakeBrowser(),
+      robotsFetcher: async () => ({ text: 'User-agent: *\nDisallow: /\n', status: 200, contentType: 'text/plain' }),
+    })
+    const run = await new LadderRunner(channels, { mode: 'research' }, new MemoryRoutingHistory()).run(url, undefined, {}, { robotsOverride: { reason: 'publisher link' } })
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(created).toEqual([])
+    // The answer is the last local rung's, with the override on it; the vendor's refusal never replaces it.
+    expect(run.result).toMatchObject({ status: 'blocked', lane: 'browser_local', warnings: [{ code: 'robots_overridden' }] })
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider' }))
     await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
   })
 

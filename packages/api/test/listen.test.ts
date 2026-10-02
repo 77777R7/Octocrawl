@@ -10,6 +10,7 @@ describe('parseListen', () => {
       port: 8787,
       tokens: [],
       defaultMaxPages: null,
+      allowRobotsOverride: true,
     })
     expect(listen.networkPolicy.privateAllowlist.length).toBeGreaterThan(0)
   })
@@ -24,6 +25,8 @@ describe('parseListen', () => {
     expect(listen.host).toBe('0.0.0.0')
     expect(listen.tokens).toEqual(['secret'])
     expect(listen.defaultMaxPages).toBe(100)
+    // A recorded robots override is a local user's decision; a hosted server takes none.
+    expect(listen.allowRobotsOverride).toBe(false)
     expect(listen.networkPolicy.privateAllowlist).toEqual([])
   })
 

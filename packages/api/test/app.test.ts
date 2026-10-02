@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +11,7 @@ import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { parseListen } from '../src/listen.js'
 
 function httpOnlyChannels(mode: 'standard' | 'research' | 'authed') {
   return buildChannels(mode, {
@@ -83,6 +85,75 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(compact.usage.totalMs).toBeGreaterThanOrEqual(0)
     expect(JSON.parse(debugText).summary.attempts[0].result.markdown).toContain('Harbour lantern catalog')
     expect(Buffer.byteLength(compactText)).toBeLessThanOrEqual(Buffer.byteLength(debugText) * 0.6)
+  })
+
+  // POST a JSON body to the app and return the status with the parsed answer.
+  const postJson = async (path: string, body: unknown) => {
+    const res = await createApp(engine).request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return { status: res.status, body: await res.json() }
+  }
+
+  it('serves html and rawHtml when asked, without what excludeTags names, and repeats neither in the attempt audit', async () => {
+    const url = `${server.url}/crawl/listing`
+    const excluded = await postJson('/v1/scrape', { url, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['ul'], debug: false })
+    expect(excluded.status).toBe(200)
+    expect(excluded.body.formats).toEqual(['markdown', 'html', 'rawHtml'])
+    expect(excluded.body.markdown).toContain('Harbour lantern catalog')
+    expect(excluded.body.markdown).not.toContain('Harbour lantern teapot 01')
+    // html is what the Markdown was written from; rawHtml is the body as received, the one the evidence hashes.
+    expect(excluded.body.html).toContain('<h1>Harbour lantern catalog</h1>')
+    expect(excluded.body.html).not.toContain('<ul>')
+    expect(excluded.body.rawHtml).toMatch(/^<!doctype html>/)
+    expect(excluded.body.rawHtml).toContain('<ul>')
+    expect(createHash('sha256').update(excluded.body.rawHtml).digest('hex')).toBe(excluded.body.snapshot.rawBodySha256)
+    // The full response carries them once: the attempt audit repeats neither.
+    const full = await postJson('/v1/scrape', { url, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['ul'] })
+    expect(full.body).toMatchObject({ status: 'success', html: excluded.body.html, rawHtml: excluded.body.rawHtml })
+    expect(full.body.summary.attempts[0].result).not.toHaveProperty('html')
+    expect(full.body.summary.attempts[0].result).not.toHaveProperty('rawHtml')
+    expect(full.body.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ excludeTags: ['ul'] }) }))
+  })
+
+  it('keeps only what includeTags names, on a page, on an error page and through /fc', async () => {
+    const url = `${server.url}/crawl/listing`
+    const included = await postJson('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['main ul'], debug: false })
+    expect(included.body.markdown).toBe([1, 2, 3].map((n) => `- [Harbour lantern teapot 0${n}](${server.url}/crawl/item/${n})`).join('\n'))
+    expect(included.body.html).toMatch(/^<body><ul><li><a href="\/crawl\/item\/1">/)
+    expect(included.body).toMatchObject({ status: 'success', lane: 'http', document: { confidence: 1 } })
+    expect(included.body).not.toHaveProperty('rawHtml')
+    // Nothing named on the page is an empty answer from the rung that read it, not a failure.
+    const none = await postJson('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['table'], debug: false })
+    expect(none.body).toMatchObject({ status: 'success', lane: 'http', markdown: '', html: '', channelsTried: ['http'] })
+    // The page an error status carried is evidence, shaped the same way, and gives no html.
+    const missing = `${server.url}/error/404`
+    expect((await postJson('/v1/scrape', { url: missing, formats: ['markdown', 'html'], includeTags: ['h1'], debug: false })).body).toMatchObject({ status: 'failed', failureReason: 'http_error', markdown: '# Not Found', html: null })
+    expect((await postJson('/v1/scrape', { url: missing, formats: ['markdown'], excludeTags: ['h1'], debug: false })).body).toMatchObject({ status: 'failed', failureReason: 'http_error', markdown: null })
+    const shim = await postJson('/fc/v1/scrape', { url, formats: ['html', 'rawHtml'], includeTags: ['h1'] })
+    expect(shim.body).toMatchObject({ success: true, data: { markdown: null, html: '<body><h1>Harbour lantern catalog</h1></body>' } })
+    expect(shim.body.data.rawHtml).toMatch(/^<!doctype html>/)
+  })
+
+  it('refuses by name a selector that does not parse, and one whose matching the page does not bound', async () => {
+    const url = `${server.url}/crawl/listing`
+    const broken = { error: 'includeTags entry is not a valid CSS selector: div[[', code: 'invalid_request' }
+    expect(await postJson('/v1/scrape', { url, includeTags: ['div[['] })).toEqual({ status: 400, body: broken })
+    expect(await postJson('/v1/batches', { urls: [url], includeTags: ['div[['] })).toEqual({ status: 400, body: broken })
+    expect(await postJson('/fc/v1/scrape', { url, includeTags: ['div[['] })).toEqual({ status: 400, body: { success: false, ...broken } })
+    expect(await postJson('/v1/crawl', { url, excludeTags: ['nav', 'p::before'] })).toEqual({ status: 400, body: { error: 'excludeTags entry is not a valid CSS selector: p::before', code: 'invalid_request' } })
+    // What the selector uses, and its place in the request.
+    expect(await postJson('/v1/scrape', { url, excludeTags: ['nav', 'li:nth-child(2)'] })).toEqual({ status: 400, body: {
+      error: 'excludeTags entry uses :nth-child, which W2L does not match: li:nth-child(2) (supported: tag, class, id and attribute selectors, the descendant and child combinators, :root, :empty, and :not(), :is() and :where() around selectors without combinators)',
+      code: 'unsupported_parameter',
+      details: { parameters: ['excludeTags[1]'] },
+    } })
+    expect(await postJson('/v1/batches', { urls: [url], includeTags: ['h2 ~ p'] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('includeTags entry uses the sibling combinator ~'), code: 'unsupported_parameter', details: { parameters: ['includeTags[0]'] } } })
+    // A list is bounded by its parts in all, since each costs the page a test of every element: 34 x 3 is over, 50 x 2 is at the limit.
+    const wide = Array.from({ length: 34 }, () => 'main > article p')
+    const tooMany = { error: 'includeTags must hold at most 100 selector parts in all, and holds 102 (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)', code: 'invalid_request' }
+    expect(await postJson('/v1/scrape', { url, includeTags: wide })).toEqual({ status: 400, body: tooMany })
+    expect(await postJson('/fc/v1/scrape', { url, includeTags: wide })).toEqual({ status: 400, body: { success: false, ...tooMany } })
+    expect(await postJson('/v1/crawl', { url, excludeTags: [...wide, ':is(h1, h2)'] })).toEqual({ status: 400, body: { ...tooMany, error: tooMany.error.replace('includeTags', 'excludeTags').replace('102', '105') } })
+    expect(await postJson('/v1/scrape', { url, includeTags: Array.from({ length: 50 }, () => 'ul li'), debug: false })).toMatchObject({ status: 200, body: { status: 'success', lane: 'http' } })
   })
 
   it('returns a 404 page and its status as evidence in every response shape, never as success', async () => {
@@ -185,6 +256,69 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(unsettled.evidenceRecord.fieldEvidence).not.toHaveProperty('/price')
     } finally {
       await new Promise<void>(resolve => local.close(() => resolve()))
+    }
+  })
+
+  it('scrapes a robots-disallowed URL under a recorded override, keeps the warning on the full and compact responses, and refuses a blanket ignoreRobotsTxt', async () => {
+    let reportHits = 0
+    const local = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /'); return }
+      reportHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><head><title>Annual report</title></head><body><main><article><h1>Annual report</h1><p>The publisher links this report from its own pages, while the host that serves it tells every crawler to stay out; a researcher fetches it once, under a recorded decision, to cite its figures.</p><p>The report itself is ordinary prose, long enough for the extraction cascade to accept it as the main content of the page.</p></article></main></body></html>')
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(local.address() as AddressInfo).port}/report`
+    try {
+      const app = createApp(engine)
+      const post = (body: unknown) => app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const robotsOverride = { reason: 'The publisher links this report itself; the host rule addresses crawlers.', recordedBy: 'analyst' }
+      const full = await (await post({ url, robotsOverride })).json()
+      expect(full).toMatchObject({ status: 'success', channelsTried: ['http'], warnings: [{ code: 'robots_overridden', message: expect.stringContaining('(rule /); it was fetched under an override recorded by analyst') }] })
+      expect(full.trace.map((event: { event: string }) => event.event)).toEqual(expect.arrayContaining(['robots_checked', 'robots_disallowed', 'robots_overridden']))
+      const compact = await (await post({ url, robotsOverride, debug: false })).json()
+      expect(compact).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden' }], evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true } } })
+      expect(reportHits).toBe(2)
+      const blanket = await post({ url, ignoreRobotsTxt: true })
+      expect(blanket.status).toBe(400)
+      expect(await blanket.json()).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] } })
+      expect(reportHits).toBe(2)
+    } finally {
+      await new Promise<void>(resolve => local.close(() => resolve()))
+    }
+  })
+
+  it('a hosted server takes no robots override: scrape and batch refuse the field by name, and nothing is fetched', async () => {
+    const requests: string[] = []
+    const local = createServer((req, res) => {
+      requests.push(req.url ?? '')
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /')
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(local.address() as AddressInfo).port}/report`
+    const hostedRoot = await mkdtemp(join(tmpdir(), 'w2l-api-hosted-'))
+    // The setting `npm run api -- --hosted` gives its engine; the fixture is on loopback, so the network policy stays local.
+    const hosted = createApiEngine({ taskRoot: hostedRoot, channelsFor: httpOnlyChannels, allowRobotsOverride: parseListen(['--hosted', '--token', 'secret'], {}).allowRobotsOverride })
+    try {
+      const app = createApp(hosted)
+      const post = (path: string, body: unknown) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const reason = 'The publisher links this report itself.'
+      const scrape = await post('/v1/scrape', { url, robotsOverride: { reason } })
+      expect(scrape.status).toBe(400)
+      expect(await scrape.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverride '), code: 'unsupported_parameter', details: { parameters: ['robotsOverride'] } })
+      const batch = await post('/v1/batches', { urls: [url], robotsOverrides: [{ url, reason }] })
+      expect(batch.status).toBe(400)
+      expect(await batch.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverrides '), code: 'unsupported_parameter', details: { parameters: ['robotsOverrides'] } })
+      expect(requests).toEqual([])
+      // Without the field the same URL is a scrape like any other, and its rule holds.
+      const plain = await post('/v1/scrape', { url })
+      expect(plain.status).toBe(200)
+      expect(await plain.json()).toMatchObject({ status: 'failed', failureReason: 'policy_denied', evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false } } })
+      expect(requests).toEqual(['/robots.txt'])
+    } finally {
+      await hosted.close()
+      await new Promise<void>(resolve => local.close(() => resolve()))
+      await rm(hostedRoot, { recursive: true, force: true })
     }
   })
 
@@ -293,8 +427,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       return { status: res.status, error: ((await res.json()) as { error?: string }).error }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'html', 'rawHtml'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: html, rawHtml (supported: markdown, links, json)' })
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml)' })
     expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], mobile: true })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: mobile') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })

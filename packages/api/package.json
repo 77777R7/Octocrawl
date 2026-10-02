@@ -26,6 +26,7 @@
     "@hono/node-server": "^1.19.6",
     "@w2l/bench": "*",
     "@w2l/contracts": "*",
+    "@w2l/extract-tf": "*",
     "@w2l/http-core": "*",
     "@w2l/runtime": "*",
     "ajv": "^8.20.0",

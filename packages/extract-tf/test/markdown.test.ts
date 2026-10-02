@@ -62,6 +62,16 @@ describe('htmlToMarkdown', () => {
     ].join('\n'))
   })
 
+  it('keeps superscripts and subscripts in their script form so they never join the next number', () => {
+    // Digital Realty's metro pages lay the unit spans side by side; the
+    // exponent must not read as the first digit of the next figure.
+    const md = htmlToMarkdown('<p><span>12,000 ft <sup>2</sup></span><span>1,100 m <sup>2</sup></span><span>N+1 Cooling</span> H<sub>2</sub>O at 10<sup>-3</sup> bar<sup>[a]</sup></p>')
+    expect(md).toContain('12,000 ft ²')
+    expect(md).toMatch(/²\s?1,100 m ²/)
+    expect(md).toContain('H₂O at 10⁻³ bar[a]')
+    expect(md).not.toContain('21,100')
+  })
+
   it('keeps an empty corner header cell empty instead of inventing its text', () => {
     const md = htmlToMarkdown(
       '<table><tr><th></th><th>2023</th><th>2024</th></tr><tr><th>Exports</th><td>12</td><td>14</td></tr></table>',
@@ -181,6 +191,14 @@ describe('htmlToMarkdown link and image targets', () => {
     const doc = '<!doctype html><html><head><base href="https://cdn.fixture.test/v2/"></head><body><a href="intro.html">Intro</a></body></html>'
     expect(htmlToMarkdown(doc, { baseUrl: BASE })).toBe('[Intro](https://cdn.fixture.test/v2/intro.html)')
     expect(htmlToMarkdown('<a href="intro.html">Intro</a>')).toBe('[Intro](intro.html)')
+  })
+
+  it('leaves out the elements the caller excludes, with everything inside, and keeps the document base', () => {
+    const doc = '<!doctype html><html><head><base href="https://cdn.fixture.test/v2/"></head><body><nav><a href="/">Home</a></nav>' +
+      '<main><p>Tides <a href="table.html">table</a><sup class="ref">[1]</sup></p></main><footer><p>Imprint</p></footer></body></html>'
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: ['nav', 'main .ref', 'head'] })).toBe('Tides [table](https://cdn.fixture.test/v2/table.html)\n\nImprint')
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: [] })).toBe(htmlToMarkdown(doc, { baseUrl: BASE }))
+    expect(htmlToMarkdown(doc, { baseUrl: BASE, exclude: ['body'] })).toBe('')
   })
 })
 
@@ -396,7 +414,7 @@ describe('htmlToMarkdown golden pages', () => {
         'There are [4 video lessons](https://www.scrapethissite.com/lessons/) that show you how to scrape this page.',
         '---',
         '### Andorra',
-        '**Capital:** Andorra la Vella  \n**Population:** 84000  \n**Area (km2):** 468.0',
+        '**Capital:** Andorra la Vella  \n**Population:** 84000  \n**Area (km²):** 468.0',
       ].join('\n\n'),
     )
   })

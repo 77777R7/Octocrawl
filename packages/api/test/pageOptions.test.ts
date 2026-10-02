@@ -26,6 +26,9 @@ const PAGES: Record<string, string> = {
     ['North pier', 'South pier', 'Estuary'].map((station, t) => `<h2>${station}</h2><table><caption>Table ${t + 1}: ${station}, high water</caption>` +
       `<tr><th>Date</th><th>Time</th><th>Height</th></tr>${Array.from({ length: 8 - t }, (_, i) => `<tr><td>2026-10-0${i + 1}</td><td>0${i}:1${t}</td><td>${4 + t}.${i}</td></tr>`).join('')}</table>`).join('') +
     '</div><footer><p>Published by the harbour office</p></footer></body></html>',
+  // A sign-in wall answered with 200: a heading and a password form, no content.
+  '/wall': '<!doctype html><html><head><title>Sign in</title></head><body><h1>Sign in</h1>' +
+    '<form method="post"><input type="text" name="user"><input type="password" name="password"><button>Sign in</button></form></body></html>',
 }
 
 type BrowserStub = { fetch: (url: string, deadlineAt?: number, signal?: AbortSignal, execution?: unknown, options?: FetchOptions) => Promise<FetchResult> }
@@ -43,6 +46,17 @@ const unreachableBrowser: BrowserStub = {
     markdown: null, truncated: false, truncatedAt: null, compliance: null,
     evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
     usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 1, contentTokens: null, browserMs: 1, externalCostUsd: null },
+    trace: [],
+  }),
+}
+
+/** A browser rung that meets a sign-in wall once the page's scripts have run. */
+const walledBrowser: BrowserStub = {
+  fetch: async url => ({
+    requestedUrl: url, status: 'blocked', failureReason: null, blockReason: 'login_wall', budgetExceeded: null, lane: 'browser_local', escalations: [],
+    markdown: null, truncated: false, truncatedAt: null, compliance: null,
+    evidence: { finalUrl: url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] },
+    usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 10, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: 1, externalCostUsd: null },
     trace: [],
   }),
 }
@@ -128,6 +142,87 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
         'Table 2: South pier, high water', '## Estuary', 'Table 3: Estuary, high water', '| 2026-10-06 | 05:12 | 6.5 |']) expect(markdown).toContain(text)
     }
     for (const chrome of ['Harbour office', 'Published by the harbour office']) expect(main.markdown).not.toContain(chrome)
+  })
+
+  it('excludeTags and the html format follow the whole page, and includeTags names the content whatever onlyMainContent says', async () => {
+    const { origin, post } = await setup(unreachableBrowser)
+    const url = `${origin}/chrome`
+    const whole = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], onlyMainContent: false, excludeTags: ['nav', 'header a[href="/login"]'] })).body
+    expect(whole).toMatchObject({ status: 'success', lane: 'http' })
+    for (const kept of [`[Harbour office](${origin}/)`, '# Hourly survey', 'Published by the harbour office']) expect(whole.markdown).toContain(kept)
+    for (const gone of ['Tide tables', 'Login', 'never content']) expect(whole.markdown).not.toContain(gone)
+    // The whole page's html: header and footer kept, the exclusions and the script gone.
+    expect(whole.html).toBe(`<body><header><a href="/">Harbour office</a> </header><main><article><h1>Hourly survey</h1><p>${PROSE}</p></article></main><footer><p>Published by the harbour office</p></footer></body>`)
+    const named = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], onlyMainContent: false, includeTags: ['footer p', 'nav'] })).body
+    expect(named.markdown).toBe(`[Tide tables](${origin}/tides)\n\nPublished by the harbour office`)
+    expect(named.html).toBe('<body><nav><a href="/tides">Tide tables</a></nav><p>Published by the harbour office</p></body>')
+    expect(named.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ includeTags: ['footer p', 'nav'], confidence: 1 }) }))
+    // A page that was not read as content keeps its evidence Markdown, without the exclusions, and has no html to give.
+    const failed = (await post('/v1/scrape', { url: `${origin}/nav-only`, formats: ['markdown', 'html', 'rawHtml'], excludeTags: ['footer'], debug: false })).body
+    expect(failed).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', html: null, rawHtml: null, formats: ['markdown', 'html', 'rawHtml'] })
+    expect(failed.markdown).toBe(`[Harbour office](${origin}/)\n\n- [Tide tables](${origin}/tides)\n- [Weather](${origin}/weather)`)
+    // Nothing named is an empty answer, not a failure. On a page that itself reads as thin the browser rung is
+    // still tried, as for any thin page; on one that reads well it is not.
+    const thin = (await post('/v1/scrape', { url: `${origin}/nav-only`, formats: ['markdown'], includeTags: ['table'] })).body
+    expect(thin).toMatchObject({ status: 'success', failureReason: null, markdown: '', lane: 'http', channelsTried: ['http', 'browser_local'] })
+    const read = (await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'] })).body
+    expect(read).toMatchObject({ status: 'success', markdown: '', lane: 'http', channelsTried: ['http'] })
+  })
+
+  it('keeps a blocked page blocked whatever includeTags names', async () => {
+    const { origin, post } = await setup(hangingBrowser, { channelsFor: mode => buildChannels(mode, { localSubjects: { browser_local: hangingBrowser } }).filter(channel => channel.id === 'http') })
+    const url = `${origin}/wall`
+    expect((await post('/v1/scrape', { url, formats: ['markdown'] })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+    // Naming the wall's own heading does not make it the page that was asked for.
+    expect((await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['h1'] })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall', markdown: null, html: null })
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'], onlyMainContent: false })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+  })
+
+  it('gives up an empty includeTags answer when the browser rung then finds the page blocked', async () => {
+    const { origin, post } = await setup(walledBrowser)
+    // The HTTP rung reads a page with no main content on which nothing is named: an empty answer it offers to
+    // the browser rung, which meets the wall the page's scripts put up. The block is the answer, not the empty success.
+    const url = `${origin}/nav-only`
+    const blocked = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['table'] })).body
+    expect(blocked).toMatchObject({ status: 'blocked', blockReason: 'login_wall', lane: 'browser_local', markdown: null, html: null, channelsTried: ['http', 'browser_local'] })
+    expect(blocked.ladderTrace.map((event: { event: string; channel: string }) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+    expect(blocked.ladderTrace[1].detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: 'login_wall' })
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'], debug: false })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall', markdown: null })
+    expect((await post('/fc/v1/scrape', { url, includeTags: ['table'] })).body).toMatchObject({ success: false, error: 'blocked: login_wall', data: { markdown: null } })
+    // A page that reads well keeps its empty answer without asking the browser rung at all.
+    expect((await post('/v1/scrape', { url: `${origin}/chrome`, formats: ['markdown'], includeTags: ['table'] })).body).toMatchObject({ status: 'success', markdown: '', lane: 'http', channelsTried: ['http'] })
+  })
+
+  it('batch items and crawl pages carry html and rawHtml when their formats ask, and their stored audit repeats neither', async () => {
+    const { origin, engine } = await setup(unreachableBrowser)
+    const url = `${origin}/chrome`
+    const batch = await engine.startBatch({ urls: [url], formats: ['markdown', 'html', 'rawHtml'], includeTags: ['h1', 'footer'] })
+    expect(await finished(() => engine.getBatch(batch.taskId))).toMatchObject({ status: 'completed', completed: 1 })
+    const [item] = (await engine.getBatchItems(batch.taskId, { debug: true }))!.items
+    expect(item).toMatchObject({
+      status: 'success',
+      markdown: '# Hourly survey\n\nPublished by the harbour office',
+      html: '<body><h1>Hourly survey</h1><footer><p>Published by the harbour office</p></footer></body>',
+      rawHtml: PAGES['/chrome'],
+    })
+    expect(item!.audit!.summary.attempts.map((attempt) => Object.keys(attempt.result).filter((key) => key === 'html' || key === 'rawHtml'))).toEqual([[]])
+
+    const plain = await engine.startBatch({ urls: [url] })
+    await finished(() => engine.getBatch(plain.taskId))
+    const [plainItem] = (await engine.getBatchItems(plain.taskId))!.items
+    expect(plainItem).not.toHaveProperty('html')
+    expect(plainItem).not.toHaveProperty('rawHtml')
+
+    const crawl = await engine.startCrawl({ url, maxPages: 1, formats: ['html'], excludeTags: ['h1'] })
+    expect(await finished(() => engine.getCrawl(crawl.taskId))).toMatchObject({ status: 'completed', pagesFetched: 1 })
+    const [page] = (await engine.getCrawlPages(crawl.taskId))!.items
+    expect(page).toMatchObject({ status: 'success', markdown: null })
+    expect(page!.html).toContain(`<p>${PROSE}</p>`)
+    expect(page!.html).not.toContain('Hourly survey')
+    expect(page).not.toHaveProperty('rawHtml')
+    // The /fc crawl status reads the same stored page.
+    const status = (await engine.getCrawlStatusPage(crawl.taskId, { limit: 10 }))!
+    expect(status.steps.map((step) => step.result?.html)).toEqual([page!.html])
   })
 
   it('on a page with no main block, false returns the whole page and the default keeps it as evidence', async () => {

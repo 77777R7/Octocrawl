@@ -1,4 +1,4 @@
-import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -23,11 +23,11 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { RobotsOriginCache } from '../robotsLookup.js'
+import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, isNoContentStatus, isSuccessStatus, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
@@ -186,16 +186,20 @@ export class BrowserLocalSubject implements SubjectAdapter {
     return this.chain.toLedger()
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     const start = Date.now()
     const monotonicStart = performance.now()
     let queueMs = 0
     let cooldownWaitMs = 0
+    // Set when a robots disallow was set aside by the caller's recorded
+    // decision; every result of this fetch then carries the warning first.
+    const robots: { overrideWarning: FetchWarning | null } = { overrideWarning: null }
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       return {
         ...result,
+        ...(robots.overrideWarning === null ? {} : { warnings: [robots.overrideWarning, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -216,7 +220,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options)
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) })
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -235,7 +239,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -286,7 +290,27 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const host = this.hostOf(url)
 
-      if (identity.respectsRobots && robotsDecision.decision === 'disallowed') {
+      // A recorded override sets a disallow the publisher wrote aside for this
+      // one URL (never an unreachable robots.txt): the verdict, the override
+      // and its reason go into the trace, the warnings and the compliance
+      // record, and the fetch goes ahead.
+      const override = options.robotsOverride
+      const overridden = identity.respectsRobots && robotsDecision.decision === 'disallowed' && robotsDecision.unreachable === undefined && override !== undefined
+      if (override !== undefined && overridden) {
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'robots_disallowed', detail: { url, appliedRules: robotsDecision.appliedRules } })
+        trace.push({
+          at: Date.now() - start,
+          lane: 'browser_local',
+          event: 'robots_overridden',
+          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+        })
+        // Said now, before the page is opened: the run's answer keeps the
+        // override even when the deadline ends this fetch before it returns.
+        onRobotsOverride?.(robotsOverrideApplied(trace, robotsOverrideWarning(robotsDecision, override)))
+      }
+      const robotsForRecord = override !== undefined && overridden ? { ...robotsDecision, skippedFetch: false, override } : robotsDecision
+
+      if (identity.respectsRobots && robotsDecision.decision === 'disallowed' && !overridden) {
         const wallMs = Date.now() - start
         const record = this.chain.append({
           recordId: crypto.randomUUID(),
@@ -553,7 +577,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         requestedUrl: url,
         finalUrl,
         requestedAt: new Date(start).toISOString(),
-        robots: robotsDecision,
+        robots: robotsForRecord,
         sentHeaders: { headers: sentHeaders },
         rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
         access: this.access,
@@ -658,7 +682,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         requestedUrl: url,
         finalUrl,
         requestedAt: new Date(start).toISOString(),
-        robots: robotsDecision,
+        robots: robotsForRecord,
         sentHeaders: { headers: sentHeaders },
         rateLimit: {
           previousRequestAtMs,
@@ -766,7 +790,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         }
       }
 
-      const extracted = extractTf.extract(converted, { url: pageUrl })
+      const extracted = extractTf.extract(converted, { url: pageUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
       const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
@@ -779,16 +803,18 @@ export class BrowserLocalSubject implements SubjectAdapter {
           escalate: extracted.escalate,
           linkCount: links.length,
           ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
+          ...tagOptions(options),
         },
       })
 
       // No main content: the whole rendered page stays on the failed result
       // as evidence, never content. onlyMainContent: false asks for the whole
-      // page, not the main content, so there it is the answer.
+      // page, not the main content, so there it is the answer; so is what
+      // includeTags names, on any page that is not blocked.
       let wholePage: string | null = null
-      if (extracted.escalate) {
-        if (gate !== null) return blocked(gate)
-        wholePage = wholePageMarkdown(converted, pageUrl)
+      if (extracted.escalate && gate !== null) return blocked(gate)
+      if (extracted.escalate && !selectionAsked(options)) {
+        wholePage = wholePageMarkdown(converted, pageUrl, options.excludeTags)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
         if (options.onlyMainContent !== false || wholePage === null) return {
@@ -815,8 +841,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = options.onlyMainContent === false
-        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl })
+      const markdown = wholePageAsked(options)
+        ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
       return {
         ...base,
@@ -840,6 +866,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           adapterValidation: extracted.adapterValidation,
           labelledValues: extracted.labelledValues,
         },
+        // rawHtml is the page as rendered; html comes from the copy extraction read, without its layout markers.
+        ...htmlFormats(body, converted, extracted.mainHtml, options),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
       }
     } catch (err) {

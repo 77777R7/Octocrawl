@@ -547,8 +547,10 @@ function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchRe
 }
 
 // The page keeps its own links (an empty list would claim it has none); the
-// caller does not follow them because a duplicate is not contentful.
-function duplicateResult(url: string, prior: FetchResult, firstCanonicalUrl: string): FetchResult {
+// caller does not follow them because a duplicate is not contentful. Its
+// content repeats an earlier page's, so it goes in every form: the Markdown
+// and the `html` and `rawHtml` formats.
+function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
   return {
     ...prior,
     requestedUrl: url,

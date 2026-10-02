@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { localNetworkPolicy } from '@w2l/contracts'
+import { SqliteTaskStore } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
-import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
 
 describe('persistent URL-array batch', () => {
   const cleanup: Array<() => Promise<void>> = []
@@ -20,9 +21,9 @@ describe('persistent URL-array batch', () => {
     let slowStarted = () => {}
     const seen: string[] = []
     const server = createServer(async (req, res) => {
-      if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nAllow: /'); return }
+      if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nDisallow: /private\nAllow: /'); return }
       seen.push(req.url ?? '')
-      if (req.url === '/item/2' && slow) {
+      if (req.url?.endsWith('/item/2') && slow) {
         slowStarted()
         await new Promise<void>(resolve => { release = resolve })
       }
@@ -33,10 +34,42 @@ describe('persistent URL-array batch', () => {
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-    const engine = () => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }, workerCount: 2, ...options })
+    const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }, workerCount: 2, ...options, ...extra })
     cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
     return { origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release() }
   }
+
+  it('fetches only the URL a recorded robots override names, keeps the override on the item and with the task', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const app = createApp(engine)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/private/item/3`]
+    const robotsOverrides = [{ url: urls[1]!, reason: 'The publisher links this item publicly; the rule addresses crawlers.', recordedBy: 'analyst' }]
+    const accepted = await client.batchScrape(urls, { robotsOverrides })
+    expect(await client.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
+    const { items } = await client.getBatchItems(accepted.taskId, { debug: true })
+    const byUrl = new Map(items.map(item => [item.url, item]))
+    expect(byUrl.get(urls[0]!)).toMatchObject({ status: 'success' })
+    expect(byUrl.get(urls[0]!)).not.toHaveProperty('warnings')
+    expect(byUrl.get(urls[1]!)).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden', message: expect.stringContaining('recorded by analyst') }] })
+    expect(byUrl.get(urls[1]!)?.trace.find(event => event.event === 'robots_overridden')?.detail).toMatchObject({ reason: robotsOverrides[0]!.reason, recordedBy: 'analyst' })
+    expect(byUrl.get(urls[1]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: true })
+    // Its neighbour under the same rule is still refused, and never fetched.
+    expect(byUrl.get(urls[2]!)).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+    expect(byUrl.get(urls[2]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: false })
+    expect(f.seen).toContain('/private/item/2')
+    expect(f.seen).not.toContain('/private/item/3')
+    // Compact items keep the warning without the trace.
+    expect((await client.getBatchItems(accepted.taskId)).items.find(item => item.url === urls[1])).toMatchObject({ trace: [], warnings: [{ code: 'robots_overridden' }] })
+    // The override is stored with the task, so a resumed batch runs with it.
+    const store = SqliteTaskStore.openReadOnly(join(f.root, accepted.taskId))
+    try { expect((await store.getTask(accepted.taskId))?.batch?.robotsOverrides).toEqual(robotsOverrides) } finally { await store.close() }
+    const bad = await app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls, robotsOverrides: [{ url: 'https://elsewhere.test/', reason: 'x' }] }) })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toMatchObject({ error: 'robotsOverrides[0].url is not one of the batch urls', code: 'invalid_request' })
+  })
 
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {
     const f = await fixture()
@@ -125,6 +158,83 @@ describe('persistent URL-array batch', () => {
     // Links requested at submission survive the restart: item 1 comes from the first run, item 2 from the resumed one.
     const { items } = await client2.getBatchItems(accepted.taskId)
     expect(items.map(item => [item.url, item.links])).toEqual([1, 2].map(n => [`${f.origin}/item/${n}`, [`${f.origin}/item/details`]]))
+  })
+
+  it('keeps a recorded robots override when an interrupted batch resumes', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine1 = f.engine()
+    const url = `${f.origin}/private/item/2`
+    const { taskId } = await engine1.startBatch({ urls: [url], robotsOverrides: [{ url, reason: 'The publisher links this item publicly.' }] })
+    await slowStarted
+    await engine1.close({ cancelActive: true })
+    f.setSlow(false); f.release()
+    const engine2 = f.engine()
+    cleanup.push(() => engine2.close())
+    const app2 = createApp(engine2)
+    const client2 = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app2.request(String(input), init)) as typeof fetch })
+    expect(await client2.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 1, completed: 1 })
+    // Fetched again by the restarted process, under the override stored with the task.
+    expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(2)
+    expect((await client2.getBatchItems(taskId)).items).toMatchObject([{ url, status: 'success', warnings: [{ code: 'robots_overridden' }] }])
+  })
+
+  it('a server that takes no robots override applies none to a stored batch it resumes', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const local = f.engine()
+    const url = `${f.origin}/private/item/2`
+    const { taskId } = await local.startBatch({ urls: [url], robotsOverrides: [{ url, reason: 'The publisher links this item publicly.' }] })
+    await slowStarted
+    await local.close({ cancelActive: true })
+    f.setSlow(false); f.release()
+    // The same task root, now served as `--hosted` serves it.
+    const hosted = f.engine({ allowRobotsOverride: false })
+    cleanup.push(() => hosted.close())
+    const app = createApp(hosted)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    expect(await client.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 1, completed: 1 })
+    const { items } = await client.getBatchItems(taskId)
+    expect(items).toMatchObject([{ url, status: 'failed', failureReason: 'policy_denied', evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false } } }])
+    expect(items[0]).not.toHaveProperty('warnings')
+    // Only the local server's request reached the page.
+    expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(1)
+  })
+
+  it('keeps the override on a scrape and a batch item whose deadline passes while the overridden request is out', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    const engine = f.engine()
+    cleanup.push(() => engine.close({ cancelActive: true }))
+    const app = createApp(engine)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const url = `${f.origin}/private/item/2`
+    const override = { reason: 'The publisher links this item publicly.', recordedBy: 'analyst' }
+    // The HTTP rung is still waiting for the page at the deadline. Whether the ladder then builds the timeout
+    // (the rung returned nothing) or the rung reports its own deadline first, the result says the rule was set aside.
+    const timedOut = {
+      status: 'failed', failureReason: 'timeout', usage: { deadlineExceeded: true },
+      warnings: [{ code: 'robots_overridden', message: expect.stringContaining('it was fetched under an override recorded by analyst') }],
+      evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true } },
+    }
+    const recorded = (trace: readonly { event: string }[]) => trace.map(event => event.event).filter(name => name.startsWith('robots_') || name === 'deadline_exceeded')
+    const events = ['robots_checked', 'robots_disallowed', 'robots_overridden', 'deadline_exceeded']
+    const full = await client.scrape(url, { robotsOverride: override, timeout: 1_000, debug: true })
+    expect(full).toMatchObject(timedOut)
+    expect(recorded(full.trace)).toEqual(events)
+    expect(await client.scrape(url, { robotsOverride: override, timeout: 1_000, debug: false })).toMatchObject(timedOut)
+    const { taskId } = await client.batchScrape([url], { robotsOverrides: [{ url, ...override }], timeout: 1_000 })
+    expect(await client.waitBatch(taskId)).toMatchObject({ requested: 1, completed: 1 })
+    expect((await client.getBatchItems(taskId)).items).toMatchObject([{ url, ...timedOut }])
+    expect(recorded((await client.getBatchItems(taskId, { debug: true })).items[0]!.trace)).toEqual(events)
+    // Each of the three requests went out past the rule before its deadline.
+    expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(3)
   })
 
   it('pages a 100-URL durable batch without returning the whole result set at once', async () => {

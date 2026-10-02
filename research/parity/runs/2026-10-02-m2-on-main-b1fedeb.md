@@ -1,0 +1,28 @@
+# Real-site run 2026-10-02
+
+Command: `node research/parity/run-sites.mjs --batch L --record research/parity/runs/2026-10-02-m2-on-main-b1fedeb.md`
+Source commit: `b1fedeb134e81775810c5b3c92d82134ddec7864`
+Run: 2026-10-02T03:45:48.522Z → 2026-10-02T03:47:30.277Z against http://127.0.0.1:8787
+Network: HTTPS_PROXY, HTTP_PROXY, NO_PROXY set in the runner's environment; 12 of 12 cases' responses record an environment proxy in evidence.envProxy (127.0.0.1:7890).
+
+Cases fully passing: 12/12; checks passing: 85/85.
+
+| Case | URL | Checks | Failed checks (P1 item) |
+| --- | --- | --- | --- |
+| L01 | https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html | 10/10 | — |
+| L02 | https://books.toscrape.com/ | 6/6 | — |
+| L03 | https://quotes.toscrape.com/js/ | 7/7 | — |
+| L04 | https://www.scrapethissite.com/pages/forms/?per_page=100 | 10/10 | — |
+| L05 | https://webscraper.io/test-sites/tables | 4/4 | — |
+| L06 | https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal) | 4/4 | — |
+| L07 | https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1810000601 | 6/6 | — |
+| L08 | https://www.gov.uk/government/statistics/subnational-electricity-and-gas-consumption-summary-report-2024/subnational-electricity-and-gas-consumption-summary-report-2024--2 | 16/16 | — |
+| L09 | https://ourworldindata.org/grapher/co-emissions-per-capita?tab=table | 6/6 | — |
+| L10 | https://www.apple.com/environment/ | 10/10 | — |
+| L11 | https://www.data.gov.uk/search?q=energy | 3/3 | — |
+| L12 | https://www.bls.gov/news.release/empsit.t01.htm | 3/3 | — |
+
+Recorded values:
+
+- L06 traceEvent summary.attempts.0.result.trace: [{"name":"sec-ch-ua","value":"\"Chromium\";v=\"128\", \"Google Chrome\";v=\"128\", \"Not;A=Brand\";v=\"24\""},{"name":"sec-ch-ua-mobile","value":"?0"},{"name":"sec-ch-ua-platform","value":"\"macOS\""},{"name":"user-agent","value":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}]
+- L11 fetchSpacing: 3 fetches, smallest gap 252 ms, required 0 ms; robots.txt HTTP 200, Crawl-delay none, seed allowed

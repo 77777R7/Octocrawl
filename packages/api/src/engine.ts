@@ -16,6 +16,7 @@ import {
   OriginScheduler,
   type Channel,
 } from '@w2l/bench'
+import { invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
 import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
@@ -41,6 +42,9 @@ import {
   type TaskStatus,
   type CrawlPageQuery,
   type ExecutionContext,
+  type RobotsOverride,
+  type RobotsUrlOverride,
+  type ScrapeFormat,
   type CompactScrapeResponse,
   type ScrapeResponse,
   type ScrapeAtom,
@@ -147,6 +151,14 @@ export interface ApiEngineOptions {
    * is refused. Null (local) leaves crawls unbounded.
    */
   defaultMaxPages?: number | null
+  /**
+   * Whether scrape and batch requests may carry a recorded robots override
+   * (`robotsOverride`, `robotsOverrides`). Absent or true (local): the person
+   * running the server decides that for their own fetches. False (hosted):
+   * the field is refused by name with HTTP 400, so no token holder can make
+   * the operator's service set a publisher's rule aside.
+   */
+  allowRobotsOverride?: boolean
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -187,6 +199,35 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const checkFileCap = (req: PageOptions): void => {
     if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
       throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes}, this server's file cap (W2L_MAX_FILE_BYTES)`)
+    }
+  }
+  /**
+   * A selector that does not parse, or that uses what W2L does not match, is
+   * refused by name before anything is fetched or stored, never read as
+   * "matched nothing". So is a list that holds more parts than the extractor
+   * matches for one list: what a list costs a page grows with its parts.
+   */
+  const checkSelectors = (req: PageOptions): void => {
+    for (const name of ['includeTags', 'excludeTags'] as const) {
+      let parts = 0
+      for (const [index, selector] of (req[name] ?? []).entries()) {
+        const refusal = invalidSelector(selector)
+        if (refusal === null) {
+          parts += selectorParts(selector)
+          continue
+        }
+        if (refusal.kind === 'syntax') throw new RequestError(`${name} entry is not a valid CSS selector: ${selector}`)
+        throw new RequestError(`${name} entry uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`${name}[${index}]`] })
+      }
+      if (parts > MAX_SELECTOR_PARTS) {
+        throw new RequestError(`${name} must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and holds ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
+      }
+    }
+  }
+  /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
+  const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
+    if (options.allowRobotsOverride === false && value !== undefined) {
+      throw new RequestError(`unsupported parameter: ${parameter} (this server takes no robots override; a recorded override is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
   }
   const originScheduler = new OriginScheduler(networkPolicy)
@@ -270,7 +311,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task.mode)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -286,7 +327,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // every page. A task stored before crawl formats existed has neither and
     // keeps the full result.
     const selection = task.batch ?? task.crawl
-    const ladder = new LadderScrapeAtom(runner, fetchOptions(selection))
+    // A batch's recorded robots overrides are per URL: only the URL an
+    // override names is fetched past a disallow, never its neighbours. A
+    // server that takes none applies none, also to a task stored with them.
+    const robotsOverrideFor = options.allowRobotsOverride === false || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
+      const robotsOverride = robotsOverrideFor(url)
+      return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
+    })
     const atom: ScrapeAtom = selection === undefined ? ladder : {
       async scrape(url, context) {
         // `timeout` is each page's own deadline, inside the task's.
@@ -304,9 +352,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(attempt => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, ...result }, ...attempt }) => ({
               ...attempt,
-              result: { ...attempt.result, markdown: null, links: [] },
+              result: { ...result, markdown: null, links: [] },
             })),
           },
         }
@@ -376,6 +424,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   return {
     async scrape(req, context = {}) {
       checkFileCap(req)
+      checkSelectors(req)
+      checkRobotsOverride('robotsOverride', req.robotsOverride)
       const overallStart = performance.now()
       // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
       const deadlineAt = req.timeout === undefined
@@ -392,7 +442,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       const runner = new LadderRunner(channels, policy, historyFor(mode))
       const operation = (async () => {
-        const run = await runner.run(req.url, undefined, scope, fetchOptions(req))
+        const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
         const full: ScrapeResponse = {
           ...run.result,
           channelsTried: run.channelsTried,
@@ -407,6 +457,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startCrawl(req) {
       checkFileCap(req)
+      checkSelectors(req)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
       }
@@ -449,6 +500,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
       checkFileCap(req)
+      checkSelectors(req)
+      checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       batchStartInProgress = true
       try {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
@@ -464,7 +517,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
         budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
-        batch: { urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req) },
+        batch: {
+          urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
+          ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
+        },
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
@@ -526,7 +582,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const last = page.steps.at(-1)
         return {
           status: task.status,
-          steps: page.steps,
+          steps: page.steps.map((step) => step.result === null ? step : { ...step, result: { ...step.result, ...askedHtmlFormats(task, step.result) } }),
           cursor: last === undefined ? query.cursor ?? null : encodeStepCursor(last.createdAt, last.id),
           hasMore: page.hasMore,
           counts,
@@ -695,19 +751,39 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 }
 
-/** What a request or stored task asks each lane to capture. Its timeout is the deadline; passed on, it lets the lanes' waits run to it. */
-function fetchOptions(options: PageOptions | undefined): FetchOptions {
+/**
+ * What a request or stored task asks each lane to capture. Its timeout is the
+ * deadline; passed on, it lets the lanes' waits run to it. `html` and
+ * `rawHtml` among its formats ask the lanes to carry them on the result.
+ */
+function fetchOptions(options: PageOptions | undefined, formats: readonly ScrapeFormat[] = []): FetchOptions {
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
     ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
     ...(options?.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
+    ...(options?.includeTags === undefined ? {} : { includeTags: options.includeTags }),
+    ...(options?.excludeTags === undefined ? {} : { excludeTags: options.excludeTags }),
+    ...(formats.includes('html') ? { includeHtml: true } : {}),
+    ...(formats.includes('rawHtml') ? { includeRawHtml: true } : {}),
   }
 }
 
 /** The page options a batch or crawl request set, stored on its task so a resumed task keeps them. */
 function pageOptions(req: PageOptions): PageOptions {
   return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }) }
+}
+
+/** A batch's recorded robots overrides by URL, as sent and in canonical form; every other URL has none. */
+function robotsOverrideLookup(overrides: readonly RobotsUrlOverride[]): (url: string) => RobotsOverride | undefined {
+  const byUrl = new Map<string, RobotsOverride>()
+  for (const { url, reason, recordedBy } of overrides) {
+    const override: RobotsOverride = { reason, ...(recordedBy === undefined ? {} : { recordedBy }) }
+    byUrl.set(url, override)
+    const canonical = canonicalizeUrl(url)
+    if (canonical !== null) byUrl.set(canonical, override)
+  }
+  return (url) => byUrl.get(url) ?? byUrl.get(canonicalizeUrl(url) ?? url)
 }
 
 /** A crawl stored with every option it needs to resume (older tasks lack maxDepth and hosts). */
@@ -735,8 +811,22 @@ function linksRequested(task: Task): boolean {
   return options?.includeLinks === true || (options?.formats ?? []).includes('links')
 }
 
-function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']): CrawlPage {
+/**
+ * `html` and `rawHtml` of a batch item or crawl page, each present when the
+ * task's formats asked for it: what the stored result carries, null when it
+ * carries none (a file, a page that was not read as content).
+ */
+function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPage, 'html' | 'rawHtml'> {
+  const formats = (task.batch ?? task.crawl)?.formats ?? []
+  return {
+    ...(formats.includes('html') ? { html: result?.html ?? null } : {}),
+    ...(formats.includes('rawHtml') ? { rawHtml: result?.rawHtml ?? null } : {}),
+  }
+}
+
+function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): CrawlPage {
   const result = step.result
+  const mode = task.mode
   return {
     id: step.id,
     url: step.url,
@@ -745,6 +835,8 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, mode: Task['mode']
     status: step.status,
     lane: step.lane,
     markdown: result?.markdown ?? null,
+    ...askedHtmlFormats(task, result),
+    ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),

@@ -61,8 +61,13 @@ export interface JsonFormatRequest {
   modelFallback?: boolean
 }
 
-/** String json returns the canonical envelope; an object maps into a caller schema. */
-export type ScrapeFormat = 'markdown' | 'links' | 'json' | JsonFormatRequest
+/**
+ * String json returns the canonical envelope; an object maps into a caller schema.
+ * `html` is the cleaned HTML the Markdown is written from (the main content,
+ * the whole page when onlyMainContent is false, or an includeTags selection);
+ * `rawHtml` is the page as the lane received it.
+ */
+export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | JsonFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string

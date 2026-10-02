@@ -130,7 +130,8 @@ function robotsDecision(result: FetchResult): EvidenceRobotsDecision | null {
       robotsSha256: signed.robotsSha256,
       unreachable: signed.unreachable ?? null,
       crawlDelayMs: signed.crawlDelayMs ?? null,
-      userOverride: false,
+      // A recorded robots override set the disallow aside; the record carries it.
+      userOverride: signed.override !== undefined,
     }
   }
   const detail = [...result.trace].reverse().find(event => event.event === 'robots_checked')?.detail
@@ -144,7 +145,8 @@ function robotsDecision(result: FetchResult): EvidenceRobotsDecision | null {
     robotsSha256: typeof detail?.robotsSha256 === 'string' ? detail.robotsSha256 : null,
     unreachable: typeof detail?.unreachable === 'string' ? detail.unreachable as RobotsUnreachable : null,
     crawlDelayMs: typeof detail?.crawlDelayMs === 'number' ? detail.crawlDelayMs : null,
-    userOverride: false,
+    // The HTTP lane mints no record; its trace says when a recorded override set the disallow aside.
+    userOverride: result.trace.some(event => event.event === 'robots_overridden'),
   }
 }
 

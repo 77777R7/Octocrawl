@@ -20,6 +20,22 @@ const PAGE_OPTION_PROPERTIES = {
   waitFor: { type: 'integer', minimum: 0, maximum: 60000, description: 'Milliseconds the browser waits after load before capture. Starts at the browser rung and counts toward timeout. Default 0.' },
   timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in milliseconds for the whole scrape (per page for crawl and batch). When it fires the result is partial with the content so far, or failed/timeout. Default 300000.' },
   maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file (PDF, CSV, XLSX, ZIP, JSON, text) to download, in bytes, below the server\'s own cap (W2L_MAX_FILE_BYTES, default 50 MiB). A larger file is failed with body_too_large and not saved.' },
+  includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors naming the only elements to keep: the content is those elements in document order (a named navigation included), whatever onlyMainContent says. Nothing matching is an empty answer. Tag, class, id and attribute selectors, descendant and child combinators, :not(), :is(), :where(), :root and :empty, at most 100 parts in all (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one); sibling combinators, :nth-child and the like, and :has() are refused by name.' },
+  excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors removed, with everything inside them, from the main content, the whole page (onlyMainContent false) and an includeTags selection. The same selectors and limit as includeTags.' },
+} as const
+/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content. */
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung.'
+/** A recorded decision to fetch one URL its host's robots.txt disallows; never a blanket switch. */
+const ROBOTS_OVERRIDE_PROPERTIES = {
+  reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
+  recordedBy: { type: 'string', minLength: 1, maxLength: 200, description: 'Who recorded the decision.' },
+} as const
+const ROBOTS_OVERRIDE_SCHEMA = {
+  type: 'object',
+  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API refuses this field.',
+  properties: ROBOTS_OVERRIDE_PROPERTIES,
+  required: ['reason'],
+  additionalProperties: false,
 } as const
 const monitorConfigSchema = {type:'object',properties:{preset:{type:'string',enum:['firecrawl-introduction']},monitorId:{type:'string'},revision:{type:'integer',minimum:1},url:{type:'string'},ruleVersion:{type:'string'},intervalMs:{type:'integer',minimum:1},staleAfterMs:{type:'integer',minimum:1},config:{type:'object'},enabled:{type:'boolean'}},additionalProperties:false} as const
 const MONITOR_TOOLS = [
@@ -53,7 +69,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit.',
+    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden, or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -63,9 +79,10 @@ export const TOOLS = [
         formats: {
           type: 'array',
           minItems: 1,
+          description: FORMATS_DESCRIPTION,
           items: {
             anyOf: [
-              { type: 'string', enum: ['markdown', 'links', 'json'] },
+              { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
               {
                 type: 'object',
                 properties: {
@@ -83,6 +100,7 @@ export const TOOLS = [
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
         ...PAGE_OPTION_PROPERTIES,
+        robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
       },
       required: ['url'],
       additionalProperties: false,
@@ -100,8 +118,8 @@ export const TOOLS = [
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
-        formats: { type: 'array', minItems: 1, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json'] },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
+          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
         includeLinks: { type: 'boolean' },
@@ -184,12 +202,17 @@ export const TOOLS = [
       properties: {
         urls: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
-        formats: { type: 'array', minItems: 1, items: { anyOf: [
-          { type: 'string', enum: ['markdown', 'links', 'json'] },
+        formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: { anyOf: [
+          { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml'] },
           { type: 'object', properties: { type: { const: 'json' }, schema: { type: 'object' }, prompt: { type: 'string' }, modelFallback: { type: 'boolean' } }, required: ['type', 'schema'], additionalProperties: false },
         ] } },
         includeLinks: { type: 'boolean' },
         ...PAGE_OPTION_PROPERTIES,
+        robotsOverrides: {
+          type: 'array', maxItems: 1000,
+          description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
+          items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
+        },
       },
       required: ['urls'], additionalProperties: false,
     },
@@ -228,6 +251,9 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       timeout: req.timeout,
       maxFileBytes: req.maxFileBytes,
+      includeTags: req.includeTags,
+      excludeTags: req.excludeTags,
+      ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
     }, request)
   }
   if (name === 'crawl') {
@@ -246,6 +272,8 @@ export async function callTool(client: W2L, name: string, args: unknown, request
       waitFor: req.waitFor,
       timeout: req.timeout,
       maxFileBytes: req.maxFileBytes,
+      includeTags: req.includeTags,
+      excludeTags: req.excludeTags,
     }, request)
   }
   if (name === 'get_crawl') {
@@ -266,7 +294,7 @@ export async function callTool(client: W2L, name: string, args: unknown, request
   }
   if (name === 'batch_scrape') {
     const req = parseBatchStartRequest(args)
-    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes }, request)
+    return client.batchScrape(req.urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }) }, request)
   }
   if (name === 'get_batch_items') {
     const input = readCrawlQuery(args)

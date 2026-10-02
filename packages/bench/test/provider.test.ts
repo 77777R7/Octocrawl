@@ -106,6 +106,28 @@ describe('ProviderSubject robots gate', () => {
     expect(full).toMatchObject({ status: 'success', evidence: { rawBodySha256: main.evidence.rawBodySha256 } })
   })
 
+  it('shapes the page by includeTags and excludeTags and carries html and rawHtml when asked, like the local lanes', async () => {
+    const body = PAGE.replace('<body>', '<body><nav><a href="/shop">Shop navigation</a></nav>').replace('</body>', '<footer>Provider footer</footer><script>track()</script></body>')
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher)
+    const url = 'https://shop.example/dp/B0TEST'
+    const plain = await subject.fetch(url)
+    expect(plain).not.toHaveProperty('html')
+    expect(plain).not.toHaveProperty('rawHtml')
+    const named = await subject.fetch(url, undefined, undefined, undefined, { includeTags: ['nav', 'h1'], includeHtml: true, includeRawHtml: true })
+    expect(named).toMatchObject({
+      status: 'success',
+      markdown: '[Shop navigation](https://shop.example/shop)\n\n# Cobalt ash kettle',
+      html: '<body><nav><a href="/shop">Shop navigation</a></nav><h1>Cobalt ash kettle</h1></body>',
+      rawHtml: body,
+      document: { confidence: 1 },
+    })
+    const whole = await subject.fetch(url, undefined, undefined, undefined, { onlyMainContent: false, excludeTags: ['nav', 'article p'], includeHtml: true })
+    expect(whole.markdown).toBe('# Cobalt ash kettle\n\nProvider footer')
+    expect(whole.html).toBe('<body><article><h1>Cobalt ash kettle</h1></article><footer>Provider footer</footer></body>')
+    expect(whole).not.toHaveProperty('rawHtml')
+  })
+
   it('keeps a page with no main block as evidence, and returns it for onlyMainContent false', async () => {
     const body = '<!doctype html><html><body><nav><a href="/shop">Shop navigation</a></nav><footer>Provider footer</footer></body></html>'
     const { fetcher } = robotsServing(AMAZON_SHAPED)
@@ -148,6 +170,20 @@ describe('ProviderSubject robots gate', () => {
     expect(out.failureReason).toBe('policy_denied')
     // The load-bearing assertion. Routing to a banned UA would not avoid the
     // violation, it would arrange it — so the request must not happen at all.
+    expect(transport.calls).toEqual([])
+  })
+
+  it('takes no recorded robots override: the rule still refuses, and the origin is not touched', async () => {
+    const transport = new CountingTransport()
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl({ declaredUserAgent: 'Scrapy/2.11' }), transport, 'research', null, fetcher)
+    const out = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { robotsOverride: { reason: 'The publisher links this page itself.', recordedBy: 'analyst' } })
+    // The override is the caller's decision for a fetch from its own machine; it is never handed to a vendor.
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied', lane: 'provider' })
+    expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', skippedFetch: true })
+    expect(out.compliance!.robots).not.toHaveProperty('override')
+    expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
+    expect(out.warnings).toBeUndefined()
     expect(transport.calls).toEqual([])
   })
 

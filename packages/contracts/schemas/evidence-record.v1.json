@@ -157,7 +157,7 @@
           "minimum": 0
         },
         "userOverride": {
-          "description": "Whether a user override replaced the robots.txt decision. W2L has no override yet, so this is false; a later version records the override here.",
+          "description": "Whether the fetch went ahead under a recorded robots override (robotsOverride on a scrape, a robotsOverrides entry on a batch) although decision is disallowed; the result's trace (robots_overridden) and warnings, and in the browser lane its compliance record, carry the rule set aside, the reason and who recorded it. False otherwise, and always on results stored before W2L had the override.",
           "type": "boolean"
         }
       }

@@ -12,8 +12,10 @@
  */
 
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
-import { outerHtml, parse, textOf } from './dom.js'
-import { cleanTree, pruneRecommendations, pruneTree } from './prune.js'
+import { detachAll, outerHtml, parse, textOf } from './dom.js'
+import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
+import { detectRenderSignals, rawSignals } from './render.js'
+import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
@@ -83,7 +85,7 @@ function confidenceOf(
 
 export class ExtractTf implements Extractor {
   extract(html: string, options: ExtractorOptions = {}): ExtractorOutput {
-    const { favorPrecision = false, favorRecall = false, pruneSelectors } = options
+    const { favorPrecision = false, favorRecall = false, pruneSelectors, includeSelectors } = options
     const parseStart = performance.now()
     const doc = parse(html)
     const parseMs = Math.max(0, performance.now() - parseStart)
@@ -116,9 +118,20 @@ export class ExtractTf implements Extractor {
     const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
       (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('preload') &&
       (link.getAttribute('as') ?? '').trim().toLowerCase() === 'fetch').length
+    // Rendering signals live in scripts and fallback markup that cleaning
+    // removes, so they are read from the raw tree as well; the visible text
+    // they are weighed against is the cleaned page's (detectRenderSignals).
+    const raw = rawSignals(doc.document)
 
-    cleanTree(doc.document)
-    pruneTree(doc.document, { selectors: pruneSelectors })
+    // The caller's exclusions (pruneSelectors) are matched here, against
+    // the page as it was received: cleaning unwraps a form and removes a
+    // navigation that a selector such as `form table.filters` leans on.
+    // What is cleaned and pruned is decided on that page too, and the
+    // excluded elements are removed after it, with everything inside them.
+    const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    cleanTree(doc.document, excluded)
+    pruneTree(doc.document)
+    detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
 
@@ -192,12 +205,22 @@ export class ExtractTf implements Extractor {
     const mainLength = main ? textOf(main).length : 0
 
     const adapter = amazonProduct ? adapterFor(doc.document, options.url, product) : preliminaryAdapter
+    // A selection the caller made (includeSelectors) is returned whole: it
+    // is read from the page as received, not from the tree cleaned above,
+    // and what the caller named is the content, so it counts as identified
+    // whatever the cascade made of the page. A selection that holds nothing
+    // says no more about the page than the cascade did, and keeps the
+    // cascade's confidence. The page itself still went through the cascade
+    // for its type, title and main region, and `escalate` below stays what
+    // the cascade found of the page.
+    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors) : null
+    const selected = selection !== null && !selection.blank
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
-      mainHtml: main ? outerHtml(main) : '',
+      mainHtml: selection !== null ? selection.html : main ? outerHtml(main) : '',
       baseUrl,
       metadata,
-      confidence: confidenceOf(
+      confidence: selected ? 1 : confidenceOf(
         blocks.filter((b) => main?.contains(b.el)).length,
         main,
         blocks.length,
@@ -218,6 +241,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
+      render: detectRenderSignals(raw, doc.document),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

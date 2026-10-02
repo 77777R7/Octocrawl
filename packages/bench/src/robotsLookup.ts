@@ -10,7 +10,7 @@
  * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { robotsAgent, type NetworkPolicy, type ExecutionContext, type RobotsUnreachable } from '@w2l/contracts'
+import { robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type RobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -35,6 +35,28 @@ export interface CachedRobots {
   absent: boolean
   /** Why robots.txt was unreachable; set only when it was. */
   unreachable?: RobotsUnreachable
+}
+
+/**
+ * The warning every result of an overridden fetch carries, so a reader who
+ * never opens the trace still sees that a rule was set aside, which one, and
+ * on whose word.
+ */
+export function robotsOverrideWarning(decision: ComplianceRobotsDecision, override: RobotsOverride): FetchWarning {
+  const rules = decision.appliedRules.map((rule) => rule.pattern).join(', ')
+  const who = override.recordedBy === undefined ? '' : ` by ${override.recordedBy}`
+  return {
+    code: 'robots_overridden',
+    message: `${decision.robotsUrl ?? 'robots.txt'} disallows this URL (rule ${rules}); it was fetched under an override recorded${who}: ${override.reason}`,
+  }
+}
+
+/**
+ * What a lane tells its caller (`ExecutionContext.onRobotsOverride`) the
+ * moment it applies an override: its robots events so far and the warning.
+ */
+export function robotsOverrideApplied(trace: readonly TraceEvent[], warning: FetchWarning): RobotsOverrideApplied {
+  return { trace: trace.filter((event) => event.event === 'robots_checked' || event.event === 'robots_disallowed' || event.event === 'robots_overridden'), warning }
 }
 
 const ROBOTS_TIMEOUT_MS = 5_000
