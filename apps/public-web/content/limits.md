@@ -12,20 +12,20 @@ Typing a URL on the [Try OctoCrawl page](/) shows a short note when the address 
 
 ## How the preview identifies itself
 
-The hosted preview identifies itself in every request it sends to a site: robots.txt, the page, and the Amazon.sg browser's requests. Its User-Agent is a Chrome User-Agent followed by the product token `W2L-Preview/1.0`, the project's earlier name, which it still sends. The Chrome version varies:
+The hosted preview identifies itself in every request it sends to a site: robots.txt, the page, and the Amazon.sg browser's requests. Its User-Agent is a Chrome User-Agent followed by the product token `OctoCrawl-Preview/1.0`. The Chrome version varies:
 
 ```text
-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 W2L-Preview/1.0 (+https://github.com/77777R7/w2l)
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 OctoCrawl-Preview/1.0 (+https://octocrawl.dev)
 ```
 
-The preview reads robots.txt before it fetches a page. To keep it off a site, or off part of one, add a group for `w2l-preview`:
+The preview reads robots.txt before it fetches a page. To keep it off a site, or off part of one, add a group for `octocrawl-preview` (or `octocrawl`):
 
 ```text
-User-agent: w2l-preview
+User-agent: octocrawl-preview
 Disallow: /
 ```
 
-For the preview, a group that names it replaces the `User-agent: *` group, so repeat there any `*` rules it should still follow. Without such a group it follows `*`. A disallowed page is not requested and returns `blocked` with the diagnostic `robots_disallowed`; a robots.txt that cannot be read stops the fetch too. The token belongs to this hosted preview: a copy of OctoCrawl that someone runs on their own machine does not send it.
+For the preview, a group that names it replaces the `User-agent: *` group, so repeat there any `*` rules it should still follow. Without such a group it follows `*`. The preview used to send `W2L-Preview/1.0`, the project's earlier name; a group for `w2l-preview` or `w2l` no longer applies to it, so rename such a group to `octocrawl-preview`. A disallowed page is not requested and returns `blocked` with the diagnostic `robots_disallowed`; a robots.txt that cannot be read stops the fetch too. The token belongs to this hosted preview: a copy of OctoCrawl that someone runs on their own machine does not send it.
 
 ## Interpret the status
 

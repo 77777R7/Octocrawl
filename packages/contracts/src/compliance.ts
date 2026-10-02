@@ -355,11 +355,13 @@ export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR
 /**
  * The product token the hosted public preview adds to the standard
  * User-Agent, so a site owner can see the preview in their logs and address
- * it in robots.txt with `User-agent: w2l-preview` (or `w2l`, which covers
- * research mode too). Groups match by substring of the whole User-Agent
- * (http-core matchRobotsGroup); `*` still applies when no group names it.
+ * it in robots.txt with `User-agent: octocrawl-preview` (or `octocrawl`).
+ * Groups match by substring of the whole User-Agent (http-core
+ * matchRobotsGroup); `*` still applies when no group names it. The token used
+ * to be `W2L-Preview/1.0`, so a group for `w2l-preview` or `w2l` no longer
+ * governs the preview.
  */
-export const PREVIEW_PRODUCT_TOKEN = 'W2L-Preview/1.0 (+https://github.com/77777R7/w2l)'
+export const PREVIEW_PRODUCT_TOKEN = 'OctoCrawl-Preview/1.0 (+https://octocrawl.dev)'
 
 /**
  * The hosted preview's identity: the standard identity with

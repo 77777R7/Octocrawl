@@ -114,6 +114,7 @@ describe('headersFromIdentity', () => {
 describe('previewIdentity', () => {
   it('appends the product token to the standard User-Agent and keeps a coherent bundle', () => {
     const preview = previewIdentity(modeIdentity('standard', 128))
+    expect(PREVIEW_PRODUCT_TOKEN).toBe('OctoCrawl-Preview/1.0 (+https://octocrawl.dev)')
     expect(preview.userAgent).toBe(`${browserUserAgent(128)} ${PREVIEW_PRODUCT_TOKEN}`)
     expect(preview.clientHints).toEqual(browserClientHints(128))
     expect(preview.respectsRobots).toBe(true)
