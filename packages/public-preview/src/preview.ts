@@ -155,6 +155,8 @@ export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSig
     onRenderedHtml: url.amazonAsin !== null ? (html, sha256) => { rendered = { html, sha256 } } : undefined,
     localPreviewProxyUrl: localPlatformRequest ? localPlatformProxyUrl : undefined,
     localPreviewRobotsException: localPlatformRequest && localPlatformRobotsException,
+    // Sites see the preview as W2L and can address it in robots.txt (User-agent: w2l-preview).
+    previewProductToken: true,
     // No third-party provider calls, even if environment keys happen to exist.
     keys: {},
   }).filter(channel => channel.id === resolvePreviewCapability(url).captureMode)
