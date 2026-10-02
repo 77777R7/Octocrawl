@@ -18,7 +18,7 @@ import {
   type ComplianceRecord,
   type ComplianceSentHeader,
 } from '@w2l/http-core'
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -167,9 +167,14 @@ const PAGE_CLOSE_MS = 2_000
  * time.
  */
 export async function closePage(page: Pick<Page, 'close'>, timeoutMs = PAGE_CLOSE_MS): Promise<boolean> {
-  const closing = page.close().then(() => true, () => true)
+  return closeWithin(page.close(), timeoutMs)
+}
+
+/** Wait for a close at most `timeoutMs`; true when it ended in time. A close that never answers is left behind, never waited for. */
+async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  const settled = closing.then(() => true, () => true)
   let timer: ReturnType<typeof setTimeout> | undefined
-  const closed = await Promise.race([closing, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })])
+  const closed = await Promise.race([settled, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) })])
   clearTimeout(timer)
   return closed
 }
@@ -371,6 +376,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // goes through routes of its own that relax it too, closed with the fetch;
     // the cache's own routes keep verifying (see EgressTlsOptions).
     const relaxedRoutes = options.skipTlsVerification === true ? new EgressRoutes(this.networkPolicy, undefined, { rejectUnauthorized: false }) : null
+    // The request route of this fetch (host allowlist, ad hosts), removed before the context closes.
+    let requestRoute: ((route: Route) => Promise<void>) | null = null
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -555,14 +562,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const blockAds = options.blockAds !== false
       const pageOrigin = new URL(url).origin
       const hasCustomHeaders = Object.keys(customHeaders).length > 0
+      // One route for the two concerns, installed before creating a page
+      // so the first navigation of a popup or worker cannot bypass it: the
+      // hosted host allowlist first (an ad host is never on it, and
+      // blockAds: false cannot widen it), then the ad hosts. The caller's
+      // headers are not a route's business: a route's continue() overrides
+      // ride every redirect hop (see CustomHeaderGate). The handler is kept
+      // so the fetch can remove it again: a route left on a context that
+      // keeps navigating holds the context's close, and on a managed
+      // context one would pile up per fetch.
       if (allowedHosts !== null || blockAds) {
-        // One route for the two concerns, installed before creating a page
-        // so the first navigation of a popup or worker cannot bypass it: the
-        // hosted host allowlist first (an ad host is never on it, and
-        // blockAds: false cannot widen it), then the ad hosts. The caller's
-        // headers are not a route's business: a route's continue() overrides
-        // ride every redirect hop (see CustomHeaderGate).
-        await context.route('**/*', async route => {
+        requestRoute = async route => {
           const request = route.request()
           const target = request.url()
           if (allowedHosts !== null) {
@@ -586,7 +596,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
             return
           }
           await route.continue().catch(() => {})
-        })
+        }
+        await context.route('**/*', requestRoute)
       }
       if (allowedHosts !== null) {
         // HTTP routes do not intercept WebSocket handshakes. The public
@@ -1117,7 +1128,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
       signal?.removeEventListener('abort', onAbort)
       if (page !== undefined) await closePage(page)
       await session?.detach().catch(() => {})
-      if (context !== this.managedContext) await context?.close().catch(() => {})
+      // The route goes before the context does: Chromium can leave a request
+      // of a page that keeps navigating paused in the handler, and a close
+      // that waited for it would not end (the refresh-loop case).
+      if (context !== undefined && requestRoute !== null) await context.unroute('**/*', requestRoute).catch(() => {})
+      if (context !== this.managedContext && context !== undefined) await closeWithin(context.close(), PAGE_CLOSE_MS)
       await relaxedRoutes?.close()
     }
   }
