@@ -4,15 +4,22 @@ import { Agent, request } from 'node:https'
 import { request as httpRequest, type ClientRequest } from 'node:http'
 import { isIP, type LookupFunction, type Socket } from 'node:net'
 import { connect as connectTls, checkServerIdentity, type ConnectionOptions, type TLSSocket } from 'node:tls'
-import { evaluateHostname, evaluateResolved, hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
-import { DeliveryStore, validateDestinationUrl, type DeliveryClaim } from './deliveryStore.js'
+import { classifyIp, evaluateHostname, evaluateResolved, hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
+import { DeliveryStore, validateDestinationUrl, type DeliveryClaim, type DestinationUrlOptions } from './deliveryStore.js'
 
 export interface WebhookTransportResponse { status: number; retryAfter: string | null }
 export interface WebhookTransportRequest { url: string; body: string; headers: Record<string, string>; signal: AbortSignal }
 export type WebhookTransport = (request: WebhookTransportRequest) => Promise<WebhookTransportResponse>
+export type WebhookTransportOptions = DestinationUrlOptions
 export interface DeliveryWorkerOptions {
   /** Separate from crawler access. Defaults to hosted/public egress, always pins vetted DNS addresses. */
   networkPolicy?: NetworkPolicy
+  /**
+   * A local service's rule: a plain-http receiver is sent to when its host is
+   * loopback and resolves to a loopback address, over node:http, direct.
+   * Every other receiver stays HTTPS with verification. Never set in hosted mode.
+   */
+  allowHttpLoopback?: boolean
   /** Trusted CA material for operator-managed private HTTPS. Verification is always enabled. */
   ca?: ConnectionOptions['ca']
   /** Explicit operator-only HTTP(S) CONNECT proxy; ambient proxy environment is ignored. */
@@ -42,14 +49,48 @@ export function webhookSignature(secret: string, timestamp: string, body: string
   return `sha256=${createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')}`
 }
 
-/** No redirects; a vetted DNS address is used for the actual TCP connection. */
-export function createHttpsWebhookTransport(policy: NetworkPolicy = hostedNetworkPolicy(), ca?: ConnectionOptions['ca'], proxyUrl?: string): WebhookTransport {
+/** Node's lookup replaced by the one vetted address, so the connection goes where the policy decided. */
+function pinnedLookup(address: string): LookupFunction {
+  return ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+    if (options.all) callback(null, [{ address, family: isIP(address) }])
+    else callback(null, address, isIP(address))
+  }) as LookupFunction
+}
+
+/**
+ * A plain-http delivery to a loopback receiver, the one case a local service
+ * admits without TLS: the host must be loopback and every address it resolves
+ * to must be too, so a `localhost` that points elsewhere is refused. Direct
+ * (loopback never goes through a proxy), no redirects, the response body dropped.
+ */
+async function sendPlainHttpLoopback(url: URL, hostname: string, input: WebhookTransportRequest): Promise<WebhookTransportResponse> {
+  const addresses = isIP(hostname) ? [hostname] : await abortable(lookup(hostname, { all: true }).then(results => results.map(result => result.address)), input.signal)
+  input.signal.throwIfAborted()
+  const pinnedAddress = addresses[0]
+  if (pinnedAddress === undefined || addresses.some(address => classifyIp(address) !== 'loopback_address')) throw new Error('webhook egress denied: http is accepted for a loopback receiver only')
+  return new Promise<WebhookTransportResponse>((resolve, reject) => {
+    const req = httpRequest(url, {
+      method: 'POST', signal: input.signal, agent: false, lookup: pinnedLookup(pinnedAddress),
+      headers: { ...input.headers, 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(input.body)) },
+    }, res => {
+      const retryAfter = res.headers['retry-after']
+      resolve({ status: res.statusCode ?? 0, retryAfter: (Array.isArray(retryAfter) ? retryAfter[0] : retryAfter) ?? null })
+      res.destroy()
+    })
+    req.once('error', reject)
+    req.end(input.body)
+  })
+}
+
+/** No redirects; a vetted DNS address is used for the actual TCP connection. With `allowHttpLoopback`, a plain-http loopback receiver is sent to over node:http. */
+export function createHttpsWebhookTransport(policy: NetworkPolicy = hostedNetworkPolicy(), ca?: ConnectionOptions['ca'], proxyUrl?: string, options: WebhookTransportOptions = {}): WebhookTransport {
   const proxy = proxyUrl ? new URL(proxyUrl) : null
   if (proxy && (!['http:', 'https:'].includes(proxy.protocol) || proxy.username || proxy.password || proxy.pathname !== '/' || proxy.search || proxy.hash)) throw new Error('delivery proxy must be an HTTP(S) origin without credentials, path, query or fragment')
   return async input => {
     input.signal.throwIfAborted()
-    const url = new URL(validateDestinationUrl(input.url))
+    const url = new URL(validateDestinationUrl(input.url, options))
     const hostname = url.hostname.replace(/^\[|\]$/g, '')
+    if (url.protocol === 'http:') return sendPlainHttpLoopback(url, hostname, input)
     const literalDecision = evaluateHostname(hostname, policy)
     if (literalDecision && !literalDecision.allowed) throw new Error(`webhook egress denied: ${literalDecision.violation}`)
     // Node's DNS promise is not abortable; stop waiting immediately on cancellation.
@@ -68,10 +109,7 @@ export function createHttpsWebhookTransport(policy: NetworkPolicy = hostedNetwor
     try { return await new Promise<WebhookTransportResponse>((resolve, reject) => {
       const req = request(url, {
         method: 'POST', signal: input.signal, ca, rejectUnauthorized: true, agent: agent ?? false,
-        lookup: ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
-          if (options.all) callback(null, [{ address: pinnedAddress, family: isIP(pinnedAddress) }])
-          else callback(null, pinnedAddress, isIP(pinnedAddress))
-        }) as LookupFunction,
+        lookup: pinnedLookup(pinnedAddress),
         headers: { ...input.headers, 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(input.body)) },
       }, res => {
         const retryAfter = res.headers['retry-after']
@@ -131,7 +169,7 @@ export class DeliveryWorker {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
     if (!Number.isSafeInteger(this.leaseMs) || !Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs <= 0 || this.leaseMs <= this.requestTimeoutMs) throw new Error('delivery lease must exceed positive request timeout')
     for (const [name, value] of [['retryBaseMs', options.retryBaseMs], ['pollMs', options.pollMs]] as const) if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) throw new Error(`invalid ${name}`)
-    this.transport = options.transport ?? createHttpsWebhookTransport(options.networkPolicy ?? hostedNetworkPolicy(), options.ca, options.proxyUrl)
+    this.transport = options.transport ?? createHttpsWebhookTransport(options.networkPolicy ?? hostedNetworkPolicy(), options.ca, options.proxyUrl, { allowHttpLoopback: options.allowHttpLoopback === true })
     this.now = options.now ?? Date.now
   }
   async processOne(signal?: AbortSignal): Promise<boolean> {
@@ -181,8 +219,9 @@ export class DeliveryWorker {
       }), signal).catch(() => {})
     }
   }
+  /** The destination's custom headers (a job destination's, sent on every attempt), then W2L's own, which no custom header overrides; the transport adds content-type and content-length last. */
   private headers(claim: DeliveryClaim): Record<string, string> {
-    const headers: Record<string, string> = { 'x-w2l-event-id': claim.delivery.eventId, 'x-w2l-event-version': String(claim.delivery.eventVersion), 'x-w2l-delivery-id': claim.delivery.id }
+    const headers: Record<string, string> = { ...claim.headers, 'x-w2l-event-id': claim.delivery.eventId, 'x-w2l-event-version': String(claim.delivery.eventVersion), 'x-w2l-delivery-id': claim.delivery.id }
     if (claim.destination.secretEnv) {
       const secret = (this.options.secrets ?? process.env)[claim.destination.secretEnv]
       if (!secret) throw new Error(`webhook secret unavailable: ${claim.destination.secretEnv}`)

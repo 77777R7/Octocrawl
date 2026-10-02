@@ -15,6 +15,7 @@ import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
+import type { WebhookPayloadFormat } from './delivery.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
 export type ApiCrawlMode = (typeof CRAWL_MODES)[number]
@@ -213,6 +214,63 @@ export interface CompactScrapeResponse {
   channelsTried: readonly string[]
 }
 
+/** The events a job webhook can be sent: Firecrawl's four, plus `cancelled`, which W2L tells apart from `failed`. */
+export const WEBHOOK_EVENTS = ['started', 'page', 'completed', 'failed', 'cancelled'] as const
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
+
+/** The bounds of a job webhook's configuration. */
+export const MAX_WEBHOOK_URL_LENGTH = 2048
+export const MAX_WEBHOOK_HEADERS = 32
+export const MAX_WEBHOOK_HEADERS_BYTES = 8192
+export const MAX_WEBHOOK_METADATA_ENTRIES = 32
+export const MAX_WEBHOOK_METADATA_VALUE_LENGTH = 1000
+export const MAX_WEBHOOK_METADATA_BYTES = 8192
+
+/**
+ * Where a crawl or batch posts its events (`webhook` on `POST /v1/crawl` and
+ * `POST /v1/batches`; a plain string is `{ url }`). Each event is one durable
+ * delivery with retries, signed when `secretEnv` names an operator secret;
+ * `GET /v1/deliveries?jobId=<taskId>` lists them. The receiver must be https;
+ * a local server also takes plain http to a loopback receiver.
+ */
+export interface WebhookConfig {
+  /** The receiver: an http(s) URL of at most 2048 characters, without credentials or a fragment. */
+  url: string
+  /**
+   * Headers sent with every delivery, retries included: at most 32, 8 KiB in
+   * all, RFC 7230 token names (lower-cased), values without line breaks.
+   * `content-type`, `content-length`, `host`, `connection`,
+   * `transfer-encoding` and every `x-w2l-*` name are W2L's and refused by
+   * name. Stored in the control database alone, never on the task or in any
+   * response, which show their names only; `secretEnv` is the signing path.
+   */
+  headers?: Readonly<Record<string, string>>
+  /** Strings echoed as `metadata` in every payload: at most 32, each of at most 1000 characters, 8 KiB in all. */
+  metadata?: Readonly<Record<string, string>>
+  /** The events to deliver; default all five. A filtered event is never enqueued. */
+  events?: readonly WebhookEvent[]
+  /** An operator `W2L_WEBHOOK_SECRET_*` variable whose value signs each delivery (`x-w2l-timestamp`, `x-w2l-signature`); never a literal. */
+  secretEnv?: string
+}
+
+/** The `webhook` field as a request may write it: a URL string, a configuration object, or null for none. */
+export type WebhookOption = string | WebhookConfig | null
+
+/**
+ * What a crawl or batch status says about its webhook: the destination
+ * (`GET /v1/deliveries?jobId=`), the receiver as origin and path (no query),
+ * the events taken, and how its deliveries stand. `pending` counts the
+ * deliveries not yet acknowledged, those in flight included.
+ */
+export interface JobWebhookStatus {
+  destinationId: string
+  url: string
+  events: readonly WebhookEvent[]
+  pending: number
+  delivered: number
+  deadLetter: number
+}
+
 export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   url: string
   mode?: ApiCrawlMode
@@ -276,7 +334,12 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
    * with a different request is HTTP 409 `conflict`. Keys live 24 hours.
    */
   idempotencyKey?: string
+  /** A receiver for the crawl's events (`started`, one `page` per page recorded, then `completed`, `failed` or `cancelled`); see WebhookConfig. */
+  webhook?: WebhookOption
 }
+
+/** What the parser hands the engine: the request plus, from the `/fc` shim, the payload shape its receiver expects. */
+export type ParsedCrawlStartRequest = CrawlStartRequest & { webhookPayloadFormat?: WebhookPayloadFormat }
 
 export interface CrawlAccepted {
   taskId: string
@@ -365,10 +428,12 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * changed`). The appended URLs go to the end of the job's list, in order.
    */
   appendToId?: string
+  /** A receiver for the batch's events (`started`, one `page` per item recorded, then `completed`, `failed` or `cancelled`); see WebhookConfig. */
+  webhook?: WebhookOption
 }
 
-/** What the parser hands the engine: the request plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none). */
-export type ParsedBatchStartRequest = BatchStartRequest & { invalidURLs?: readonly string[] }
+/** What the parser hands the engine: the request plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none), and from a shim the payload shape its receiver expects. */
+export type ParsedBatchStartRequest = BatchStartRequest & { invalidURLs?: readonly string[]; webhookPayloadFormat?: WebhookPayloadFormat }
 
 /**
  * `POST /v1/batches` 202: the task id and, when `ignoreInvalidURLs` was on,
@@ -386,6 +451,10 @@ export interface BatchStatusResponse extends CrawlReport {
   requested: number
   completed: number
   remaining: number
+  /** Items recorded `success` or `partial`, every attempt counted. */
+  succeeded: number
+  /** Items the errors report lists: `failed`, `blocked`, `cancelled` or `budget_exceeded`, every attempt counted. */
+  failed: number
   /** The cap in force: the request's `maxConcurrency` or the service's worker count, whichever is lower. */
   maxConcurrency: number
   /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
@@ -564,8 +633,8 @@ const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'inc
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'appendToId', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them. */
 const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -650,6 +719,102 @@ function readAppendToId(value: unknown): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'string' || value.length < 1 || value.length > 200) throw new RequestError('appendToId must be a non-empty string')
   return value
+}
+
+const WEBHOOK_KEYS = ['url', 'headers', 'metadata', 'events', 'secretEnv'] as const
+/** Header names a delivery sets itself: the transport's and W2L's own `x-w2l-*` family. */
+const WEBHOOK_RESERVED_HEADERS: ReadonlySet<string> = new Set(['content-type', 'content-length', 'host', 'connection', 'transfer-encoding'])
+const WEBHOOK_SECRET_ENV = /^W2L_WEBHOOK_SECRET_[A-Z0-9_]+$/
+const WEBHOOK_HEADERS_MESSAGE = `webhook.headers must be an object of at most ${MAX_WEBHOOK_HEADERS} string values`
+const WEBHOOK_METADATA_MESSAGE = `webhook.metadata must be an object of at most ${MAX_WEBHOOK_METADATA_ENTRIES} string values of at most ${MAX_WEBHOOK_METADATA_VALUE_LENGTH} characters`
+const WEBHOOK_EVENTS_MESSAGE = `webhook.events must be a non-empty array of ${WEBHOOK_EVENTS.join(', ')} without duplicates`
+
+const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength
+
+/** Why a webhook header (lower-cased name) cannot be sent, or null when it can: W2L's own and the transport's names are reserved. */
+export function webhookHeaderRefusal(name: string): string | null {
+  return WEBHOOK_RESERVED_HEADERS.has(name) || name.startsWith('x-w2l-') ? `webhook.headers: ${name} is reserved` : null
+}
+
+/** `webhook.headers`: at most 32 entries of 8 KiB in all, token names given once and lower-cased, values without line breaks, none reserved. */
+function readWebhookHeaders(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some((item) => typeof item !== 'string')) throw new RequestError(WEBHOOK_HEADERS_MESSAGE)
+  const entries = Object.entries(value as Record<string, string>)
+  if (entries.length > MAX_WEBHOOK_HEADERS) throw new RequestError(WEBHOOK_HEADERS_MESSAGE)
+  const headers: Record<string, string> = {}
+  let bytes = 0
+  for (const [given, item] of entries) {
+    if (!HEADER_NAME.test(given)) throw new RequestError(`webhook.headers: ${given} is not a valid HTTP header name`)
+    const name = given.toLowerCase()
+    const refusal = webhookHeaderRefusal(name)
+    if (refusal !== null) throw new RequestError(refusal)
+    if (name in headers) throw new RequestError(`webhook.headers: ${name} is given twice`)
+    if (/[\r\n]/.test(item)) throw new RequestError('webhook.headers value must not contain line breaks')
+    bytes += utf8Bytes(name) + utf8Bytes(item)
+    headers[name] = item
+  }
+  if (bytes > MAX_WEBHOOK_HEADERS_BYTES) throw new RequestError(`webhook.headers must be at most ${MAX_WEBHOOK_HEADERS_BYTES} bytes`)
+  return headers
+}
+
+/** `webhook.metadata`: at most 32 string values of at most 1000 characters, 8 KiB in all, echoed as they are. */
+function readWebhookMetadata(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(WEBHOOK_METADATA_MESSAGE)
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > MAX_WEBHOOK_METADATA_ENTRIES) throw new RequestError(WEBHOOK_METADATA_MESSAGE)
+  let bytes = 0
+  for (const [key, item] of entries) {
+    if (typeof item !== 'string' || item.length > MAX_WEBHOOK_METADATA_VALUE_LENGTH) throw new RequestError(WEBHOOK_METADATA_MESSAGE)
+    bytes += utf8Bytes(key) + utf8Bytes(item)
+  }
+  if (bytes > MAX_WEBHOOK_METADATA_BYTES) throw new RequestError(WEBHOOK_METADATA_MESSAGE)
+  return { ...(value as Record<string, string>) }
+}
+
+/** `webhook.events`: a non-empty list of the five names, each once, in the order given. */
+function readWebhookEvents(value: unknown): readonly WebhookEvent[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || !(WEBHOOK_EVENTS as readonly string[]).includes(item)) || new Set(value).size !== value.length) {
+    throw new RequestError(WEBHOOK_EVENTS_MESSAGE)
+  }
+  return [...(value as WebhookEvent[])]
+}
+
+/**
+ * The `webhook` of a crawl or batch request: a URL string is `{ url }`, null
+ * or undefined is none, an object takes url, headers, metadata, events and
+ * secretEnv and nothing else (`unknown webhook option: <key>`). The URL must
+ * be http(s) of at most 2048 characters without credentials or a fragment;
+ * whether http is admitted (a loopback receiver of a local service) and
+ * whether a hosted server takes the address is the engine's, mode-aware check.
+ */
+export function readWebhook(value: unknown): WebhookConfig | undefined {
+  if (value === undefined || value === null) return undefined
+  const rec: Record<string, unknown> = typeof value === 'string' ? { url: value } : value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  if (typeof rec.url !== 'string' || rec.url.length === 0) throw new RequestError('webhook must be a URL string or an object with url')
+  for (const key of Object.keys(rec)) if (rec[key] !== undefined && !(WEBHOOK_KEYS as readonly string[]).includes(key)) throw new RequestError(`unknown webhook option: ${key}`)
+  if (rec.url.length > MAX_WEBHOOK_URL_LENGTH) throw new RequestError(`webhook.url must be at most ${MAX_WEBHOOK_URL_LENGTH} characters`)
+  let url: URL
+  try {
+    url = new URL(rec.url)
+  } catch {
+    throw new RequestError('webhook.url must be http(s)')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new RequestError('webhook.url must be http(s)')
+  if (url.username || url.password || url.hash) throw new RequestError('webhook.url must not carry credentials or a fragment')
+  if (rec.secretEnv !== undefined && (typeof rec.secretEnv !== 'string' || !WEBHOOK_SECRET_ENV.test(rec.secretEnv))) throw new RequestError('webhook.secretEnv must name an operator W2L_WEBHOOK_SECRET_* variable')
+  const headers = readWebhookHeaders(rec.headers)
+  const metadata = readWebhookMetadata(rec.metadata)
+  const events = readWebhookEvents(rec.events)
+  return {
+    url: rec.url,
+    ...(headers === undefined ? {} : { headers }),
+    ...(metadata === undefined ? {} : { metadata }),
+    ...(events === undefined ? {} : { events }),
+    ...(rec.secretEnv === undefined ? {} : { secretEnv: rec.secretEnv as string }),
+  }
 }
 
 /** A batch's `maxConcurrency`: an integer from 1 to 4; the engine lowers it to its worker count, never raises it. */
@@ -1219,6 +1384,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const sitemap = readSitemapMode(rec.sitemap)
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
   const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
+  const webhook = readWebhook(rec.webhook)
   const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
@@ -1234,6 +1400,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     ...(sitemap === undefined ? {} : { sitemap }),
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(webhook === undefined ? {} : { webhook }),
     ...page,
     ...readAttribution(rec),
   }
@@ -1281,6 +1448,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
   const maxConcurrency = readMaxConcurrency(rec.maxConcurrency, 'maxConcurrency')
+  const webhook = readWebhook(rec.webhook)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
@@ -1293,6 +1461,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(ignoreInvalidURLs === true ? { invalidURLs } : {}),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(appendToId === undefined ? {} : { appendToId }),
+    ...(webhook === undefined ? {} : { webhook }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats)

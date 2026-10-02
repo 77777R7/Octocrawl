@@ -5,7 +5,7 @@
  * Types only — no I/O.
  */
 
-import type { AgentHints, RequestAttribution } from './api.js'
+import type { AgentHints, JobWebhookStatus, RequestAttribution } from './api.js'
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
 import type { Evidence, FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
@@ -216,6 +216,8 @@ export interface CrawlReport {
   discovery: CrawlDiscovery | null
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
+  /** The task's webhook and how its deliveries stand; absent when the request set none. */
+  webhook?: JobWebhookStatus
 }
 
 export interface CrawlPage {

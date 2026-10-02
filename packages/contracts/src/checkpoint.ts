@@ -8,8 +8,9 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
-import type { PageOptions, RequestAttribution, RobotsUrlOverride } from './api.js'
+import type { PageOptions, RequestAttribution, RobotsUrlOverride, WebhookEvent } from './api.js'
 import type { CrawlMode } from './compliance.js'
+import type { WebhookPayloadFormat } from './delivery.js'
 import type { CrawlDiscovery, SitemapMode } from './crawl.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
@@ -53,6 +54,22 @@ export const DEFAULT_CRAWL_BUDGET: CrawlBudget = {
   maxTokens: null,
 }
 
+/**
+ * A job's webhook as its task stores it: the receiver, the events taken,
+ * the metadata echoed in every payload, the signing secret's name and the
+ * destination (`job:<taskId>`) in the control database. Custom headers live
+ * in that database alone, never here.
+ */
+export interface StoredJobWebhook {
+  url: string
+  events: readonly WebhookEvent[]
+  metadata: Readonly<Record<string, string>>
+  secretEnv?: string
+  destinationId: string
+  /** `firecrawl` for a job started through the `/fc` shim, whose receiver gets Firecrawl's payload shape; absent means W2L's envelope. */
+  payloadFormat?: WebhookPayloadFormat
+}
+
 /** One crawl job. The SQLite file sits next to `taskDir`. */
 export interface Task {
   id: string
@@ -71,7 +88,7 @@ export interface Task {
    * place, pushing to the end in order: the orchestrator seeds the tail past
    * what it has seeded, by index, and never a URL twice.
    */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[] } & PageOptions
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
@@ -103,6 +120,8 @@ export interface Task {
     sitemap?: SitemapMode
     /** The crawl's own cap on pages fetched at once; null takes the service's worker count. */
     maxConcurrency?: number | null
+    /** The crawl's webhook, when the request set one. */
+    webhook?: StoredJobWebhook
   } & PageOptions
   /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
   attribution?: RequestAttribution

@@ -151,6 +151,25 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(Object.keys(runtime).sort()).toEqual(['CrawlOrchestrator', 'systemClock'])
   })
 
+  it('calls onStep once per persisted step, in the order the steps are written, after the step and the attempt counters', async () => {
+    const clock = new FakeClock()
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]])
+    // Each fetch moves the clock, so the steps' createdAt order is the order they were written.
+    const atom: ScrapeAtom = { scrape: async (url) => { clock.t += 10; const hit = pages.get(url); if (hit === undefined) throw new Error(`no page for ${url}`); return hit }, close: async () => {} }
+    const store = new MemoryTaskStore()
+    const seen: Array<{ id: string; status: string; persisted: boolean; pagesFetched: number }> = []
+    const orchestrator = new CrawlOrchestrator({ store, atom, clock, workerCount: 1, onStep: async (step) => {
+      const persisted = await store.getStep(step.id)
+      const attempt = await store.getAttempt(step.attemptId)
+      seen.push({ id: step.id, status: step.status, persisted: persisted !== null && persisted.status === step.status, pagesFetched: attempt?.pagesFetched ?? -1 })
+    } })
+    const report = await orchestrator.run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+    expect(report.pagesFetched).toBe(3)
+    const steps = await store.listSteps(report.taskId)
+    expect(seen.map((entry) => entry.id)).toEqual(steps.map((step) => step.id))
+    expect(seen).toEqual(steps.map((step, index) => ({ id: step.id, status: 'success', persisted: true, pagesFetched: index + 1 })))
+  })
+
   it('does not enqueue links from a non-contentful page', async () => {
     const blocked: FetchResult = {
       ...page(SEED, { links: [ITEM_A] }),

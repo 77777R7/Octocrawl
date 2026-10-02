@@ -2,14 +2,25 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import { configureControlDatabase } from './sqliteSetup.js'
-import type { DeliveryAttempt, DeliveryDestination, DeliveryDestinationInput, DeliveryPage, DeliveryPageQuery, DeliveryQuery, DeliveryState, WebhookDelivery, WebhookEventEnvelope } from '@w2l/contracts'
+import { classifyIp, WEBHOOK_EVENTS, webhookHeaderRefusal, type DeliveryAttempt, type DeliveryDestination, type DeliveryDestinationInput, type DeliveryDestinationKind, type DeliveryPage, type DeliveryPageQuery, type DeliveryQuery, type DeliveryState, type WebhookDelivery, type WebhookEvent, type WebhookEventEnvelope, type WebhookPayload, type WebhookPayloadFormat } from '@w2l/contracts'
+
+/** Columns added to delivery_destinations after its first schema, each created when missing. */
+const DESTINATION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ['secret_env', 'secret_env TEXT'],
+  ['kind', "kind TEXT NOT NULL DEFAULT 'monitor'"],
+  ['events_json', 'events_json TEXT'],
+  ['headers_json', 'headers_json TEXT'],
+  ['metadata_json', 'metadata_json TEXT'],
+  ['payload_format', 'payload_format TEXT'],
+]
 
 export function createDeliveryTables(db: Database.Database): void {
   db.transaction(() => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS delivery_destinations (
       id TEXT PRIMARY KEY, monitor_id TEXT NOT NULL, url TEXT NOT NULL, max_attempts INTEGER NOT NULL,
-      enabled INTEGER NOT NULL, created_at INTEGER NOT NULL, secret_env TEXT
+      enabled INTEGER NOT NULL, created_at INTEGER NOT NULL, secret_env TEXT,
+      kind TEXT NOT NULL DEFAULT 'monitor', events_json TEXT, headers_json TEXT, metadata_json TEXT, payload_format TEXT
     );
     CREATE TABLE IF NOT EXISTS webhook_deliveries (
       id TEXT PRIMARY KEY, destination_id TEXT NOT NULL, monitor_id TEXT NOT NULL, event_id TEXT NOT NULL,
@@ -27,9 +38,25 @@ export function createDeliveryTables(db: Database.Database): void {
       error TEXT, retry_after_at INTEGER, UNIQUE(delivery_id,fencing_token)
     );
   `)
-  const columns = db.prepare('PRAGMA table_info(delivery_destinations)').all() as { name: string }[]
-  if (!columns.some(column => column.name === 'secret_env')) db.exec('ALTER TABLE delivery_destinations ADD COLUMN secret_env TEXT')
+  const columns = new Set((db.prepare('PRAGMA table_info(delivery_destinations)').all() as { name: string }[]).map(column => column.name))
+  for (const [name, definition] of DESTINATION_COLUMNS) if (!columns.has(name)) db.exec(`ALTER TABLE delivery_destinations ADD COLUMN ${definition}`)
   }).immediate()
+}
+
+/**
+ * Caller owns the transaction. One delivery for a job destination
+ * (`job:<taskId>`), keyed by its event id: a second enqueue of the same event
+ * is ignored, so a resume or a restart can offer every persisted step again
+ * and no page is sent twice. The payload is stored as given and never changes.
+ */
+export function enqueueJobDelivery(db: Database.Database, destinationId: string, eventId: string, sequence: number, payload: WebhookPayload, now: number): boolean {
+  const destination = db.prepare('SELECT * FROM delivery_destinations WHERE id=?').get(destinationId) as DestinationRow | undefined
+  if (!destination || destination.kind !== 'job') throw new Error('job webhook destination not found')
+  if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('invalid job event sequence')
+  return db.prepare(`INSERT OR IGNORE INTO webhook_deliveries
+    (id,destination_id,monitor_id,event_id,event_version,state,max_attempts,next_attempt_at,created_at,payload_json)
+    VALUES (?,?,?,?,?,'pending',?,?,?,?)`)
+    .run(crypto.randomUUID(), destination.id, destination.monitor_id, eventId, sequence, destination.max_attempts, Math.max(now, deliveryOriginNotBefore(db, destination.url)), now, JSON.stringify(payload)).changes === 1
 }
 
 /** Caller owns the transaction: invoke alongside event and outbox insertion. No network I/O. */
@@ -54,34 +81,87 @@ function hasMonitorOutbox(db: Database.Database): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_outbox'").get())
 }
 
-export function validateDestinationUrl(value: string): string {
-  const url = new URL(value)
-  if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('webhook destination must be HTTPS without credentials or fragment')
-  return url.href
+export interface DestinationUrlOptions {
+  /** A local service's rule: a plain-http receiver is admitted when its host is loopback (127.0.0.0/8, ::1, localhost); hosted mode never sets it. */
+  allowHttpLoopback?: boolean
 }
 
-interface DestinationRow { id: string; monitor_id: string; url: string; max_attempts: number; enabled: number; created_at: number; secret_env: string | null }
+/** Whether a URL's host names the machine itself: a loopback literal, or `localhost` (whose resolved address the transport checks again). */
+export function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  return host === 'localhost' || classifyIp(host) === 'loopback_address'
+}
+
+export function validateDestinationUrl(value: string, options: DestinationUrlOptions = {}): string {
+  let url: URL
+  try { url = new URL(value) } catch { throw new Error('webhook destination must be HTTPS without credentials or fragment') }
+  if (url.username || url.password || url.hash) throw new Error('webhook destination must be HTTPS without credentials or fragment')
+  if (url.protocol === 'https:') return url.href
+  if (url.protocol === 'http:' && options.allowHttpLoopback === true) {
+    if (isLoopbackHostname(url.hostname)) return url.href
+    throw new Error('webhook destination must be HTTPS, or plain http to a loopback receiver')
+  }
+  throw new Error('webhook destination must be HTTPS without credentials or fragment')
+}
+
+interface DestinationRow { id: string; monitor_id: string; url: string; max_attempts: number; enabled: number; created_at: number; secret_env: string | null; kind: DeliveryDestinationKind; events_json: string | null; headers_json: string | null; metadata_json: string | null; payload_format: WebhookPayloadFormat | null }
 interface DeliveryRow { id: string; destination_id: string; monitor_id: string; event_id: string; event_version: number; state: DeliveryState; attempt_count: number; max_attempts: number; next_attempt_at: number; lease_until: number | null; fencing_token: number; created_at: number; delivered_at: number | null; last_status: number | null; last_error: string | null; payload_json: string }
 interface AttemptRow { id: string; delivery_id: string; fencing_token: number; started_at: number; ended_at: number | null; outcome: DeliveryAttempt['outcome']; status: number | null; error: string | null; retry_after_at: number | null }
-export interface DeliveryClaim { delivery: WebhookDelivery; destination: DeliveryDestination; attemptId: string }
+/** A claimed delivery with its destination and, for a job destination, the custom header values the worker sends (never part of the public destination). */
+export interface DeliveryClaim { delivery: WebhookDelivery; destination: DeliveryDestination; attemptId: string; headers: Readonly<Record<string, string>> }
 export interface DeliveryCompletion { state: 'delivered' | 'pending' | 'dead_letter'; status: number | null; error: string | null; nextAttemptAt?: number; retryAfterAt?: number | null }
 
+/** The job-destination options as they are stored: events in request order, header names lower-cased, metadata as given. */
+function jobDestinationFields(input: DeliveryDestinationInput): { events: readonly WebhookEvent[] | null; headers: Record<string, string> | null; metadata: Record<string, string> | null; payloadFormat: WebhookPayloadFormat | null } {
+  let events: readonly WebhookEvent[] | null = null
+  if (input.events !== undefined) {
+    if (!Array.isArray(input.events) || input.events.length === 0 || input.events.some(event => !(WEBHOOK_EVENTS as readonly string[]).includes(event)) || new Set(input.events).size !== input.events.length) throw new Error(`events must be a non-empty array of ${WEBHOOK_EVENTS.join(', ')} without duplicates`)
+    events = [...input.events]
+  }
+  let headers: Record<string, string> | null = null
+  if (input.headers !== undefined) {
+    if (input.headers === null || typeof input.headers !== 'object' || Array.isArray(input.headers) || Object.values(input.headers).some(value => typeof value !== 'string' || /[\r\n]/.test(value))) throw new Error('headers must be an object of string values without line breaks')
+    headers = {}
+    for (const [name, value] of Object.entries(input.headers)) {
+      const lower = name.toLowerCase()
+      const refusal = webhookHeaderRefusal(lower)
+      if (refusal !== null) throw new Error(refusal)
+      headers[lower] = value
+    }
+  }
+  let metadata: Record<string, string> | null = null
+  if (input.metadata !== undefined) {
+    if (input.metadata === null || typeof input.metadata !== 'object' || Array.isArray(input.metadata) || Object.values(input.metadata).some(value => typeof value !== 'string')) throw new Error('metadata must be an object of string values')
+    metadata = { ...input.metadata }
+  }
+  if (input.payloadFormat !== undefined && input.payloadFormat !== 'w2l' && input.payloadFormat !== 'firecrawl') throw new Error('payloadFormat must be w2l or firecrawl')
+  return { events, headers, metadata, payloadFormat: input.payloadFormat ?? null }
+}
+
 /** Caller owns the write transaction so subscription creation and historical enqueue can commit together. */
-export function registerDeliveryDestination(db: Database.Database, input: DeliveryDestinationInput, now = Date.now()): DeliveryDestination {
+export function registerDeliveryDestination(db: Database.Database, input: DeliveryDestinationInput, now = Date.now(), options: DestinationUrlOptions = {}): DeliveryDestination {
   if (!input || typeof input.id !== 'string' || !input.id.trim() || input.id.length > 200 || typeof input.monitorId !== 'string' || !input.monitorId.trim() || input.monitorId.length > 200) throw new Error('invalid destination or monitor ID')
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new Error('enabled must be boolean')
   if (input.secretEnv !== undefined && !/^W2L_WEBHOOK_SECRET_[A-Z0-9_]+$/.test(input.secretEnv)) throw new Error('secretEnv must name an operator W2L_WEBHOOK_SECRET_* variable')
-  const url = validateDestinationUrl(input.url)
+  const kind: DeliveryDestinationKind = input.kind ?? 'monitor'
+  if (kind !== 'monitor' && kind !== 'job') throw new Error('kind must be monitor or job')
+  // The job options wait for the Monitor destinations: a Monitor's receiver gets every event, W2L's headers and the Monitor envelope.
+  if (kind === 'monitor' && (input.events !== undefined || input.headers !== undefined || input.metadata !== undefined || input.payloadFormat !== undefined)) throw new Error('events, headers, metadata and payloadFormat are job webhook options; a Monitor destination takes none')
+  const fields = jobDestinationFields(input)
+  // A job destination's receiver was checked by the engine under its mode; a Monitor destination stays HTTPS-only.
+  const url = validateDestinationUrl(input.url, kind === 'job' ? options : {})
   const maxAttempts = input.maxAttempts ?? 8
   if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 100) throw new Error('maxAttempts must be an integer from 1 to 100')
   const row = db.prepare('SELECT * FROM delivery_destinations WHERE id=?').get(input.id) as DestinationRow | undefined
-  const existing = row ? destinationFrom(row) : null
-  if (existing) {
-    if (existing.monitorId !== input.monitorId || existing.url !== url || existing.maxAttempts !== maxAttempts || existing.secretEnv !== input.secretEnv) throw new Error('destination identity is immutable; create a new destination ID')
-    return existing
+  if (row) {
+    const same = row.monitor_id === input.monitorId && row.url === url && row.max_attempts === maxAttempts && (row.secret_env ?? undefined) === input.secretEnv && row.kind === kind
+      && (row.events_json ?? null) === (fields.events === null ? null : JSON.stringify(fields.events)) && (row.headers_json ?? null) === (fields.headers === null ? null : JSON.stringify(fields.headers))
+      && (row.metadata_json ?? null) === (fields.metadata === null ? null : JSON.stringify(fields.metadata)) && (row.payload_format ?? null) === fields.payloadFormat
+    if (!same) throw new Error('destination identity is immutable; create a new destination ID')
+    return destinationFrom(row)
   }
-  db.prepare('INSERT INTO delivery_destinations (id,monitor_id,url,max_attempts,enabled,created_at,secret_env) VALUES (?,?,?,?,?,?,?)')
-    .run(input.id, input.monitorId, url, maxAttempts, input.enabled === false ? 0 : 1, now, input.secretEnv ?? null)
+  db.prepare('INSERT INTO delivery_destinations (id,monitor_id,url,max_attempts,enabled,created_at,secret_env,kind,events_json,headers_json,metadata_json,payload_format) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(input.id, input.monitorId, url, maxAttempts, input.enabled === false ? 0 : 1, now, input.secretEnv ?? null, kind, fields.events === null ? null : JSON.stringify(fields.events), fields.headers === null ? null : JSON.stringify(fields.headers), fields.metadata === null ? null : JSON.stringify(fields.metadata), fields.payloadFormat)
   return destinationFrom(db.prepare('SELECT * FROM delivery_destinations WHERE id=?').get(input.id) as DestinationRow)
 }
 
@@ -97,12 +177,33 @@ export class DeliveryStore {
     } catch (error) { db.close(); throw error }
   }
   close(): void { this.db.close() }
-  createDestination(input: DeliveryDestinationInput, now = Date.now()): DeliveryDestination {
-    return this.db.transaction(() => registerDeliveryDestination(this.db, input, now)).immediate()
+  createDestination(input: DeliveryDestinationInput, now = Date.now(), options: DestinationUrlOptions = {}): DeliveryDestination {
+    return this.db.transaction(() => registerDeliveryDestination(this.db, input, now, options)).immediate()
   }
   getDestination(id: string): DeliveryDestination | null {
-    const row = this.db.prepare('SELECT * FROM delivery_destinations WHERE id=?').get(id) as DestinationRow | undefined
+    const row = this.destinationRow(id)
     return row ? destinationFrom(row) : null
+  }
+  private destinationRow(id: string): DestinationRow | undefined {
+    return this.db.prepare('SELECT * FROM delivery_destinations WHERE id=?').get(id) as DestinationRow | undefined
+  }
+  /** One job event for a job destination, ignored when that event is already enqueued; true when a row was added. */
+  enqueueJob(destinationId: string, eventId: string, sequence: number, payload: WebhookPayload, now = Date.now()): boolean {
+    return this.db.transaction(() => enqueueJobDelivery(this.db, destinationId, eventId, sequence, payload, now)).immediate()
+  }
+  /** The event ids a destination has deliveries for, in whatever state. */
+  listEventIds(destinationId: string): string[] {
+    return (this.db.prepare('SELECT event_id FROM webhook_deliveries WHERE destination_id=? ORDER BY created_at,id').all(destinationId) as { event_id: string }[]).map(row => row.event_id)
+  }
+  getDeliveryByEvent(destinationId: string, eventId: string): WebhookDelivery | null {
+    const row = this.db.prepare('SELECT * FROM webhook_deliveries WHERE destination_id=? AND event_id=?').get(destinationId, eventId) as DeliveryRow | undefined
+    return row ? deliveryFrom(row) : null
+  }
+  /** How a destination's deliveries stand, by state; every state present, 0 when none. */
+  countDeliveries(destinationId: string): Record<DeliveryState, number> {
+    const counts: Record<DeliveryState, number> = { pending: 0, delivering: 0, delivered: 0, dead_letter: 0 }
+    for (const row of this.db.prepare('SELECT state, COUNT(*) AS count FROM webhook_deliveries WHERE destination_id=? GROUP BY state').all(destinationId) as { state: DeliveryState; count: number }[]) counts[row.state] = row.count
+    return counts
   }
   listDestinations(monitorId?: string): DeliveryDestination[] {
     const rows = monitorId === undefined ? this.db.prepare('SELECT * FROM delivery_destinations ORDER BY created_at,id').all() : this.db.prepare('SELECT * FROM delivery_destinations WHERE monitor_id=? ORDER BY created_at,id').all(monitorId)
@@ -160,7 +261,8 @@ export class DeliveryStore {
         WHERE s.enabled=1 AND ((d.state='pending' AND d.next_attempt_at<=?) OR (d.state='delivering' AND d.lease_until<=?))
         ORDER BY d.next_attempt_at,d.created_at,d.id`).all(now, now) as DeliveryRow[]
       for (const row of rows) {
-        const destination = this.getDestination(row.destination_id)!
+        const destinationRow = this.destinationRow(row.destination_id)!
+        const destination = destinationFrom(destinationRow)
         if (deliveryOriginNotBefore(this.db, destination.url) > now) continue
         if (row.state === 'delivering') this.db.prepare("UPDATE delivery_attempts SET outcome='lease_expired',ended_at=?,error='worker lease expired; acknowledgement unknown' WHERE delivery_id=? AND fencing_token=? AND outcome='sending'").run(now, row.id, row.fencing_token)
         if (row.attempt_count >= row.max_attempts) {
@@ -171,7 +273,7 @@ export class DeliveryStore {
         const attemptId = crypto.randomUUID()
         this.db.prepare("UPDATE webhook_deliveries SET state='delivering',attempt_count=attempt_count+1,fencing_token=?,lease_until=? WHERE id=?").run(token, now + leaseMs, row.id)
         this.db.prepare("INSERT INTO delivery_attempts (id,delivery_id,fencing_token,started_at,outcome) VALUES (?,?,?,?,'sending')").run(attemptId, row.id, token, now)
-        return { delivery: this.getDelivery(row.id)!, destination, attemptId }
+        return { delivery: this.getDelivery(row.id)!, destination, attemptId, headers: destinationRow.headers_json ? JSON.parse(destinationRow.headers_json) as Record<string, string> : {} }
       }
       return null
     }).immediate()
@@ -211,9 +313,20 @@ export class DeliveryStore {
     }).immediate()
   }
 }
+/** The public destination: header names without their values, which only a claim carries. */
 function destinationFrom(row: DestinationRow): DeliveryDestination {
-  return { id: row.id, monitorId: row.monitor_id, url: row.url, maxAttempts: row.max_attempts, enabled: row.enabled === 1, createdAt: row.created_at, ...(row.secret_env ? { secretEnv: row.secret_env } : {}) }
+  const kind: DeliveryDestinationKind = row.kind ?? 'monitor'
+  return {
+    id: row.id, monitorId: row.monitor_id, url: row.url, maxAttempts: row.max_attempts, enabled: row.enabled === 1, createdAt: row.created_at,
+    ...(row.secret_env ? { secretEnv: row.secret_env } : {}),
+    kind,
+    ...(kind === 'job' && row.monitor_id.startsWith('job:') ? { jobId: row.monitor_id.slice('job:'.length) } : {}),
+    ...(row.events_json ? { events: JSON.parse(row.events_json) as WebhookEvent[] } : {}),
+    headerNames: row.headers_json ? Object.keys(JSON.parse(row.headers_json) as Record<string, string>) : [],
+    ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, string> } : {}),
+    ...(row.payload_format ? { payloadFormat: row.payload_format } : {}),
+  }
 }
 function deliveryFrom(row: DeliveryRow): WebhookDelivery {
-  return { id: row.id, destinationId: row.destination_id, monitorId: row.monitor_id, eventId: row.event_id, eventVersion: row.event_version, state: row.state, attemptCount: row.attempt_count, maxAttempts: row.max_attempts, nextAttemptAt: row.next_attempt_at, leaseUntil: row.lease_until, fencingToken: row.fencing_token, createdAt: row.created_at, deliveredAt: row.delivered_at, lastStatus: row.last_status, lastError: row.last_error, payload: JSON.parse(row.payload_json) as WebhookEventEnvelope }
+  return { id: row.id, destinationId: row.destination_id, monitorId: row.monitor_id, eventId: row.event_id, eventVersion: row.event_version, state: row.state, attemptCount: row.attempt_count, maxAttempts: row.max_attempts, nextAttemptAt: row.next_attempt_at, leaseUntil: row.lease_until, fencingToken: row.fencing_token, createdAt: row.created_at, deliveredAt: row.delivered_at, lastStatus: row.last_status, lastError: row.last_error, payload: JSON.parse(row.payload_json) as WebhookPayload }
 }

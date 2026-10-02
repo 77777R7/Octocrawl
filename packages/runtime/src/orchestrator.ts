@@ -93,6 +93,13 @@ export interface OrchestratorOptions {
   shutdownSignal?: AbortSignal
   /** Reads the site's sitemap for a crawl whose mode is not `skip`; closed with the run. Without one every crawl runs as `skip`. */
   sitemapSource?: SitemapSource
+  /**
+   * Called once per step, after the step and the attempt's counters are
+   * written, in the order the steps are written (a step's own worker waits
+   * for it). An error it throws fails the run like a store error, so a
+   * listener whose failure must not stop the crawl catches its own.
+   */
+  onStep?: (step: StepRecord) => void | Promise<void>
 }
 
 const EMPTY_USAGE = {
@@ -116,6 +123,7 @@ export class CrawlOrchestrator {
   private readonly signal?: AbortSignal
   private readonly shutdownSignal?: AbortSignal
   private readonly sitemapSource?: SitemapSource
+  private readonly onStep?: (step: StepRecord) => void | Promise<void>
   private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
@@ -128,6 +136,7 @@ export class CrawlOrchestrator {
     this.signal = options.signal
     this.shutdownSignal = options.shutdownSignal
     this.sitemapSource = options.sitemapSource
+    this.onStep = options.onStep
   }
 
   /**
@@ -364,7 +373,8 @@ export class CrawlOrchestrator {
             // Written from here on, no longer in flight (the write itself is synchronous).
             inFlight = false
             pagesInFlight--
-            await this.store.putStep({ id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at })
+            const step: StepRecord = { id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at }
+            await this.store.putStep(step)
             taskUrls.add(item.canonicalUrl)
             if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
@@ -384,6 +394,7 @@ export class CrawlOrchestrator {
             }
             // A status read while the crawl runs sees its progress.
             await this.store.putAttempt({ ...runningAttempt, ...meters() })
+            if (this.onStep !== undefined) await this.onStep(step)
             if (contentful) wakeWorkers()
           } catch (err) {
             stopping = true
