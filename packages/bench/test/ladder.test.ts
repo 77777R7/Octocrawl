@@ -572,6 +572,23 @@ describe('LadderRunner — a page with no main content', () => {
     expect(run.summary.attempts.map((attempt) => attempt.result.failureReason)).toEqual(['empty_unverified', 'connection_error'])
   })
 
+  it('keeps a client-rendered shell\'s caveat on the evidence it keeps, and the rung\'s own ask names the hop once', async () => {
+    // The HTTP rung found no main region on a shell: its failed result carries the warning and the event beside its ask.
+    const shell: FetchResult = {
+      ...noMainContent(),
+      warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (script_shell); this HTTP capture may be a shell.' }],
+      trace: [{ at: 10, lane: 'http', event: 'quality_client_rendered', detail: { reason: 'script_shell', markers: [], emptyTables: 0, textChars: 14, scriptChars: 2_258 } }],
+    }
+    const kept = await new LadderRunner([channel('http', [shell]), channel('browser_local', [browserFailure('connection_error')])], { mode: 'standard' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http', markdown: PAGE, warnings: [{ code: 'client_rendered_suspected' }] })
+    expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: false }])
+    expect(kept.ladderTrace.filter((t) => t.event === 'ladder_step')[0]).toMatchObject({ channel: 'http', detail: { status: 'failed', escalate: 'subject_escalations' } })
+    // The rendered page replaces it without the caveat, and no second hop is stamped on it.
+    const rendered = await new LadderRunner([channel('http', [shell]), channel('browser_local', [contentfulResult(url, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(rendered.result).toMatchObject({ status: 'success', lane: 'browser_local', markdown: 'MAIN CONTENT', escalations: [] })
+    expect(rendered.result.warnings).toBeUndefined()
+  })
+
   it('answers with the browser rung\'s own page or block instead', async () => {
     const rendered: FetchResult = { ...noMainContent(), lane: 'browser_local', escalations: [], markdown: 'Rendered whole page' }
     const renderedRun = await new LadderRunner([channel('http', [noMainContent()]), channel('browser_local', [rendered])], { mode: 'standard' }).run(url)

@@ -563,6 +563,38 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
     })
 
+    // Client-side rendering: the page as received looks like a shell for
+    // data its scripts fill in (a table with no cells beside scripts, an
+    // empty app root, an "enable JavaScript" fallback; extract-tf's
+    // render.ts). The status stays what the content earned: a success, or
+    // the failed result that keeps the page as evidence when the extractor
+    // found no main region, which is how the plainest shells arrive here (a
+    // page of site chrome around the script that writes its content). Either
+    // result says so in a warning, and the ladder reads the event as it
+    // reads quality_low_yield: an offer to the browser lane, which captures
+    // the rendered page and never raises it. On the failed result the lane's
+    // own extract_low_confidence ask already names that hop.
+    const render = extracted.render
+    const clientRenderedCaveat = (): FetchWarning[] => {
+      if (render === undefined || !render.clientRendered) return []
+      trace.push({
+        at: wallMs,
+        lane: 'http',
+        event: 'quality_client_rendered',
+        detail: {
+          reason: render.reason,
+          markers: render.markers,
+          emptyTables: render.emptyTables,
+          textChars: render.textChars,
+          scriptChars: render.scriptChars,
+        },
+      })
+      return [{
+        code: 'client_rendered_suspected',
+        message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
+      }]
+    }
+
     let wholePage: string | null = null
     if (extracted.escalate && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options)) {
@@ -570,6 +602,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       wholePage = wholePageMarkdown(body, out.finalUrl, options.excludeTags)
       formatMs = performance.now() - formatStart
       if (options.onlyMainContent !== false || wholePage === null) {
+        const warnings = clientRenderedCaveat()
         return finish({
           ...base,
           status: 'failed',
@@ -582,6 +615,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           ],
           markdown: wholePage,
           ...(wholePage === null ? {} : { links }),
+          ...(warnings.length > 0 ? { warnings } : {}),
         })
       }
     }
@@ -636,33 +670,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
       })
     }
 
-    // Client-side rendering: the page as received looks like a shell for
-    // data its scripts fill in (a table with no cells beside scripts, an
-    // empty app root, an "enable JavaScript" fallback; extract-tf's
-    // render.ts). The status stays what the content earned; the result says
-    // so in a warning, and the ladder reads the event as it reads
-    // quality_low_yield: an offer to the browser lane, which captures the
-    // rendered page and never raises it.
-    const render = extracted.render
-    const warnings: FetchWarning[] = []
-    if (render !== undefined && render.clientRendered) {
-      warnings.push({
-        code: 'client_rendered_suspected',
-        message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
-      })
-      trace.push({
-        at: wallMs,
-        lane: 'http',
-        event: 'quality_client_rendered',
-        detail: {
-          reason: render.reason,
-          markers: render.markers,
-          emptyTables: render.emptyTables,
-          textChars: render.textChars,
-          scriptChars: render.scriptChars,
-        },
-      })
-    }
+    // The shell caveat follows quality_low_yield: when both fire, the first
+    // quality event in the trace names the ladder's hop.
+    const warnings = clientRenderedCaveat()
 
     return finish({
       ...base,
