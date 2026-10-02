@@ -38,6 +38,8 @@ describe('persistent URL-array batch', () => {
         }
         await hold(path)
         if (res.destroyed) return
+        // A page the server says has no content: a bare 204, no body and no content-type header.
+        if (path.startsWith('/empty/')) { res.writeHead(204).end(); return }
         if (path.startsWith('/missing/')) {
           res.writeHead(404, { 'content-type': 'text/html' })
           res.end('<html><head><title>Not Found</title></head><body><main><h1>Not Found</h1><p>There is no such item on this fixture server; the page you asked for does not exist here and never did, so this answer is the error page itself.</p></main></body></html>')
@@ -459,6 +461,25 @@ describe('persistent URL-array batch', () => {
     expect(byUrl.get(urls[1]!)).toMatchObject({ status: 'failed', failureReason: 'policy_denied', json: { status: 'incomplete' } })
     expect(byUrl.get(urls[2]!)).toMatchObject({ status: 'failed', failureReason: 'http_error', agentHints: [expect.stringContaining('check the link')] })
     expect(f.seen).not.toContain('/private/item/2')
+  })
+
+  it('counts a page the server answers with 204 as succeeded: an item without content, not an error', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const urls = [`${f.origin}/item/1`, `${f.origin}/empty/2`, `${f.origin}/missing/4`]
+    const accepted = await w2l.batchScrape(urls)
+    // A page read, with or without content, succeeded; only the 404 failed.
+    expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3, succeeded: 2, failed: 1, remaining: 0 })
+    const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
+    expect(items.map(item => item.url).sort()).toEqual([...urls].sort())
+    expect(items.find(item => item.url === urls[1])).toMatchObject({ status: 'empty_verified', failureReason: null, lane: 'http', markdown: null })
+    expect(f.seen).toContain('/empty/2')
+    // The empty page is not an error, and the stream lists every page read as a document, that one included.
+    expect((await w2l.getBatchErrors(accepted.taskId)).errors.map(error => error.url)).toEqual([urls[2]])
+    const streamed = await (await app.request(`/v1/batches/${accepted.taskId}/events`)).text()
+    expect(streamed.match(/event: document/g)).toHaveLength(3)
   })
 
   it('finishes every URL when one origin never answers its robots.txt, and does not fetch that origin', async () => {

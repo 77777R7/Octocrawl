@@ -153,9 +153,13 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       await store.putStep(step())
       await store.putStep(step({ id: 'step-2', result: pageResult('https://example.com/'), createdAt: LATER }))
       await store.putStep(step({ id: 'step-3', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', status: 'failed', result: null, createdAt: LATER }))
-      expect(await store.countCompletedSteps('task-1')).toBe(1)
-      expect((await store.listStepsPage('task-1', { limit: 10, kind: 'all' })).steps).toHaveLength(3)
-      expect(await store.countSteps('task-1', 'attempt-1')).toEqual({ success: 2, failed: 1 })
+      // A page read without content (a 204) is a completed URL with its own outcome, which the batch status counts as succeeded.
+      const empty = pageResult('https://example.com/empty')
+      await store.putStep(step({ id: 'step-4', url: empty.requestedUrl, canonicalUrl: empty.requestedUrl, status: 'empty_verified', result: { ...empty, status: 'empty_verified', markdown: null, evidence: { ...empty.evidence, httpStatus: 204 } }, createdAt: LATER }))
+      expect(await store.countCompletedSteps('task-1')).toBe(2)
+      expect((await store.listStepsPage('task-1', { limit: 10, kind: 'all' })).steps).toHaveLength(4)
+      expect(await store.countSteps('task-1', 'attempt-1')).toEqual({ success: 2, failed: 1, empty_verified: 1 })
+      expect(await store.countSteps('task-1')).toEqual({ success: 2, failed: 1, empty_verified: 1 })
       expect(await store.countSteps('task-1', 'attempt-2')).toEqual({})
     })
 
