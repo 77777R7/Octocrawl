@@ -31,6 +31,25 @@ const PAGE_OPTION_PROPERTIES = {
   blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
   removeBase64Images: { type: 'boolean', description: 'Leave an image whose src is a data: URI out of the Markdown, keeping its alt text (default true, Firecrawl\'s default). false keeps it as ![alt](data:…), which contentTokens then counts. html and rawHtml are never rewritten.' },
 } as const
+/** A crawl's or batch's webhook: a URL string or the configuration object; the native parser checks it, the engine's mode decides what the URL may be. */
+const WEBHOOK_PROPERTY = {
+  description: 'Where the job posts its events as durable, retried deliveries: a URL string, or { url, headers, metadata, events, secretEnv }. Events: started (sequence 0), one page per page recorded (the page as get_crawl_pages / get_batch_items list it), then completed, failed or cancelled with the job\'s status report; default all five, events narrows them. headers (at most 32, no content-type, host or x-w2l-* name) go with every delivery and are stored in the control database only; metadata (at most 32 strings) is echoed in every payload; secretEnv names an operator W2L_WEBHOOK_SECRET_* variable that signs each delivery (x-w2l-timestamp, x-w2l-signature). The receiver must be https; a local server also takes plain http to a loopback receiver. get_crawl / get_batch report the delivery counts under webhook, and list_deliveries with jobId lists them. Not offered on the hosted host.',
+  anyOf: [
+    { type: 'string', maxLength: 2048 },
+    {
+      type: 'object',
+      properties: {
+        url: { type: 'string', maxLength: 2048 },
+        headers: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string' } },
+        metadata: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 1000 } },
+        events: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { type: 'string', enum: ['started', 'page', 'completed', 'failed', 'cancelled'] } },
+        secretEnv: { type: 'string', pattern: '^W2L_WEBHOOK_SECRET_[A-Z0-9_]+$' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    },
+  ],
+} as const
 /** The caller's own label for its integration; `origin` is not a tool option: the server records the client's name and version. */
 const INTEGRATION_PROPERTY = {
   integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
@@ -106,9 +125,9 @@ const MONITOR_TOOLS = [
   {name:'resume_monitor',description:'Resume Monitor scheduling; first run becomes due immediately.',inputSchema:idSchema},
   {name:'cancel_monitor_run',description:'Explicitly cancel a queued or running Monitor run.',inputSchema:{type:'object',properties:{id:{type:'string'},runId:{type:'string'}},required:['id','runId'],additionalProperties:false}},
   {name:'create_delivery_destination',description:'Register an HTTPS webhook for a Monitor. The secretEnv names an operator environment variable; never send the secret value.',inputSchema:{type:'object',properties:{id:{type:'string'},monitorId:{type:'string'},url:{type:'string'},secretEnv:{type:'string'},maxAttempts:{type:'integer',minimum:1,maximum:100},enabled:{type:'boolean'}},required:['monitorId','url'],additionalProperties:false}},
-  {name:'list_delivery_destinations',description:'List webhook destinations, optionally for one Monitor.',inputSchema:{type:'object',properties:{monitorId:{type:'string'}},additionalProperties:false}},
+  {name:'list_delivery_destinations',description:'List webhook destinations, optionally for one Monitor (monitorId) or one crawl or batch (jobId, the taskId); custom header names are listed, never their values.',inputSchema:{type:'object',properties:{monitorId:{type:'string'},jobId:{type:'string'}},additionalProperties:false}},
   ...(['pause_delivery_destination','resume_delivery_destination'] as const).map(name=>({name,description:`${name} for an HTTPS webhook destination`,inputSchema:idSchema})),
-  {name:'list_deliveries',description:'Page through delivery state and failures. Defaults to 20 compact results.',inputSchema:{type:'object',properties:{monitorId:{type:'string'},destinationId:{type:'string'},state:{type:'string',enum:['pending','delivering','delivered','dead_letter']},cursor:{type:'string'},limit:{type:'integer',minimum:1,maximum:50},debug:{type:'boolean'}},additionalProperties:false}},
+  {name:'list_deliveries',description:'Page through delivery state and failures, for a Monitor (monitorId) or a crawl or batch (jobId, the taskId). Defaults to 20 compact results.',inputSchema:{type:'object',properties:{monitorId:{type:'string'},jobId:{type:'string'},destinationId:{type:'string'},state:{type:'string',enum:['pending','delivering','delivered','dead_letter']},cursor:{type:'string'},limit:{type:'integer',minimum:1,maximum:50},debug:{type:'boolean'}},additionalProperties:false}},
   {name:'get_delivery',description:'Inspect one delivery and its retry attempts.',inputSchema:idSchema},
   {name:'retry_dead_letter',description:'Explicitly retry a dead-letter delivery with the same eventId.',inputSchema:{type:'object',properties:{id:{type:'string'}},required:['id'],additionalProperties:false}},
 ] as const
@@ -179,6 +198,7 @@ export const TOOLS = [
         sitemap: { type: 'string', enum: ['include', 'skip', 'only'], description: 'How the crawl uses the site\'s sitemap. include (default): the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, are read with the crawl\'s identity and robots.txt verdict and their URLs queued ahead of the start page\'s links, under the same host, subtree, path and depth rules. skip: no sitemap is read. only: no page link is followed; the pages are the start URL and the sitemap\'s entries. get_crawl reports the files read, refused or unreadable in discovery.sitemap.' },
         maxConcurrency: { type: 'integer', minimum: 1, description: 'Pages this crawl fetches at once, at most; refused above the service\'s worker count (4 locally, 2 on the hosted host). It only lowers the crawl\'s parallelism: the per-host ceiling and minimum interval still apply.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
+        webhook: WEBHOOK_PROPERTY,
         ...PAGE_OPTION_PROPERTIES,
         ...INTEGRATION_PROPERTY,
       },
@@ -276,6 +296,7 @@ export const TOOLS = [
         ignoreInvalidURLs: { type: 'boolean', description: 'Start with the entries of urls that are http(s) URLs and report the rest as invalidURLs (on the answer and on get_batch) instead of refusing the batch. Default false: an entry that is not a URL is refused by its index.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
         appendToId: { type: 'string', minLength: 1, maxLength: 200, description: 'Add urls to this existing batch instead of starting a new job: the job keeps its mode, formats, includeLinks, maxConcurrency and page options (sending one is refused by name), and the answer carries requested (the job\'s URLs now) and appended. The batch\'s run picks the URLs up; a completed batch runs again for them; a cancelled or failed one is refused (conflict); the total stays at most 1000 and a URL already in the batch is refused.' },
+        webhook: WEBHOOK_PROPERTY,
         ...INTEGRATION_PROPERTY,
       },
       required: ['urls'], additionalProperties: false,
@@ -365,6 +386,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.sitemap === undefined ? {} : { sitemap: req.sitemap }),
       ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
       ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }),
+      ...(req.webhook === undefined ? {} : { webhook: req.webhook }),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -403,7 +425,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)
@@ -512,11 +534,11 @@ async function callMonitorTool(client: W2L, name: string, rec: Record<string, un
   }
   if (name === 'cancel_monitor_run') return compactMonitor(await client.cancelMonitorRun(id(),required(rec.runId,'runId'),request))
   if (name === 'create_delivery_destination') return client.createDeliveryDestination({id:rec.id === undefined ? crypto.randomUUID() : id(),monitorId:required(rec.monitorId,'monitorId'),url:required(rec.url,'url'),...(rec.secretEnv === undefined ? {} : {secretEnv:required(rec.secretEnv,'secretEnv')}),...(rec.maxAttempts === undefined ? {} : {maxAttempts:rec.maxAttempts as number}),...(rec.enabled === undefined ? {} : {enabled:rec.enabled as boolean})},request)
-  if (name === 'list_delivery_destinations') return client.listDeliveryDestinations({monitorId:rec.monitorId === undefined ? undefined : required(rec.monitorId,'monitorId')},request)
+  if (name === 'list_delivery_destinations') return client.listDeliveryDestinations({monitorId:rec.monitorId === undefined ? undefined : required(rec.monitorId,'monitorId'),jobId:rec.jobId === undefined ? undefined : required(rec.jobId,'jobId')},request)
   if (name === 'pause_delivery_destination') return client.pauseDeliveryDestination(id(), request)
   if (name === 'resume_delivery_destination') return client.resumeDeliveryDestination(id(), request)
   if (name === 'list_deliveries') {
-    const page = await client.getDeliveriesPage({monitorId:rec.monitorId as string | undefined,destinationId:rec.destinationId as string | undefined,state:rec.state as 'pending' | 'delivering' | 'delivered' | 'dead_letter' | undefined,cursor:rec.cursor as string | undefined,limit:rec.limit as number | undefined},request)
+    const page = await client.getDeliveriesPage({monitorId:rec.monitorId as string | undefined,jobId:rec.jobId as string | undefined,destinationId:rec.destinationId as string | undefined,state:rec.state as 'pending' | 'delivering' | 'delivered' | 'dead_letter' | undefined,cursor:rec.cursor as string | undefined,limit:rec.limit as number | undefined},request)
     return debug ? page : {...page,items:page.items.map(compactDelivery)}
   }
   if (name === 'get_delivery') {const detail=await client.getDelivery(id(),request);return debug ? detail : {delivery:compactDelivery(detail.delivery),attempts:detail.attempts}}

@@ -321,7 +321,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     try { return c.json(engine.createDeliveryDestination(await c.req.json()), 201) }
     catch (error) { return fail(c, error instanceof SyntaxError ? 'invalid_json' : 'invalid_request', error instanceof Error ? error.message : 'invalid destination') }
   })
-  app.get('/v1/delivery/destinations', (c) => c.json(engine.listDeliveryDestinations(c.req.query('monitorId'))))
+  /** The destinations of one Monitor (`monitorId`) or one crawl or batch (`jobId`); header names only, never their values. */
+  app.get('/v1/delivery/destinations', (c) => c.json(engine.listDeliveryDestinations({ monitorId: c.req.query('monitorId'), jobId: c.req.query('jobId') })))
   for (const action of ['pause', 'resume'] as const) app.post(`/v1/delivery/destinations/:id/${action}`, (c) => {
     try { return c.json(engine.setDeliveryDestinationEnabled(c.req.param('id'), action === 'resume')) }
     catch { return fail(c, 'not_found', 'destination not found') }
@@ -329,13 +330,13 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.get('/v1/deliveries', (c) => {
     const state = c.req.query('state')
     if (state && !['pending','delivering','delivered','dead_letter'].includes(state)) return fail(c, 'invalid_request', 'invalid delivery state')
-    return c.json(engine.listDeliveries({monitorId: c.req.query('monitorId'), destinationId: c.req.query('destinationId'), state: state as import('@w2l/contracts').DeliveryState | undefined}))
+    return c.json(engine.listDeliveries({monitorId: c.req.query('monitorId'), jobId: c.req.query('jobId'), destinationId: c.req.query('destinationId'), state: state as import('@w2l/contracts').DeliveryState | undefined}))
   })
   app.get('/v1/deliveries/page', (c) => {
     const state = c.req.query('state')
     if (state && !['pending','delivering','delivered','dead_letter'].includes(state)) return fail(c,'invalid_request','invalid delivery state')
     const limit = c.req.query('limit') === undefined ? undefined : Number(c.req.query('limit'))
-    try { return c.json(engine.getDeliveriesPage({monitorId:c.req.query('monitorId'),destinationId:c.req.query('destinationId'),state:state as import('@w2l/contracts').DeliveryState | undefined,cursor:c.req.query('cursor'),limit})) }
+    try { return c.json(engine.getDeliveriesPage({monitorId:c.req.query('monitorId'),jobId:c.req.query('jobId'),destinationId:c.req.query('destinationId'),state:state as import('@w2l/contracts').DeliveryState | undefined,cursor:c.req.query('cursor'),limit})) }
     catch (error) { return fail(c,'invalid_request',error instanceof Error ? error.message : 'invalid delivery query') }
   })
   app.get('/v1/deliveries/:id', (c) => {

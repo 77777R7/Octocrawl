@@ -36,6 +36,9 @@ describe('single-owner hosted workflow policy', () => {
     // So are a retry key and an append: the hosted batch is one reviewed job per call.
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],idempotencyKey:'nightly-1'})).toThrow('unsupported remote tool option')
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],appendToId:'batch-1'})).toThrow('unsupported remote tool option')
+    // A job webhook is not offered on the hosted host: the reviewed batch shape has none, and the crawl tools stay out.
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],webhook:'https://receiver.example/hook'})).toThrow('unsupported remote tool option')
+    expect(REMOTE_TOOLS.has('crawl')).toBe(false)
     // The errors report is a read of the owner's own batches, offered like get_batch_items; the crawl tools stay out.
     expect(REMOTE_TOOLS.has('get_batch_errors')).toBe(true)
     expect(call('get_batch_errors',{id:'batch-1',limit:10})).toEqual({id:'batch-1',limit:10})

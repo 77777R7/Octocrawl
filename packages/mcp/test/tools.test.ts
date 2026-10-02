@@ -551,6 +551,35 @@ describe('MCP tools', () => {
       'POST http://w2l.local/v1/deliveries/delivery-1/retry',
     ])
   })
+
+  it('declares webhook on crawl and batch_scrape, forwards it, refuses a bad one before any call, and lists deliveries and destinations by jobId', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      const url = String(input)
+      calls.push({ line: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if (url.includes('/v1/deliveries/page')) return json({ items: [{ id: 'd1', eventId: 'crawl-1:started', state: 'delivered', payload: { secret: 'body' } }], nextCursor: null, hasMore: false })
+      if (url.includes('/v1/delivery/destinations')) return json([{ id: 'job:crawl-1', kind: 'job', headerNames: ['authorization'] }])
+      return json({ taskId: url.endsWith('/v1/crawl') ? 'crawl-1' : 'batch-1' }, 202)
+    }) as typeof fetch })
+    const webhook = { url: 'https://receiver.example/hook', headers: { Authorization: 'Bearer test' }, metadata: { run: 'mcp' }, events: ['page', 'completed'] }
+    await callTool(client, 'crawl', { url: 'https://example.com/', webhook })
+    expect(calls[0]?.body).toMatchObject({ url: 'https://example.com/', webhook: { url: webhook.url, headers: { authorization: 'Bearer test' }, metadata: { run: 'mcp' }, events: ['page', 'completed'] } })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], webhook: 'https://receiver.example/hook' })
+    expect(calls[1]?.body).toMatchObject({ urls: ['https://example.com/a'], webhook: { url: 'https://receiver.example/hook' } })
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', webhook: { url: 'https://receiver.example/hook', headers: { Host: 'x' } } })).rejects.toThrow('webhook.headers: host is reserved')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], webhook: { url: 'https://receiver.example/hook', events: [] } })).rejects.toThrow('webhook.events must be a non-empty array')
+    expect(calls).toHaveLength(2)
+    const compact = await callTool(client, 'list_deliveries', { jobId: 'crawl-1' }) as { items: Array<Record<string, unknown>> }
+    expect(calls[2]?.line).toBe('GET http://127.0.0.1:8787/v1/deliveries/page?jobId=crawl-1')
+    expect(compact.items[0]).toMatchObject({ eventId: 'crawl-1:started', state: 'delivered' })
+    expect(compact.items[0]).not.toHaveProperty('payload')
+    expect(await callTool(client, 'list_delivery_destinations', { jobId: 'crawl-1' })).toEqual([{ id: 'job:crawl-1', kind: 'job', headerNames: ['authorization'] }])
+    expect(calls[3]?.line).toBe('GET http://127.0.0.1:8787/v1/delivery/destinations?jobId=crawl-1')
+    for (const name of ['crawl', 'batch_scrape']) {
+      const properties = TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { anyOf?: unknown[] }>
+      expect(properties.webhook?.anyOf, name).toHaveLength(2)
+    }
+  })
 })
 
 function json(body: unknown, status = 200): Response {

@@ -3,8 +3,10 @@ export type { AppOptions } from './app.js'
 export { createApiEngine } from './engine.js'
 export type { ApiEngine, ApiEngineOptions, CrawlWithSteps } from './engine.js'
 export { compactScrapeResponse, extractStructured } from './structured.js'
-export { parseListen, parsePort } from './listen.js'
-export type { ApiMode, ListenConfig } from './listen.js'
+export { deliveryConfig, parseListen, parsePort } from './listen.js'
+export type { ApiMode, DeliveryConfig, ListenConfig } from './listen.js'
+export { JobEventHub, jobKindOf } from './jobEvents.js'
+export type { JobEvent, JobEventListener, JobKind, JobTerminalStatus } from './jobEvents.js'
 export {
   FIRECRAWL_SHIM_DIFFS,
   FIRECRAWL_SHIM_SNAPSHOT,

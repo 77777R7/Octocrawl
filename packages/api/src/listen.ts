@@ -1,6 +1,23 @@
-import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
+
+/**
+ * How the API process delivers job webhooks, apart from how it fetches
+ * pages: TLS always verified, the shell's HTTP(S)_PROXY never used
+ * (`W2L_DELIVERY_PROXY_URL` names an explicit proxy), `W2L_DELIVERY_CA_FILE`
+ * trusted. Local mode reaches https receivers on public and local-network
+ * addresses and plain http on loopback; hosted mode public https only, plus
+ * `W2L_DELIVERY_PRIVATE_ALLOWLIST`.
+ */
+export interface DeliveryConfig {
+  networkPolicy: NetworkPolicy
+  allowHttpLoopback: boolean
+  proxyUrl?: string
+  caFile?: string
+  /** The startup line describing the policy, printed once. */
+  notice: string
+}
 
 export interface ListenConfig {
   mode: ApiMode
@@ -23,6 +40,8 @@ export interface ListenConfig {
    * or `--rate-limit-per-minute`), per bearer token; absent means no limit.
    */
   rateLimit?: { perMinute: number }
+  /** How this process delivers job webhooks. */
+  delivery: DeliveryConfig
 }
 
 export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ListenConfig {
@@ -45,6 +64,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       allowRobotsOverride: false,
       notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
       ...(rateLimit === undefined ? {} : { rateLimit }),
+      delivery: deliveryConfig('hosted', env),
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -58,6 +78,25 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     allowRobotsOverride: true,
     notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
     ...(rateLimit === undefined ? {} : { rateLimit }),
+    delivery: deliveryConfig('local', env),
+  }
+}
+
+/** The delivery policy of a mode: the public egress rule, plus the local allowlist and plain-http loopback locally; `W2L_DELIVERY_PRIVATE_ALLOWLIST` extends either. */
+export function deliveryConfig(mode: ApiMode, env: NodeJS.ProcessEnv = process.env): DeliveryConfig {
+  const extra = (env['W2L_DELIVERY_PRIVATE_ALLOWLIST'] ?? '').split(',').map((value) => value.trim()).filter(Boolean)
+  const policy = hostedNetworkPolicy()
+  policy.privateAllowlist = [...(mode === 'local' ? LOCAL_PRIVATE_ALLOWLIST : []), ...extra]
+  const proxyUrl = (env['W2L_DELIVERY_PROXY_URL'] ?? '').trim()
+  const caFile = (env['W2L_DELIVERY_CA_FILE'] ?? '').trim()
+  const reach = mode === 'local' ? 'https receivers on public and local-network addresses, plain http on loopback' : 'https receivers on public addresses' + (extra.length > 0 ? ` and ${extra.join(', ')}` : '')
+  const route = proxyUrl.length > 0 ? `through ${proxyUrl}` : 'direct, the environment proxy not used'
+  return {
+    networkPolicy: policy,
+    allowHttpLoopback: mode === 'local',
+    ...(proxyUrl.length > 0 ? { proxyUrl } : {}),
+    ...(caFile.length > 0 ? { caFile } : {}),
+    notice: `webhook deliveries: ${reach}; TLS verified; ${route}`,
   }
 }
 

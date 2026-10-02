@@ -616,9 +616,12 @@ export class W2L {
     return this.post<DeliveryDestination>('/v1/delivery/destinations', input, 201, request)
   }
 
-  async listDeliveryDestinations(options: { monitorId?: string } = {}, request: RequestOptions = {}): Promise<DeliveryDestination[]> {
-    const query = options.monitorId === undefined ? '' : `?${new URLSearchParams({ monitorId: options.monitorId })}`
-    return this.get<DeliveryDestination[]>(`/v1/delivery/destinations${query}`, request)
+  /** The destinations of a Monitor (`monitorId`) or of a crawl or batch (`jobId`); every destination when neither is given. Header names only, never their values. */
+  async listDeliveryDestinations(options: { monitorId?: string; jobId?: string } = {}, request: RequestOptions = {}): Promise<DeliveryDestination[]> {
+    const params = new URLSearchParams()
+    if (options.monitorId !== undefined) params.set('monitorId', options.monitorId)
+    if (options.jobId !== undefined) params.set('jobId', options.jobId)
+    return this.get<DeliveryDestination[]>(`/v1/delivery/destinations${params.size === 0 ? '' : `?${params}`}`, request)
   }
 
   async pauseDeliveryDestination(id: string, request: RequestOptions = {}): Promise<DeliveryDestination> {
@@ -629,9 +632,11 @@ export class W2L {
     return this.post<DeliveryDestination>(`/v1/delivery/destinations/${encodeURIComponent(id)}/resume`, undefined, 200, request)
   }
 
+  /** The deliveries of a Monitor (`monitorId`) or of a crawl or batch (`jobId`, the task id), each with its payload. */
   async listDeliveries(options: DeliveryQuery = {}, request: RequestOptions = {}): Promise<WebhookDelivery[]> {
     const params = new URLSearchParams()
     if (options.monitorId !== undefined) params.set('monitorId', options.monitorId)
+    if (options.jobId !== undefined) params.set('jobId', options.jobId)
     if (options.destinationId !== undefined) params.set('destinationId', options.destinationId)
     if (options.state !== undefined) params.set('state', options.state)
     return this.get<WebhookDelivery[]>(`/v1/deliveries${params.size === 0 ? '' : `?${params}`}`, request)
@@ -640,6 +645,7 @@ export class W2L {
   async getDeliveriesPage(options: DeliveryPageQuery = {}, request: RequestOptions = {}): Promise<DeliveryPage> {
     const params = new URLSearchParams()
     if (options.monitorId !== undefined) params.set('monitorId',options.monitorId)
+    if (options.jobId !== undefined) params.set('jobId',options.jobId)
     if (options.destinationId !== undefined) params.set('destinationId',options.destinationId)
     if (options.state !== undefined) params.set('state',options.state)
     if (options.cursor !== undefined) params.set('cursor',options.cursor)

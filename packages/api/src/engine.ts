@@ -38,6 +38,7 @@ import {
   type CrawlPageList,
   type CrawlReport,
   type CrawlStartRequest,
+  type ParsedCrawlStartRequest,
   type BatchAccepted,
   type BatchErrorItem,
   type BatchErrorStatus,
@@ -82,6 +83,8 @@ import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor } from './hints.js'
+import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
+import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
@@ -133,7 +136,7 @@ export interface ApiEngine {
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   /** Starts a crawl; with `idempotencyKey`, a retried start replays the first one's answer (`replayed: true`), and the key sent with another request is a CrawlStateError. */
-  startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
+  startCrawl(req: ParsedCrawlStartRequest): Promise<CrawlAccepted>
   /** The crawls this process is running, oldest start first: those it started and those it resumed at startup; never a batch. */
   listActiveCrawls(): Promise<ActiveCrawlList>
   /**
@@ -179,7 +182,8 @@ export interface ApiEngine {
   cancelMonitorRun(id: string, runId: string): MonitorView
   setMonitorEnabled(id: string, enabled: boolean): MonitorView
   createDeliveryDestination(input: DeliveryDestinationInput): DeliveryDestination
-  listDeliveryDestinations(monitorId?: string): DeliveryDestination[]
+  /** The destinations of a Monitor (`monitorId`) or of a job (`jobId`, whose destination is `job:<taskId>`); all when neither is given. */
+  listDeliveryDestinations(query?: { monitorId?: string; jobId?: string }): DeliveryDestination[]
   setDeliveryDestinationEnabled(id: string, enabled: boolean): DeliveryDestination
   listDeliveries(query?: DeliveryQuery): WebhookDelivery[]
   getDeliveriesPage(query?: DeliveryPageQuery): DeliveryPage
@@ -222,6 +226,13 @@ export interface ApiEngineOptions {
    * without it. Absent or false is a local engine, the person's own.
    */
   hosted?: boolean
+  /**
+   * The receivers a job `webhook` may name beyond https: with
+   * `allowHttpLoopback` (the default off a hosted engine) a plain-http
+   * receiver on loopback is taken, for a local developer's receiver. A hosted
+   * engine takes https to a public address only, whatever this says.
+   */
+  webhookPolicy?: { allowHttpLoopback: boolean }
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -320,6 +331,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
+  }
+  // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
+  const jobEvents = new JobEventHub()
+  const jobWebhooks = new JobWebhooks(deliveryStore, { hosted, allowHttpLoopback: options.webhookPolicy?.allowHttpLoopback ?? !hosted })
+  const logWebhookFailure = (taskId: string, stage: string, error: unknown): void => {
+    console.error(JSON.stringify({ component: 'api', event: 'job_webhook_failed', taskId, stage, error: error instanceof Error ? error.message : String(error) }))
   }
   // One record per scrape call, written before the response is sent and read
   // back by GET /v1/scrapes/:id. No page body; no retention in M2.
@@ -439,10 +456,71 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (report === null) return null
       const steps =
         report.attemptId.length === 0 ? [] : await store.listSteps(taskId, report.attemptId)
-      return { report, steps }
+      const task = await store.getTask(taskId)
+      const webhook = task === null ? undefined : jobWebhooks.status(task)
+      return { report: webhook === undefined ? report : { ...report, webhook }, steps }
     } finally {
       await store.close()
     }
+  }
+
+  /** A batch's status: the latest attempt's report with the batch's totals, the cap in force, the skipped entries and its webhook's standing. */
+  async function loadBatch(taskId: string): Promise<BatchStatusResponse | null> {
+    if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+    const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+    try {
+      const task = await store.getTask(taskId)
+      if (!task?.batch) return null
+      const attempts = await store.listAttempts(taskId)
+      const latest = attempts.at(-1)
+      const report = latest
+        ? reportFromTaskAttempt(task, latest, 0)
+        : await crawlReportFromStore(store, taskId)
+      if (!report) return null
+      const completed = await store.countCompletedSteps(taskId)
+      const counts = await store.countSteps(taskId)
+      const webhook = jobWebhooks.status(task)
+      return {
+        ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
+        succeeded: (counts.success ?? 0) + (counts.partial ?? 0),
+        failed: (counts.failed ?? 0) + (counts.blocked ?? 0) + (counts.cancelled ?? 0) + (counts.budget_exceeded ?? 0),
+        // The cap in force: the batch's own, never above this service's worker count.
+        maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+        ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
+        ...(webhook === undefined ? {} : { webhook }),
+      }
+    } finally { await store.close() }
+  }
+
+  /**
+   * A task that has ended: its terminal webhook event and hub event, from the
+   * row as it is now. Nothing for a job still in flight or paused by shutdown
+   * (it ends later, in this process or the next). Idempotent: the terminal
+   * event's id is deterministic, so a second call for the same attempt adds
+   * nothing.
+   */
+  async function finishJob(task: Task, store: SqliteTaskStore, error?: string): Promise<void> {
+    const current = await store.getTask(task.id)
+    if (current === null || !isTerminalStatus(current.status)) return
+    const kind = jobKindOf(current)
+    const report = kind === 'batch' ? await loadBatch(current.id) : (await loadCrawlWithSteps(current.id))?.report ?? null
+    if (report === null) return
+    if (webhookOf(current) !== undefined) {
+      try { await jobWebhooks.terminal(current, report, store, error) }
+      catch (failure) { logWebhookFailure(current.id, 'terminal', failure) }
+    }
+    await jobEvents.emit({ type: 'terminal', taskId: current.id, jobKind: kind, status: current.status, report })
+  }
+
+  /** At startup, a finished job with a webhook: every step and the terminal event offered again, so a crash between a write and its enqueue loses no delivery. */
+  async function reconcileFinished(task: Task, store: SqliteTaskStore): Promise<void> {
+    try {
+      await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task))
+      if (webhookOf(task) !== undefined) {
+        const report = task.batch === undefined ? (await loadCrawlWithSteps(task.id))?.report ?? null : await loadBatch(task.id)
+        if (report !== null) await jobWebhooks.terminal(task, report, store)
+      }
+    } catch (error) { logWebhookFailure(task.id, 'reconcile', error) }
   }
 
   async function activeBatchCount(): Promise<number> {
@@ -544,6 +622,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // pages declare it), the engine's network policy, origin scheduler and this mode's robots.txt cache; a hosted
     // engine's policy has no proxy and no private ranges. A batch never reads one.
     const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode) })
+    // Each persisted step is one job event: a webhook delivery when the task has a receiver (a delivery error is logged, never the page's), then the hub's.
+    const webhook = webhookOf(task)
+    const kind = jobKindOf(task)
+    const onStep = async (step: StepRecord): Promise<void> => {
+      const page = compactPage(step, task)
+      if (webhook !== undefined) {
+        try { await jobWebhooks.page(task, step, page, store) }
+        catch (error) { logWebhookFailure(task.id, 'page', error) }
+      }
+      await jobEvents.emit({ type: 'page', taskId: task.id, jobKind: kind, page })
+    }
     const orchestrator = new CrawlOrchestrator({
       store, atom,
       workerCount,
@@ -553,31 +642,42 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       shutdownSignal: shutdownController.signal,
       signal: controller.signal,
       ...(sitemapSource === undefined ? {} : { sitemapSource }),
+      onStep,
     })
-    const job = orchestrator.run({
-      seedUrl: task.seedUrl,
-      ...(task.batch ? { seedUrls: task.batch.urls } : {}),
-      taskDir: task.taskDir,
-      mode,
-      budget: task.budget,
-      maxDepth: req.maxDepth,
-      allowlistedDomains: req.allowlistedDomains,
-      resumeFrom: req.resume ? task.id : null,
-      useCached: req.useCached,
-      taskId: task.id,
-      ...req.scope,
-      sitemap: req.sitemap,
-      maxConcurrency: req.maxConcurrency,
-    }).then(async () => {
+    const job = (async () => {
+      // A resumed or restarted job offers its persisted steps to the webhook again before fetching more; those already enqueued are ignored.
+      if (webhook !== undefined && req.resume) {
+        try { await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task)) }
+        catch (error) { logWebhookFailure(task.id, 'reconcile', error) }
+      }
+      return orchestrator.run({
+        seedUrl: task.seedUrl,
+        ...(task.batch ? { seedUrls: task.batch.urls } : {}),
+        taskDir: task.taskDir,
+        mode,
+        budget: task.budget,
+        maxDepth: req.maxDepth,
+        allowlistedDomains: req.allowlistedDomains,
+        resumeFrom: req.resume ? task.id : null,
+        useCached: req.useCached,
+        taskId: task.id,
+        ...req.scope,
+        sitemap: req.sitemap,
+        maxConcurrency: req.maxConcurrency,
+      })
+    })().then(async () => {
       crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
       const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
       if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
+      // The terminal event follows the terminal task row the run wrote; a run paused by shutdown has none.
+      await finishJob(task, store)
       inflight.delete(task.id)
       await store.close()
-    }).catch(async () => {
+    }).catch(async (error: unknown) => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
+      await finishJob(task, store, error instanceof Error ? error.message : String(error))
       await store.close()
     })
     runningCrawls.set(task.id, orchestrator)
@@ -593,13 +693,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
-    void store.getTask(name).then(task => {
+    void store.getTask(name).then(async task => {
       const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
       if (unfinished && task.batch) {
         launchTask(task, store, batchRunOptions(task.batch, true))
       } else if (unfinished && crawlOptionsStored(task)) {
         launchTask(task, store, crawlRunOptions(task, true))
-      } else void store.close()
+      } else {
+        // A finished job with a receiver: anything a crash cut off between a write and its enqueue is offered again, nothing twice.
+        if (task !== null && webhookOf(task) !== undefined && isTerminalStatus(task.status)) await reconcileFinished(task, store)
+        void store.close()
+      }
     }).catch(() => { void store.close() })
   }
 
@@ -676,6 +780,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
       checkHostedOptions(req)
+      const webhookConfig = jobWebhooks.check(req.webhook)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
       }
@@ -724,12 +829,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           sitemap: req.sitemap ?? 'include',
           maxConcurrency: req.maxConcurrency ?? null,
           ...pageOptions(req),
+          // The destination is registered first (`job:<taskId>`); the task stores everything but the header values.
+          ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
         },
         ...attributionOf(req),
         createdAt: now,
         updatedAt: now,
       }
       await store.putTask(task)
+      jobWebhooks.started(task)
+      void jobEvents.emit({ type: 'started', taskId, jobKind: 'crawl' })
       launchTask(task, store, crawlRunOptions(task, false))
       } catch (error) { submission.forget(); throw error }
       return accepted
@@ -760,6 +869,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkAttributeSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
+      const webhookConfig = jobWebhooks.check(req.webhook)
       batchStartInProgress = true
       try {
       const canonical = req.urls.map(url => canonicalizeUrl(url))
@@ -782,6 +892,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
         ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
+        ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
@@ -795,33 +906,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try {
         const store = SqliteTaskStore.open(taskDir)
         await store.putTask(task)
+        jobWebhooks.started(task)
+        void jobEvents.emit({ type: 'started', taskId, jobKind: 'batch' })
         launchTask(task, store, batchRunOptions(batch, false))
       } catch (error) { submission.forget(); throw error }
       return accepted
       } finally { batchStartInProgress = false }
     },
 
-    async getBatch(taskId) {
-      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
-      const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
-      try {
-        const task = await store.getTask(taskId)
-        if (!task?.batch) return null
-        const attempts = await store.listAttempts(taskId)
-        const latest = attempts.at(-1)
-        const report = latest
-          ? reportFromTaskAttempt(task, latest, 0)
-          : await crawlReportFromStore(store, taskId)
-        if (!report) return null
-        const completed = await store.countCompletedSteps(taskId)
-        return {
-          ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
-          // The cap in force: the batch's own, never above this service's worker count.
-          maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
-          ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
-        }
-      } finally { await store.close() }
-    },
+    getBatch: loadBatch,
 
     async getBatchItems(taskId, query) {
       if (await this.getBatch(taskId) === null) return null
@@ -916,6 +1009,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const latest = attempts[attempts.length - 1]
           if (latest?.status === 'running') await store.putAttempt({ ...latest, status: 'cancelled', endedAt: now })
           crawlControllers.get(taskId)?.abort()
+          // A run in this process ends with the cancellation and sends the terminal event itself; a task no run is working on gets it here.
+          if (!inflight.has(taskId)) await finishJob(task, store)
         }
       } finally {
         await store.close()
@@ -999,10 +1094,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     createDeliveryDestination(input) {
       return monitorStore.registerDestination(input)
     },
-    listDeliveryDestinations: (id) => deliveryStore.listDestinations(id),
+    listDeliveryDestinations: (query = {}) => deliveryStore.listDestinations(deliverySubject(query)),
     setDeliveryDestinationEnabled: (id, enabled) => deliveryStore.setDestinationEnabled(id, enabled),
-    listDeliveries: (query) => deliveryStore.listDeliveries(query),
-    getDeliveriesPage: (query) => deliveryStore.listDeliveriesPage(query),
+    listDeliveries: (query = {}) => deliveryStore.listDeliveries(deliveryQuery(query)),
+    getDeliveriesPage: (query = {}) => deliveryStore.listDeliveriesPage(deliveryQuery(query)),
     getDelivery(id) { const delivery = deliveryStore.getDelivery(id); return delivery ? {delivery, attempts: deliveryStore.attempts(id)} : null },
     retryDelivery: (id) => deliveryStore.replayDeadLetter(id),
 
@@ -1110,6 +1205,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
 /** The local rungs that render a page and so can capture the `screenshot` format. */
 const BROWSER_RUNGS: ReadonlySet<string> = new Set(['browser_local', 'authed_session'])
+
+function isTerminalStatus(status: TaskStatus): status is JobTerminalStatus {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+/** The subject a delivery listing is about: a Monitor by its id, or a job by `jobId` (its destination's monitor id is `job:<taskId>`); not both at once. */
+function deliverySubject(query: { monitorId?: string; jobId?: string }): string | undefined {
+  if (query.jobId !== undefined && query.monitorId !== undefined) throw new RequestError('jobId and monitorId cannot be combined')
+  return query.jobId === undefined ? query.monitorId : `job:${query.jobId}`
+}
+
+/** A delivery query for the store: `jobId` folded into `monitorId`. */
+function deliveryQuery<T extends DeliveryQuery>(query: T): Omit<T, 'jobId'> {
+  const { jobId: _jobId, ...rest } = query
+  const monitorId = deliverySubject(query)
+  return { ...rest, ...(monitorId === undefined ? {} : { monitorId }) }
+}
 
 /**
  * What a request or stored task asks each lane to capture. Its timeout is the
@@ -1252,7 +1364,7 @@ async function appendedWithoutStep(taskId: string, store: SqliteTaskStore): Prom
 
 /** The options a running crawl reports: its task's stored options, with the defaults a task stored before an option existed runs under, plus its page budget. */
 function activeCrawlOptions(task: Task): ActiveCrawlOptions {
-  const { formats, includeLinks, includePaths, excludePaths, maxDepth, allowlistedDomains, useCached, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain, allowSubdomains, allowExternalLinks, sitemap, maxConcurrency, ...page } = task.crawl ?? {}
+  const { formats, includeLinks, includePaths, excludePaths, maxDepth, allowlistedDomains, useCached, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain, allowSubdomains, allowExternalLinks, sitemap, maxConcurrency, webhook: _webhook, ...page } = task.crawl ?? {}
   return {
     maxPages: task.budget.maxPages,
     maxDepth: maxDepth ?? null,
@@ -1341,6 +1453,12 @@ function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPag
     ...(hasFormat(formats, 'attributes') && result?.attributes !== undefined ? { attributes: result.attributes } : {}),
     ...(hasFormat(formats, 'screenshot') && result !== null ? { screenshot: result.screenshot ?? null } : {}),
   }
+}
+
+/** A step as the items routes list it by default and as a job event carries it: no routing audit, an empty trace. */
+function compactPage(step: StepRecord, task: Task): CrawlPage {
+  const { audit: _audit, ...page } = toCrawlPage(step, linksRequested(task), task)
+  return { ...page, trace: [] }
 }
 
 function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): CrawlPage {
