@@ -164,6 +164,21 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'list_active_crawls', { teamId: 't1' })).rejects.toThrow('unsupported parameter: teamId')
   })
 
+  it('declares allowExternalLinks and includeSubdomains on batch_scrape as false only, forwards false as sent, and refuses true by name', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); return json({ taskId: 'task-1' }, 202) }) as typeof fetch })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], allowExternalLinks: false, includeSubdomains: false })
+    expect(bodies).toEqual([{ urls: ['https://example.com/a'], allowExternalLinks: false, includeSubdomains: false, origin: SDK_ORIGIN }])
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], allowExternalLinks: true })).rejects.toThrow('allowExternalLinks: true is not offered on a batch')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], includeSubdomains: true })).rejects.toThrow('a crawl takes allowSubdomains')
+    expect(bodies).toHaveLength(1)
+    const properties = TOOLS.find(tool => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, { type?: string; const?: unknown }>
+    expect(properties.allowExternalLinks).toMatchObject({ type: 'boolean', const: false })
+    expect(properties.includeSubdomains).toMatchObject({ type: 'boolean', const: false })
+    // MCP streams nothing; the tool that waits says where the streams are.
+    expect(TOOLS.find(tool => tool.name === 'wait_batch')?.description).toContain('MCP has no event stream')
+  })
+
   it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

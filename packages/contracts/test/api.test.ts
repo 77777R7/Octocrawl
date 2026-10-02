@@ -185,6 +185,14 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchStartRequest({ urls: [url], invalidURLs: [] })).toThrow('unsupported parameter: invalidURLs')
     // An override binds to the valid list.
     expect(() => parseBatchStartRequest({ urls: mixed, ignoreInvalidURLs: true, robotsOverrides: [{ url: 'ftp://x', reason: 'r' }] })).toThrow('robotsOverrides[0].url is not one of the batch urls')
+    // Firecrawl's extract scope flags: false says what already holds and is kept as sent; true is refused by name, pointing at the crawl option; neither is a crawl option here.
+    expect(parseBatchStartRequest({ urls: [url], allowExternalLinks: false, includeSubdomains: false })).toMatchObject({ allowExternalLinks: false, includeSubdomains: false })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('allowExternalLinks')
+    expect(() => parseBatchStartRequest({ urls: [url], allowExternalLinks: true })).toThrow('allowExternalLinks: true is not offered on a batch: a batch fetches only the URLs given; a crawl takes allowExternalLinks, and extraction across links is the M5 multi-URL extract')
+    expect(() => parseBatchStartRequest({ urls: [url], includeSubdomains: true })).toThrow('includeSubdomains: true is not offered on a batch: a batch fetches only the URLs given; a crawl takes allowSubdomains, and extraction across links is the M5 multi-URL extract')
+    expect(() => parseBatchStartRequest({ urls: [url], includeSubdomains: 'yes' })).toThrow('includeSubdomains must be a boolean')
+    expect(() => parseCrawlStartRequest({ url, includeSubdomains: false })).toThrow('unsupported parameter: includeSubdomains')
+    expect(parseBatchStartRequest({ appendToId: 'batch-1', urls: [url], allowExternalLinks: false })).toMatchObject({ appendToId: 'batch-1', allowExternalLinks: false })
     // The scrape and crawl messages keep their field name.
     expect(() => parseScrapeRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
     expect(() => parseCrawlStartRequest({ url: '' })).toThrow('url is required')
@@ -358,9 +366,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     for (const name of Object.keys(scope)) {
       expect(parseCrawlStartRequest({ url })).not.toHaveProperty(name)
       expect(() => parseCrawlStartRequest({ url, [name]: 'yes' })).toThrow(`${name} must be a boolean`)
-      // A crawl's scope is not a scrape or batch option.
+      // A crawl's scope is not a scrape or batch option (a batch takes Firecrawl's allowExternalLinks in its no-op form alone, below).
       expect(() => parseScrapeRequest({ url, [name]: true })).toThrow(`unsupported parameter: ${name}`)
-      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(`unsupported parameter: ${name}`)
+      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(name === 'allowExternalLinks' ? 'allowExternalLinks: true is not offered on a batch' : `unsupported parameter: ${name}`)
     }
     expect(() => parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: ['other.test'] })).toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
     expect(parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: [] })).toMatchObject({ allowExternalLinks: true })

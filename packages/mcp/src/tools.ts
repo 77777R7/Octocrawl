@@ -294,6 +294,8 @@ export const TOOLS = [
         },
         maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Pages of this batch in flight at once; the per-host ceiling still applies. Only lowers the service\'s worker count; omitted takes it.' },
         ignoreInvalidURLs: { type: 'boolean', description: 'Start with the entries of urls that are http(s) URLs and report the rest as invalidURLs (on the answer and on get_batch) instead of refusing the batch. Default false: an entry that is not a URL is refused by its index.' },
+        allowExternalLinks: { type: 'boolean', const: false, description: 'Accepted as false only, which already holds: a batch fetches the URLs given and follows no link. true is refused by name; a crawl takes allowExternalLinks, and extraction across links is the M5 multi-URL extract.' },
+        includeSubdomains: { type: 'boolean', const: false, description: 'Accepted as false only, which already holds: a batch fetches the URLs given and follows no link. true is refused by name; a crawl takes allowSubdomains.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
         appendToId: { type: 'string', minLength: 1, maxLength: 200, description: 'Add urls to this existing batch instead of starting a new job: the job keeps its mode, formats, includeLinks, maxConcurrency and page options (sending one is refused by name), and the answer carries requested (the job\'s URLs now) and appended. The batch\'s run picks the URLs up; a completed batch runs again for them; a cancelled or failed one is refused (conflict); the total stays at most 1000 and a URL already in the batch is refused.' },
         webhook: WEBHOOK_PROPERTY,
@@ -304,7 +306,7 @@ export const TOOLS = [
   },
   ...(['get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch'] as const).map(name => ({
     name,
-    description: `${name} for a persistent URL-array batch`,
+    description: `${name} for a persistent URL-array batch${name === 'wait_batch' ? '. MCP has no event stream: poll with wait_batch and page with get_batch_items; the REST API streams a job on GET /v1/batches/:id/events (and /v1/crawl/:id/events, each with a /ws WebSocket), the SDK with client.watcher(jobId).' : ''}`,
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' }, maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many items in all (pages of at most 50); the answer is then { items, nextCursor, hasMore, stoppedBy }.' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: 300000 } } : {}) }, required: ['id'], additionalProperties: false },
   })),
   {
@@ -425,7 +427,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)

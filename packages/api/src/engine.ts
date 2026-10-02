@@ -150,6 +150,19 @@ export interface ApiEngine {
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   /**
+   * The in-process hub a job's events pass through (`started`, one `page`
+   * per persisted step, the `terminal`): what the stream routes subscribe
+   * to. Deliveries do not go through it; the engine enqueues them itself.
+   */
+  readonly jobEvents: JobEventHub
+  /**
+   * Every persisted step of a crawl or batch, every attempt and every
+   * outcome, as the compact pages the items routes and the job events carry
+   * (no audit, an empty trace), in the order recorded, after `cursor`; null
+   * for an unknown task. The stream routes replay from it.
+   */
+  listJobPages(taskId: string, query: { cursor?: string; limit: number }): Promise<CrawlPageList<CrawlPage> | null>
+  /**
    * The batch's failed, blocked, cancelled and budget-cut items across every
    * attempt (an interrupted and resumed batch keeps its earlier failures), one
    * page at a time, with the URLs robots.txt refused; null for an id that is
@@ -482,7 +495,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const webhook = jobWebhooks.status(task)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
-        succeeded: (counts.success ?? 0) + (counts.partial ?? 0),
+        // A page read, with or without content, succeeded; what the errors report lists failed.
+        succeeded: (counts.success ?? 0) + (counts.partial ?? 0) + (counts.empty_verified ?? 0),
         failed: (counts.failed ?? 0) + (counts.blocked ?? 0) + (counts.cancelled ?? 0) + (counts.budget_exceeded ?? 0),
         // The cap in force: the batch's own, never above this service's worker count.
         maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
@@ -915,6 +929,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     getBatch: loadBatch,
+
+    jobEvents,
+
+    async listJobPages(taskId, query) {
+      const page = await loadCrawlPageList(taskId, { cursor: query.cursor, limit: query.limit }, 'all', true)
+      if (page === null) return null
+      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+    },
 
     async getBatchItems(taskId, query) {
       if (await this.getBatch(taskId) === null) return null
@@ -1465,7 +1487,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
   const result = step.result
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result })
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary }) })
   return {
     id: step.id,
     url: step.url,

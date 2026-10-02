@@ -412,6 +412,15 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    */
   ignoreInvalidURLs?: boolean
   /**
+   * Firecrawl's extract scope flags, accepted in their no-op form only: a
+   * batch fetches exactly the URLs given and follows no link, which is what
+   * `false` says. `true` is refused with HTTP 400 naming the alternative (a
+   * crawl's `allowExternalLinks` / `allowSubdomains`; extraction across
+   * links is the M5 multi-URL extract).
+   */
+  allowExternalLinks?: false
+  includeSubdomains?: false
+  /**
    * A client-chosen key, 1 to 200 characters without control characters,
    * that makes a retried submission return the first one's answer (with
    * `replayed: true`) instead of a second job; also the `x-idempotency-key`
@@ -451,9 +460,9 @@ export interface BatchStatusResponse extends CrawlReport {
   requested: number
   completed: number
   remaining: number
-  /** Items recorded `success` or `partial`, every attempt counted. */
+  /** Items recorded `success`, `partial` or `empty_verified` (a page read, with or without content), every attempt counted. */
   succeeded: number
-  /** Items the errors report lists: `failed`, `blocked`, `cancelled` or `budget_exceeded`, every attempt counted. */
+  /** Items the errors report lists: `failed`, `blocked`, `cancelled` or `budget_exceeded`, every attempt counted. With one step per URL, `completed` is `succeeded + failed`. */
   failed: number
   /** The cap in force: the request's `maxConcurrency` or the service's worker count, whichever is lower. */
   maxConcurrency: number
@@ -522,6 +531,36 @@ export interface CrawlPageQuery {
 }
 export type CrawlPagesResponse = CrawlPageList<CrawlPage>
 export type CrawlErrorsResponse = CrawlPageList<CrawlError>
+
+/**
+ * The events a job stream sends (`GET /v1/crawl/:id/events`,
+ * `GET /v1/batches/:id/events` as server-sent events, and the same routes'
+ * `/ws` as WebSocket frames): `catchup` with the job's report as the stream
+ * opens, one `document` per page recorded (the compact page the items routes
+ * list, with the step cursor the listing routes take, so `after=<cursor>` or
+ * `Last-Event-ID` resumes a stream), `snapshot` with the report after each
+ * page, `done` with the terminal report, `error` with `{ code, message }`.
+ * A document is sent once per step id on one stream; a client that resumes
+ * or switches transports deduplicates by it.
+ */
+export const JOB_STREAM_EVENTS = ['catchup', 'document', 'snapshot', 'done', 'error'] as const
+export type JobStreamEventType = (typeof JOB_STREAM_EVENTS)[number]
+export type JobStreamReport = CrawlReport | BatchStatusResponse
+export type JobStreamFrame =
+  | { type: 'catchup'; data: JobStreamReport }
+  | { type: 'document'; data: CrawlPage; cursor: string }
+  | { type: 'snapshot'; data: JobStreamReport }
+  | { type: 'done'; data: JobStreamReport }
+  | { type: 'error'; error: { code: string; message: string } }
+
+/**
+ * The WebSocket subprotocol a client presents its bearer token in, since the
+ * WebSocket API sets no headers: `w2l.token.<token>`, echoed back as the
+ * selected protocol. A token must then be made of the characters a
+ * subprotocol name allows (RFC 6455 token characters); the SDK falls back to
+ * the SSE route, which carries the Authorization header, for any other token.
+ */
+export const WS_TOKEN_PROTOCOL_PREFIX = 'w2l.token.'
 
 export function isApiCrawlMode(value: string): value is ApiCrawlMode {
   return (CRAWL_MODES as readonly string[]).includes(value)
@@ -634,9 +673,11 @@ const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-/** What a batch body may carry beside `appendToId`: the job's own options are not among them. */
-const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
+/** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
+const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+/** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
+const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
 /**
@@ -815,6 +856,19 @@ export function readWebhook(value: unknown): WebhookConfig | undefined {
     ...(events === undefined ? {} : { events }),
     ...(rec.secretEnv === undefined ? {} : { secretEnv: rec.secretEnv as string }),
   }
+}
+
+/**
+ * A batch's `allowExternalLinks` / `includeSubdomains`: `false` is accepted
+ * as what already holds (a batch fetches only the URLs given and follows no
+ * link); `true` is refused by name, pointing at the crawl option that does it
+ * and at the M5 multi-URL extract, never silently honoured or dropped.
+ */
+function readBatchScopeNoOp(value: unknown, key: keyof typeof BATCH_SCOPE_NOOP_KEYS): false | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'boolean') throw new RequestError(`${key} must be a boolean`)
+  if (value) throw new RequestError(`${key}: true is not offered on a batch: a batch fetches only the URLs given; a crawl takes ${BATCH_SCOPE_NOOP_KEYS[key]}, and extraction across links is the M5 multi-URL extract`)
+  return false
 }
 
 /** A batch's `maxConcurrency`: an integer from 1 to 4; the engine lowers it to its worker count, never raises it. */
@@ -1448,6 +1502,8 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
   const maxConcurrency = readMaxConcurrency(rec.maxConcurrency, 'maxConcurrency')
+  const allowExternalLinks = readBatchScopeNoOp(rec.allowExternalLinks, 'allowExternalLinks')
+  const includeSubdomains = readBatchScopeNoOp(rec.includeSubdomains, 'includeSubdomains')
   const webhook = readWebhook(rec.webhook)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
@@ -1459,6 +1515,8 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs }),
     ...(ignoreInvalidURLs === true ? { invalidURLs } : {}),
+    ...(allowExternalLinks === undefined ? {} : { allowExternalLinks }),
+    ...(includeSubdomains === undefined ? {} : { includeSubdomains }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(appendToId === undefined ? {} : { appendToId }),
     ...(webhook === undefined ? {} : { webhook }),
