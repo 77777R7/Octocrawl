@@ -58,7 +58,7 @@ export function restBody(request: CodeRequest): Record<string, unknown> {
 
 export function restSnippet(request: CodeRequest): string {
   return [
-    '# In an OctoCrawl checkout, start the local API first: npm run api',
+    '# In an Octocrawl checkout, start the local API first: npm run api',
     `curl -sS -X POST ${LOCAL_API}/v1/scrape \\`,
     `  -H 'content-type: application/json' \\`,
     `  -d ${shellQuote(JSON.stringify(restBody(request)))}`,

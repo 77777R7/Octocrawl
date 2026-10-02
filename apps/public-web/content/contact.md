@@ -1,25 +1,34 @@
 # Contact
 
-> **DRAFT for the owner's review. Not published.** Text in [square brackets] is a decision only the owner can make.
-
-OctoCrawl is run in the open. There are two channels: GitHub issues, which are public (never post passwords, keys or personal data in one), and email at [lunhoward306@gmail.com](mailto:lunhoward306@gmail.com).
+Octocrawl and this site are run by Howard Lun. There are two ways to get in touch: GitHub issues, which are public, and email, which is private.
 
 ## Questions, bugs and ideas
 
-Open an issue on [GitHub](https://github.com/77777R7/w2l/issues). For a question, add the `question` label.
+Open an issue on [GitHub](https://github.com/77777R7/w2l/issues). For a question, add the `question` label. Issues are public: never post passwords, keys or personal data in one.
 
 ## Privacy
 
-Email [lunhoward306@gmail.com](mailto:lunhoward306@gmail.com), so the request stays private.
+For a question or request about your data, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev). What the site records is described in [Privacy](/docs/privacy/).
 
 ## Security
 
-[Owner: turn on GitHub private vulnerability reporting, or name a security email, before publishing this page.] Until then, open an issue that asks for a private channel, without the details of the problem.
+To report a security problem, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) with "Security" in the subject. Please do not open a public issue about it until it is fixed.
 
 ## Site owners
 
-The preview reads your robots.txt before it fetches a page and obeys the rules that apply to it, including `User-agent: *`. If robots.txt cannot be reached (a server error, no answer or a timeout), the page is not fetched; a robots.txt that answers with a 4xx status counts as no rules, as RFC 9309 provides.
+The preview names itself in its user agent: each request it makes carries the token `OctoCrawl-Preview/1.0 (+https://octocrawl.dev)` after a standard browser string.
 
-[Owner: the preview currently sends a standard browser user agent and does not name OctoCrawl, so a site cannot single it out by name. Decide whether to add an OctoCrawl token to its user agent before publishing this paragraph; until then, do not tell site owners they can block OctoCrawl by name.]
+It reads your robots.txt before it fetches a page and obeys the rules for `octocrawl-preview`, or for `User-agent: *` when no group names it. To keep the preview off your site:
 
-To report a problem with how the preview treated your site, open an issue on GitHub. [Owner: or a private channel.]
+```text
+User-agent: octocrawl-preview
+Disallow: /
+```
+
+A group that names the preview replaces the `*` group for it; the details are in [How the preview identifies itself](/docs/limits/#how-the-preview-identifies-itself). If robots.txt cannot be reached (a server error, no answer or a timeout), the page is not fetched; a robots.txt that answers with a 4xx status counts as no rules, as RFC 9309 provides. The preview never signs in, solves a CAPTCHA or gets past a verification page.
+
+To report a problem with how the preview treated your site, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) or open an issue on GitHub.
+
+## Misuse
+
+To report misuse of the preview, see the [Acceptable use policy](/docs/acceptable-use/) and email [hello@octocrawl.dev](mailto:hello@octocrawl.dev).

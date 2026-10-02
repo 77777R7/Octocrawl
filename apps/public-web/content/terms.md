@@ -1,14 +1,12 @@
 # Terms of use
 
-> **DRAFT for the owner's review. Not reviewed by a lawyer. Not published.** Text in [square brackets] is a decision only the owner can make.
+These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/w2l/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-These terms cover the public OctoCrawl page at this address and its preview service (“the preview”). They do not cover the OctoCrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/w2l/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run OctoCrawl on your own computer, these terms do not apply.
-
-Last updated [date].
+Last updated 3 October 2026.
 
 ## Who runs the preview
 
-The preview is run by [owner: name or legal entity, and country].
+The preview is run by Howard Lun, an individual in British Columbia, Canada. You can reach him at [hello@octocrawl.dev](mailto:hello@octocrawl.dev).
 
 ## What the preview is
 
@@ -31,7 +29,7 @@ The preview is run by [owner: name or legal entity, and country].
 
 ## No warranty
 
-[Owner or lawyer: final wording. A starting point:] The preview is free and provided “as is”, without warranties of any kind, to the extent the law allows. To the extent the law allows, [the operator] is not liable for any loss that comes from using the preview or relying on its results.
+The preview is free and provided “as is”, without warranties of any kind, to the extent the law allows. To the extent the law allows, the operator is not liable for any loss that comes from using the preview or relying on its results.
 
 ## Changes
 
@@ -39,7 +37,9 @@ When these terms change, the date above changes with them. Using the preview aft
 
 ## Governing law
 
-[Owner: which country's law applies, and where disputes are heard.]
+These terms are governed by the laws of the Province of British Columbia and the federal laws of Canada that apply there, and disputes about them are heard in the courts of British Columbia.
+
+If you use the preview as a consumer, nothing in these terms takes away the protection that the mandatory consumer laws of the place where you live give you, or a right those laws give you to bring a claim in your local courts.
 
 ## Contact
 

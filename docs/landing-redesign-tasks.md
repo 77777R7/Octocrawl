@@ -1,6 +1,6 @@
 # Landing page 改版任务清单
 
-设计稿：[OctoCrawl Landing Redesign（Claude Design 画布）](https://claude.ai/artifact/GS5XkKXd6UbKAMZYWfi7eD)
+设计稿：[Octocrawl Landing Redesign（Claude Design 画布）](https://claude.ai/artifact/GS5XkKXd6UbKAMZYWfi7eD)
 - `Main.dc.html`：可交互的桌面版整页
 - `Palette.dc.html`：场景配色和字符词汇
 
@@ -46,7 +46,7 @@
 - [x] **T5 共享动效工具 `whenVisible(el, start, stop)`**（`src/motion.ts`，目前用于跑马灯）
   - 基于 IntersectionObserver，同时处理 `visibilitychange` 和 `prefers-reduced-motion`。
   - 后面所有动效都走这一个入口。
-- [x] 页脚联系方式：邮箱 lunhoward306@gmail.com 和 GitHub issues。
+- [x] 页脚联系方式：邮箱 hello@octocrawl.dev 和 GitHub issues。
 - 验证（全部做完）：
   - `npm run build --workspace @w2l/public-web`
   - 用 Playwright 截图 1440 和 390 两个宽度。
@@ -68,7 +68,7 @@
   - tab 能用键盘操作（方向键、Home/End）。
   - 屏幕阅读器能读到完整的记录文本。
 
-## P3 Why OctoCrawl：Firecrawl 式两格（浅色纸本区）
+## P3 Why Octocrawl：Firecrawl 式两格（浅色纸本区）
 
 - [x] **T8 左格 "Fewer false successes."**
   - ASCII 字符填充的对比条，tab 切换两个指标。数据来自 `docs/benchmark-gate.md` 的 run `35423895294` · `main@6dc2e6e`：
@@ -85,8 +85,8 @@
 
 ## P4 What you can count on（Firecrawl 图四式）和 Run it yourself
 
-- [x] **T10 节点图**：YOUR AGENT → OctoCrawl → robots.txt ✓ → PUBLIC PAGE。
-  - 节点之间用发丝线连接，OctoCrawl 节点用章鱼标志，外面一圈橙色弧线。
+- [x] **T10 节点图**：YOUR AGENT → Octocrawl → robots.txt ✓ → PUBLIC PAGE。
+  - 节点之间用发丝线连接，Octocrawl 节点用章鱼标志，外面一圈橙色弧线。
 - [x] **T10b 两格**
   - 左格 Checked fields：同心圆加 ASCII 光晕，中间放字段来源小表。
   - 右格 Five formats：4×2 图标网格（Markdown、Links、Page info、Fields、JSON、PDF、Copy、Download），悬停显示格式说明和文件类型。
