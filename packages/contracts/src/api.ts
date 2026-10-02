@@ -269,11 +269,24 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
    * the worker count.
    */
   maxConcurrency?: number | null
+  /**
+   * A client-chosen key, 1 to 200 characters without control characters,
+   * that makes a retried start return the first start's answer instead of a
+   * second job (also the `x-idempotency-key` header on REST). The same key
+   * with a different request is HTTP 409 `conflict`. Keys live 24 hours.
+   */
+  idempotencyKey?: string
 }
 
 export interface CrawlAccepted {
   taskId: string
+  /** Present and true when `idempotencyKey` matched an earlier start and this is its stored answer; nothing was started. */
+  replayed?: boolean
 }
+
+/** The request headers REST reads an idempotency key from, merged into the body as `idempotencyKey` before parsing. */
+export const IDEMPOTENCY_KEY_HEADERS = ['x-idempotency-key', 'idempotency-key'] as const
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 200
 
 /** The options a running crawl was started with, as `GET /v1/crawl/active` reports them: its task's stored options plus its page budget. */
 export interface ActiveCrawlOptions {
@@ -335,14 +348,38 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * is a duplicate: neither is an invalid URL. Default false.
    */
   ignoreInvalidURLs?: boolean
+  /**
+   * A client-chosen key, 1 to 200 characters without control characters,
+   * that makes a retried submission return the first one's answer (with
+   * `replayed: true`) instead of a second job; also the `x-idempotency-key`
+   * header on REST. The same key with a different request is HTTP 409
+   * `conflict`. Keys live 24 hours, per task root.
+   */
+  idempotencyKey?: string
+  /**
+   * The id of an existing batch to add `urls` to instead of starting a new
+   * job. The body may then carry only `urls`, `ignoreInvalidURLs`,
+   * `idempotencyKey`, `robotsOverrides` and the attribution labels: the job's
+   * `mode`, `formats`, `includeLinks`, `maxConcurrency` and page options
+   * stay as they were (`appendToId keeps the job's options; <key> cannot be
+   * changed`). The appended URLs go to the end of the job's list, in order.
+   */
+  appendToId?: string
 }
 
 /** What the parser hands the engine: the request plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none). */
 export type ParsedBatchStartRequest = BatchStartRequest & { invalidURLs?: readonly string[] }
 
-/** `POST /v1/batches` 202: the task id and, when `ignoreInvalidURLs` was on, the entries skipped, possibly none. */
+/**
+ * `POST /v1/batches` 202: the task id and, when `ignoreInvalidURLs` was on,
+ * the entries skipped, possibly none. An append answers with the job's id,
+ * `requested` (the job's URLs after the append) and `appended` (the URLs this
+ * request added); a replayed submission carries `replayed: true`.
+ */
 export interface BatchAccepted extends CrawlAccepted {
   invalidURLs?: string[]
+  requested?: number
+  appended?: number
 }
 
 export interface BatchStatusResponse extends CrawlReport {
@@ -527,8 +564,10 @@ const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'inc
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'appendToId', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+/** What a batch body may carry beside `appendToId`: the job's own options are not among them. */
+const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
 /**
@@ -593,6 +632,23 @@ function readUrl(value: unknown, name = 'url'): string {
     if (err instanceof RequestError) throw err
     throw new RequestError(`${name} must be http(s)`)
   }
+  return value
+}
+
+/** An idempotency key: 1 to 200 characters, none of them a control character (it is stored and compared, never sent to a site). */
+function readIdempotencyKey(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  // eslint-disable-next-line no-control-regex
+  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_IDEMPOTENCY_KEY_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new RequestError(`idempotencyKey must be a string of 1 to ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`)
+  }
+  return value
+}
+
+/** The id of the batch to append to: a non-empty string of at most 200 characters (the engine decides whether such a batch exists). */
+function readAppendToId(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length < 1 || value.length > 200) throw new RequestError('appendToId must be a non-empty string')
   return value
 }
 
@@ -1162,6 +1218,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   const sitemap = readSitemapMode(rec.sitemap)
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
+  const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
@@ -1176,6 +1233,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     ...scope,
     ...(sitemap === undefined ? {} : { sitemap }),
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...page,
     ...readAttribution(rec),
   }
@@ -1188,11 +1246,20 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
  * (`urls[2] must be http(s)`), or with `ignoreInvalidURLs` collected into
  * `invalidURLs` instead; an entry that is not a string is refused either
  * way. The 1..1000 cap counts the submitted entries; `requested` later
- * counts the valid ones.
+ * counts the valid ones. With `appendToId` the body may carry only the
+ * entries to add and what binds to them: an option of the job itself is
+ * refused by name (`appendToId keeps the job's options; formats cannot be
+ * changed`).
  */
 export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const rec = asRecord(body)
   rejectUnknownKeys(rec, BATCH_KEYS)
+  const appendToId = readAppendToId(rec.appendToId)
+  if (appendToId !== undefined) {
+    const changed = BATCH_KEYS.find((key) => rec[key] !== undefined && !(BATCH_APPEND_KEYS as readonly string[]).includes(key))
+    if (changed !== undefined) throw new RequestError(`appendToId keeps the job's options; ${changed} cannot be changed`)
+  }
+  const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   if (!Array.isArray(rec.urls) || rec.urls.length < 1 || rec.urls.length > 1000) {
     throw new RequestError('urls must contain 1 to 1000 URLs')
   }
@@ -1224,6 +1291,8 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs }),
     ...(ignoreInvalidURLs === true ? { invalidURLs } : {}),
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(appendToId === undefined ? {} : { appendToId }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats)

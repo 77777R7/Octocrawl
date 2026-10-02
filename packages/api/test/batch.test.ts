@@ -6,7 +6,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { SqliteTaskStore } from '@w2l/runtime'
-import { W2L } from '@w2l/sdk'
+import { W2L, type BatchAccepted } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
 
@@ -48,12 +48,14 @@ describe('persistent URL-array batch', () => {
         res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p><p><a href="details">Details</a></p></article></main></body></html>`)
       } finally { inFlight-- }
     })
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    // Bound to every address, so the one server answers as 127.0.0.1 and, for a URL appended on a new host, as localhost.
+    await new Promise<void>(resolve => server.listen(0, resolve))
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const localhostOrigin = `http://localhost:${(server.address() as AddressInfo).port}`
     const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency, perHostMinDelayMs: 0 }, workerCount: 2, ...engineOptions, ...extra })
     cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
     return {
-      origin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release(),
+      origin, localhostOrigin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release(),
       setHold: (fn: (path: string) => Promise<void>) => { hold = fn }, inFlight: () => inFlight, maxInFlight: () => maxInFlight, resetMaxInFlight: () => { maxInFlight = 0 },
     }
   }
@@ -138,6 +140,146 @@ describe('persistent URL-array batch', () => {
     expect(await refused.json()).toEqual({ error: 'urls[1] must be http(s)', code: 'invalid_request' })
     expect((await readdir(f.root)).length).toBe(before)
     expect(f.seen).toEqual(['/item/1'])
+  })
+
+  /** The task directories under a root: the batches and crawls, not the task root's own files (the idempotency index, scrapes). */
+  const taskDirs = async (root: string) => (await readdir(root, { withFileTypes: true })).filter(entry => entry.isDirectory() && !['scrapes', 'files', 'profiles'].includes(entry.name)).map(entry => entry.name).sort()
+
+  it('replays a batch submitted twice under one idempotency key, refuses the key for another request, and reads the key from the header too', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const urls = [1, 2, 3].map(n => `${f.origin}/item/${n}`)
+    const first = await w2l.batchScrape(urls, { idempotencyKey: 'nightly-2026-10-02' })
+    const again = await w2l.batchScrape(urls, { idempotencyKey: 'nightly-2026-10-02' })
+    expect(first).toEqual({ taskId: expect.any(String) })
+    expect(again).toEqual({ taskId: first.taskId, replayed: true })
+    expect(await w2l.waitBatch(first.taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
+    // One task directory, each URL fetched once; the key's row sits in the task root's index.
+    expect(await taskDirs(f.root)).toEqual([first.taskId])
+    expect([...f.seen].sort()).toEqual(['/item/1', '/item/2', '/item/3'])
+    expect((await readdir(f.root)).some(name => name === 'idempotency.sqlite')).toBe(true)
+    // The same key with another request is a conflict, and starts nothing either.
+    await expect(w2l.batchScrape(urls.slice(0, 2), { idempotencyKey: 'nightly-2026-10-02' })).rejects.toMatchObject({ status: 409, code: 'conflict', body: { error: 'idempotency key was used for a different request', code: 'conflict' } })
+    expect(await taskDirs(f.root)).toEqual([first.taskId])
+    // The header Firecrawl clients send: alone it is the key; beside a body key it must be the same key.
+    const post = (body: unknown, headers: Record<string, string> = {}) => app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+    const byHeader = await post({ urls: [urls[0]] }, { 'x-idempotency-key': 'header-key' })
+    expect(byHeader.status).toBe(202)
+    const headerBody = await byHeader.json() as BatchAccepted
+    expect(headerBody).toEqual({ taskId: expect.any(String) })
+    expect(await (await post({ urls: [urls[0]] }, { 'x-idempotency-key': 'header-key' })).json()).toEqual({ ...headerBody, replayed: true })
+    expect(await (await post({ urls: [urls[0]], idempotencyKey: 'header-key' }, { 'Idempotency-Key': 'header-key' })).json()).toEqual({ ...headerBody, replayed: true })
+    const mismatch = await post({ urls: [urls[0]], idempotencyKey: 'other' }, { 'x-idempotency-key': 'header-key' })
+    expect(mismatch.status).toBe(400)
+    expect(await mismatch.json()).toEqual({ error: 'idempotencyKey does not match the x-idempotency-key header', code: 'invalid_request' })
+    expect(await w2l.waitBatch(headerBody.taskId)).toMatchObject({ status: 'completed', completed: 1 })
+    expect(await taskDirs(f.root)).toEqual([first.taskId, headerBody.taskId].sort())
+    expect(f.seen.filter(path => path === '/item/1')).toHaveLength(2)
+  })
+
+  it('appends URLs to a running batch, which fetches them in the same attempt, also on a new host, and replays a repeated append', async () => {
+    const f = await fixture()
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [1, 2, 3].map(n => `${f.origin}/item/${n}`)
+    const { taskId } = await w2l.batchScrape(urls, { formats: ['markdown'] })
+    await slowStarted
+    const running = await w2l.getBatch(taskId)
+    expect(running).toMatchObject({ status: 'running', requested: 3 })
+    const more = [`${f.origin}/item/4`, `${f.localhostOrigin}/item/5`]
+    const appended = await w2l.appendToBatch(taskId, more, { idempotencyKey: 'append-1' })
+    expect(appended).toEqual({ taskId, requested: 5, appended: 2 })
+    expect(await w2l.appendToBatch(taskId, more, { idempotencyKey: 'append-1' })).toEqual({ taskId, requested: 5, appended: 2, replayed: true })
+    expect(await w2l.getBatch(taskId)).toMatchObject({ requested: 5 })
+    f.release()
+    const report = await w2l.waitBatch(taskId)
+    // Seeded live: the same attempt fetched every URL, the new host's included, once each.
+    expect(report).toMatchObject({ status: 'completed', requested: 5, completed: 5, remaining: 0, attemptId: running.attemptId })
+    const items = (await w2l.getBatchItems(taskId, { limit: 10 })).items
+    expect(items.map(item => [item.url, item.status]).sort()).toEqual([...urls, ...more].map(url => [url, 'success']).sort())
+    expect([...f.seen].sort()).toEqual(['/item/1', '/item/2', '/item/3', '/item/4', '/item/5'])
+    const store = SqliteTaskStore.openReadOnly(join(f.root, taskId))
+    try {
+      expect((await store.getTask(taskId))?.batch?.urls).toEqual([...urls, ...more])
+      expect((await store.listAttempts(taskId)).length).toBe(1)
+    } finally { await store.close() }
+    expect(await taskDirs(f.root)).toEqual([taskId])
+  })
+
+  it('appends to a completed batch, which runs again for the new URLs in a second attempt, and refuses what an append cannot do by name', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const urls = [1, 2].map(n => `${f.origin}/item/${n}`)
+    const { taskId } = await w2l.batchScrape(urls)
+    const first = await w2l.waitBatch(taskId)
+    expect(first).toMatchObject({ status: 'completed', completed: 2 })
+    const more = [3, 4, 5, 6, 7].map(n => `${f.origin}/item/${n}`)
+    expect(await w2l.appendToBatch(taskId, more)).toEqual({ taskId, requested: 7, appended: 5 })
+    const second = await w2l.waitBatch(taskId)
+    expect(second).toMatchObject({ status: 'completed', requested: 7, completed: 7, remaining: 0 })
+    expect(second.attemptId).not.toBe(first.attemptId)
+    // The relaunch fetched the five new URLs alone.
+    expect([...f.seen].sort()).toEqual([1, 2, 3, 4, 5, 6, 7].map(n => `/item/${n}`))
+    const store = SqliteTaskStore.openReadOnly(join(f.root, taskId))
+    try {
+      expect((await store.listAttempts(taskId)).map(attempt => attempt.status)).toEqual(['completed', 'completed'])
+      expect((await store.getTask(taskId))?.batch?.urls).toEqual([...urls, ...more])
+    } finally { await store.close() }
+    // Named refusals: a URL already in the batch, an option of the job, a total over 1000, an unknown id, a crawl's id.
+    await expect(w2l.appendToBatch(taskId, [`${f.origin}/item/8`, `${f.origin}/item/3`])).rejects.toMatchObject({ status: 400, body: { error: `appended url is already in the batch: ${f.origin}/item/3`, code: 'invalid_request' } })
+    const post = (body: unknown) => app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const changed = await post({ appendToId: taskId, urls: [`${f.origin}/item/8`], formats: ['links'] })
+    expect(changed.status).toBe(400)
+    expect(await changed.json()).toEqual({ error: 'appendToId keeps the job\'s options; formats cannot be changed', code: 'invalid_request' })
+    const tooMany = await post({ appendToId: taskId, urls: Array.from({ length: 994 }, (_, n) => `${f.origin}/item/${n + 100}`) })
+    expect(tooMany.status).toBe(400)
+    expect(await tooMany.json()).toEqual({ error: 'batch would exceed 1000 URLs', code: 'invalid_request' })
+    const unknown = await post({ appendToId: 'nothing', urls: [`${f.origin}/item/8`] })
+    expect(unknown.status).toBe(404)
+    expect(await unknown.json()).toEqual({ error: 'not found', code: 'not_found' })
+    const crawl = await engine.startCrawl({ url: urls[0]!, maxPages: 1, sitemap: 'skip' })
+    expect((await post({ appendToId: crawl.taskId, urls: [`${f.origin}/item/8`] })).status).toBe(404)
+    await w2l.waitCrawl(crawl.taskId)
+    // Nothing of that was fetched, and the batch is as the second attempt left it.
+    expect(f.seen.filter(path => path === '/item/8' || path === '/item/100')).toEqual([])
+    expect(await w2l.getBatch(taskId)).toMatchObject({ status: 'completed', requested: 7, completed: 7 })
+    // A cancelled batch takes no more URLs.
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const held = await w2l.batchScrape([`${f.origin}/item/2`])
+    await slowStarted
+    expect(await w2l.cancelBatch(held.taskId)).toMatchObject({ status: 'cancelled' })
+    f.release()
+    await expect(w2l.appendToBatch(held.taskId, [`${f.origin}/item/9`])).rejects.toMatchObject({ status: 409, body: { error: 'batch is cancelled', code: 'conflict' } })
+  })
+
+  it('accepts an append while the one active hosted batch runs, since an append adds no job', async () => {
+    const f = await fixture({ maxActiveBatches: 1 })
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const engine = f.engine()
+    cleanup.push(() => engine.close({ cancelActive: true }))
+    const { client: w2l } = client(engine)
+    const { taskId } = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/item/2`])
+    await slowStarted
+    await expect(w2l.batchScrape([`${f.origin}/item/3`])).rejects.toMatchObject({ status: 400, body: { error: 'active batch limit reached' } })
+    expect(await w2l.appendToBatch(taskId, [`${f.origin}/item/3`])).toEqual({ taskId, requested: 3, appended: 1 })
+    f.release()
+    expect(await w2l.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3, remaining: 0 })
+    expect([...f.seen].sort()).toEqual(['/item/1', '/item/2', '/item/3'])
   })
 
   it('lists the items that did not succeed on /errors, every attempt included, with the URLs robots.txt refused', async () => {

@@ -126,6 +126,9 @@ export class WaitTimeoutError<T extends { status: string } = { status: string }>
   }
 }
 
+/** What `appendToBatch` may send beside the URLs: what binds to them, and the attribution labels; the job's own options stay as they are. */
+export type AppendToBatchOptions = Pick<BatchStartRequest, 'ignoreInvalidURLs' | 'idempotencyKey' | 'robotsOverrides' | 'origin' | 'integration'>
+
 /** crawlAndWait's result: the final status, every page and every error of the crawl's latest attempt. */
 export interface CrawlCollected {
   taskId: string
@@ -190,6 +193,7 @@ export type PagedListOptions = Omit<CrawlPageQuery, 'cursor'> & PaginationLimits
 /** The largest page the API serves: crawl pages up to 1 000, batch items up to 50. */
 const CRAWL_PAGE_MAX_LIMIT = 1_000
 const BATCH_ITEM_MAX_LIMIT = 50
+
 
 function checkPaginationLimits(options: PaginationLimits): void {
   if (options.maxPages !== undefined && !(Number.isInteger(options.maxPages) && options.maxPages >= 0)) throw new RangeError('maxPages must be an integer, 0 or more')
@@ -306,10 +310,28 @@ export class W2L {
     return this.post<CrawlAccepted>('/v1/crawl', { ...opts, url, origin: originOf(opts, request) }, 202, request)
   }
 
-  /** Starts a batch: `{ taskId }`, plus `invalidURLs` (the entries skipped) when `ignoreInvalidURLs` was on. */
+  /**
+   * Starts a batch: `{ taskId }`, plus `invalidURLs` (the entries skipped)
+   * when `ignoreInvalidURLs` was on; with `idempotencyKey` a retried start
+   * returns the first one's answer with `replayed: true`; with `appendToId`
+   * the URLs join that batch (see appendToBatch) and the answer carries
+   * `requested` and `appended`.
+   */
   async batchScrape(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, request: RequestOptions = {}): Promise<BatchAccepted> {
     return this.post<BatchAccepted>('/v1/batches', { ...opts, urls, origin: originOf(opts, request) }, 202, request)
   }
+
+  /**
+   * Adds URLs to an existing batch (`appendToId`): the job keeps its mode,
+   * formats, includeLinks, maxConcurrency and page options, and its run picks
+   * the URLs up (a completed batch runs again for them). The answer carries
+   * `requested`, the job's URLs now, and `appended`. A cancelled or failed
+   * batch, a total over 1000 or a URL already in the batch is a W2LError.
+   */
+  async appendToBatch(id: string, urls: readonly string[], opts: AppendToBatchOptions = {}, request: RequestOptions = {}): Promise<BatchAccepted> {
+    return this.batchScrape(urls, { ...opts, appendToId: id }, request)
+  }
+
 
   async getBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
     return this.get<BatchStatusResponse>(`/v1/batches/${encodeURIComponent(id)}`, request, `batch not found: ${id}`)

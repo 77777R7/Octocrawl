@@ -8,7 +8,10 @@
  * from its second request on.
  *
  * A link is admitted in this order: canonicalize, depth, host scope, the
- * seed's path subtree, the asset and path filters, visited. The host scope is
+ * seed's path subtree, the asset and path filters, visited. A seed (an
+ * explicit caller URL: a crawl's start URL, a batch's URLs, an appended batch
+ * URL on a new host) passes canonicalize, depth and visited alone: the host
+ * scope and the filters govern discovered links. The host scope is
  * the seed host, its apex/www twin and the host the seed redirected to
  * (followSeedRedirect), plus an allowlist's hosts (exact / `*.domain`, as
  * governance matches them), every host under the seed's apex when
@@ -21,8 +24,8 @@
  * semantics, exclude wins; a link a filter cannot decide in its time limit is
  * skipped, see pathFilter.ts), or on its canonical URL with regexOnFullURL,
  * and links to assets (images, fonts, styles, scripts, audio, video,
- * programs) are not enqueued. Seeds bypass the subtree, path and asset
- * filters, so the seed URL is always fetched.
+ * programs) are not enqueued. Seeds bypass the host scope and the subtree,
+ * path and asset filters, so a seed URL is always fetched.
  *
  * A sitemap entry (enqueueFromSitemap) is admitted exactly as a link is, at
  * the depth the orchestrator gives it, and recorded as discovered via the
@@ -299,10 +302,11 @@ export class Frontier {
       return { accepted: false, canonicalUrl, reason: 'depth' }
     }
     const host = hostOf(canonicalUrl)
-    if (!this.hostAllowed(host)) {
-      return { accepted: false, canonicalUrl, reason: 'host_denied' }
-    }
     if (acceptedReason === 'enqueued') {
+      // A seed is the caller's own URL; the host scope, like the filters below, is for the links found on the pages.
+      if (!this.hostAllowed(host)) {
+        return { accepted: false, canonicalUrl, reason: 'host_denied' }
+      }
       const pathname = new URL(canonicalUrl).pathname
       if (!this.crawlEntireDomain && this.seedHosts.has(host) && !this.inSeedSubtree(pathname)) {
         return { accepted: false, canonicalUrl, reason: 'subtree_denied' }

@@ -329,6 +329,22 @@ describe('W2L SDK', () => {
     expect(calls.map((call) => call.line)).toEqual(['POST /v1/batches', 'GET /v1/batches/batch-1/errors', 'GET /v1/batches/batch-1/errors?cursor=c1&limit=5', 'GET /v1/batches/nothing/errors'])
   })
 
+  it('sends idempotencyKey and appendToId with a batch start, and appendToBatch posts to /v1/batches', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const body = JSON.parse(String(init?.body)) as { appendToId?: string }
+      calls.push({ line: `${init?.method ?? 'GET'} ${url.pathname}`, body })
+      return new Response(JSON.stringify(body.appendToId === undefined ? { taskId: 'batch-1', replayed: true } : { taskId: body.appendToId, requested: 7, appended: 2 }), { status: 202 })
+    }) as typeof fetch })
+    expect(await client.batchScrape(['https://example.com/a'], { idempotencyKey: 'nightly-1' })).toEqual({ taskId: 'batch-1', replayed: true })
+    expect(await client.appendToBatch('batch-1', ['https://example.com/b', 'https://example.com/c'], { idempotencyKey: 'nightly-1:append', ignoreInvalidURLs: true })).toEqual({ taskId: 'batch-1', requested: 7, appended: 2 })
+    expect(calls).toEqual([
+      { line: 'POST /v1/batches', body: { urls: ['https://example.com/a'], idempotencyKey: 'nightly-1', origin: SDK_ORIGIN } },
+      { line: 'POST /v1/batches', body: { urls: ['https://example.com/b', 'https://example.com/c'], appendToId: 'batch-1', idempotencyKey: 'nightly-1:append', ignoreInvalidURLs: true, origin: SDK_ORIGIN } },
+    ])
+  })
+
   it('crawlAndWait and batchAndWait return the final status with every page, error and item', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {

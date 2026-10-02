@@ -18,6 +18,13 @@
  * `only` a page's links stay on its record and are not followed. The load is
  * written to the attempt's discovery with every file it read or refused. A
  * crawl's maxConcurrency lowers the workers it runs; the per-host gate stays.
+ *
+ * A batch's URL list can grow while it runs (an append): the task row is
+ * re-read every 100 ms and on every work-loop turn, and URLs past the ones
+ * already seeded are seeded then, so the same attempt fetches them. The task
+ * written at the end of a run is built from the row as it then is, never from
+ * the object the run opened with, so a list that grew meanwhile is kept; URLs
+ * that arrive after the workers have stopped are the engine's to relaunch.
  */
 
 import {
@@ -206,6 +213,8 @@ export class CrawlOrchestrator {
       })
       const priorSteps = await this.store.listSteps(task.id)
       const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps)
+      // How many of a batch's URLs the frontier has been given; an append pushes to the end of the list, so the tail past this index is new.
+      let seededCount = task.batch?.urls.length ?? 0
       if (sitemapMode !== 'skip' && this.sitemapSource !== undefined && discovery !== null) {
         discovery.sitemap = await this.loadSitemap(this.sitemapSource, sitemapMode, task.seedUrl, task.budget.maxPages, frontier, discovery, scope)
       }
@@ -234,9 +243,17 @@ export class CrawlOrchestrator {
       wakeWorkers = (): void => {
         while (wakeResolvers.length > 0) wakeResolvers.shift()!()
       }
+      // URLs appended to a batch since the frontier was last fed: seeded (a URL this task already fetched is marked visited instead) and the idle workers woken.
+      const seedAppended = (current: Task | null): void => {
+        if (current?.batch === undefined || current.batch.urls.length <= seededCount) return
+        seedBatchUrls(frontier, current.batch.urls.slice(seededCount), taskUrls)
+        seededCount = current.batch.urls.length
+        wakeWorkers()
+      }
 
       // Cancellation written by another engine/process must reach an in-flight
       // request, rather than wait for that request to complete before polling.
+      // The same read picks up URLs appended to a batch.
       const pollCancellation = async (): Promise<void> => {
         try {
           const current = await this.store.getTask(runningTask.id)
@@ -244,7 +261,7 @@ export class CrawlOrchestrator {
           if (current?.status === 'cancelled') {
             persistedCancellation = true
             stopController.abort(new DOMException('Crawl cancelled', 'AbortError'))
-          }
+          } else if (!scope.signal.aborted) seedAppended(current)
         } catch (error) {
           if (pollingStopped) return
           failed = error
@@ -262,7 +279,7 @@ export class CrawlOrchestrator {
           if (persistedTask?.status === 'cancelled') {
             persistedCancellation = true
             stopController.abort(new DOMException('Crawl cancelled', 'AbortError'))
-          }
+          } else seedAppended(persistedTask)
           if (stopped()) { stopping = true; break }
           const spent: CrawlBudgetSpent = { wallMs: now - startedAtMs, costUsd, costUnknown, tokens: contentTokens, tokensUnknown: contentTokensUnknown }
           const hit = budgetHit(spec.budget, spent)
@@ -417,13 +434,15 @@ export class CrawlOrchestrator {
       endedAt,
       ...meters(),
     }
-    const finished: Task = { ...task, status, updatedAt: endedAt }
     try {
       await this.store.putAttempt(finishedAttempt)
     } catch (err) {
       if (failed === null) failed = err
     }
+    // The row as it is now, not the object the run opened with: a batch's URL list may have grown meanwhile, and the final write keeps it.
+    let finished: Task = { ...(persistedTask ?? task), status, updatedAt: endedAt }
     try {
+      finished = { ...((await this.store.getTask(task.id)) ?? persistedTask ?? task), status, updatedAt: endedAt }
       await this.store.putTask(finished)
     } catch (err) {
       if (failed === null) failed = err
@@ -505,14 +524,7 @@ export class CrawlOrchestrator {
    */
   private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<readonly StepRecord[]> {
     if (task.batch !== undefined) {
-      const completed = new Set(prior
-        .filter(step => step.result !== null)
-        .map(step => step.canonicalUrl))
-      for (const url of task.batch.urls) {
-        const canonical = canonicalizeUrl(url)
-        if (canonical !== null && completed.has(canonical)) frontier.markVisited(canonical)
-        else frontier.seed(url)
-      }
+      seedBatchUrls(frontier, task.batch.urls, new Set(prior.filter(step => step.result !== null).map(step => step.canonicalUrl)))
       return []
     }
     if (spec.resumeFrom === null) {
@@ -550,6 +562,15 @@ export class CrawlOrchestrator {
     for (const entry of loaded.urls) countVerdict(offered, frontier.enqueueFromSitemap(entry.url, 1, entry.file), entry.url, entry.file)
     addDiscovery(discovery, offered)
     return { ...record, sources: loaded.sources, files: loaded.files, listed: loaded.urls.length, enqueued: offered.enqueued, truncated: loaded.truncated }
+  }
+}
+
+/** Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a relaunch never fetches it again. */
+function seedBatchUrls(frontier: Frontier, urls: readonly string[], completed: ReadonlySet<string>): void {
+  for (const url of urls) {
+    const canonical = canonicalizeUrl(url)
+    if (canonical !== null && completed.has(canonical)) frontier.markVisited(canonical)
+    else frontier.seed(url)
   }
 }
 

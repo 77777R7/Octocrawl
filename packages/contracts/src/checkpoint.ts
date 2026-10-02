@@ -66,7 +66,10 @@ export interface Task {
    * page options and recorded robots overrides included, plus the batch's own
    * cap on pages in flight (`maxConcurrency`, absent when the request set
    * none) and the entries `ignoreInvalidURLs` skipped at submission
-   * (`invalidURLs`, present exactly when that option was on).
+   * (`invalidURLs`, present exactly when that option was on). An append
+   * (`appendToId`) extends `urls`, `robotsOverrides` and `invalidURLs` in
+   * place, pushing to the end in order: the orchestrator seeds the tail past
+   * what it has seeded, by index, and never a URL twice.
    */
   batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[] } & PageOptions
   /**

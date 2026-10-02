@@ -227,7 +227,8 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
   const problems = noProblems()
-  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain'], problems)
+  // `idempotencyKey` is the native name of the `x-idempotency-key` header the v1 SDK sends, which the API merges into the body before parsing.
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain', 'idempotencyKey'], problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
     const options = rec.scrapeOptions
@@ -256,6 +257,7 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
     native.crawlEntireDomain = rec.allowBackwardLinks
   }
   if (rec.crawlEntireDomain !== undefined) native.crawlEntireDomain = rec.crawlEntireDomain
+  if (rec.idempotencyKey !== undefined) native.idempotencyKey = rec.idempotencyKey
   return parseCrawlStartRequest(native)
 }
 

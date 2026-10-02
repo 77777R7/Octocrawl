@@ -403,6 +403,34 @@ describe('MCP tools', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('declares and forwards idempotencyKey on crawl and batch_scrape, and appendToId on batch_scrape', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      const url = String(input)
+      calls.push({ line: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return json(url.endsWith('/v1/crawl') ? { taskId: 'crawl-1', replayed: true } : { taskId: 'batch-1', requested: 7, appended: 2 }, 202)
+    }) as typeof fetch })
+    expect(await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], idempotencyKey: 'nightly-1' })).toEqual({ taskId: 'batch-1', requested: 7, appended: 2 })
+    expect(calls[0]?.body).toEqual({ urls: ['https://example.com/a'], idempotencyKey: 'nightly-1', origin: SDK_ORIGIN })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true })
+    expect(calls[1]?.body).toEqual({ urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true, origin: SDK_ORIGIN })
+    expect(await callTool(client, 'crawl', { url: 'https://example.com/', idempotencyKey: 'nightly-2' })).toEqual({ taskId: 'crawl-1', replayed: true })
+    expect(calls[2]?.body).toMatchObject({ url: 'https://example.com/', idempotencyKey: 'nightly-2', origin: SDK_ORIGIN })
+    const key = { type: 'string', minLength: 1, maxLength: 200 }
+    const batch = TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>
+    expect(batch.idempotencyKey).toMatchObject(key)
+    expect(batch.appendToId).toMatchObject(key)
+    expect((TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>).idempotencyKey).toMatchObject(key)
+    const scrape = TOOLS.find((tool) => tool.name === 'scrape')?.inputSchema.properties as Record<string, unknown>
+    expect(scrape).not.toHaveProperty('idempotencyKey')
+    expect(scrape).not.toHaveProperty('appendToId')
+    // Refused before any call, by the contract's own messages.
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], idempotencyKey: '' })).rejects.toThrow('idempotencyKey must be a string of 1 to 200 characters')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], appendToId: 'batch-1', formats: ['markdown'] })).rejects.toThrow('appendToId keeps the job\'s options; formats cannot be changed')
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', appendToId: 'batch-1' })).rejects.toThrow('unsupported parameter: appendToId')
+    expect(calls).toHaveLength(3)
+  })
+
   it('bounds wait_batch and returns current state when its wait expires', async () => {
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'running', completed: 0, requested: 2, remaining: 2 })) as typeof fetch })
     const state = await callTool(client, 'wait_batch', { id: 'batch-1', timeoutMs: 10 }) as { status: string }

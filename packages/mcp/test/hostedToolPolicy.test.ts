@@ -33,6 +33,9 @@ describe('single-owner hosted workflow policy', () => {
     // The reviewed batch shape is fixed: the batch's own cap and the invalid-URL skip are refused too, and nothing is loosened.
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],maxConcurrency:1})).toThrow('unsupported remote tool option')
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],ignoreInvalidURLs:true})).toThrow('unsupported remote tool option')
+    // So are a retry key and an append: the hosted batch is one reviewed job per call.
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],idempotencyKey:'nightly-1'})).toThrow('unsupported remote tool option')
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],appendToId:'batch-1'})).toThrow('unsupported remote tool option')
     // The errors report is a read of the owner's own batches, offered like get_batch_items; the crawl tools stay out.
     expect(REMOTE_TOOLS.has('get_batch_errors')).toBe(true)
     expect(call('get_batch_errors',{id:'batch-1',limit:10})).toEqual({id:'batch-1',limit:10})

@@ -544,6 +544,83 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
   })
 })
 
+describe('CrawlOrchestrator batch append', () => {
+  const BATCH_A = 'https://fixture.test/batch/a'
+  const BATCH_B = 'https://fixture.test/batch/b'
+  const BATCH_C = 'https://other.test/batch/c'
+  const STARTED = '2026-10-02T00:00:00.000Z'
+
+  /** An atom that holds the pages in `held` until released, so an append can land while they are in flight. */
+  class GatedAtom implements ScrapeAtom {
+    readonly fetches: string[] = []
+    private readonly gates = new Map<string, () => void>()
+    constructor(private readonly held: ReadonlySet<string>) {}
+    async scrape(url: string): Promise<ScrapeOutcome> {
+      this.fetches.push(url)
+      if (this.held.has(url)) await new Promise<void>((resolve) => { this.gates.set(url, resolve) })
+      return outcome(url, [])
+    }
+    release(url: string): void { this.gates.get(url)?.() }
+    async close(): Promise<void> {}
+  }
+
+  async function batchTask(store: TaskStore, urls: readonly string[]): Promise<void> {
+    await store.putTask({ id: 'batch-1', seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls, formats: ['markdown'], includeLinks: false }, createdAt: STARTED, updatedAt: STARTED })
+  }
+
+  /** A batch run as the engine starts one: the stored task, depth 0, no host list, the whole host and exact URLs. */
+  const batchSpec = { seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', maxDepth: 0, allowlistedDomains: [], crawlEntireDomain: true, deduplicateSimilarURLs: false, sitemap: 'skip' as const }
+
+  it('seeds URLs appended while it runs, fetches them in the same attempt, also on a new host, and keeps the longer list at the end', async () => {
+    const store = new MemoryTaskStore()
+    await batchTask(store, [BATCH_A, BATCH_B])
+    const atom = new GatedAtom(new Set([BATCH_A]))
+    const orchestrator = new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 2, perHostMinDelayMs: 0 })
+    const run = orchestrator.run({ ...batchSpec, taskId: 'batch-1' })
+    await expect.poll(() => atom.fetches).toContain(BATCH_A)
+    // The engine's append: the row grows by one URL while the first page is still out.
+    const current = (await store.getTask('batch-1'))!
+    await store.putTask({ ...current, batch: { ...current.batch!, urls: [BATCH_A, BATCH_B, BATCH_C] }, updatedAt: '2026-10-02T00:00:01.000Z' })
+    // The run re-reads the row and seeds the tail: the new host's page is fetched while a is still out (b waits for a: one page at a time on a host until its robots.txt is known).
+    await expect.poll(() => atom.fetches).toContain(BATCH_C)
+    expect(atom.fetches).toEqual([BATCH_A, BATCH_C])
+    expect(orchestrator.pagesAhead()).toBe(2)
+    atom.release(BATCH_A)
+    const report = await run
+    expect(report).toMatchObject({ status: 'completed', pagesFetched: 3 })
+    expect([...atom.fetches].sort()).toEqual([BATCH_A, BATCH_B, BATCH_C])
+    const steps = await store.listSteps('batch-1')
+    expect(steps.map((step) => step.url).sort()).toEqual([BATCH_A, BATCH_B, BATCH_C])
+    expect(steps.every((step) => step.attemptId === report.attemptId && step.depth === 0)).toBe(true)
+    // The final write is built from the row as it then is, not from the two-URL object the run opened with.
+    const finished = (await store.getTask('batch-1'))!
+    expect(finished.status).toBe('completed')
+    expect(finished.batch?.urls).toEqual([BATCH_A, BATCH_B, BATCH_C])
+    expect(await store.countCompletedSteps('batch-1')).toBe(3)
+  })
+
+  it('leaves a URL appended after the run has ended without a step, which a resume of the task then fetches alone', async () => {
+    const store = new MemoryTaskStore()
+    await batchTask(store, [BATCH_A])
+    const atom = new GatedAtom(new Set())
+    const report = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), perHostMinDelayMs: 0 }).run({ ...batchSpec, taskId: 'batch-1' })
+    expect(report).toMatchObject({ status: 'completed', pagesFetched: 1 })
+    // The engine's append to a completed batch: the list grows and the status returns to pending; no run is there to seed it.
+    const current = (await store.getTask('batch-1'))!
+    await store.putTask({ ...current, status: 'pending', batch: { ...current.batch!, urls: [BATCH_A, BATCH_C] }, updatedAt: '2026-10-02T00:00:01.000Z' })
+    expect(atom.fetches).toEqual([BATCH_A])
+    expect((await store.listSteps('batch-1')).map((step) => step.url)).toEqual([BATCH_A])
+    expect(await store.countCompletedSteps('batch-1')).toBe(1)
+    // The relaunch the engine then makes: a resume seeds only the URL without a step, in a second attempt.
+    const resumed = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), perHostMinDelayMs: 0 }).run({ ...batchSpec, resumeFrom: 'batch-1' })
+    expect(resumed).toMatchObject({ taskId: 'batch-1', status: 'completed', pagesFetched: 1 })
+    expect(resumed.attemptId).not.toBe(report.attemptId)
+    expect(atom.fetches).toEqual([BATCH_A, BATCH_C])
+    expect(new Map((await store.listSteps('batch-1')).map((step) => [step.url, step.attemptId]))).toEqual(new Map([[BATCH_A, report.attemptId], [BATCH_C, resumed.attemptId]]))
+    expect(await store.countCompletedSteps('batch-1')).toBe(2)
+  })
+})
+
 describe('CrawlOrchestrator sitemap modes', () => {
   const sitemapRun = (atom: FakeAtom, source: SitemapSource | undefined, spec: Partial<Parameters<CrawlOrchestrator['run']>[0]>) => {
     const store = new MemoryTaskStore()
