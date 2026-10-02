@@ -34,8 +34,10 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
-  'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, origin, integration and the same scrapeOptions (applied to every page). The formats are markdown, links, html, rawHtml, images, screenshot (also screenshot@fullPage, and { type: "screenshot", fullPage, quality, viewport }) and an { type: "attributes", selectors } entry; other formats and parameters the shim does not map (proxy, location, actions, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl); data lists the failed and blocked pages too (with metadata.error) but not the duplicates, whose content is an earlier entry\'s, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only), maxConcurrency, origin, integration and the same scrapeOptions (applied to every page). The formats are markdown, links, html, rawHtml, images, screenshot (also screenshot@fullPage, and { type: "screenshot", fullPage, quality, viewport }) and an { type: "attributes", selectors } entry; other formats and parameters the shim does not map (proxy, location, actions, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'A crawl follows links inside the start URL\'s path subtree on its host and www twin by default (crawlEntireDomain false), folds /a and /a/, / and /index.html, www and apex, http and https into one page (deduplicateSimilarURLs true) and reports every collapsed or refused link in the native crawl status (discovery) and each page\'s trace (links_offered); allowSubdomains takes every host under the start URL\'s apex (no public-suffix list), allowExternalLinks every host, each page with its own robots.txt read.',
+  'sitemap (default include, as in Firecrawl) reads the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, with the crawl\'s own http identity, robots.txt verdict, SSRF checks and proxy, and queues their URLs ahead of the start page\'s links under the same host, subtree, path and depth rules; only follows no page link; skip reads none. The native crawl status lists every sitemap file read, refused or unreadable in discovery.sitemap; the shim\'s status carries nothing of it, and sitemap fetches have no signed compliance record. maxConcurrency caps the pages one crawl fetches at once, at most the service\'s worker count (HTTP 400 above it), and never raises the per-host ceiling.',
   'screenshot (data.screenshot, a data:image/png;base64 string, or image/jpeg with quality 1 to 100) is captured on the local browser rung alone, which such a request selects (no http attempt; a server without a browser rung refuses the format with HTTP 400): after load, stability and waitFor, before the DOM is read, CSS-pixel sized at the declared 1280x800 viewport (device scale factor 2 is declared, not baked into the image) or at the viewport asked for (integers 320..1920 by 240..1080, within the declared screen; a window size, not a change of identity); fullPage captures the document\'s whole height at that width without scrolling first, so sections a page loads on scroll may show unloaded. A capture the browser could not make leaves data.screenshot null with a screenshot_unavailable warning while the page stands; a file or a page that was not rendered has null too. Firecrawl captures at its own viewport and may return a URL instead of the image.',
   'images (data.images) lists every image URL of the whole document as received: img src and srcset candidates, picture sources, lazy data-src/data-srcset/data-lazy-src/data-original, video posters, image_src links, og:image and twitter:image, absolute http(s) with the fragment stripped, each once, in document order, data: URIs left out; includeTags, excludeTags and onlyMainContent do not narrow it. attributes (data.attributes) gives, per selector, the named attribute\'s values as written, elements without it skipped; a selector W2L does not match is HTTP 400 by name, as for includeTags. Both are absent for a file and for a page that is success: false. removeBase64Images (default true) keeps an image\'s alt text where Firecrawl writes a (<Base64-Image-Removed>) placeholder; false keeps the data: URI in the Markdown.',
   'origin (the Firecrawl SDKs\' client label) and integration are stored, not echoed: the scrape record (GET /v1/scrapes/:id) and the crawl task carry them, and nothing sent to the target changes.',
@@ -193,21 +195,17 @@ const SHIM_OPTIONAL_PAGE_FIELDS = [
 ] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
 const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images'] as const
-
-/** Accepted only with the value W2L already implements; any other value is rejected. */
-const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
-  ignoreSitemap: { value: true, reason: 'W2L does not read sitemaps' },
-}
+/** Crawl options that keep their Firecrawl name on the native request; the native parser validates them. */
+const SHIM_CRAWL_SCOPE_OPTIONS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'allowSubdomains', 'allowExternalLinks', 'sitemap', 'maxConcurrency'] as const
 
 interface ShimProblems {
   parameters: string[]
-  values: string[]
   formats: Set<string>
   /** The supported route for a refused option W2L does not offer (a stealth proxy, ignoreRobotsTxt). */
   hints: string[]
 }
 
-const noProblems = (): ShimProblems => ({ parameters: [], values: [], formats: new Set(), hints: [] })
+const noProblems = (): ShimProblems => ({ parameters: [], formats: new Set(), hints: [] })
 
 /** `origin` (the Firecrawl SDKs' client label) and `integration`: stored on W2L's own records, validated by the native parser. */
 const SHIM_ATTRIBUTION = ['origin', 'integration'] as const
@@ -229,8 +227,7 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
   const problems = noProblems()
-  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions'], problems)
-  checkShimFixedValue(rec, '', 'ignoreSitemap', problems)
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain'], problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
     const options = rec.scrapeOptions
@@ -243,6 +240,22 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
   if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
   if (rec.excludePaths !== undefined) native.excludePaths = rec.excludePaths
+  // v1 ignoreSitemap and sitemapOnly are v2 sitemap: skip / include and only; the v2 name wins when both are sent.
+  if (rec.ignoreSitemap !== undefined) {
+    if (typeof rec.ignoreSitemap !== 'boolean') throw new RequestError('ignoreSitemap must be a boolean')
+    native.sitemap = rec.ignoreSitemap ? 'skip' : 'include'
+  }
+  if (rec.sitemapOnly !== undefined) {
+    if (typeof rec.sitemapOnly !== 'boolean') throw new RequestError('sitemapOnly must be a boolean')
+    if (rec.sitemapOnly) native.sitemap = 'only'
+  }
+  for (const key of SHIM_CRAWL_SCOPE_OPTIONS) if (rec[key] !== undefined) native[key] = rec[key]
+  // v1 allowBackwardLinks is v2 crawlEntireDomain; the v2 name wins when both are sent.
+  if (rec.allowBackwardLinks !== undefined) {
+    if (typeof rec.allowBackwardLinks !== 'boolean') throw new RequestError('allowBackwardLinks must be a boolean')
+    native.crawlEntireDomain = rec.allowBackwardLinks
+  }
+  if (rec.crawlEntireDomain !== undefined) native.crawlEntireDomain = rec.crawlEntireDomain
   return parseCrawlStartRequest(native)
 }
 
@@ -280,26 +293,16 @@ function checkShimKeys(rec: Record<string, unknown>, prefix: string, known: read
   }
 }
 
-function checkShimFixedValue(rec: Record<string, unknown>, prefix: string, key: string, problems: ShimProblems): void {
-  const value = rec[key]
-  const fixed = SHIM_FIXED_VALUES[key]!
-  if (value === undefined) return
-  if (typeof value !== 'boolean') throw new RequestError(`${prefix}${key} must be a boolean`)
-  if (value !== fixed.value) problems.values.push(`${prefix}${key}: ${String(value)} is not supported (${fixed.reason})`)
-}
-
 function throwShimProblems(problems: ShimProblems): void {
   const parts: string[] = []
   if (problems.parameters.length > 0) {
     parts.push(`unsupported ${problems.parameters.length === 1 ? 'parameter' : 'parameters'}: ${problems.parameters.join(', ')}`)
   }
-  parts.push(...problems.values)
   if (problems.formats.size > 0) {
     parts.push(`unsupported ${problems.formats.size === 1 ? 'format' : 'formats'}: ${[...problems.formats].join(', ')} (the /fc shim supports ${SHIM_FORMATS.join(', ')})`)
   }
   if (parts.length === 0) return
-  // A value problem reads "<name>: <value> is not supported (...)"; its parameter is listed too.
-  const parameters = [...problems.parameters, ...problems.values.map((value) => value.split(':', 1)[0] ?? value)]
+  const parameters = problems.parameters
   const formats = [...problems.formats]
   throw new RequestError(parts.join('; '), parameters.length > 0 ? 'unsupported_parameter' : 'unsupported_format', {
     ...(parameters.length > 0 ? { parameters } : {}),
@@ -339,7 +342,8 @@ export function parseFirecrawlCrawlStatusQuery(query: Record<string, string | un
 export function wrapCrawlStatus(report: Pick<CrawlReport, 'status'>, steps: readonly StepRecord[], counts: FirecrawlCrawlCounts): FirecrawlCrawlStatus {
   const data: FirecrawlPage[] = []
   for (const step of steps) {
-    if (step.result !== null) data.push(firecrawlPage(step.result))
+    // A page whose body repeated an earlier page's is not a document of its own; `total` still counts it.
+    if (step.result !== null && step.status !== 'duplicate') data.push(firecrawlPage(step.result))
   }
   return {
     status: firecrawlCrawlStatus(report.status),

@@ -201,7 +201,8 @@ describe('Evidence Record: HTTP lane', () => {
     expect(byUrl.get(`${origin}/missing`)).toMatchObject({ status: 'failed', httpStatus: 404 })
     expect(byUrl.get(`${origin}/private`)).toMatchObject({ reason: 'policy_denied', finalUrl: null })
 
-    const crawl = await client.crawl(`${origin}/hub`, { maxPages: 4 })
+    // The hub's pages are its siblings, outside the /hub/ subtree a crawl keeps to by default.
+    const crawl = await client.crawl(`${origin}/hub`, { maxPages: 4, crawlEntireDomain: true })
     await client.waitCrawl(crawl.taskId, { pollIntervalMs: 50, timeoutMs: 20_000 })
     const pages = (await client.getCrawlPages(crawl.taskId)).items
     const errors = (await client.getCrawlErrors(crawl.taskId)).items

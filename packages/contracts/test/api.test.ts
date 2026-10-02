@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -147,6 +147,22 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, includeHtml: true })).toThrow('unsupported parameter: includeHtml')
   })
 
+  it('takes a crawl\'s sitemap mode and concurrency cap, and refuses them on scrape and batch', () => {
+    const url = 'https://example.com/'
+    expect(parseCrawlStartRequest({ url, sitemap: 'only', maxConcurrency: 2 })).toMatchObject({ sitemap: 'only', maxConcurrency: 2 })
+    expect(parseCrawlStartRequest({ url, sitemap: 'skip' })).toMatchObject({ sitemap: 'skip' })
+    expect(parseCrawlStartRequest({ url, maxConcurrency: null })).toMatchObject({ maxConcurrency: null })
+    const plain = parseCrawlStartRequest({ url })
+    expect(plain).not.toHaveProperty('sitemap')
+    expect(plain).not.toHaveProperty('maxConcurrency')
+    for (const sitemap of ['all', 'INCLUDE', true, null]) expect(() => parseCrawlStartRequest({ url, sitemap })).toThrow('sitemap must be include, skip, or only')
+    for (const maxConcurrency of [0, -1, 1.5, '2', true]) expect(() => parseCrawlStartRequest({ url, maxConcurrency })).toThrow('maxConcurrency must be an integer >= 1')
+    expect(() => parseScrapeRequest({ url, sitemap: 'include' })).toThrow('unsupported parameter: sitemap')
+    expect(() => parseBatchStartRequest({ urls: [url], sitemap: 'skip' })).toThrow('unsupported parameter: sitemap')
+    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: 1 })).toThrow('unsupported parameter: maxConcurrency')
+    expect(DEFAULT_CRAWL_SPEC).toMatchObject({ sitemap: 'include', maxConcurrency: null })
+  })
+
   it('accepts the images format, one attributes entry within its bounds and removeBase64Images on scrape, batch and crawl, each refusal by name', () => {
     const url = 'https://example.com/'
     const attributes = { type: 'attributes', selectors: [{ selector: ' span.titleline > a ', attribute: 'href' }, { selector: 'tr.athing', attribute: 'id' }] }
@@ -273,6 +289,26 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('accepts the crawl URL-scope booleans, refuses other types by name, and refuses allowExternalLinks beside an allowlist', () => {
+    const url = 'https://example.com/docs/'
+    const scope = { regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: true, allowExternalLinks: true }
+    expect(parseCrawlStartRequest({ url, ...scope })).toMatchObject(scope)
+    for (const name of Object.keys(scope)) {
+      expect(parseCrawlStartRequest({ url })).not.toHaveProperty(name)
+      expect(() => parseCrawlStartRequest({ url, [name]: 'yes' })).toThrow(`${name} must be a boolean`)
+      // A crawl's scope is not a scrape or batch option.
+      expect(() => parseScrapeRequest({ url, [name]: true })).toThrow(`unsupported parameter: ${name}`)
+      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(`unsupported parameter: ${name}`)
+    }
+    expect(() => parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: ['other.test'] })).toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
+    expect(parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: [] })).toMatchObject({ allowExternalLinks: true })
+    expect(parseCrawlStartRequest({ url, allowExternalLinks: false, allowlistedDomains: ['other.test'] })).toMatchObject({ allowlistedDomains: ['other.test'] })
+    expect(parseCrawlPageQuery({ includeDuplicates: 'true' })).toMatchObject({ includeDuplicates: true })
+    expect(parseCrawlPageQuery({ includeDuplicates: 'false' })).toMatchObject({ includeDuplicates: false })
+    expect(parseCrawlPageQuery({})).not.toHaveProperty('includeDuplicates')
+    expect(() => parseCrawlPageQuery({ includeDuplicates: '1' })).toThrow('includeDuplicates must be true or false')
   })
 
   it('refuses a path filter that can backtrack catastrophically, with invalid_request, and keeps lookaround', () => {

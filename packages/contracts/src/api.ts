@@ -6,7 +6,8 @@
  */
 
 import { BROWSER_FINGERPRINT, browserFingerprintFor, type CrawlMode, type RobotsOverride } from './compliance.js'
-import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
+import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport, SitemapMode } from './crawl.js'
+import { SITEMAP_MODES } from './crawl.js'
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, FetchWarning, LadderRunAudit } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
@@ -227,10 +228,89 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   includePaths?: readonly string[]
   /** Pathname regexes that skip a discovered link; they win over includePaths. */
   excludePaths?: readonly string[]
+  /**
+   * Match includePaths / excludePaths against a discovered link's canonical
+   * URL (scheme, host, path and query) instead of its pathname. Default false.
+   */
+  regexOnFullURL?: boolean
+  /**
+   * URLs that differ only in their query string are one page: the first
+   * variant seen is fetched, later ones are reported as collapsed. Default false.
+   */
+  ignoreQueryParameters?: boolean
+  /**
+   * `/a` and `/a/`, `/` and `/index.html`, `www.` and the apex, http and https
+   * name one page: the first variant seen is fetched, later ones are reported
+   * as collapsed. Default true.
+   */
+  deduplicateSimilarURLs?: boolean
+  /**
+   * Follow links anywhere on the start URL's host. Default false: links on
+   * that host are followed only inside the start URL's path subtree.
+   */
+  crawlEntireDomain?: boolean
+  /** Follow links to subdomains of the start URL's host (`*.apex`, with one leading `www.` removed). Default false. */
+  allowSubdomains?: boolean
+  /** Follow links to any host; cannot be combined with allowlistedDomains. Default false. */
+  allowExternalLinks?: boolean
+  /**
+   * How the crawl uses the site's sitemap: `include` (default) reads the
+   * sitemaps the start URL's robots.txt names, or `/sitemap.xml`, and queues
+   * their URLs ahead of the start page's links; `skip` reads none; `only`
+   * follows no page link, so the pages are the start URL and the sitemap's
+   * entries. Entries pass the same host, subtree, path and depth rules as
+   * links. The files read are listed in the report's `discovery.sitemap`.
+   */
+  sitemap?: SitemapMode
+  /**
+   * Pages this crawl fetches at once, at most: an integer >= 1, refused above
+   * the service's worker count. It can only lower the crawl's parallelism; the
+   * per-host ceiling and minimum interval still apply. Null or omitted takes
+   * the worker count.
+   */
+  maxConcurrency?: number | null
 }
 
 export interface CrawlAccepted {
   taskId: string
+}
+
+/** The options a running crawl was started with, as `GET /v1/crawl/active` reports them: its task's stored options plus its page budget. */
+export interface ActiveCrawlOptions {
+  maxPages: number | null
+  maxDepth: number | null
+  allowlistedDomains: readonly string[]
+  includePaths: readonly string[]
+  excludePaths: readonly string[]
+  useCached: boolean
+  sitemap: SitemapMode
+  ignoreQueryParameters: boolean
+  deduplicateSimilarURLs: boolean
+  crawlEntireDomain: boolean
+  allowSubdomains: boolean
+  allowExternalLinks: boolean
+  regexOnFullURL: boolean
+  maxConcurrency: number | null
+  /** The per-page options every page of the crawl gets: its formats, `includeLinks` and the page options. */
+  scrapeOptions: PageOptions & { formats: readonly ScrapeFormat[]; includeLinks: boolean }
+}
+
+/** One crawl this API process is running (a crawl it resumed at startup included); batches are not listed. */
+export interface ActiveCrawl {
+  id: string
+  /** The start URL. */
+  url: string
+  status: 'pending' | 'running' | 'paused'
+  /** When the latest attempt started; the task's creation time while no attempt has opened yet. */
+  startedAt: string
+  /** The latest attempt's pages so far. */
+  pagesFetched: number
+  options: ActiveCrawlOptions
+}
+
+/** `GET /v1/crawl/active`: always 200, with an empty list when nothing runs. */
+export interface ActiveCrawlList {
+  crawls: readonly ActiveCrawl[]
 }
 
 export interface BatchStartRequest extends PageOptions, RequestAttribution {
@@ -254,6 +334,8 @@ export interface CrawlPageQuery {
   cursor?: string
   limit?: number
   debug?: boolean
+  /** List the pages whose content repeated an earlier page's (status `duplicate`) too; left out by default. */
+  includeDuplicates?: boolean
 }
 export type CrawlPagesResponse = CrawlPageList<CrawlPage>
 export type CrawlErrorsResponse = CrawlPageList<CrawlError>
@@ -367,7 +449,8 @@ function asRecord(body: unknown): Record<string, unknown> {
 const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images'] as const
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
@@ -778,6 +861,21 @@ function readBound(value: unknown, name: string, min: number): number | null | u
   return value
 }
 
+/** `sitemap`: one of include, skip, only. */
+function readSitemapMode(value: unknown): SitemapMode | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !(SITEMAP_MODES as readonly string[]).includes(value)) throw new RequestError('sitemap must be include, skip, or only')
+  return value as SitemapMode
+}
+
+/** `maxConcurrency`: an integer >= 1, or null for the service's worker count; the engine refuses one above that count. */
+function readConcurrency(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new RequestError('maxConcurrency must be an integer >= 1')
+  return value
+}
+
 /**
  * Pathname regexes with Firecrawl's documented bounds: at most 1000 patterns
  * of at most 2000 characters, none that can backtrack catastrophically
@@ -967,17 +1065,32 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
+  const allowlistedDomains = readAllowlist(rec.allowlistedDomains)
+  const scope: Partial<Record<(typeof CRAWL_SCOPE_KEYS)[number], boolean>> = {}
+  for (const key of CRAWL_SCOPE_KEYS) {
+    const value = readBoolean(rec[key], key)
+    if (value !== undefined) scope[key] = value
+  }
+  // Either the hosts to follow are listed, or every host is followed; both at once contradict each other.
+  if (scope.allowExternalLinks === true && allowlistedDomains !== undefined && allowlistedDomains.length > 0) {
+    throw new RequestError('allowExternalLinks cannot be combined with allowlistedDomains')
+  }
+  const sitemap = readSitemapMode(rec.sitemap)
+  const maxConcurrency = readConcurrency(rec.maxConcurrency)
   const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
     maxPages: readBound(rec.maxPages, 'maxPages', 1),
     maxDepth: readBound(rec.maxDepth, 'maxDepth', 0),
     useCached,
-    allowlistedDomains: readAllowlist(rec.allowlistedDomains),
+    allowlistedDomains,
     formats: readFormats(rec.formats),
     includeLinks: rec.includeLinks as boolean | undefined,
     includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
     excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
+    ...scope,
+    ...(sitemap === undefined ? {} : { sitemap }),
+    ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...page,
     ...readAttribution(rec),
   }
@@ -1017,5 +1130,12 @@ export function parseCrawlPageQuery(query: Record<string, string | undefined>): 
   if (query.cursor !== undefined && query.cursor.length === 0) throw new RequestError('cursor must not be empty')
   if (query.attemptId !== undefined && query.attemptId.length === 0) throw new RequestError('attemptId must not be empty')
   if (query.debug !== undefined && query.debug !== 'true' && query.debug !== 'false') throw new RequestError('debug must be true or false')
-  return { cursor: query.cursor, limit, attemptId: query.attemptId, debug: query.debug === undefined ? undefined : query.debug === 'true' }
+  if (query.includeDuplicates !== undefined && query.includeDuplicates !== 'true' && query.includeDuplicates !== 'false') throw new RequestError('includeDuplicates must be true or false')
+  return {
+    cursor: query.cursor,
+    limit,
+    attemptId: query.attemptId,
+    debug: query.debug === undefined ? undefined : query.debug === 'true',
+    ...(query.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates === 'true' }),
+  }
 }

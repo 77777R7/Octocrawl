@@ -89,11 +89,13 @@ export class MemoryTaskStore implements TaskStore {
 
   async listStepsPage(taskId: string, query: StepPageQuery) {
     const errorStatuses = new Set(['failed', 'blocked', 'cancelled', 'budget_exceeded'])
+    // The pages: not an error, and not a duplicate of an earlier page unless asked for.
+    const isPage = (status: string) => !errorStatuses.has(status) && (status !== 'duplicate' || query.includeDuplicates === true)
     const cursor = query.cursor === undefined ? null : decodeStepCursor(query.cursor)
     const rows = [...this.steps.values()]
       .filter((step) => step.taskId === taskId)
       .filter((step) => query.attemptId === undefined || step.attemptId === query.attemptId)
-      .filter((step) => query.kind === 'all' || (query.kind === 'errors' ? errorStatuses.has(step.status) : !errorStatuses.has(step.status)))
+      .filter((step) => query.kind === 'all' || (query.kind === 'errors' ? errorStatuses.has(step.status) : isPage(step.status)))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .filter((step) => cursor === null || step.createdAt > cursor.createdAt || (step.createdAt === cursor.createdAt && step.id > cursor.id))
     const rowsWithLookahead = rows.slice(0, query.limit + 1)

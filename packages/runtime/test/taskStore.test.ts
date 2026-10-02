@@ -320,6 +320,7 @@ describe('@w2l/runtime public surface', () => {
       'systemClock',
       'toEvidenceRecord',
       'verifyWebhookSignature',
+      'visitKey',
       'webhookSignature',
     ])
     expect(runtime).not.toHaveProperty('SCHEMA')

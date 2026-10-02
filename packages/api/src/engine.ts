@@ -5,16 +5,19 @@
 
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { join } from 'node:path'
 import {
   buildChannels,
   BrowserLocalSubject,
   FileStore,
+  HttpSitemapSource,
   LadderRunner,
   LadderScrapeAtom,
   MemoryRoutingHistory,
   ResilientHttpSubject,
   OriginScheduler,
+  RobotsOriginCache,
   type Channel,
 } from '@w2l/bench'
 import { invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -25,6 +28,10 @@ import {
   maxFileBytesFromEnv,
   type FetchOptions,
   type PageOptions,
+  type ActiveCrawl,
+  type ActiveCrawlList,
+  type ActiveCrawlOptions,
+  type SitemapMode,
   type CrawlAccepted,
   type CrawlError,
   type CrawlPage,
@@ -105,6 +112,8 @@ export interface ApiEngine {
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
+  /** The crawls this process is running, oldest start first: those it started and those it resumed at startup; never a batch. */
+  listActiveCrawls(): Promise<ActiveCrawlList>
   startBatch(req: BatchStartRequest): Promise<CrawlAccepted>
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
@@ -189,11 +198,15 @@ export interface ApiEngineOptions {
   /** Hosted single-owner resource ceiling; absent locally for compatibility. */
   maxActiveBatches?: number
   batchMaxWallMs?: number | null
+  /** Pages the orchestrator fetches at once per crawl, and the most a crawl's `maxConcurrency` may ask for. Default 4. */
   workerCount?: number
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
 }
+
+/** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
+const DEFAULT_WORKER_COUNT = 4
 
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
@@ -284,6 +297,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const originScheduler = new OriginScheduler(networkPolicy)
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
+  const workerCount = Math.max(1, options.workerCount ?? DEFAULT_WORKER_COUNT)
+  // One robots.txt cache per mode, shared by the http rung and a crawl's sitemap reader, so a host's robots.txt is read once for both.
+  const robotsCaches = new Map<string, RobotsOriginCache>()
+  const robotsCacheFor = (mode: 'standard' | 'research' | 'authed'): RobotsOriginCache => {
+    const existing = robotsCaches.get(mode)
+    if (existing !== undefined) return existing
+    const cache = new RobotsOriginCache(networkPolicy)
+    robotsCaches.set(mode, cache)
+    return cache
+  }
   const inflight = new Map<string, Promise<void>>()
   let batchStartInProgress = false
   const activeScrapes = new Set<Promise<unknown>>()
@@ -292,7 +315,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode) })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -394,6 +417,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         cursor: query?.cursor,
         limit: query?.limit ?? 50,
         kind,
+        ...(query?.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates }),
       })
       const includeLinks = linksRequested(task)
       return {
@@ -406,7 +430,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
-  function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean }): void {
+  function launchTask(task: Task, store: SqliteTaskStore, req: TaskRunOptions): void {
     const mode = defaultApiMode(task.mode)
     // Batch and crawl tasks apply their stored formats and page options to
     // every page. A task stored before crawl formats existed has neither and
@@ -416,7 +440,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -461,14 +486,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const controller = new AbortController()
     crawlControllers.set(task.id, controller)
+    // A crawl that reads a sitemap gets its own reader: the crawl mode's http identity (the mobile one when its
+    // pages declare it), the engine's network policy, origin scheduler and this mode's robots.txt cache; a hosted
+    // engine's policy has no proxy and no private ranges. A batch never reads one.
+    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode) })
     const orchestrator = new CrawlOrchestrator({
       store, atom,
-      workerCount: options.workerCount,
+      workerCount,
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,
       crawlDelayMsByHost: options.crawlDelayMsByHost,
       shutdownSignal: shutdownController.signal,
       signal: controller.signal,
+      ...(sitemapSource === undefined ? {} : { sitemapSource }),
     })
     const job = orchestrator.run({
       seedUrl: task.seedUrl,
@@ -481,6 +511,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       resumeFrom: req.resume ? task.id : null,
       useCached: req.useCached,
       taskId: task.id,
+      ...req.scope,
+      sitemap: req.sitemap,
+      maxConcurrency: req.maxConcurrency,
     }).then(async () => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await store.close()
@@ -505,7 +538,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     void store.getTask(name).then(task => {
       const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
       if (unfinished && task.batch) {
-        launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(task.batch.urls.map(url => new URL(url).hostname))], useCached: false, resume: true })
+        launchTask(task, store, batchRunOptions(task.batch.urls, true))
       } else if (unfinished && crawlOptionsStored(task)) {
         launchTask(task, store, crawlRunOptions(task, true))
       } else void store.close()
@@ -588,6 +621,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
       }
+      // A crawl may lower its parallelism below the service's workers, never raise it.
+      if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
+        throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
+      }
       const mode = defaultApiMode(req.mode)
       const taskId = crypto.randomUUID()
       const taskDir = join(taskRoot, taskId)
@@ -614,6 +651,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxDepth: req.maxDepth ?? null,
           allowlistedDomains: req.allowlistedDomains ?? [],
           useCached: req.useCached === true,
+          regexOnFullURL: req.regexOnFullURL === true,
+          ignoreQueryParameters: req.ignoreQueryParameters === true,
+          deduplicateSimilarURLs: req.deduplicateSimilarURLs !== false,
+          crawlEntireDomain: req.crawlEntireDomain === true,
+          allowSubdomains: req.allowSubdomains === true,
+          allowExternalLinks: req.allowExternalLinks === true,
+          sitemap: req.sitemap ?? 'include',
+          maxConcurrency: req.maxConcurrency ?? null,
           ...pageOptions(req),
         },
         ...attributionOf(req),
@@ -623,6 +668,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       await store.putTask(task)
       launchTask(task, store, crawlRunOptions(task, false))
       return { taskId }
+    },
+
+    async listActiveCrawls() {
+      const crawls: ActiveCrawl[] = []
+      // The crawls this process runs are the ids in flight: O(active) read-only opens, never a scan of the task root.
+      for (const id of inflight.keys()) {
+        if (!existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) continue
+        const store = SqliteTaskStore.openReadOnly(join(taskRoot, id))
+        try {
+          const task = await store.getTask(id)
+          if (task === null || task.batch !== undefined || (task.status !== 'pending' && task.status !== 'running' && task.status !== 'paused')) continue
+          const latest = (await store.listAttempts(id)).at(-1)
+          crawls.push({ id, url: task.seedUrl, status: task.status, startedAt: latest?.startedAt ?? task.createdAt, pagesFetched: latest?.pagesFetched ?? 0, options: activeCrawlOptions(task) })
+        } finally {
+          await store.close()
+        }
+      }
+      return { crawls: crawls.sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id)) }
     },
 
     async startBatch(req) {
@@ -655,7 +718,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
-      launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(urls.map(url => new URL(url).hostname))], useCached: false, resume: false })
+      launchTask(task, store, batchRunOptions(urls, false))
       return { taskId }
       } finally { batchStartInProgress = false }
     },
@@ -875,6 +938,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))
       await Promise.all([...channelsByMode.values()].flatMap((channels) => channels.map((channel) => channel.close?.().catch(() => {}))))
       channelsByMode.clear()
+      await Promise.all([...robotsCaches.values()].map((cache) => cache.teardown().catch(() => {})))
+      robotsCaches.clear()
       crawlControllers.clear()
       monitorStore.close()
       deliveryStore.close()
@@ -976,9 +1041,86 @@ function crawlOptionsStored(task: Task): boolean {
   return task.batch === undefined && task.crawl?.maxDepth !== undefined
 }
 
-/** The run options a crawl task was stored with. */
-function crawlRunOptions(task: Task, resume: boolean): { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean } {
-  return { maxDepth: task.crawl?.maxDepth ?? null, allowlistedDomains: task.crawl?.allowlistedDomains ?? [], useCached: task.crawl?.useCached === true, resume }
+/** The URL-scope options of a run, as CrawlStartRequest names them. */
+type CrawlScopeOptions = Required<Pick<CrawlStartRequest, 'regexOnFullURL' | 'ignoreQueryParameters' | 'deduplicateSimilarURLs' | 'crawlEntireDomain' | 'allowSubdomains' | 'allowExternalLinks'>>
+
+/** What launchTask runs a task with: its stored limits and scope, its sitemap mode and concurrency cap, and the hosts governance lets its ladder fetch (empty: no restriction). */
+interface TaskRunOptions {
+  maxDepth: number | null
+  allowlistedDomains: readonly string[]
+  useCached: boolean
+  resume: boolean
+  scope: CrawlScopeOptions
+  sitemap: SitemapMode
+  maxConcurrency: number | null
+  policyAllowlist: readonly string[]
+}
+
+/** A batch never discovers: its frontier takes the whole host and exact canonical URLs, and governance its own URLs' hosts. */
+const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }
+
+function batchRunOptions(urls: readonly string[], resume: boolean): TaskRunOptions {
+  const hosts = [...new Set(urls.map(url => new URL(url).hostname))]
+  return { maxDepth: 0, allowlistedDomains: hosts, useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: null, policyAllowlist: hosts }
+}
+
+/** The options a running crawl reports: its task's stored options, with the defaults a task stored before an option existed runs under, plus its page budget. */
+function activeCrawlOptions(task: Task): ActiveCrawlOptions {
+  const { formats, includeLinks, includePaths, excludePaths, maxDepth, allowlistedDomains, useCached, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain, allowSubdomains, allowExternalLinks, sitemap, maxConcurrency, ...page } = task.crawl ?? {}
+  return {
+    maxPages: task.budget.maxPages,
+    maxDepth: maxDepth ?? null,
+    allowlistedDomains: allowlistedDomains ?? [],
+    includePaths: includePaths ?? [],
+    excludePaths: excludePaths ?? [],
+    useCached: useCached === true,
+    sitemap: sitemap ?? 'skip',
+    ignoreQueryParameters: ignoreQueryParameters ?? false,
+    deduplicateSimilarURLs: deduplicateSimilarURLs ?? false,
+    crawlEntireDomain: crawlEntireDomain ?? true,
+    allowSubdomains: allowSubdomains ?? false,
+    allowExternalLinks: allowExternalLinks ?? false,
+    regexOnFullURL: regexOnFullURL ?? false,
+    maxConcurrency: maxConcurrency ?? null,
+    scrapeOptions: { formats: formats ?? ['markdown'], includeLinks: includeLinks === true, ...page },
+  }
+}
+
+/**
+ * The run options a crawl task was stored with. A task stored before the
+ * URL-scope options were kept runs under the rule it was started with: the
+ * whole host (`crawlEntireDomain`) and exact canonical URLs (no
+ * `deduplicateSimilarURLs`).
+ */
+function crawlRunOptions(task: Task, resume: boolean): TaskRunOptions {
+  const stored = task.crawl
+  const allowlistedDomains = stored?.allowlistedDomains ?? []
+  const scope: CrawlScopeOptions = {
+    regexOnFullURL: stored?.regexOnFullURL ?? false,
+    ignoreQueryParameters: stored?.ignoreQueryParameters ?? false,
+    deduplicateSimilarURLs: stored?.deduplicateSimilarURLs ?? false,
+    crawlEntireDomain: stored?.crawlEntireDomain ?? true,
+    allowSubdomains: stored?.allowSubdomains ?? false,
+    allowExternalLinks: stored?.allowExternalLinks ?? false,
+  }
+  // A task stored before the sitemap mode was kept read no sitemap, and resumes that way.
+  return { maxDepth: stored?.maxDepth ?? null, allowlistedDomains, useCached: stored?.useCached === true, resume, scope, sitemap: stored?.sitemap ?? 'skip', maxConcurrency: stored?.maxConcurrency ?? null, policyAllowlist: crawlPolicyAllowlist(task.seedUrl, allowlistedDomains, scope) }
+}
+
+/**
+ * The hosts governance lets a crawl's ladder fetch, from the frontier's host
+ * rule. With `allowExternalLinks`, or when the request names no hosts, there
+ * is no list: the frontier alone scopes the crawl, as before, so a seed that
+ * redirects to another host keeps working. When hosts are named, the seed's
+ * host and its www twin are always on the list too (the seed must be
+ * fetched), and `*.apex` when `allowSubdomains` admits the apex's subdomains.
+ */
+function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly string[], scope: Pick<CrawlScopeOptions, 'allowSubdomains' | 'allowExternalLinks'>): readonly string[] {
+  if (scope.allowExternalLinks || allowlistedDomains.length === 0) return []
+  const host = new URL(seedUrl).hostname.toLowerCase()
+  const apex = host.startsWith('www.') ? host.slice(4) : host
+  const twin = host.startsWith('www.') ? apex : host.includes('.') && isIP(host) === 0 ? `www.${host}` : null
+  return [...new Set([host, ...(twin === null ? [] : [twin]), ...allowlistedDomains, ...(scope.allowSubdomains ? [`*.${apex}`] : [])])]
 }
 
 /** Why a crawl cannot be resumed now, or null when it can. */

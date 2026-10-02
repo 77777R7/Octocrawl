@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
 import { Frontier } from '../src/frontier.js'
 
-const SEED = 'https://fixture.test/listing'
+// The seed is the site's root: by default a crawl stays in the seed's path subtree (see the subtree test).
+const SEED = 'https://fixture.test/'
 
 function seeded(overrides: ConstructorParameters<typeof Frontier>[0] = { seedUrl: SEED }): Frontier {
   const frontier = new Frontier({ seedUrl: SEED, ...overrides })
@@ -55,6 +56,99 @@ describe('Frontier seed / enqueue / visited', () => {
     expect(frontier.enqueue('https://shop.example.com/p', 1).accepted).toBe(true)
     expect(frontier.enqueue('https://example.com.evil.net/p', 1).reason).toBe('host_denied')
     expect(frontier.enqueue('https://fixture.test/p', 1).reason).toBe('host_denied')
+    // The list adds hosts to the seed's own: seed a.test with ['b.test'] follows both.
+    const added = new Frontier({ seedUrl: 'https://a.test/', allowlistedDomains: ['b.test'] })
+    added.seed()
+    expect(added.enqueue('https://a.test/p', 1).accepted).toBe(true)
+    expect(added.enqueue('https://b.test/p', 1).accepted).toBe(true)
+    expect(added.enqueue('https://c.test/p', 1).reason).toBe('host_denied')
+  })
+
+  it('admits every host under the seed\'s apex with allowSubdomains, never a look-alike', () => {
+    const frontier = new Frontier({ seedUrl: 'https://www.example.com/', allowSubdomains: true })
+    frontier.seed()
+    expect(frontier.enqueue('https://docs.example.com/x', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://example.com/y', 1).accepted).toBe(true)
+    expect(frontier.enqueue('https://example.com.evil.net/', 1).reason).toBe('host_denied')
+    expect(frontier.enqueue('https://other.test/', 1).reason).toBe('host_denied')
+  })
+
+  it('admits any http(s) host with allowExternalLinks and still refuses other schemes', () => {
+    const frontier = seeded({ seedUrl: SEED, allowExternalLinks: true })
+    expect(frontier.enqueue('https://other.test/', 1).accepted).toBe(true)
+    expect(frontier.enqueue('javascript:alert(1)', 1).reason).toBe('scheme_denied')
+    expect(frontier.enqueue('mailto:a@b.test', 1).reason).toBe('scheme_denied')
+  })
+
+  it('keeps links on the seed host inside the seed\'s path subtree unless crawlEntireDomain is set', () => {
+    const guide = new Frontier({ seedUrl: 'https://fixture.test/docs/guide/' })
+    guide.seed()
+    expect(guide.enqueue('https://fixture.test/docs/guide/intro', 1).accepted).toBe(true)
+    expect(guide.enqueue('https://fixture.test/docs/other', 1)).toMatchObject({ accepted: false, reason: 'subtree_denied' })
+    expect(guide.enqueue('https://fixture.test/blog', 1).reason).toBe('subtree_denied')
+    // A seed that names a file scopes to its directory; one without a slash is a directory plus the exact path.
+    const file = new Frontier({ seedUrl: 'https://fixture.test/docs/index.html' })
+    file.seed()
+    expect(file.enqueue('https://fixture.test/docs/api/', 1).accepted).toBe(true)
+    expect(file.enqueue('https://fixture.test/about', 1).reason).toBe('subtree_denied')
+    const search = new Frontier({ seedUrl: 'https://fixture.test/search?q=x' })
+    search.seed()
+    expect(search.enqueue('https://fixture.test/search?page=2&q=x', 1).accepted).toBe(true)
+    expect(search.enqueue('https://fixture.test/search/x', 1).accepted).toBe(true)
+    expect(search.enqueue('https://fixture.test/searching', 1).reason).toBe('subtree_denied')
+    const whole = new Frontier({ seedUrl: 'https://fixture.test/docs/guide/', crawlEntireDomain: true })
+    whole.seed()
+    expect(whole.enqueue('https://fixture.test/blog', 1).accepted).toBe(true)
+    // A host admitted beside the seed host is not path-scoped; the host the seed redirected to brings its own subtree.
+    const sub = new Frontier({ seedUrl: 'https://www.example.com/docs/', allowSubdomains: true })
+    sub.seed()
+    expect(sub.enqueue('https://docs.example.com/anything', 1).accepted).toBe(true)
+    expect(sub.enqueue('https://www.example.com/blog', 1).reason).toBe('subtree_denied')
+    sub.followSeedRedirect('https://www.example.com/')
+    expect(sub.enqueue('https://www.example.com/blog', 1).accepted).toBe(true)
+  })
+
+  it('matches includePaths / excludePaths against the canonical URL with regexOnFullURL, so a host-anchored pattern can decide', () => {
+    const pattern = '^https://a\\.test/x\\?p='
+    const full = new Frontier({ seedUrl: 'https://a.test/', allowExternalLinks: true, includePaths: [pattern], regexOnFullURL: true })
+    full.seed()
+    expect(full.enqueue('https://a.test/x?p=1', 1).accepted).toBe(true)
+    expect(full.enqueue('https://b.test/x?p=1', 1)).toMatchObject({ accepted: false, reason: 'path_denied' })
+    // Without the option the subject is the pathname, which never starts with a scheme: both are refused.
+    const pathOnly = new Frontier({ seedUrl: 'https://a.test/', allowExternalLinks: true, includePaths: [pattern] })
+    pathOnly.seed()
+    expect(pathOnly.enqueue('https://a.test/x?p=1', 1).reason).toBe('path_denied')
+    expect(pathOnly.enqueue('https://b.test/x?p=1', 1).reason).toBe('path_denied')
+  })
+
+  it('folds URLs that differ only in their query into the first one seen with ignoreQueryParameters, and fetches that first variant', () => {
+    const frontier = new Frontier({ seedUrl: 'https://fixture.test/', ignoreQueryParameters: true })
+    frontier.seed()
+    expect(frontier.enqueue('/list?page=1', 1, 'https://fixture.test/')).toMatchObject({ accepted: true, canonicalUrl: 'https://fixture.test/list' })
+    expect(frontier.enqueue('https://fixture.test/list?page=2', 1)).toEqual({ accepted: false, canonicalUrl: 'https://fixture.test/list', reason: 'duplicate', collapsedInto: 'https://fixture.test/list' })
+    // A variant offered before is a plain repeat, not a second collapse.
+    expect(frontier.enqueue('https://fixture.test/list?page=2', 1)).toEqual({ accepted: false, canonicalUrl: 'https://fixture.test/list', reason: 'duplicate' })
+    expect(frontier.enqueue('https://fixture.test/list?page=1', 1)).toEqual({ accepted: false, canonicalUrl: 'https://fixture.test/list', reason: 'duplicate' })
+    const t0 = 1_000
+    const seed = frontier.dequeue(t0).item!
+    frontier.release(seed.canonicalUrl)
+    expect(frontier.dequeue(t0 + DEFAULT_NETWORK_POLICY.perHostMinDelayMs).item).toMatchObject({ url: 'https://fixture.test/list?page=1', canonicalUrl: 'https://fixture.test/list', via: 'link', from: 'https://fixture.test/' })
+    expect(seed).toMatchObject({ via: 'seed' })
+    expect(seed).not.toHaveProperty('from')
+  })
+
+  it('folds /index.html, /a/, the www twin and http into the first-seen page with deduplicateSimilarURLs, and keeps /x/y apart', () => {
+    const frontier = new Frontier({ seedUrl: 'https://a.test/', deduplicateSimilarURLs: true })
+    expect(frontier.seed().accepted).toBe(true)
+    expect(frontier.enqueue('https://a.test/index.html', 1)).toEqual({ accepted: false, canonicalUrl: 'https://a.test/index.html', reason: 'duplicate', collapsedInto: 'https://a.test/' })
+    expect(frontier.enqueue('https://a.test/x', 1).accepted).toBe(true)
+    expect(frontier.enqueue('http://www.a.test/x/', 1)).toMatchObject({ reason: 'duplicate', collapsedInto: 'https://a.test/x' })
+    expect(frontier.enqueue('https://a.test/x/y', 1).accepted).toBe(true)
+    expect(frontier.pendingCount()).toBe(3)
+    // Off, the variants are distinct pages, as before.
+    const exact = new Frontier({ seedUrl: 'https://a.test/' })
+    exact.seed()
+    expect(exact.enqueue('https://a.test/index.html', 1).accepted).toBe(true)
   })
 
   it('drops URLs past maxDepth', () => {
@@ -119,11 +213,12 @@ describe('Frontier seed / enqueue / visited', () => {
     www.seed()
     expect(www.enqueue('https://example.com/b', 1).accepted).toBe(true)
 
-    // An explicit allowlist stays the only authority.
-    const listed = new Frontier({ seedUrl: 'https://example.com/', allowlistedDomains: ['example.com'] })
+    // An explicit allowlist adds to the seed host and its twin, which stay in scope.
+    const listed = new Frontier({ seedUrl: 'https://example.com/', allowlistedDomains: ['partner.test'] })
     listed.seed()
-    listed.followSeedRedirect('https://www.example.com/')
-    expect(listed.enqueue('https://www.example.com/a', 1).reason).toBe('host_denied')
+    expect(listed.enqueue('https://www.example.com/a', 1).accepted).toBe(true)
+    expect(listed.enqueue('https://partner.test/a', 1).accepted).toBe(true)
+    expect(listed.enqueue('https://docs.example.com/a', 1).reason).toBe('host_denied')
   })
 
   it('does not enqueue image, font, style, script, media or program links; documents and the seed stay', () => {

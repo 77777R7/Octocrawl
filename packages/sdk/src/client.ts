@@ -1,4 +1,5 @@
 import type {
+  ActiveCrawlList,
   CrawlAccepted,
   DeliveryDestination,
   DeliveryDestinationInput,
@@ -138,6 +139,62 @@ export interface BatchCollected {
 }
 
 /**
+ * Caps on a listing that follows cursors (listCrawlPages, listBatchItems,
+ * getCrawlDocuments, getBatchDocuments). None by default: the listing reads to
+ * the end. With `maxResults` each page is requested no larger than what is
+ * still wanted, so the cursor the listing stops at continues exactly where it
+ * left off.
+ */
+export interface PaginationLimits {
+  /** Pages read after the first; 0 reads the first page alone. */
+  maxPages?: number
+  /** Items returned in all, at least 1. */
+  maxResults?: number
+  /** Once this many milliseconds have passed since the first page was requested, no further page is requested. */
+  maxWaitMs?: number
+}
+
+/** Why a bounded listing stopped: the last page (`end`), or the limit that stopped it with pages still unread. */
+export type PaginationStop = 'end' | 'maxPages' | 'maxResults' | 'maxWait'
+
+/** Where a bounded listing stopped: the cursor of the first page it did not read (null at the end) and what stopped it. */
+export interface PaginationEnd {
+  nextCursor: string | null
+  stoppedBy: PaginationStop
+}
+
+/** The items a bounded listing read, with where it stopped; `hasMore` is whether a page remains. */
+export interface PageCollection<T> extends PaginationEnd {
+  items: T[]
+  hasMore: boolean
+}
+
+/** A crawl's status with its pages, as one answer: the latest attempt's pages unless `attemptId` is given. */
+export interface CrawlDocuments extends PaginationEnd {
+  report: CrawlReport
+  pages: CrawlPage[]
+}
+
+/** A batch's status with its items, as one answer. */
+export interface BatchDocuments extends PaginationEnd {
+  report: BatchStatusResponse
+  items: CrawlPage[]
+}
+
+/** A page listing's query (`limit`, `attemptId`, `debug`, `includeDuplicates`) with the caps on how far it follows cursors. */
+export type PagedListOptions = Omit<CrawlPageQuery, 'cursor'> & PaginationLimits
+
+/** The largest page the API serves: crawl pages up to 1 000, batch items up to 50. */
+const CRAWL_PAGE_MAX_LIMIT = 1_000
+const BATCH_ITEM_MAX_LIMIT = 50
+
+function checkPaginationLimits(options: PaginationLimits): void {
+  if (options.maxPages !== undefined && !(Number.isInteger(options.maxPages) && options.maxPages >= 0)) throw new RangeError('maxPages must be an integer, 0 or more')
+  if (options.maxResults !== undefined && !(Number.isInteger(options.maxResults) && options.maxResults >= 1)) throw new RangeError('maxResults must be an integer, 1 or more')
+  if (options.maxWaitMs !== undefined && !(Number.isFinite(options.maxWaitMs) && options.maxWaitMs >= 0)) throw new RangeError('maxWaitMs must be a finite number of milliseconds, 0 or more')
+}
+
+/**
  * The API answered with an error status. `code` is the API error code when the
  * body carried one (`rate_limited` for HTTP 429); `body` is the parsed JSON
  * body, or its text if it was not JSON. The SDK retries no 429 itself: a
@@ -258,14 +315,21 @@ export class W2L {
     return this.getPageList<CrawlPage>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request)
   }
 
-  async *listBatchItems(id: string, options: Omit<CrawlPageQuery, 'cursor'> = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage> {
-    let cursor: string | undefined
-    do {
-      const page = await this.getBatchItems(id, { ...options, cursor }, request)
-      for (const item of page.items) { request.signal?.throwIfAborted(); yield item }
-      cursor = page.hasMore ? page.nextCursor ?? undefined : undefined
-      if (page.hasMore && cursor === undefined) throw new Error('batch items response omitted nextCursor')
-    } while (cursor !== undefined)
+  /** Every item of a batch, page by page (at most 50 per request), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
+  listBatchItems(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage, PaginationEnd> {
+    return this.paginate((query) => this.getBatchItems(id, query, request), options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
+  }
+
+  /** The items listBatchItems would yield under the same options, collected, with where the listing stopped. */
+  async collectBatchItems(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<PageCollection<CrawlPage>> {
+    return collect(this.listBatchItems(id, options, request))
+  }
+
+  /** A batch's status and its items in one answer, every item unless the PaginationLimits stop the listing. */
+  async getBatchDocuments(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<BatchDocuments> {
+    const report = await this.getBatch(id, request)
+    const { items, nextCursor, stoppedBy } = await this.collectBatchItems(id, options, request)
+    return { report, items, nextCursor, stoppedBy }
   }
 
   /** Polls a batch until it completes, fails or is cancelled. Items come from listBatchItems. */
@@ -289,6 +353,11 @@ export class W2L {
 
   async getCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {
     return this.get<CrawlReport>(`/v1/crawl/${encodeURIComponent(id)}`, request, `crawl not found: ${id}`)
+  }
+
+  /** The crawls the API process is running, with each one's start URL, status, pages so far and options; empty when nothing runs. */
+  async getActiveCrawls(request: RequestOptions = {}): Promise<ActiveCrawlList> {
+    return this.get<ActiveCrawlList>('/v1/crawl/active', request)
   }
 
   /** Polls a crawl until it completes, fails or is cancelled. Pages come from listCrawlPages. */
@@ -318,17 +387,61 @@ export class W2L {
     return this.getPageList<CrawlPage>(`/v1/crawl/${encodeURIComponent(id)}/pages`, options, request)
   }
 
-  async *listCrawlPages(id: string, options: Omit<CrawlPageQuery, 'cursor'> = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage> {
+  /**
+   * A crawl's pages, page by page, or as many as the PaginationLimits allow;
+   * the generator's return value says where it stopped. The latest attempt's
+   * pages unless `attemptId` names another; a resume with `useCached` records
+   * the pages it reuses in its new attempt, so that attempt normally holds
+   * every page.
+   */
+  listCrawlPages(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage, PaginationEnd> {
+    return this.paginate((query) => this.getCrawlPages(id, query, request), options, request, CRAWL_PAGE_MAX_LIMIT, 'crawl pages')
+  }
+
+  /** The pages listCrawlPages would yield under the same options, collected, with where the listing stopped. */
+  async collectCrawlPages(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<PageCollection<CrawlPage>> {
+    return collect(this.listCrawlPages(id, options, request))
+  }
+
+  /** A crawl's status and its pages in one answer, every page unless the PaginationLimits stop the listing. */
+  async getCrawlDocuments(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<CrawlDocuments> {
+    const report = await this.getCrawl(id, request)
+    const { items, nextCursor, stoppedBy } = await this.collectCrawlPages(id, options, request)
+    return { report, pages: items, nextCursor, stoppedBy }
+  }
+
+  /**
+   * Follow a listing's cursors within its limits. Each page is requested no
+   * larger than the items still wanted, so a stop at `maxResults` leaves a
+   * cursor that continues exactly after the last item returned. A page's
+   * `hasMore` without a cursor is the API breaking its contract and throws.
+   */
+  private async *paginate<T>(fetchPage: (query: CrawlPageQuery) => Promise<CrawlPageList<T>>, options: PagedListOptions, request: RequestOptions, maxLimit: number, what: string): AsyncGenerator<T, PaginationEnd> {
+    checkPaginationLimits(options)
+    const { maxPages, maxResults, maxWaitMs, ...query } = options
+    const startedAt = Date.now()
     let cursor: string | undefined
-    do {
-      const page = await this.getCrawlPages(id, { ...options, cursor }, request)
+    let pagesAfterFirst = 0
+    let returned = 0
+    for (;;) {
+      const remaining = maxResults === undefined ? undefined : maxResults - returned
+      const limit = remaining === undefined ? query.limit : Math.min(remaining, query.limit ?? maxLimit)
+      const page = await fetchPage({ ...query, ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) })
       for (const item of page.items) {
+        if (remaining !== undefined && returned >= maxResults!) break
         request.signal?.throwIfAborted()
+        returned++
         yield item
       }
-      cursor = page.hasMore ? page.nextCursor ?? undefined : undefined
-      if (page.hasMore && cursor === undefined) throw new Error('crawl pages response omitted nextCursor')
-    } while (cursor !== undefined)
+      const next = page.hasMore ? page.nextCursor ?? undefined : undefined
+      if (page.hasMore && next === undefined) throw new Error(`${what} response omitted nextCursor`)
+      if (next === undefined) return { nextCursor: null, stoppedBy: 'end' }
+      if (maxResults !== undefined && returned >= maxResults) return { nextCursor: next, stoppedBy: 'maxResults' }
+      if (maxPages !== undefined && pagesAfterFirst >= maxPages) return { nextCursor: next, stoppedBy: 'maxPages' }
+      if (maxWaitMs !== undefined && Date.now() - startedAt >= maxWaitMs) return { nextCursor: next, stoppedBy: 'maxWait' }
+      cursor = next
+      pagesAfterFirst++
+    }
   }
 
   async getCrawlErrors(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlError>> {
@@ -503,6 +616,7 @@ export class W2L {
     if (options.limit !== undefined) params.set('limit', String(options.limit))
     if (options.attemptId !== undefined) params.set('attemptId', options.attemptId)
     if (options.debug !== undefined) params.set('debug', String(options.debug))
+    if (options.includeDuplicates !== undefined) params.set('includeDuplicates', String(options.includeDuplicates))
     const suffix = params.size === 0 ? '' : `?${params.toString()}`
     return this.get<CrawlPageList<T>>(`${path}${suffix}`, request, `crawl not found: ${path}`)
   }
@@ -512,6 +626,16 @@ export class W2L {
     if (res.status === 404 && notFound !== undefined) throw await responseError('GET', path, res, notFound)
     if (!res.ok) throw await responseError('GET', path, res)
     return (await res.json()) as T
+  }
+}
+
+/** Drain a bounded listing into its items and where it stopped. */
+async function collect<T>(listing: AsyncGenerator<T, PaginationEnd>): Promise<PageCollection<T>> {
+  const items: T[] = []
+  for (;;) {
+    const next = await listing.next()
+    if (next.done) return { items, nextCursor: next.value.nextCursor, hasMore: next.value.nextCursor !== null, stoppedBy: next.value.stoppedBy }
+    items.push(next.value)
   }
 }
 

@@ -14,6 +14,8 @@ export interface StepPageQuery {
   cursor?: string
   limit: number
   kind: StepPageKind
+  /** For kind `pages`: list the steps whose status is `duplicate` too; left out by default. */
+  includeDuplicates?: boolean
 }
 export interface StepPage {
   steps: readonly StepRecord[]

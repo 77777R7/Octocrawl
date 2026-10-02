@@ -1,7 +1,11 @@
 export { SDK_ORIGIN, W2L, W2LError, WaitTimeoutError } from './client.js'
 export { SDK_VERSION } from './version.js'
 export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest } from './client.js'
+export type { BatchCollected, BatchDocuments, CrawlCollected, CrawlDocuments, PageCollection, PagedListOptions, PaginationEnd, PaginationLimits, PaginationStop } from './client.js'
 export type {
+  ActiveCrawl,
+  ActiveCrawlList,
+  ActiveCrawlOptions,
   AgentHints,
   ApiErrorBody,
   ApiErrorCode,
@@ -41,6 +45,10 @@ export type {
   CrawlPageList,
   CrawlPageQuery,
   CrawlStartRequest,
+  SitemapMode,
+  SitemapDiscovery,
+  SitemapFileRecord,
+  CrawlDiscovery,
   FetchResult,
   DocumentMonitorConfig,
   DocumentFields,

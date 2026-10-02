@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { buildChannels } from '@w2l/bench'
+import { SqliteTaskStore } from '@w2l/runtime'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 
@@ -90,6 +91,8 @@ describe('Firecrawl /scrape /crawl shim', () => {
         limit: 4,
         maxDepth: 2,
         ignoreSitemap: true,
+        // The fixture's items are siblings of the listing: v1's name for following them.
+        allowBackwardLinks: true,
         scrapeOptions: { formats: ['markdown'] },
       }),
     })
@@ -100,6 +103,13 @@ describe('Firecrawl /scrape /crawl shim', () => {
     expect(accepted.url).toBe(`${server.url}/crawl/listing`)
 
     await engine.close()
+    // v1's ignoreSitemap: true is the native sitemap mode skip, stored with the task.
+    const store = SqliteTaskStore.openReadOnly(join(taskRoot, accepted.id))
+    try {
+      expect((await store.getTask(accepted.id))?.crawl).toMatchObject({ sitemap: 'skip' })
+    } finally {
+      await store.close()
+    }
     const got = await app.request(`/fc/v1/crawl/${accepted.id}`)
     expect(got.status).toBe(200)
     const status = await got.json()
@@ -122,6 +132,7 @@ describe('Firecrawl /scrape /crawl shim', () => {
         url: `${server.url}/crawl/listing`,
         includePaths: ['^/crawl/item/'],
         excludePaths: ['^/crawl/item/[12]$'],
+        crawlEntireDomain: true,
         scrapeOptions: { formats: ['links'] },
       }),
     })
