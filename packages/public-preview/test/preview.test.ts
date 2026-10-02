@@ -61,7 +61,14 @@ describe('anonymous preview contract', () => {
     expect([captures, quotaCalls]).toEqual([0, 0])
     expect((await fetch(`${url}/api/capability?url=file:///etc/passwd`)).status).toBe(400)
     expect((await fetch(`${url}/api/capability?url=https://docs.example&debug=true`)).status).toBe(400)
-    expect((await fetch(`${url}/api/capability`, { method: 'POST' })).status).toBe(405)
+    expect((await fetch(`${url}/api/capability`, { method: 'PUT' })).status).toBe(405)
+    // The page sends the address in the body, so it never appears in a request log's path and query.
+    const posted = await fetch(`${url}/api/capability`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://www.amazon.sg/dp/B0D4DHBFFH' }) })
+    expect(await posted.json()).toMatchObject({ capability: { task: 'amazon_sg_product' } })
+    const post = (body: unknown, headers: Record<string, string> = {}) => fetch(`${url}/api/capability`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+    expect((await post({ url: 'https://docs.example', debug: true })).status).toBe(400)
+    expect((await post({ url: 'https://docs.example' }, { origin: 'https://evil.example' })).status).toBe(403)
+    expect((await fetch(`${url}/api/capability?url=x`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://docs.example' }) })).status).toBe(400)
   })
 
   it('keeps hosted X and Reddit routes conditional despite local adapters', () => {

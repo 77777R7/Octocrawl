@@ -62,6 +62,8 @@ function empty(status: PreviewResponse['status'], url: string, reason: string, t
  * turn into an unbounded stream of reads. A count with previews left is always read fresh, since a preview on another
  * instance may have used one; only a used-up day is cached, until the next UTC midnight, as it cannot change before. */
 const QUOTA_LOOKUPS_PER_MINUTE = 120
+/** A capability request holds one address of at most 2,048 characters. */
+const CAPABILITY_BODY_BYTES = 4_096
 
 function nextUtcMidnight(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
@@ -191,11 +193,27 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       return
     }
     if (pathname === '/api/capability') {
-      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return }
+      // GET takes the address in the query, so it lands in the hosting request log; the page itself POSTs it in the
+      // body, which the log does not keep.
+      if (req.method !== 'GET' && req.method !== 'POST') { res.writeHead(405, { allow: 'GET, POST' }).end(); return }
+      if (req.method === 'POST' && (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site')) {
+        res.writeHead(403, { 'cache-control': 'no-store' }).end(); return
+      }
       try {
-        const entries = [...requestUrl.searchParams.entries()]
-        if (entries.length !== 1 || entries[0]?.[0] !== 'url') throw new Error('Provide one public URL in the url query parameter.')
-        const target = normalizePreviewUrl(entries[0][1])
+        let address: string
+        if (req.method === 'POST') {
+          if (requestUrl.search) throw new Error('Send the address in the request body only.')
+          const body = await readRequestBody(req, CAPABILITY_BODY_BYTES)
+          const keys = body !== null && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : []
+          const value = (body as { url?: unknown } | null)?.url
+          if (keys.length !== 1 || typeof value !== 'string') throw new Error('Send a JSON object with one url.')
+          address = value
+        } else {
+          const entries = [...requestUrl.searchParams.entries()]
+          if (entries.length !== 1 || entries[0]?.[0] !== 'url') throw new Error('Provide one public URL in the url query parameter.')
+          address = entries[0][1]
+        }
+        const target = normalizePreviewUrl(address)
         sendJson(res, 200, { requestedUrl: target.url, capability: resolvePreviewCapability(target) })
       } catch (error) {
         sendJson(res, 400, { error: 'invalid_url', reason: error instanceof Error ? error.message : 'Invalid URL.' })
