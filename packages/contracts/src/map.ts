@@ -50,7 +50,7 @@ export interface MapLink {
 
 export type MapStatus = 'completed' | 'partial' | 'failed'
 
-/** What the start page read gave, or why it was not read (`failed/policy_denied` when robots.txt disallows the start URL). */
+/** What the start page read gave, or why it was not read (`failed/policy_denied` when robots.txt disallows the start URL or could not be read). */
 export interface MapStartPage {
   url: string
   finalUrl: string | null
@@ -58,8 +58,15 @@ export interface MapStartPage {
   status: ResultStatus
   failureReason: FailureReason | null
   lane: 'http'
-  /** The start URL's robots.txt verdict; null when it could not be read before the deadline. */
-  robots: 'allowed' | 'no_robots' | 'disallowed' | null
+  /**
+   * The start URL's robots.txt verdict; `unreachable` when its robots.txt
+   * could not be read (a 5xx, a network error, its lookup's timeout or the
+   * egress policy), which counts as a complete disallow but is no rule the
+   * publisher wrote; null when it was not read before the deadline.
+   */
+  robots: 'allowed' | 'no_robots' | 'disallowed' | 'unreachable' | null
+  /** Why robots.txt could not be read (`server_error`, `network_error`, `timeout`, ...); present only with robots `unreachable`. */
+  robotsUnreachable?: string
   rawBodySha256: string | null
   /** http(s) links the page holds, each once, before scope, robots and limit. */
   linksFound: number
@@ -105,7 +112,7 @@ export interface MapRefused {
   }
 }
 
-export const MAP_WARNING_CODES = ['map_timeout', 'start_page_unreadable', 'start_page_client_rendered', 'sitemap_unreadable', 'sitemap_files_capped', 'robots_host_cap', 'map_record_unwritten'] as const
+export const MAP_WARNING_CODES = ['map_timeout', 'start_page_unreadable', 'start_page_client_rendered', 'sitemap_unreadable', 'sitemap_files_capped', 'robots_host_cap', 'robots_unreachable', 'map_record_unwritten'] as const
 export type MapWarningCode = (typeof MAP_WARNING_CODES)[number]
 
 export interface MapWarning {

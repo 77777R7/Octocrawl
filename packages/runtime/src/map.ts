@@ -70,7 +70,8 @@ export interface MapSpec {
 const READ_STATUSES: ReadonlySet<ResultStatus> = new Set<ResultStatus>(['success', 'empty_verified'])
 
 type Found = { via: 'link'; text: string | null } | { via: 'sitemap'; entry: SitemapEntry }
-type Verdict = 'allowed' | 'no_robots' | 'disallowed' | 'unchecked'
+/** `unreachable`: robots.txt could not be read (5xx, network error, its lookup's timeout, the egress policy), which counts as a complete disallow but is no rule the publisher wrote. */
+type Verdict = 'allowed' | 'no_robots' | 'disallowed' | { unreachable: string } | 'unchecked'
 
 export class MapRunner {
   constructor(private readonly sources: MapSources) {}
@@ -112,6 +113,8 @@ export class MapRunner {
       let limitReached = false
       let hostCapped = 0
       const origins = new Set<string>()
+      /** Origins whose robots.txt could not be read: the reason, and how many candidates on them were left out. */
+      const unreachableOrigins = new Map<string, { reason: string; refused: number }>()
 
       /** The robots.txt verdict for a candidate: its origin's file is read once, for at most the start host and maxRobotsHosts others. */
       const verdictFor = async (canonicalUrl: string): Promise<Verdict> => {
@@ -122,7 +125,8 @@ export class MapRunner {
         }
         try {
           const verdict = await this.sources.robotsVerdict(canonicalUrl, scope)
-          return typeof verdict === 'string' ? verdict : 'disallowed'
+          if (typeof verdict === 'string') return verdict
+          return verdict.unreachable === undefined ? 'disallowed' : { unreachable: verdict.unreachable }
         } catch (error) {
           if (cancelled()) throw error
           if (Date.now() >= deadlineAt) { timedOut = true; return 'unchecked' }
@@ -160,6 +164,18 @@ export class MapRunner {
         if (!start && link.title === undefined && found.entry.title !== undefined && found.entry.title.length > 0) Object.assign(link, { title: found.entry.title, titleSource: 'sitemap' })
       }
 
+      /** A URL robots.txt keeps out: disallowed by a rule, or on a host whose robots.txt could not be read, which is counted apart for the warning. */
+      const refuseRobots = (canonicalUrl: string, verdict: 'disallowed' | { unreachable: string }): void => {
+        refused.robots++
+        sample(refused.samples.robots, canonicalUrl)
+        if (typeof verdict === 'object') {
+          const origin = new URL(canonicalUrl).origin
+          const seen = unreachableOrigins.get(origin)
+          if (seen === undefined) unreachableOrigins.set(origin, { reason: verdict.unreachable, refused: 1 })
+          else seen.refused++
+        }
+      }
+
       /** One candidate's verdict, counted; true when it is taken (or would be, past the limit), which a sitemap load reads as its accept. */
       const offer = async (result: FrontierEnqueueResult, found: Found): Promise<boolean> => {
         if (!result.accepted) {
@@ -182,7 +198,7 @@ export class MapRunner {
         const canonicalUrl = result.canonicalUrl!
         const verdict = await verdictFor(canonicalUrl)
         if (verdict === 'unchecked') { refused.robotsUnchecked++; return false }
-        if (verdict === 'disallowed') { refused.robots++; sample(refused.samples.robots, canonicalUrl); return false }
+        if (verdict === 'disallowed' || typeof verdict === 'object') { refuseRobots(canonicalUrl, verdict); return false }
         if (links.length >= limit) { refused.overLimit++; limitReached = true; return true }
         add(canonicalUrl, found, verdict)
         return true
@@ -194,10 +210,11 @@ export class MapRunner {
       if (sitemapMode !== 'only') {
         const startVerdict = await verdictFor(startCanonical)
         const blank = { url: spec.url, finalUrl: null, httpStatus: null, lane: 'http' as const, rawBodySha256: null, linksFound: 0, title: null, description: null }
-        if (startVerdict === 'disallowed') {
-          refused.robots++
-          sample(refused.samples.robots, startCanonical)
-          startPage = { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' }
+        if (startVerdict === 'disallowed' || typeof startVerdict === 'object') {
+          refuseRobots(startCanonical, startVerdict)
+          startPage = typeof startVerdict === 'object'
+            ? { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'unreachable', robotsUnreachable: startVerdict.unreachable }
+            : { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' }
         } else if (startVerdict === 'unchecked') {
           refused.robotsUnchecked++
           startPage = { ...blank, status: 'failed', failureReason: 'timeout', robots: null }
@@ -293,7 +310,9 @@ export class MapRunner {
         warnings.push({ code: 'map_timeout', message: `the map stopped at its ${timeoutMs} ms timeout after ${elapsedMs} ms with ${links.length} links; ${unread}` })
       }
       if (startPage !== null && startFailed) {
-        const why = startPage.failureReason === 'policy_denied' ? '; robots.txt disallows it for the map\'s identity, so it was not requested' : ''
+        const why = startPage.failureReason !== 'policy_denied' ? ''
+          : startPage.robots === 'unreachable' ? `; its robots.txt could not be read (${startPage.robotsUnreachable ?? 'unknown'}), which counts as a complete disallow, so it was not requested`
+            : startPage.robots === 'disallowed' ? '; robots.txt disallows it for the map\'s identity, so it was not requested' : ''
         warnings.push({ code: 'start_page_unreadable', message: `the start page was not read as content (${startPage.status}${startPage.failureReason === null ? '' : `/${startPage.failureReason}`}${startPage.httpStatus === null ? '' : `, HTTP ${startPage.httpStatus}`})${why}; its links are not in this map` })
       }
       if (clientRendered) warnings.push({ code: 'start_page_client_rendered', message: 'the start page looks filled by script on the http lane, so the links read from it may be incomplete' })
@@ -303,6 +322,10 @@ export class MapRunner {
         warnings.push({ code: 'sitemap_unreadable', message: `${unreadable.length} sitemap ${unreadable.length === 1 ? 'file was' : 'files were'} not read: ${named}${unreadable.length > 3 ? ', ...' : ''}; their URLs are not in this map` })
       }
       if (sitemap?.truncated === 'files') warnings.push({ code: 'sitemap_files_capped', message: `the map reads at most ${spec.maxSitemapFiles ?? MAP_SITEMAP_MAX_FILES} sitemap files and the site lists more; URLs in the files not read are not in this map` })
+      if (unreachableOrigins.size > 0) {
+        const named = [...unreachableOrigins].slice(0, 3).map(([origin, seen]) => `${origin}/robots.txt (${seen.reason}, ${seen.refused} ${seen.refused === 1 ? 'URL' : 'URLs'})`).join(', ')
+        warnings.push({ code: 'robots_unreachable', message: `robots.txt could not be read for ${unreachableOrigins.size} ${unreachableOrigins.size === 1 ? 'host' : 'hosts'}: ${named}${unreachableOrigins.size > 3 ? ', ...' : ''}; an unreadable robots.txt counts as a complete disallow, so the URLs on those hosts were left out, although no rule was read from it` })
+      }
       if (hostCapped > 0) warnings.push({ code: 'robots_host_cap', message: `robots.txt is read for at most ${maxRobotsHosts} hosts beside the start host; ${hostCapped} URLs on further hosts were left out unchecked` })
 
       return {

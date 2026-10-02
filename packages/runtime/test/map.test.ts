@@ -103,6 +103,28 @@ describe('MapRunner', () => {
     expect(map.warnings.map((warning) => warning.code)).toEqual(['start_page_unreadable'])
   })
 
+  it('reports an unreachable robots.txt as unreachable with its reason, never as a rule the publisher wrote', async () => {
+    const sitemap = fakeSitemap([{ url: `${SITE}/docs/open` }])
+    const { wired, reads } = sources(startPage([]), sitemap.source, async (url) => (url.startsWith(SITE) ? { disallowed: true, unreachable: 'server_error' } : 'allowed'))
+    const map = await new MapRunner(wired).run({ id: 'm-unreachable', url: START })
+    expect(reads).toEqual([])
+    expect(map.sources.startPage).toMatchObject({ status: 'failed', failureReason: 'policy_denied', robots: 'unreachable', robotsUnreachable: 'server_error' })
+    expect(map.links).toEqual([])
+    expect(map.refused).toMatchObject({ robots: 2, samples: { robots: [START, `${SITE}/docs/open`] } })
+    expect(map.status).toBe('failed')
+    expect(map.warnings.map((warning) => warning.code)).toEqual(['start_page_unreadable', 'robots_unreachable'])
+    const [unreadable, unreachable] = map.warnings
+    expect(unreadable!.message).toContain('its robots.txt could not be read (server_error), which counts as a complete disallow')
+    expect(unreadable!.message).not.toContain('disallows it')
+    expect(unreachable!.message).toContain(`${SITE}/robots.txt (server_error, 2 URLs)`)
+    // A rule the publisher wrote keeps its own wording and no robots_unreachable warning.
+    const ruled = await new MapRunner(sources(startPage([]), fakeSitemap([]).source, async () => ({ disallowed: true })).wired).run({ id: 'm-ruled', url: START })
+    expect(ruled.sources.startPage).toMatchObject({ robots: 'disallowed' })
+    expect(ruled.sources.startPage).not.toHaveProperty('robotsUnreachable')
+    expect(ruled.warnings.map((warning) => warning.code)).toEqual(['start_page_unreadable'])
+    expect(ruled.warnings[0]!.message).toContain('robots.txt disallows it for the map\'s identity')
+  })
+
   it('stops at limit: exactly limit links, the rest counted over the limit, the sitemap given what is left, robots refusals not counted', async () => {
     const sitemap = fakeSitemap(Array.from({ length: 10 }, (_, i) => ({ url: `${SITE}/docs/s${i}` })))
     const { wired } = sources(startPage([link('/docs/private/p'), link('/docs/1'), link('/docs/2'), link('/docs/3'), link('/docs/4'), link('/docs/5')]), sitemap.source)
