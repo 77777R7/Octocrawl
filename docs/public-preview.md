@@ -175,6 +175,19 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 
 With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
+### Refresh the Amazon.sg state
+
+The anonymous Singapore state in `w2l-amazon-state` stops working after some days (the first one lasted from 2026-09-24 to at most 2026-10-02). Then every Amazon.sg product comes back `incomplete` with `region_unverified`, while ordinary pages still work. `.github/workflows/amazon-state-check.yml` previews two fixed products every day at 01:17 UTC and fails, with an email from GitHub, when neither comes back complete; run it by hand with `gh workflow run amazon-state-check.yml`. To refresh:
+
+```sh
+export W2L_AMAZON_PUBLIC_STATE_FILE="$PWD/.w2l/public-preview/amazon-state-$(date -u +%Y%m%dT%H%M%SZ).json"
+node scripts/section-c/ensure-amazon-sg-state.mjs --fresh-only
+gcloud secrets versions add w2l-amazon-state --data-file="$W2L_AMAZON_PUBLIC_STATE_FILE" --project="$W2L_PROJECT_ID"
+gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --revision-suffix="state$(date -u +%m%d)"
+```
+
+The service reads `latest` only when an instance starts, so the new revision is what picks the state up. Tag it, preview a product through the tag URL, then move traffic to it as in any deploy, and disable the previous secret version.
+
 ### Quota counter expiry
 
 Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day after the UTC day it counts (`quotaExpiry` in `packages/public-preview/src/quota.ts`). Firestore deletes expired documents only once a TTL policy exists on that field, so create it once per project:
