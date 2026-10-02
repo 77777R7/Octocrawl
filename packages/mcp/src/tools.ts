@@ -3,12 +3,12 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -172,6 +172,49 @@ export const TOOLS = [
     name: 'get_scrape',
     description: 'Read the record of one scrape call by the scrapeId its response carried (metadata.scrapeId): the request (header values replaced by their names), who made it (origin, integration), the verdict, the lanes tried, the metadata, the snapshot, the usage, the warnings and the hints. No page body. Records live under the server\'s task root without retention.',
     inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'metadata.scrapeId of a scrape response' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'map',
+    description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts }); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
+    annotations: { title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'http(s) URL of the start page' },
+        search: { type: 'string', minLength: 1, maxLength: MAP_SEARCH_MAX_CHARS, description: 'Keep only the URLs in which every word (at most 10) appears, case-insensitively, in the decoded URL or its title. A filter, not a ranking: the order stays the discovery order, and limit counts the matches.' },
+        sitemap: { type: 'string', enum: ['include', 'skip', 'only'], description: 'include (default): the start page\'s links and the sitemaps. skip: no sitemap is read. only: no page is read; the links are the sitemap entries in their listed order (the start URL only when a sitemap lists it).' },
+        includeSubdomains: { type: 'boolean', description: 'Admit every host under the start URL\'s apex (the host with one leading www. removed; no public-suffix list). Default false. Each new host\'s robots.txt is read, for at most 20 hosts.' },
+        ignoreQueryParameters: { type: 'boolean', description: 'Fold URLs that differ only in their query string into the first one seen, returned without its query; each merge is counted (refused.collapsed, with samples under debug). Default false.' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_MAP_LIMIT, description: `Links returned at most. Default ${DEFAULT_MAP_LIMIT}; a hosted server takes up to 5000. Reaching it is status completed with stoppedBy limit.` },
+        timeout: { type: 'integer', minimum: 1000, maximum: MAX_MAP_TIMEOUT_MS, description: `Milliseconds for the whole map. Default ${DEFAULT_MAP_TIMEOUT_MS}; a hosted server takes up to 60000.` },
+        includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a URL must match (as on crawl).' },
+        excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that leave a URL out; they win over includePaths.' },
+        regexOnFullURL: { type: 'boolean', description: 'Match includePaths and excludePaths against the canonical URL instead of its pathname. Default false.' },
+        crawlEntireDomain: { type: 'boolean', description: 'Admit URLs anywhere on the start host, not only in the start URL\'s path subtree. Default false.' },
+        deduplicateSimilarURLs: { type: 'boolean', description: 'Fold /a and /a/, / and /index.html, www and apex, http and https into one URL. Default true.' },
+        mode: { type: 'string', enum: ['standard', 'research'], description: 'The declared identity robots.txt, the page and the sitemaps are read under. authed is not offered: a map reads public sitemaps and one public page.' },
+        debug: { type: 'boolean', description: 'Return the full map response instead of the compact one.' },
+        ...INTEGRATION_PROPERTY,
+      },
+      required: ['url'],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The map\'s record id (GET /v1/maps/:id on the REST API).' },
+        status: { type: 'string', enum: ['completed', 'partial', 'failed'] },
+        stoppedBy: { enum: ['limit', 'timeout', null] },
+        links: {
+          type: 'array',
+          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['url'] },
+        },
+        warning: { type: 'string', description: 'The warnings\' messages, joined.' },
+        agentHints: { type: 'array', items: { type: 'string' } },
+        counts: { type: 'object', properties: { returned: { type: 'integer' }, refused: { type: 'integer' } } },
+      },
+      required: ['id', 'status', 'stoppedBy', 'links'],
+    },
   },
   {
     name: 'crawl',
@@ -372,6 +415,13 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const rec = readRecord(args)
     return client.getScrape(required(rec.id, 'id'), request)
   }
+  if (name === 'map') {
+    const { debug, ...rest } = readRecord(args)
+    if (debug !== undefined && typeof debug !== 'boolean') throw new RequestError('debug must be a boolean')
+    const { url, ...options } = parseMapRequest(withoutOrigin(rest))
+    const response = await client.map(url, options, request)
+    return debug === true ? response : compactMap(response)
+  }
   if (name === 'crawl') {
     const req = parseCrawlStartRequest(withoutOrigin(args))
     return client.crawl(req.url, {
@@ -506,6 +556,19 @@ function readRecord(args: unknown): Record<string, unknown> {
 function required(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new RequestError(`${name} is required`)
   return value
+}
+/** A map for an agent: its links' URLs and titles, the warnings as one string, the hints, and how many URLs it returned and left out. */
+function compactMap(response: MapResponse) {
+  const { samples: _samples, ...counters } = response.refused
+  return {
+    id: response.id,
+    status: response.status,
+    stoppedBy: response.stoppedBy,
+    links: response.links.map(({ url, title, description }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }) })),
+    ...(response.warnings.length === 0 ? {} : { warning: response.warnings.map((warning) => warning.message).join(' ') }),
+    ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
+    counts: { returned: response.links.length, refused: Object.values(counters).reduce((sum, n) => sum + n, 0) },
+  }
 }
 function compactMonitor(view: Awaited<ReturnType<W2L['getMonitor']>>) {
   const latest = view.runs[0]

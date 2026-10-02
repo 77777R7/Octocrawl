@@ -53,7 +53,10 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(server.getClientVersion()) }) }
       catch (error) { throw call?.signal.aborted ? requestCancelled() : withErrorCode(error) }
       if (call?.signal.aborted) throw requestCancelled()
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+      // A tool that declares an outputSchema answers its result as structuredContent too.
+      const declared = TOOLS.find(tool => tool.name === request.params.name)
+      const structured = declared !== undefined && 'outputSchema' in declared
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], ...(structured ? { structuredContent: result as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })
   return server

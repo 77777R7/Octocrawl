@@ -44,6 +44,9 @@ describe('single-owner hosted workflow policy', () => {
     expect(call('get_batch_errors',{id:'batch-1',limit:10})).toEqual({id:'batch-1',limit:10})
     expect(REMOTE_TOOLS.has('get_crawl_errors')).toBe(false)
     expect(() => call('get_crawl_errors',{id:'c1'})).toThrow('tool not available in this deployment')
+    // map takes an arbitrary URL, which the hosted host never does: it stays out, and a call is refused unchanged.
+    expect(REMOTE_TOOLS.has('map')).toBe(false)
+    expect(() => call('map',{url:'https://www.amazon.sg/dp/B000VW9PIK'})).toThrow('tool not available in this deployment')
   })
 
   it('allows reviewed public-document monitors with explicit HTTP capture and one receiver', () => {
