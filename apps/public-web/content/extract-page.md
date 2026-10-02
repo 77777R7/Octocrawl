@@ -1,10 +1,10 @@
 # Extract a public page
 
-Use the W2L page when you want readable content, links, or a few fields from one public HTTP(S) URL without setting up a task. The browser submits the URL and, only when you change them, the two options below; capture settings and service secrets remain on the server.
+Use the OctoCrawl page when you want readable content, links, or a few fields from one public HTTP(S) URL without setting up a task. The browser submits the URL and, only when you change them, the two options below; capture settings and service secrets remain on the server.
 
 ## Input
 
-Open [Try W2L](/), paste `https://docs.firecrawl.dev/introduction`, and press **Extract page**. This public documentation URL is the first-use example. When this site is served over public HTTPS, the page and extraction API use the same address; no local installation is needed for this single-page preview.
+Open [Try OctoCrawl](/), paste `https://docs.firecrawl.dev/introduction`, and press **Extract page**. This public documentation URL is the first-use example. When this site is served over public HTTPS, the page and extraction API use the same address; no local installation is needed for this single-page preview.
 
 ## Expected output
 
@@ -31,19 +31,19 @@ Links and page metadata come with ordinary pages that were read, and fields with
 - **Read**: **Main content** (the default) leaves out headers, menus and footers. **Whole page** keeps them; a page with no clear main content then returns everything instead of failing.
 - **Fields**: up to 20 fields, each a name and a type (text, number, yes / no, or a list of text). Type a name on the add line and press Enter to add it, and set its type beside it. **+ product fields** fills in name, brand, price, currency, availability, SKU, rating and review count. Names use letters, digits, spaces, dots, dashes and underscores.
 
-The **Fields** view lists each field in the order you set them, marked ✓ when the page states it, · when it does not, and : when the page states more than one value. Under each value it shows where on the page it was read, as the downloaded `.fields.json` records it. **Links** and **Page info** read the same way: links are numbered and marked · on the page's own site or ↗ elsewhere, and each page-info value names the tag it was read from, or the tag W2L looked for when the page does not declare it.
+The **Fields** view lists each field in the order you set them, marked ✓ when the page states it, · when it does not, and : when the page states more than one value. Under each value it shows where on the page it was read, as the downloaded `.fields.json` records it. **Links** and **Page info** read the same way: links are numbered and marked · on the page's own site or ↗ elsewhere, and each page-info value names the tag it was read from, or the tag OctoCrawl looked for when the page does not declare it.
 
 Fields are read from the page itself: JSON-LD, microdata, meta tags, table rows, definition lists, and a PDF's `Label: value` lines. No AI model is used. A field the page does not state comes back empty with its reason, never guessed. Amazon.sg product pages take no options; they always return their checked product record.
 
 ## Run it on your computer
 
-**Get code** shows the same extraction for the local API (a cURL command for `POST /v1/scrape`) and for the local MCP service (the `scrape` tool call, or `scrape_product` for an Amazon.sg product), with the URL, format and options you chose. Both need a checkout of the W2L repository and have no daily limit. A local run can also use a local browser, so its result may differ from this preview. See the [API reference](/docs/reference/) and [Connect MCP](/docs/connect-mcp/).
+**Get code** shows the same extraction for the local API (a cURL command for `POST /v1/scrape`) and for the local MCP service (the `scrape` tool call, or `scrape_product` for an Amazon.sg product), with the URL, format and options you chose. Both need a checkout of the OctoCrawl repository and have no daily limit. A local run can also use a local browser, so its result may differ from this preview. See the [API reference](/docs/reference/) and [Connect MCP](/docs/connect-mcp/).
 
 For the exact recorded success sample and its observation time, see [Introduction](/docs/). The result may differ when the source page changes.
 
 ## If extraction does not complete
 
-- **Blocked:** the site denied automated access, required login, or returned a verification page. Try another permitted public page; W2L does not solve a challenge.
+- **Blocked:** the site denied automated access, required login, or returned a verification page. Try another permitted public page; OctoCrawl does not solve a challenge.
 - **Timed out:** the source or local outbound path did not finish within the preview deadline. Check the final URL and reason. A timeout alone does not prove that the site's parser is wrong.
 - **Incomplete:** content or identity could not be fully verified. Read what is available and its missing reason; do not treat it as a complete record.
 - **Daily limit reached:** stop until the applicable quota resets. The local review server's counters reset on restart; the hosted preview uses durable counters.

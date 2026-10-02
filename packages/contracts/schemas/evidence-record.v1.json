@@ -76,7 +76,7 @@
       ]
     },
     "artifacts": {
-      "description": "Files W2L saved while producing this result, each with its SHA-256: a file response (PDF, CSV, ...) saved as received (kind file), and the page snapshot when the operator sets W2L_CAPTURE_RAW_DIR. An empty list when nothing was saved.",
+      "description": "Files W2L saved while producing this result, each with its SHA-256: a file response (PDF, CSV, ...) saved as received (kind file), and, when the operator sets W2L_CAPTURE_RAW_DIR, the page snapshot and the screenshot format's image. An empty list when nothing was saved.",
       "type": "array",
       "items": { "$ref": "#/$defs/artifact" }
     },
@@ -220,7 +220,7 @@
       "required": ["kind", "path", "sha256"],
       "properties": {
         "kind": {
-          "description": "snapshot: the page's HTML as W2L read it (the rendered page on browser lanes). file: a file response (PDF, CSV, JSON, text, XLSX, XLS, ZIP) saved byte for byte as received. screenshot is reserved for the lane that will produce it. Null when W2L cannot tell what the file is.",
+          "description": "snapshot: the page's HTML as W2L read it (the rendered page on browser lanes). file: a file response (PDF, CSV, JSON, text, XLSX, XLS, ZIP) saved byte for byte as received. screenshot: the browser lane's capture for the screenshot format, saved under W2L_CAPTURE_RAW_DIR as <sha256>.png or .jpg, with its size and type. Null when W2L cannot tell what the file is.",
           "enum": ["snapshot", "screenshot", "file", null]
         },
         "path": {
@@ -233,12 +233,12 @@
           "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
         },
         "bytes": {
-          "description": "Size of the file in bytes: for kind file, every byte received. Null when unknown (a snapshot). Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
+          "description": "Size of the file in bytes: for kind file, every byte received. Null when unknown (a snapshot); for kind screenshot, the image's bytes. Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
           "type": ["integer", "null"],
           "minimum": 0
         },
         "contentType": {
-          "description": "The Content-Type header the file was received with, as sent. Null when the response sent none or W2L did not record it (a snapshot). Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
+          "description": "The Content-Type header the file was received with, as sent. Null when the response sent none or W2L did not record it (a snapshot); for kind screenshot, image/png or image/jpeg. Added to v1 with file download: optional here so that earlier records stay valid; W2L writes it on every artifact.",
           "type": ["string", "null"]
         }
       }

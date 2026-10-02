@@ -22,7 +22,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -648,7 +648,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (extracted.escalate && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options)) {
       const formatStart = performance.now()
-      wholePage = wholePageMarkdown(body, out.finalUrl, options.excludeTags)
+      wholePage = wholePageMarkdown(body, out.finalUrl, options)
       formatMs = performance.now() - formatStart
       if (options.onlyMainContent !== false || wholePage === null) {
         const warnings = clientRenderedCaveat()
@@ -678,12 +678,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     const formatStart = performance.now()
-    const mainMarkdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    const mainMarkdown = htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
     // onlyMainContent: false emits the whole page (header, navigation and
     // footer kept) through the same converter and base URL. The quality
     // signal below still reads the main content, so the mode never changes
     // which lane answers.
-    const markdown = wholePageAsked(options) ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags }) : mainMarkdown
+    const markdown = wholePageAsked(options) ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) }) : mainMarkdown
     formatMs += performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
     const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)
@@ -722,6 +722,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // The shell caveat follows quality_low_yield: when both fire, the first
     // quality event in the trace names the ladder's hop.
     const warnings = clientRenderedCaveat()
+    // The images and attributes formats read the body as received, like links.
+    const extra = extraFormats(body, out.finalUrl, options, trace, 'http', wallMs)
 
     return finish({
       ...base,
@@ -734,6 +736,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       markdown,
       ...(warnings.length > 0 ? { warnings } : {}),
       links,
+      ...extra,
       metadata: extracted.metadata,
       document: {
         title: extracted.title,

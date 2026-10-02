@@ -32,6 +32,8 @@ export interface PreviewServerOptions {
   publicOrigin?: string
   /** Where page events and anonymous preview outcomes are written; stdout JSON lines by default. */
   log?: Logger
+  /** Shared with the Cloudflare Worker; at least 32 characters. See acceptProxyHeaders. */
+  proxySecret?: string
 }
 
 const MIME: Record<string, string> = {
@@ -62,6 +64,7 @@ function empty(status: PreviewResponse['status'], url: string, reason: string, t
  * turn into an unbounded stream of reads. A count with previews left is always read fresh, since a preview on another
  * instance may have used one; only a used-up day is cached, until the next UTC midnight, as it cannot change before. */
 const QUOTA_LOOKUPS_PER_MINUTE = 120
+const PROXY_SECRET_HEADER = 'x-w2l-proxy-secret'
 /** A capability request holds one address of at most 2,048 characters. */
 const CAPABILITY_BODY_BYTES = 4_096
 
@@ -69,7 +72,29 @@ function nextUtcMidnight(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
 }
 
+/** Requests the Cloudflare Worker forwarded, with the visitor's own address it reported. */
+const proxiedClient = new WeakMap<IncomingMessage, string>()
+
+/** The Worker in cloudflare/public-preview-proxy names the public domain in X-Forwarded-Host and the visitor in
+ * CF-Connecting-IP, and proves it is the Worker with a shared secret header. Without that proof both headers are
+ * dropped, so a client calling the run.app address directly cannot pick its own address or host. When no secret is
+ * configured, X-Forwarded-Host keeps its plain meaning (site.ts) and CF-Connecting-IP is never believed. */
+function acceptProxyHeaders(req: IncomingMessage, secret: string | undefined): void {
+  const presented = req.headers[PROXY_SECRET_HEADER]
+  delete req.headers[PROXY_SECRET_HEADER]
+  const client = req.headers['cf-connecting-ip']
+  delete req.headers['cf-connecting-ip']
+  if (!secret) return
+  const proven = typeof presented === 'string'
+    && timingSafeEqual(createHash('sha256').update(presented).digest(), createHash('sha256').update(secret).digest())
+  if (!proven) { delete req.headers['x-forwarded-host']; return }
+  if (typeof client === 'string' && isIP(client.trim())) proxiedClient.set(req, client.trim())
+}
+
 function visitorAddress(req: IncomingMessage): string {
+  // Behind the Worker the last X-Forwarded-For entry is Cloudflare's own address, shared by every visitor.
+  const proxied = proxiedClient.get(req)
+  if (proxied !== undefined) return proxied
   const forwarded = req.headers['x-forwarded-for']
   const addresses = (typeof forwarded === 'string' ? forwarded : Array.isArray(forwarded) ? forwarded.join(',') : '').split(',')
   // The last address may be a load balancer, so this is deliberately a
@@ -178,12 +203,14 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
   if (options.visitorCookieSecret && options.visitorCookieSecret.length < 32) throw new Error('Visitor cookie secret must have at least 32 characters')
   if (options.evalToken && options.evalToken.length < 32) throw new Error('Evaluation token must have at least 32 characters')
   if (options.localPlatformRobotsException && !options.localPlatformProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
+  if (options.proxySecret !== undefined && options.proxySecret.length < 32) throw new Error('Proxy secret must have at least 32 characters')
   const publicOrigin = options.publicOrigin ? parsePublicOrigin(options.publicOrigin) : undefined
   const log = options.log ?? stdoutLogger
   const visitorId = (req: IncomingMessage) => dailyVisitorId(options.visitorCookieSecret, visitorKey(req, options.visitorCookieSecret))
   const usedUp = new Map<string, { until: number; status: QuotaStatus }>()
   let quotaLookups = { windowStart: 0, count: 0 }
   return (req, res) => { void (async () => {
+    acceptProxyHeaders(req, options.proxySecret)
     const started = performance.now()
     const deadlineAt = Date.now() + deadlineMs
     const requestUrl = new URL(req.url ?? '/', 'http://localhost')

@@ -20,6 +20,7 @@ import {
   type JsonValue,
   type Lane,
   type RobotsUnreachable,
+  type ScreenshotEvidence,
   type StructuredExtractionResult,
   type TraceEvent,
 } from '@w2l/contracts'
@@ -87,7 +88,7 @@ export function toEvidenceRecord(
     fieldEvidence: output.json === undefined || output.json === null ? null : Object.fromEntries(
       output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null }]),
     ),
-    artifacts: evidence.artifacts.map(path => artifact(path, result.file)),
+    artifacts: evidence.artifacts.map(path => artifact(path, result.file, result.screenshot ?? undefined)),
     proxy: evidence.envProxy ?? null,
     identity: {
       userAgent,
@@ -171,12 +172,14 @@ function observedUserAgent(result: FetchResult): string | null {
 }
 
 /**
- * The file the result describes (`file.path`), saved as received; a raw
+ * The file the result describes (`file.path`), saved as received; the
+ * screenshot it carries (`screenshot.path`), with its size and type; a raw
  * snapshot, saved as `<sha256 of its bytes>.html` (bench captureRawHtml),
  * whose size and type are not recorded; any other file is not known here.
  */
-function artifact(path: string, file: FileDescription | undefined): EvidenceArtifact {
+function artifact(path: string, file: FileDescription | undefined, screenshot: ScreenshotEvidence | undefined): EvidenceArtifact {
   if (file !== undefined && file.path === path) return { kind: 'file', path, sha256: file.sha256, bytes: file.bytes, contentType: file.contentType }
+  if (screenshot !== undefined && screenshot.path === path) return { kind: 'screenshot', path, sha256: screenshot.sha256, bytes: screenshot.bytes, contentType: screenshot.contentType }
   const hash = /(?:^|[\\/])([0-9a-f]{64})\.html$/.exec(path)?.[1]
   return hash === undefined ? { kind: null, path, sha256: null, bytes: null, contentType: null } : { kind: 'snapshot', path, sha256: hash, bytes: null, contentType: null }
 }

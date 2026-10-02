@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -528,7 +528,7 @@ export class ProviderSubject implements SubjectAdapter {
     let wholePage: string | null = null
     if (extracted.escalate && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options)) {
-      wholePage = wholePageMarkdown(res.body, res.finalUrl, options.excludeTags)
+      wholePage = wholePageMarkdown(res.body, res.finalUrl, options)
       if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
@@ -552,8 +552,8 @@ export class ProviderSubject implements SubjectAdapter {
 
     // onlyMainContent: false emits the whole page through the same converter and base URL.
     const markdown = wholePageAsked(options)
-      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl, exclude: options.excludeTags })
-      : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+      ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
+      : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
 
     // THE UNIFIED IDENTITY RULE (ProviderSubject, LadderRunner, w2l-provider,
     // RoutingHistory all follow it): a fetch whose wire identity was
@@ -575,6 +575,8 @@ export class ProviderSubject implements SubjectAdapter {
       }
     }
 
+    // The images and attributes formats read the page the vendor returned, like links.
+    const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
     return {
       ...base,
       status: 'success',
@@ -598,6 +600,7 @@ export class ProviderSubject implements SubjectAdapter {
         labelledValues: extracted.labelledValues,
       },
       ...htmlFormats(res.body, res.body, extracted.mainHtml, options),
+      ...extra,
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
     }
   }

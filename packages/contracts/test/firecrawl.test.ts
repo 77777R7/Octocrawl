@@ -133,20 +133,53 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
-    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'summary'] })).toThrow('unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
     expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
-    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
-      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: screenshot')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['summary'], location: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: summary')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: 'yes' })).toThrow('ignoreSitemap must be a boolean')
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
-    // W2L always drops data: image URIs, which is Firecrawl's removeBase64Images default.
-    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url })
-    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: true } })).toMatchObject({ url })
-    expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: false })).toThrow('removeBase64Images: false is not supported')
-    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toThrow('scrapeOptions.removeBase64Images: false is not supported')
+    // removeBase64Images is mapped with its value: true is W2L's default, false keeps the data: images.
+    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, removeBase64Images: true })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toMatchObject({ url, removeBase64Images: false })
+    expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: 'no' })).toThrow('removeBase64Images must be a boolean')
+  })
+
+  it('maps the images format and an attributes entry for scrape and a crawl\'s scrapeOptions, and serves both on data when the result carries them', () => {
+    const url = 'https://example.com/'
+    const attributes = { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }] }
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'images', attributes] })).toEqual({ url, formats: ['markdown', 'images', attributes] })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['images', 'images'] } })).toMatchObject({ formats: ['images'] })
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', { type: 'json', schema: {} }] })).toThrow('unsupported format: json (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [] }] })).toThrow('attributes format requires selectors')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [42] })).toThrow('formats must be an array of strings or { type } objects')
+    const served = wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', images: ['https://example.com/a.png'], attributes: [{ selector: 'a', attribute: 'href', values: ['/x', '/y'] }] })).data
+    expect(served).toMatchObject({ images: ['https://example.com/a.png'], attributes: [{ selector: 'a', attribute: 'href', values: ['/x', '/y'] }] })
+    const plain = wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data
+    expect(plain).not.toHaveProperty('images')
+    expect(plain).not.toHaveProperty('attributes')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /data\.images/.test(d) && /Base64-Image-Removed/.test(d))).toBe(true)
+  })
+
+  it('maps the screenshot format in its three spellings for scrape and a crawl\'s scrapeOptions, and serves data.screenshot as a data URI', () => {
+    const url = 'https://example.com/'
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toEqual({ url, formats: ['markdown', 'screenshot'] })
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['screenshot@fullPage'] })).toEqual({ url, formats: [{ type: 'screenshot', fullPage: true }] })
+    const entry = { type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['markdown', entry] } })).toMatchObject({ formats: ['markdown', entry] })
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['screenshot', 'screenshot@fullPage'] })).toThrow('formats must contain at most one screenshot entry')
+    const screenshot = { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot })).data.screenshot).toBe('data:image/png;base64,iVBO')
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot: { ...screenshot, contentType: 'image/jpeg', quality: 60 } })).data.screenshot).toBe('data:image/jpeg;base64,iVBO')
+    // Asked for, and the browser rung could not capture it: null, never a placeholder; not asked for: no key.
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot: null })).data).toMatchObject({ screenshot: null })
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data).not.toHaveProperty('screenshot')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /data\.screenshot/.test(d) && /browser rung/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /No fire-engine/.test(d) && /screenshots/.test(d))).toBe(false)
   })
 
   it('gives shim rejections a code and names what was rejected in details', () => {
@@ -155,13 +188,11 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       try { fn() } catch (error) { return error }
       return undefined
     }
-    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'json', 'screenshot'] })))
-      .toMatchObject({ code: 'unsupported_format', details: { formats: ['json', 'screenshot'] } })
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'json', 'summary'] })))
+      .toMatchObject({ code: 'unsupported_format', details: { formats: ['json', 'summary'] } })
     // Parameters and formats together: the parameter code wins and details keep both lists.
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], actions: [] } })))
-      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['screenshot'] } })
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })))
-      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['scrapeOptions.removeBase64Images'] } })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['summary'], actions: [] } })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['summary'] } })
     expect(thrown(() => parseFirecrawlScrapeRequest({ url: 'ftp://example.com/' }))).toMatchObject({ code: 'invalid_request' })
   })
 
@@ -282,6 +313,37 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       contentType: 'text/html',
       ...CALL_FACTS,
     })
+  })
+
+  it('passes the Open Graph, Dublin Core and article fields the page states into data.metadata, and leaves absent ones out', () => {
+    const wrapped = wrapScrape(scrape({
+      requestedUrl: 'https://example.com/report',
+      status: 'success',
+      markdown: 'Report',
+      metadata: {
+        title: 'Report', description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null,
+        ogSiteName: 'Example', ogImage: 'https://example.com/og.png', ogLocaleAlternate: ['fr_FR', 'de_DE'],
+        publishedTime: '2025-12-18T09:30:08+00:00', articleTag: ['energy', 'regions'], dcDate: '18 December 2025',
+      },
+    }))
+    expect(wrapped.data.metadata).toEqual({
+      title: 'Report', ogSiteName: 'Example', ogImage: 'https://example.com/og.png', ogLocaleAlternate: ['fr_FR', 'de_DE'],
+      publishedTime: '2025-12-18T09:30:08+00:00', articleTag: 'energy, regions', dcDate: '18 December 2025',
+      sourceURL: 'https://example.com/report', url: 'https://example.com/report', statusCode: 200, contentType: 'text/html', ...CALL_FACTS,
+    })
+    expect(wrapped.data.metadata).not.toHaveProperty('ogTitle')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /ogTitle/.test(d) && /publishedTime/.test(d) && /no date normalisation/.test(d))).toBe(true)
+  })
+
+  it('passes the warnings through as one warning string, on a scrape and on a crawl status page, and leaves it out when there are none', () => {
+    const url = 'https://example.com/'
+    const warnings = [{ code: 'client_rendered_suspected', message: 'This HTTP capture may be a shell.' }, { code: 'low_content_yield', message: 'The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.' }]
+    const result = page({ requestedUrl: url, status: 'success', markdown: 'Thin', warnings })
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Thin', warnings })).data.warning).toBe('This HTTP capture may be a shell. The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.')
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data).not.toHaveProperty('warning')
+    const step: StepRecord = { id: 'step-1', taskId: 'task-1', attemptId: 'attempt-1', url, canonicalUrl: url, depth: 0, status: 'success', lane: 'http', contentHash: 'abc', cached: false, result, createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z' }
+    expect(wrapCrawlStatus({ status: 'completed' }, [step], { completed: 1, total: 1 }).data[0]?.warning).toBe('This HTTP capture may be a shell. The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /low_content_yield/.test(d) && /data\.warning/.test(d))).toBe(true)
   })
 
   it('names the final URL after a redirect and leaves an unknown content type out', () => {

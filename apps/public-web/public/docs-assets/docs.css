@@ -300,3 +300,6 @@ a[aria-current=page] .doc-nav-mark{background:var(--orange)}
   .doc-adjacent{grid-template-columns:1fr}
   .doc-adjacent a:last-child{text-align:left}
 }
+
+/* Inline code such as a full URL breaks inside the line on a phone instead of widening the page. */
+.doc-article :not(pre)>code{overflow-wrap:anywhere}

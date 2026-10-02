@@ -247,7 +247,7 @@ describe('crawl lifecycle', () => {
   it('/fc crawl status: failed and duplicate pages count in total, not completed; total is unknown while a crawl is paused', async () => {
     const s = await site({ gate: '/a', missing: '/c', twin: '/d' })
     const first = s.engine({ workerCount: 1 })
-    const { taskId } = await first.startCrawl({ url: `${s.origin}/`, maxDepth: 1 })
+    const { taskId } = await first.startCrawl({ url: `${s.origin}/`, maxDepth: 1, formats: ['markdown', 'images'] })
     await s.reachedGate
     await first.close({ cancelActive: true })
     expect(await (await createApp(first).request(`/fc/v1/crawl/${taskId}`)).json()).toMatchObject({ status: 'scraping', completed: 1, total: null })
@@ -267,6 +267,8 @@ describe('crawl lifecycle', () => {
     expect(data).toHaveLength(6)
     expect(new Set(data.map((page) => new URL(page.metadata.sourceURL).pathname))).toEqual(new Set(['/', '/a', '/b', '/c', ...DOCUMENTS]))
     expect(data.find((page) => page.metadata.sourceURL.endsWith('/c'))?.metadata).toMatchObject({ statusCode: 404, error: 'http_error' })
+    // The images format asked for is on the pages read as content (the duplicate `/d` is not listed at all).
+    expect(data.find((page) => new URL(page.metadata.sourceURL).pathname === '/')).toHaveProperty('images', [])
     expect(data.filter((page) => page.metadata.error === undefined)).toHaveLength(page1.completed)
     expect((await second.getCrawl(taskId))?.discovery).toMatchObject({ duplicateContent: 1 })
     // The native page list leaves it out too, unless asked for.

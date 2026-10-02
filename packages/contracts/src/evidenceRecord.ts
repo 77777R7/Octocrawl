@@ -30,8 +30,9 @@ export type FieldEvidenceSource = (typeof FIELD_EVIDENCE_SOURCES)[number]
 
 /**
  * `snapshot` is the page's HTML as W2L read it (`W2L_CAPTURE_RAW_DIR`);
- * `file` is a file (PDF, CSV, ...) saved as received; `screenshot` is
- * reserved for the lane that will produce it.
+ * `file` is a file (PDF, CSV, ...) saved as received; `screenshot` is the
+ * browser lane's capture for the `screenshot` format, saved under
+ * `W2L_CAPTURE_RAW_DIR` as `<sha256>.png` or `.jpg`, with its size and type.
  */
 export const EVIDENCE_ARTIFACT_KINDS = ['snapshot', 'screenshot', 'file'] as const
 export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]

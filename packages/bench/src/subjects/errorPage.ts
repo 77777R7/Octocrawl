@@ -1,5 +1,5 @@
-import type { FetchOptions, FetchResult } from '@w2l/contracts'
-import { collectLinks, extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers } from '@w2l/extract-tf'
+import type { AttributeExtraction, FetchOptions, FetchResult, Lane, TraceEvent } from '@w2l/contracts'
+import { collectImages, collectLinks, extractAttributes, extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 
 /**
  * Response-status rules shared by every lane. A 2xx answer is judged from
@@ -34,13 +34,13 @@ export function errorPageEvidence(status: number | null, contentType: string | n
   if (status === null || status < 100 || isSuccessStatus(status) || status === 304) return null
   if (body.trim() === '' || !isTextBody(contentType)) return null
   let markdown: string | null
-  if (wholePageAsked(options)) markdown = wholePageMarkdown(body, url, options.excludeTags)
+  if (wholePageAsked(options)) markdown = wholePageMarkdown(body, url, options)
   else {
     const extracted = extractTf.extract(body, { url, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
     // Error pages are often too small for main-content extraction; then the
     // whole body is what the server said, unless the caller named the
     // elements to keep.
-    markdown = extracted.escalate && !selectionAsked(options) ? wholePageMarkdown(body, url, options.excludeTags) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl })
+    markdown = extracted.escalate && !selectionAsked(options) ? wholePageMarkdown(body, url, options) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
   }
   return markdown === null || markdown === '' ? null : { markdown, links: collectLinks(body, url) }
 }
@@ -48,13 +48,43 @@ export function errorPageEvidence(status: number | null, contentType: string | n
 /**
  * The whole page as Markdown, through the converter and base URL a page's
  * main content uses, without the elements the caller excluded
- * (`excludeTags`); null when it has no text. It is the content that
- * `onlyMainContent: false` asks for, and the evidence a failed result keeps
- * when the extractor found no main content.
+ * (`excludeTags`) and with the caller's `removeBase64Images`; null when it
+ * has no text. It is the content that `onlyMainContent: false` asks for, and
+ * the evidence a failed result keeps when the extractor found no main content.
  */
-export function wholePageMarkdown(html: string, url: string, exclude?: readonly string[]): string | null {
-  const markdown = htmlToMarkdown(html, { baseUrl: url, exclude })
+export function wholePageMarkdown(html: string, url: string, options: FetchOptions = {}): string | null {
+  const markdown = htmlToMarkdown(html, { baseUrl: url, exclude: options.excludeTags, ...markdownOptions(options) })
   return markdown.trim() === '' ? null : markdown
+}
+
+/**
+ * The Markdown options a request's page options choose: `removeBase64Images:
+ * false` keeps `data:` images as targets; the default drops them and keeps
+ * their alt text, which every lane always did.
+ */
+export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'dataUriImages'> {
+  return options.removeBase64Images === false ? { dataUriImages: 'keep' } : {}
+}
+
+/**
+ * The `images` and `attributes` formats of a contentful result, each only
+ * when asked for, read from the page as the lane received it (`raw`: the
+ * response body on the HTTP lane, the rendered DOM on a browser lane) like
+ * `links`, with their trace events (`images_collected`, `attributes_extracted`).
+ */
+export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes'> {
+  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[] } = {}
+  if (options.includeImages === true) {
+    const collected = collectImages(raw, url)
+    trace.push({ at, lane, event: 'images_collected', detail: { count: collected.images.length, srcsetCandidates: collected.srcsetCandidates, lazy: collected.lazy, dataUrisDropped: collected.dataUrisDropped } })
+    out.images = collected.images
+  }
+  if (options.attributes !== undefined && options.attributes.length > 0) {
+    const attributes = extractAttributes(raw, options.attributes)
+    trace.push({ at, lane, event: 'attributes_extracted', detail: { selectors: attributes.length, counts: attributes.map((entry) => entry.values.length) } })
+    out.attributes = attributes
+  }
+  return out
 }
 
 /**

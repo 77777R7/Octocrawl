@@ -30,8 +30,8 @@ describe('REST error codes', () => {
     expect(await call(app, '/v1/scrape', post({ url, proxy: 'stealth' }))).toMatchObject({
       status: 400, body: { error: expect.stringContaining('unsupported parameter: proxy'), code: 'unsupported_parameter', details: { parameters: ['proxy'] } },
     })
-    expect(await call(app, '/v1/batches', post({ urls: [url], formats: ['markdown', 'screenshot'] }))).toMatchObject({
-      status: 400, body: { error: expect.stringContaining('unsupported format: screenshot'), code: 'unsupported_format', details: { formats: ['screenshot'] } },
+    expect(await call(app, '/v1/batches', post({ urls: [url], formats: ['markdown', 'summary'] }))).toMatchObject({
+      status: 400, body: { error: expect.stringContaining('unsupported format: summary'), code: 'unsupported_format', details: { formats: ['summary'] } },
     })
     expect(await call(app, '/v1/crawl/missing')).toEqual({ status: 404, body: { error: 'not found', code: 'not_found' } })
     expect(await call(app, '/v1/nothing-here')).toEqual({ status: 404, body: { error: 'no route for GET /v1/nothing-here', code: 'not_found' } })
@@ -56,8 +56,8 @@ describe('REST error codes', () => {
   it('puts the same codes in the Firecrawl envelope under /fc', async () => {
     const app = createApp(engine)
     expect(await call(app, '/fc/v1/scrape', post('not json'))).toEqual({ status: 400, body: { success: false, error: 'body must be JSON', code: 'invalid_json' } })
-    expect(await call(app, '/fc/v1/scrape', post({ url, formats: ['markdown', 'screenshot'] }))).toEqual({
-      status: 400, body: { success: false, error: 'unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)', code: 'unsupported_format', details: { formats: ['screenshot'] } },
+    expect(await call(app, '/fc/v1/scrape', post({ url, formats: ['markdown', 'summary'] }))).toEqual({
+      status: 400, body: { success: false, error: 'unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)', code: 'unsupported_format', details: { formats: ['summary'] } },
     })
     expect(await call(app, '/fc/v1/crawl/missing')).toEqual({ status: 404, body: { success: false, error: 'not found', code: 'not_found' } })
     expect(await call(app, '/fc/v2/scrape', post({ url }))).toEqual({ status: 404, body: { success: false, error: 'no route for POST /fc/v2/scrape', code: 'not_found' } })

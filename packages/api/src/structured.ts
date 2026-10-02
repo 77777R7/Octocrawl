@@ -1,6 +1,7 @@
 import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
+  AttributesFormatRequest,
   CompactScrapeResponse,
   ExecutionContext,
   FetchResult,
@@ -19,13 +20,14 @@ import type {
   ScrapeResponse,
   ScrapeResponseMetadata,
   ScrapeRun,
+  ScreenshotOptions,
   StructuredExtractionIssue,
   StructuredExtractionResult,
   StructuredFieldEvidence,
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
+import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
 import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
@@ -909,21 +911,49 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly Scra
   return ['markdown', 'links']
 }
 
-function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml'): boolean {
-  return formats.some(format => typeof format === 'string' ? format === name : name === 'json')
+/** Whether the formats ask for one by name: a string entry, or an object entry of that `type` (a json schema request counts as `json`, a screenshot entry as `screenshot`). */
+export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'attributes' | 'screenshot'): boolean {
+  return formats.some(format => typeof format === 'string' ? format === name : format.type === name)
 }
 
-function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRequest | undefined {
-  return formats.find((format): format is JsonFormatRequest => typeof format === 'object')
+/** The caller's json schema request, when the formats carry one; an attributes or screenshot entry is not one. */
+export function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRequest | undefined {
+  return formats.find((format): format is JsonFormatRequest => typeof format === 'object' && format.type === 'json')
 }
 
-function withoutRepeatedBodies(summary: ScrapeResponse['summary']): ScrapeResponse['summary'] {
+/** The attributes request, when the formats carry one. */
+export function attributesFormat(formats: readonly ScrapeFormat[]): AttributesFormatRequest | undefined {
+  return formats.find((format): format is AttributesFormatRequest => typeof format === 'object' && format.type === 'attributes')
+}
+
+/** The screenshot request, when the formats carry one: the string's defaults (`{}`), or the entry's options without its `type`. */
+export function screenshotFormat(formats: readonly ScrapeFormat[]): ScreenshotOptions | undefined {
+  for (const format of formats) {
+    if (format === 'screenshot') return {}
+    if (typeof format === 'object' && format.type === 'screenshot') {
+      const { type: _type, ...options } = format
+      return options
+    }
+  }
+  return undefined
+}
+
+/**
+ * The attempt copies of the run's audit without what the response itself
+ * carries: `debug` keeps their Markdown, links, html, rawHtml, images and
+ * attributes, the compact shapes drop them; a screenshot's base64 travels
+ * once in every shape, so a copy that had one carries `screenshot: null`.
+ */
+function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolean): ScrapeResponse['summary'] {
   return {
     ...summary,
-    attempts: summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, ...result }, ...attempt }) => ({
-      ...attempt,
-      result: { ...result, markdown: null, links: [] },
-    })),
+    attempts: summary.attempts.map(({ result, ...attempt }) => {
+      const { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, screenshot, ...rest } = result
+      return {
+        ...attempt,
+        result: { ...(debug ? result : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
+      }
+    }),
   }
 }
 
@@ -950,15 +980,19 @@ export async function prepareScrapeResponse(
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
+  const warning = warningOf(result.warnings)
   const next: ScrapeRun = {
     ...result,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
-    // Asked for: what the result carries, null when it carries none (a file, a page not read as content).
+    // The warnings as one string too, Firecrawl's `warning`, present exactly when they are.
+    ...(warning === undefined ? {} : { warning }),
+    // Asked for: what the result carries, null when it carries none (a file, a page not read as content, a capture that failed).
     ...(hasFormat(formats, 'html') ? { html: result.html ?? null } : {}),
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
+    ...(hasFormat(formats, 'screenshot') ? { screenshot: result.screenshot ?? null } : {}),
     ...(json === undefined ? {} : { json }),
-    summary: req.debug === true ? result.summary : withoutRepeatedBodies(result.summary),
+    summary: withoutRepeatedBodies(result.summary, req.debug === true),
   }
   const serializeMs = Math.max(0, performance.now() - serializeStart)
   const totalMs = Math.max(0, performance.now() - overallStart)
@@ -1090,12 +1124,20 @@ export function compactScrapeResponse(
       ...(hasFormat(formats, 'html') ? ['html' as const] : []),
       ...(hasFormat(formats, 'rawHtml') ? ['rawHtml' as const] : []),
       ...(includeLinks ? ['links' as const] : []),
+      ...(hasFormat(formats, 'images') ? ['images' as const] : []),
+      ...(hasFormat(formats, 'attributes') ? ['attributes' as const] : []),
+      ...(hasFormat(formats, 'screenshot') ? ['screenshot' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
     ...(hasFormat(formats, 'markdown') ? { markdown: next.markdown } : {}),
     ...(hasFormat(formats, 'html') ? { html: next.html ?? null } : {}),
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: next.rawHtml ?? null } : {}),
     ...(includeLinks ? { links: next.links ?? [] } : {}),
+    // Asked for, and read: a page not read as content (a file, a failed or blocked page) carries neither.
+    ...(hasFormat(formats, 'images') && next.images !== undefined ? { images: next.images } : {}),
+    ...(hasFormat(formats, 'attributes') && next.attributes !== undefined ? { attributes: next.attributes } : {}),
+    // Asked for: the capture, or null when the browser lane rendered no page or could not capture it.
+    ...(hasFormat(formats, 'screenshot') ? { screenshot: next.screenshot ?? null } : {}),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,
       pageType: next.document.pageType,
@@ -1108,6 +1150,7 @@ export function compactScrapeResponse(
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
     ...(next.file === undefined ? {} : { file: next.file }),
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
+    ...(warningOf(next.warnings) === undefined ? {} : { warning: warningOf(next.warnings) }),
     ...(next.agentHints === undefined ? {} : { agentHints: next.agentHints }),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,
