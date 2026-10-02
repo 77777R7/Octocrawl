@@ -137,6 +137,27 @@ subresource host list. `scrape_product` and `batch_products` use the fixed
 schema without caller-supplied model prompts. One active batch, at most 1000
 distinct products, and a 90-minute run budget bound the initial host.
 
+## Mapping a site
+
+The local service also offers `map` (not the hosted service, whose remote
+tools take no arbitrary URL). It lists a site's URLs from the sitemaps the
+site declares and the links on its start page, which it reads on the http
+lane alone; it never reads a second page. Ask for, say,
+`map` with `{ "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP", "limit": 100 }`.
+The tool is annotated read-only and idempotent, and declares an output
+schema, so the result comes as `structuredContent` beside the JSON text:
+`{ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts: { returned, refused } }`.
+`status` is `completed`, `partial` (the deadline cut the map or a source
+failed) or `failed` (nothing found); `stoppedBy` says whether `limit` or
+`timeout` stopped it. A title is the start page's own, an anchor's text or a
+sitemap's news title, never fetched. It takes `search` (every word in the
+URL or the title; a filter, not a ranking), `sitemap` (`include`, `skip`,
+`only`), `includeSubdomains`, `ignoreQueryParameters`, the crawl's path and
+scope options, `limit`, `timeout`, `mode` and `integration`; `debug: true`
+returns the full map with each link's evidence and the refusal counts. A
+site whose sitemap lists only a few roots maps to little more than its start
+page's links: use `crawl` to read further pages.
+
 ## Cancelling a call
 
 Both HTTP services keep no MCP session: each POST is handled on its own. A

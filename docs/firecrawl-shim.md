@@ -3,7 +3,9 @@
 Snapshot date: **2026-09-18**. Source: Firecrawl API v1
 [`POST /scrape`](https://docs.firecrawl.dev/api-reference/v1-endpoint/scrape),
 [`POST /crawl`](https://docs.firecrawl.dev/api-reference/v1-endpoint/crawl-post),
-[`GET /crawl/{id}`](https://docs.firecrawl.dev/api-reference/v1-endpoint/crawl-get).
+[`GET /crawl/{id}`](https://docs.firecrawl.dev/api-reference/v1-endpoint/crawl-get);
+[`POST /map`](https://docs.firecrawl.dev/api-reference/v1-endpoint/map) added 2026-10-03,
+with the v2 names its SDKs send.
 
 This is a **one-shot migration tool**, not a compatibility layer. Point a
 Firecrawl v1 client at `http://127.0.0.1:8787/fc` so its `/v1/scrape` and
@@ -15,10 +17,22 @@ Covered:
 - `POST /fc/v1/scrape` → native scrape → `{ success, data }`
 - `POST /fc/v1/crawl` → native crawl start → `{ success, id, url }` (HTTP 200). The `x-idempotency-key` header the v1 SDK sends is honoured: the same key with the same body answers the first start's `id` and starts no second crawl; the same key with another body is HTTP 409 `{ success: false, error: "idempotency key was used for a different request", code: "conflict" }`. Keys live 24 hours ([README](../README.md)). Firecrawl's `webhook` (a URL string, or `{ url, headers, metadata, events }`) is mapped onto the native job webhook, and the receiver gets Firecrawl's payload shape ([below](#known-diffs)).
 - `GET /fc/v1/crawl/:id` → the crawl's status, counts and one page of its steps → Firecrawl crawl status, further pages through `next`
+- `POST /fc/v1/map` → native map (`POST /v1/map`) → `{ success: true, id, links: [url strings], warning?, agent_hints? }` (HTTP 200), or `{ success: false, id, error, links: [] }` (HTTP 200) when the map found nothing because a source failed or its deadline passed. The native record, with every link's evidence, the sitemap files read and the refusal counts, is `GET /v1/maps/:id` under the same `id`.
 
-Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Map has no `/fc` route yet; the native `POST /v1/map` ([README](../README.md)) lists a site's URLs from its sitemaps and its start page, and the shim's `/fc/v1/map` comes with the map's search and scope options. Batch scrape has no `/fc` route yet (Firecrawl's `/v2/batch/scrape`, its `maxConcurrency`, `ignoreInvalidURLs`, `appendToId` and idempotency key, and its errors report wait for a later milestone); the native routes are `POST /v1/batches`, which takes `idempotencyKey` and `appendToId`, and `GET /v1/batches/:id/errors` ([batch scraping](batch-scrape.md)).
+Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Batch scrape has no `/fc` route yet (Firecrawl's `/v2/batch/scrape`, its `maxConcurrency`, `ignoreInvalidURLs`, `appendToId` and idempotency key, and its errors report wait for a later milestone); the native routes are `POST /v1/batches`, which takes `idempotencyKey` and `appendToId`, and `GET /v1/batches/:id/errors` ([batch scraping](batch-scrape.md)).
 
 ## Known diffs
+
+Map:
+
+- `/fc/v1/map` maps `url`, `search`, `sitemap` (v2: `include`, `skip`, `only`), the v1 `ignoreSitemap` (`true` is `skip`, `false` is `include`) and `sitemapOnly` (`true` is `only`), `includeSubdomains`, `ignoreQueryParameters`, `limit` (1 to 100,000, default 5,000), `timeout` (1,000 to 300,000 ms for the whole map, default 60,000), `origin` and `integration`. The v2 `sitemap` wins over the v1 flags, as on the crawl shim; both v1 flags `true` is HTTP 400 `ignoreSitemap and sitemapOnly cannot both be true`. `useIndex`, `location`, `ignoreCache`, `threatProtection`, `auditMetadata` and any other key are HTTP 400 by name (`useIndex` with `agent_hints`: W2L keeps no URL index).
+- Omitted options take W2L's defaults: `includeSubdomains` and `ignoreQueryParameters` are `false`, where Firecrawl's v2 documents `true` for both. Firecrawl documents no default `timeout`; W2L's is 60,000 ms, since a map answers synchronously. A hosted W2L takes `limit` up to 5,000 and `timeout` up to 60,000.
+- `search` keeps the URLs in which every word appears, case-insensitively, in the percent-decoded URL or the title W2L has for it, in discovery order; Firecrawl documents results ordered by relevance. W2L filters; it does not rank.
+- A map reads one page body (the start URL, on the http rung; no browser) and the sitemaps the site declares. There is no URL index, so a site without a sitemap maps only its start page's links, and a site whose sitemap lists a few roots maps to little more (docs.python.org/3/: 24 links on 2026-10-03).
+- Robots-disallowed URLs, and URLs on a host whose robots.txt could not be read, are left out of `links` and counted on the native response (`refused.robots`, with samples).
+- A deadline that cuts the map answers 200 with what was found and a `warning`, never an error status; a map that found nothing is `success: false` with the reason in `error`.
+
+Scrape and crawl:
 
 - Challenge / block pages are `success: false`. Firecrawl often returns the interstitial as success markdown.
 - A page answered with an HTTP error status (4xx/5xx) is `success: false`, with its Markdown in `data.markdown` and the status in `data.metadata.statusCode`: the error page is evidence of what the server said, not content.
