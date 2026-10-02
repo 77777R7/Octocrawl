@@ -16,7 +16,7 @@ Covered:
 - `POST /fc/v1/crawl` → native crawl start → `{ success, id, url }` (HTTP 200)
 - `GET /fc/v1/crawl/:id` → the crawl's status, counts and one page of its steps → Firecrawl crawl status, further pages through `next`
 
-Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Map is not implemented yet; the [roadmap](../ROADMAP.md) schedules a native `map` endpoint for P2.
+Not covered: Search, Interact, Agent, Monitor and Extract will not be added. Map is not implemented yet; the [roadmap](../ROADMAP.md) schedules a native `map` endpoint for P2. Batch scrape has no `/fc` route yet (Firecrawl's `/v2/batch/scrape`, its `maxConcurrency` and `ignoreInvalidURLs`, and its errors report wait for a later milestone); the native routes are `POST /v1/batches` and `GET /v1/batches/:id/errors` ([batch scraping](batch-scrape.md)).
 
 ## Known diffs
 

@@ -8,7 +8,45 @@ curl -sS -X POST http://127.0.0.1:8787/v1/batches \
   -d '{"urls":["https://example.com/a","https://example.com/b"],"formats":["markdown"]}'
 ```
 
-Use the returned ID with `GET /v1/batches/:id` for `requested`, `completed`, `remaining`, and task status. `GET /v1/batches/:id/items?limit=50&cursor=...` returns all per-URL outcomes, including failures, in stable pages (default 10, maximum 50). Items omit attempt audits and trace content by default; pass `debug=true` to include the routing audit and trace. Persisted attempt audits omit repeated Markdown, links, `html` and `rawHtml` bodies; the selected top-level result remains available. `GET /v1/batches/:id/events` streams `progress`, `paused`, and terminal `complete` SSE events; reconnecting after a restart receives the current state. `POST /v1/batches/:id/cancel` cancels unfinished work. A completed batch can contain failed URLs, so inspect each item's `status` and `failureReason`.
+## Request options
+
+| Option | Values | What it does |
+| --- | --- | --- |
+| `urls` | 1 to 1000 strings | The URLs to fetch, each an http(s) URL, distinct after canonicalization. An entry that is not a URL is refused by its index (`urls[2] must be http(s)`, `urls[2] is required`) unless `ignoreInvalidURLs` is on; an entry that is not a string is `urls[2] must be a string` either way. |
+| `mode` | `standard` (default), `research`, `authed` | The identity every URL is fetched under, as on scrape. |
+| `formats`, `includeLinks` | as on scrape | What each item carries; `links` or `includeLinks: true` adds the outbound links. |
+| `robotsOverrides` | `[{ url, reason, recordedBy? }]` | Recorded decisions to fetch single URLs of the batch past their robots.txt rule (above). Refused on a hosted server. |
+| `maxConcurrency` | integer 1 to 4 | The most pages of this batch in flight at once, across all its hosts. It only lowers the service's worker count (4 locally, 2 on the hosted MCP host) and never raises the per-host ceiling or shortens the minimum interval; per host the effective number is the lower of the two. Stored with the task, so a batch resumed after a restart runs under the same cap; `GET /v1/batches/:id` reports the cap in force as `maxConcurrency`. Omitted takes the worker count. |
+| `ignoreInvalidURLs` | boolean, default false | Start with the entries of `urls` that are http(s) URLs and report the rest as `invalidURLs` (on the 202, possibly empty, and on `GET /v1/batches/:id`, present exactly when the option was on) instead of refusing the request. `requested` counts the valid URLs; the 1 to 1000 cap counts the submitted entries; a duplicate is refused as before, since it is not an invalid URL, and a `robotsOverrides` entry must name a URL that stayed. `urls must contain at least one valid URL` when none does. |
+| page options | `onlyMainContent`, `waitFor`, `timeout`, `maxFileBytes`, `includeTags`, `excludeTags`, `headers`, `mobile`, `skipTlsVerification`, `fastMode`, `blockAds`, `removeBase64Images` | Applied to every URL as on one scrape ([README](../README.md)). |
+| `origin`, `integration` | labels | Stored on the task's record and nowhere else ([README](../README.md)). |
+
+The hosted MCP host's `batch_scrape` keeps its reviewed shape (Amazon.sg `/dp` URLs, the fixed JSON schema): `maxConcurrency`, `ignoreInvalidURLs` and `robotsOverrides` are refused there with `unsupported remote tool option`, and nothing about TLS, robots.txt or the egress checks changes with these options anywhere.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/v1/batches \
+  -H 'content-type: application/json' \
+  -d '{"urls":["https://example.com/a","not a url"],"ignoreInvalidURLs":true,"maxConcurrency":1}'
+# 202 {"taskId":"…","invalidURLs":["not a url"]}
+```
+
+## Reading the result
+
+Use the returned ID with `GET /v1/batches/:id` for `requested`, `completed`, `remaining`, `maxConcurrency` (the cap in force), `invalidURLs` (when `ignoreInvalidURLs` was on) and task status. `GET /v1/batches/:id/items?limit=50&cursor=...` returns all per-URL outcomes, including failures, in stable pages (default 10, maximum 50). Items omit attempt audits and trace content by default; pass `debug=true` to include the routing audit and trace. Persisted attempt audits omit repeated Markdown, links, `html` and `rawHtml` bodies; the selected top-level result remains available. `GET /v1/batches/:id/events` streams `progress`, `paused`, and terminal `complete` SSE events; reconnecting after a restart receives the current state. `POST /v1/batches/:id/cancel` cancels unfinished work. A completed batch can contain failed URLs, so inspect each item's `status` and `failureReason`, or read the errors report.
+
+### The errors report
+
+`GET /v1/batches/:id/errors?cursor=&limit=` (SDK `getBatchErrors(id, { cursor?, limit? })`, MCP `get_batch_errors`) lists the items that did not succeed: status `failed`, `blocked`, `cancelled` or `budget_exceeded`, across every attempt of the batch, so a batch interrupted and resumed keeps the failures its first attempt recorded (where `GET /v1/crawl/:id/errors` on the same id reads the latest attempt alone). Errors carry no page bodies, so a page holds up to 1000 of them (`limit` 1 to 1000, default 1000; a batch has at most 1000 URLs). The answer is `{ errors, robotsBlocked, nextCursor, hasMore }`:
+
+- `errors[]`: `{ id, timestamp, url, status, code, error, httpStatus }`, Firecrawl's names with W2L's status vocabulary beside them. `id` and `timestamp` are the item's step id and `createdAt` on `/items`; `status` is the item's; `code` is its `failureReason`, `blockReason` or `budgetExceeded`, whichever the status carries, else the status itself (`http_error`, `policy_denied`, `bot_detected_generic`, …); `httpStatus` is the final response's status or `null` when no response answered; `error` is a sentence for a reader: the item's first warning when it has one, else `<status>: <code>` with ` (HTTP <n>)` when the status is known and, for a robots.txt refusal, ` — robots.txt rule <pattern>` from the `robots_disallowed` trace event (or ` — robots.txt unreachable (<reason>)` when the file could not be read).
+- `robotsBlocked`: every URL of the batch, all attempts, not paginated, whose stored result is `policy_denied` with a `robots_disallowed` trace event and no `robots_overridden` event. It is a projection of the lanes' own records, the same events the item's trace and Evidence Record carry; nothing is inferred. A governance or SSRF refusal is `policy_denied` too, but not robots.txt: it stays in `errors` and out of this list, and an item fetched under a recorded override is in neither.
+
+A crawl's id answers 404 here, as a batch's does on the crawl routes.
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/batches/<id>/errors?limit=100
+# {"errors":[{"id":"…","timestamp":"2026-10-02T12:00:00.000Z","url":"https://httpbin.org/status/404","status":"failed","code":"http_error","error":"failed: http_error (HTTP 404)","httpStatus":404}],"robotsBlocked":["https://httpbin.org/deny"],"nextCursor":null,"hasMore":false}
+```
 
 ```ts
 const { taskId } = await w2l.batchScrape(urls, {
@@ -24,7 +62,7 @@ for await (const item of w2l.listBatchItems(taskId, { limit: 50 })) {
 
 `waitBatch` and `waitCrawl` poll every 500 ms (`pollIntervalMs` changes it) until the task completes, fails or is cancelled; a paused task is still waited on. `batchAndWait(urls, options, wait)` starts a batch, waits for it and returns `{ taskId, report, items }` with every item; `crawlAndWait(url, options, wait)` does the same for a crawl and returns its `pages` and `errors`. With `timeoutMs`, a wait throws `WaitTimeoutError` once that time is up, a status request in flight included; the error carries `taskId`, `timeoutMs` and `last`, the last status read (null when none answered in time), and the task keeps running. A status request that fails with a network error, HTTP 408, 429 or 5xx is retried after 1, 2, 4, 8, then 10 s, or after its `Retry-After` when that asks for 60 s or less, until `maxRetries` (default 5) retries in a row have failed; any other error ends the wait at once.
 
-MCP exposes `batch_scrape`, `get_batch`, `get_batch_items`, `wait_batch`, and `cancel_batch`. `wait_batch` waits at most 30 seconds by default (configurable with `timeoutMs` up to 300 seconds) and returns the current state if the batch is still running; cancelling the `wait_batch` call stops the wait, over stdio and over the local and hosted HTTP services alike ([cancelling an MCP call](mcp-first-use.md#cancelling-a-call)), and the batch keeps running. For incremental work, page through items while the task runs. The task and item checkpoints are SQLite-backed; after a process restart, pending/running/paused batches resume missing URLs and keep prior results.
+MCP exposes `batch_scrape`, `get_batch`, `get_batch_items`, `get_batch_errors`, `wait_batch`, and `cancel_batch`. `wait_batch` waits at most 30 seconds by default (configurable with `timeoutMs` up to 300 seconds) and returns the current state if the batch is still running; cancelling the `wait_batch` call stops the wait, over stdio and over the local and hosted HTTP services alike ([cancelling an MCP call](mcp-first-use.md#cancelling-a-call)), and the batch keeps running. For incremental work, page through items while the task runs. The task and item checkpoints are SQLite-backed; after a process restart, pending/running/paused batches resume missing URLs and keep prior results.
 
 An [actual process-kill test](evidence/batch-crash-recovery.json) stopped the API with `SIGKILL` after URL 1 completed and URL 2 started. The restarted API finished 2/2 items; URL 1 was requested once and URL 2 twice. Repeat with `npm run verify:batch-crash`. Run one API process per task root; multi-process ownership/lease coordination is not part of this batch contract.
 
