@@ -131,6 +131,16 @@ describe('matchRobotsGroup', () => {
     const narrow = parseRobotsTxt('User-agent: googlebot\nDisallow: /\n')
     expect(matchRobotsGroup(narrow, 'w2l/0.1')).toBeNull()
   })
+
+  it('matches a product token appended to a browser User-Agent, longest group first', () => {
+    const preview = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 OctoCrawl-Preview/1.0 (+https://octocrawl.dev)'
+    const groups = parseRobotsTxt(
+      ['User-agent: *', 'Disallow: /everyone', '', 'User-agent: octocrawl', 'Disallow: /octocrawl', '', 'User-agent: octocrawl-preview', 'Disallow: /preview', '', 'User-agent: w2l-preview', 'Disallow: /old-token'].join('\n'),
+    )
+    expect(matchRobotsGroup(groups, preview)!.rules[0]!.pattern).toBe('/preview')
+    expect(matchRobotsGroup(parseRobotsTxt('User-agent: *\nDisallow: /everyone\n\nUser-agent: octocrawl\nDisallow: /octocrawl\n'), preview)!.rules[0]!.pattern).toBe('/octocrawl')
+    expect(matchRobotsGroup(parseRobotsTxt('User-agent: *\nDisallow: /everyone\n\nUser-agent: w2l-preview\nDisallow: /old-token\n'), preview)!.rules[0]!.pattern).toBe('/everyone')
+  })
 })
 
 // ---------------------------------------------------------------------------
