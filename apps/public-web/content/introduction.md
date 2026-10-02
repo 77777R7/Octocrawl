@@ -1,14 +1,14 @@
 # One link. Web data, ready.
 
-OctoCrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
+Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 
 > **Availability:** Try the page preview at the URL where you are reading this. The MCP walkthrough below is verified on the same computer as the client. A hosted MCP address and browser login are paused on the roadmap. A hosted page preview does not include hosted MCP or persistent Monitor tasks.
 
-## Try OctoCrawl
+## Try Octocrawl
 
-Paste `https://docs.firecrawl.dev/introduction` into [the OctoCrawl page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
+Paste `https://docs.firecrawl.dev/introduction` into [the Octocrawl page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
 
-This is a recorded result from the OctoCrawl capture path, not a guaranteed response for every future visit:
+This is a recorded result from the Octocrawl capture path, not a guaranteed response for every future visit:
 
 ```json
 {
@@ -25,9 +25,9 @@ This is a recorded result from the OctoCrawl capture path, not a guaranteed resp
 
 `totalMs` above is the server-side measurement from that capture. The web page displays the longer client-visible time, including network and rendering. A successful page capture does not mean every optional structured field was found.
 
-## When OctoCrawl cannot read a page
+## When Octocrawl cannot read a page
 
-OctoCrawl reports a reason instead of inventing content. In another real local capture on the same source commit, a LinkedIn feed URL was stopped by the site's automated-access policy:
+Octocrawl reports a reason instead of inventing content. In another real local capture on the same source commit, a LinkedIn feed URL was stopped by the site's automated-access policy:
 
 ```json
 {

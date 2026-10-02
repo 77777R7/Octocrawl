@@ -7,7 +7,7 @@ Use a batch when you already have an explicit list of public URLs. A batch visit
 After [connecting the local MCP service](/docs/connect-mcp/), ask Codex:
 
 ```text
-Use OctoCrawl batch_scrape with these URLs: https://docs.firecrawl.dev/introduction and https://modelcontextprotocol.io/specification/2025-11-25/basic/transports. Use Markdown. Return the taskId, wait for completion, then page through every item with get_batch_items at limit 1. Include failed items and their reasons.
+Use Octocrawl batch_scrape with these URLs: https://docs.firecrawl.dev/introduction and https://modelcontextprotocol.io/specification/2025-11-25/basic/transports. Use Markdown. Return the taskId, wait for completion, then page through every item with get_batch_items at limit 1. Include failed items and their reasons.
 ```
 
 The corresponding MCP start arguments are:
