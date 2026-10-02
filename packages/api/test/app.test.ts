@@ -305,7 +305,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     await engine.close()
     const app = createApp(engine)
     const report = await (await app.request(`/v1/batches/${batch.body.taskId}`)).json()
-    expect(report).toMatchObject({ status: 'completed', attribution: { origin: 'suite@1', integration: 'nightly-prices' } })
+    expect(report).toMatchObject({ status: 'completed', discovery: null, attribution: { origin: 'suite@1', integration: 'nightly-prices' } })
     expect(JSON.stringify((await (await app.request(`/v1/batches/${batch.body.taskId}/items`)).json()).items)).not.toContain('nightly-prices')
     expect(await (await app.request(`/v1/crawl/${crawl.body.taskId}`)).json()).not.toHaveProperty('attribution')
     expect(await postJson('/v1/batches', { urls: [url], integration: 'has space' })).toEqual({ status: 400, body: { error: 'integration must be a string of 1 to 100 printable characters without spaces', code: 'invalid_request' } })
@@ -499,6 +499,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
         url: `${server.url}/crawl/listing`,
         maxPages: 4,
         maxDepth: 2,
+        // The fixture's items are siblings of the listing, outside the subtree a crawl keeps to by default.
+        crawlEntireDomain: true,
       }),
     })
     expect(started.status).toBe(202)
@@ -538,7 +540,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const started = await app.request('/v1/crawl', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: `${server.url}/crawl/listing`, maxPages: 4, maxDepth: 2 }),
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, maxPages: 4, maxDepth: 2, crawlEntireDomain: true }),
     })
     const { taskId } = (await started.json()) as { taskId: string }
     await engine.close()
@@ -608,7 +610,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const started = await app.request('/v1/crawl', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: `${server.url}/crawl/listing`, formats: ['markdown', 'links', { type: 'json', schema }], includePaths: ['^/crawl/item/'], excludePaths: ['^/crawl/item/2$'] }),
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, formats: ['markdown', 'links', { type: 'json', schema }], includePaths: ['^/crawl/item/'], excludePaths: ['^/crawl/item/2$'], crawlEntireDomain: true }),
     })
     const { taskId } = (await started.json()) as { taskId: string }
     await engine.close()
@@ -621,6 +623,100 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(pages?.items.every((item) => item.json?.status === 'complete' && typeof (item.json.data as { title?: unknown }).title === 'string')).toBe(true)
     } finally {
       await restarted.close()
+    }
+  })
+
+  it('keeps a crawl seeded below the root in the seed\'s path subtree unless crawlEntireDomain is set, and reports the refused links', async () => {
+    const app = createApp(engine)
+    const start = async (body: Record<string, unknown>) => (await postJson('/v1/crawl', { url: `${server.url}/crawl/item/1`, maxPages: 5, ...body })).body.taskId as string
+    const scoped = await start({})
+    const whole = await start({ crawlEntireDomain: true })
+    await engine.close()
+    // The item's one link, the listing, lies outside /crawl/item/: refused and counted, not fetched.
+    expect(await (await app.request(`/v1/crawl/${scoped}`)).json()).toMatchObject({ status: 'completed', pagesFetched: 1, budgetExceeded: null, discovery: { offered: 1, enqueued: 0, subtreeDenied: 1, duplicateContent: 0 } })
+    const scopedPages = await (await app.request(`/v1/crawl/${scoped}/pages?debug=true`)).json()
+    expect(scopedPages.items.map((item: { url: string }) => item.url)).toEqual([`${server.url}/crawl/item/1`])
+    expect(scopedPages.items[0].trace).toContainEqual(expect.objectContaining({ event: 'discovered', detail: { via: 'seed', from: null } }))
+    expect(scopedPages.items[0].trace).toContainEqual(expect.objectContaining({ event: 'links_offered', detail: expect.objectContaining({ offered: 1, subtreeDenied: 1, enqueued: 0 }) }))
+    // With the whole host, the listing and its other items follow.
+    expect((await (await app.request(`/v1/crawl/${whole}`)).json()).discovery).toMatchObject({ subtreeDenied: 0, enqueued: 3 })
+    const wholePages = await (await app.request(`/v1/crawl/${whole}/pages?debug=true`)).json()
+    expect(wholePages.items.map((item: { url: string }) => new URL(item.url).pathname).sort()).toEqual(['/crawl/item/1', '/crawl/item/2', '/crawl/item/3', '/crawl/listing'])
+    expect(wholePages.items.find((item: { url: string }) => item.url.endsWith('/crawl/item/2'))).toMatchObject({ depth: 2 })
+    expect(wholePages.items.find((item: { url: string }) => item.url.endsWith('/crawl/listing')).trace).toContainEqual(expect.objectContaining({ event: 'discovered', detail: { via: 'link', from: `${server.url}/crawl/item/1` } }))
+  })
+
+  it('fetches the seed when allowlistedDomains names other hosts, since the list adds to the seed host, and refuses it beside allowExternalLinks', async () => {
+    const started = await postJson('/v1/crawl', { url: `${server.url}/crawl/listing`, maxPages: 1, allowlistedDomains: ['other.test'] })
+    expect(started.status).toBe(202)
+    await engine.close()
+    const app = createApp(engine)
+    const pages = await (await app.request(`/v1/crawl/${started.body.taskId}/pages?debug=true`)).json()
+    expect(pages.items).toHaveLength(1)
+    expect(pages.items[0]).toMatchObject({ status: 'success', url: `${server.url}/crawl/listing` })
+    expect(pages.items[0].trace.some((event: { event: string }) => event.event === 'governance_refusal' || event.event === 'ladder_governance_refusal')).toBe(false)
+    expect(await postJson('/v1/crawl', { url: `${server.url}/crawl/listing`, allowExternalLinks: true, allowlistedDomains: ['other.test'] }))
+      .toEqual({ status: 400, body: { error: 'allowExternalLinks cannot be combined with allowlistedDomains', code: 'invalid_request' } })
+  })
+
+  it('follows a link to another host only with allowExternalLinks, reading that host\'s robots.txt, and counts it as hostDenied otherwise', async () => {
+    const requests: string[] = []
+    const html = (title: string, links: string[]) => `<!doctype html><html><head><title>${title}</title></head><body><main><article><h1>${title}</h1><p>${PROSE}</p><ul>${links.map((href) => `<li><a href="${href}">${href}</a></li>`).join('')}</ul></article></main></body></html>`
+    let port = 0
+    // Bound to every address, so the one server answers as 127.0.0.1 and as localhost: two hosts to the crawl, loopback to the network policy.
+    const site = createServer((req, res) => {
+      requests.push(`${(req.headers.host ?? '').replace(/:\d+$/, '')}${req.url}`)
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(req.url === '/ext' ? html('Elsewhere', []) : html('Home', [`http://localhost:${port}/ext`]))
+    })
+    await new Promise<void>(resolve => site.listen(0, '::', resolve))
+    port = (site.address() as AddressInfo).port
+    try {
+      const followed = await postJson('/v1/crawl', { url: `http://127.0.0.1:${port}/`, maxDepth: 1, allowExternalLinks: true })
+      const refused = await postJson('/v1/crawl', { url: `http://127.0.0.1:${port}/`, maxDepth: 1 })
+      await engine.close()
+      const app = createApp(engine)
+      const followedPages = await (await app.request(`/v1/crawl/${followed.body.taskId}/pages?debug=true`)).json()
+      expect(followedPages.items.map((item: { url: string; status: string }) => [item.url, item.status]).sort()).toEqual([[`http://127.0.0.1:${port}/`, 'success'], [`http://localhost:${port}/ext`, 'success']])
+      const elsewhere = followedPages.items.find((item: { url: string }) => item.url.includes('localhost'))
+      expect(elsewhere.trace).toContainEqual(expect.objectContaining({ event: 'discovered', detail: { via: 'link', from: `http://127.0.0.1:${port}/` } }))
+      expect(elsewhere.trace.some((event: { event: string }) => event.event === 'robots_checked')).toBe(true)
+      expect(requests).toContain('localhost/robots.txt')
+      expect(await (await app.request(`/v1/crawl/${refused.body.taskId}`)).json()).toMatchObject({ status: 'completed', pagesFetched: 1, discovery: { offered: 1, enqueued: 0, hostDenied: 1 } })
+      const refusedPages = await (await app.request(`/v1/crawl/${refused.body.taskId}/pages?debug=true`)).json()
+      expect(refusedPages.items[0].trace).toContainEqual(expect.objectContaining({ event: 'links_offered', detail: expect.objectContaining({ hostDenied: 1, samples: { collapsed: [], hostDenied: [`http://localhost:${port}/ext`] } }) }))
+    } finally {
+      site.closeAllConnections()
+      await new Promise<void>(resolve => site.close(() => resolve()))
+    }
+  })
+
+  it('leaves a page whose body repeats an earlier one out of /pages unless includeDuplicates=true, and counts it in discovery', async () => {
+    const html = (title: string, links: string[]) => `<!doctype html><html><head><title>${title}</title></head><body><main><article><h1>${title}</h1><p>${PROSE}</p><ul>${links.map((href) => `<li><a href="${href}">${href}</a></li>`).join('')}</ul></article></main></body></html>`
+    const twins = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(req.url === '/' ? html('Hub', ['/a', '/b']) : html('Twin page', []))
+    })
+    await new Promise<void>(resolve => twins.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(twins.address() as AddressInfo).port}`
+    try {
+      const started = await postJson('/v1/crawl', { url: `${origin}/`, maxDepth: 1 })
+      await engine.close()
+      const app = createApp(engine)
+      const taskId = started.body.taskId as string
+      // /a and /b are distinct URLs with one body: the second fetched is a duplicate, counted but no page of its own.
+      expect(await (await app.request(`/v1/crawl/${taskId}`)).json()).toMatchObject({ status: 'completed', pagesFetched: 3, discovery: { offered: 2, enqueued: 2, collapsed: 0, duplicateContent: 1 } })
+      const pages = await (await app.request(`/v1/crawl/${taskId}/pages`)).json()
+      expect(pages.items.map((item: { status: string }) => item.status)).toEqual(['success', 'success'])
+      const all = await (await app.request(`/v1/crawl/${taskId}/pages?includeDuplicates=true`)).json()
+      expect(all.items).toHaveLength(3)
+      expect(all.items.filter((item: { status: string }) => item.status === 'duplicate')).toHaveLength(1)
+      expect(all.items.find((item: { status: string }) => item.status === 'duplicate')).toMatchObject({ markdown: null, contentHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+      expect((await (await app.request(`/v1/crawl/${taskId}/errors`)).json()).items).toEqual([])
+      expect(await (await app.request(`/v1/crawl/${taskId}/pages?includeDuplicates=maybe`)).json()).toEqual({ error: 'includeDuplicates must be true or false', code: 'invalid_request' })
+    } finally {
+      twins.closeAllConnections()
+      await new Promise<void>(resolve => twins.close(() => resolve()))
     }
   })
 

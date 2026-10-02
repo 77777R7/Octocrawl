@@ -20,6 +20,7 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
         costUnknown: true,
         contentTokens: null,
         contentTokensUnknown: true,
+        discovery: null,
         ...(task.attribution === undefined ? {} : { attribution: task.attribution }),
     }
   }
@@ -51,6 +52,8 @@ export function reportFromTaskAttempt(
     costUnknown: attempt.costUnknown,
     contentTokens: attempt.contentTokens,
     contentTokensUnknown: attempt.contentTokensUnknown,
+    // A batch discovers nothing; a crawl attempt stored before the counters were kept has none.
+    discovery: task.batch !== undefined ? null : attempt.discovery ?? null,
     ...(task.attribution === undefined ? {} : { attribution: task.attribution }),
   }
 }

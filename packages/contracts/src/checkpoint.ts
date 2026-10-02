@@ -10,6 +10,7 @@
 
 import type { PageOptions, RequestAttribution, RobotsUrlOverride } from './api.js'
 import type { CrawlMode } from './compliance.js'
+import type { CrawlDiscovery } from './crawl.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
 import type { BudgetKind, Lane, ResultStatus } from './status.js'
@@ -73,10 +74,22 @@ export interface Task {
     excludePaths?: readonly string[]
     /** Link hops from the seed; null is unbounded. Absent on a task stored before depth was kept. */
     maxDepth?: number | null
-    /** Hosts links may lead to; empty follows the seed's host, its apex/www twin and where the seed redirected. */
+    /** Hosts links may lead to, beside the seed's host, its apex/www twin and where the seed redirected. */
     allowlistedDomains?: readonly string[]
     /** A resume reuses the pages this task already fetched instead of fetching them again. */
     useCached?: boolean
+    /**
+     * The URL-scope options the crawl was started with (see CrawlStartRequest).
+     * Absent on a task stored before they were kept: such a task resumes with
+     * the rule it was started under, whole host (`crawlEntireDomain` true) and
+     * exact canonical URLs (`deduplicateSimilarURLs` false), the rest false.
+     */
+    regexOnFullURL?: boolean
+    ignoreQueryParameters?: boolean
+    deduplicateSimilarURLs?: boolean
+    crawlEntireDomain?: boolean
+    allowSubdomains?: boolean
+    allowExternalLinks?: boolean
   } & PageOptions
   /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
   attribution?: RequestAttribution
@@ -104,6 +117,8 @@ export interface Attempt {
   budgetExceeded: BudgetKind | null
   /** Set when this attempt resumes a previously interrupted attempt. */
   recoveredFromAttemptId?: string | null
+  /** What this attempt's pages offered the frontier and what became of it, written after every page of a crawl; absent for a batch and for an attempt stored before it was kept. */
+  discovery?: CrawlDiscovery | null
 }
 
 /**

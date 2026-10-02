@@ -109,6 +109,26 @@ describe('MCP tools', () => {
     }
   })
 
+  it('declares and forwards the crawl URL-scope options, and includeDuplicates for get_crawl_pages', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      calls.push({ line: `${init?.method ?? 'GET'} ${String(input)}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return String(input).endsWith('/v1/crawl') ? json({ taskId: 'task-1' }, 202) : json({ items: [], nextCursor: null, hasMore: false })
+    }) as typeof fetch })
+    const scope = { regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: true, allowExternalLinks: true }
+    await callTool(client, 'crawl', { url: 'https://example.com/docs/', ...scope })
+    expect(calls[0]?.body).toEqual({ url: 'https://example.com/docs/', ...scope, origin: SDK_ORIGIN })
+    await callTool(client, 'get_crawl_pages', { id: 'task-1', includeDuplicates: true })
+    expect(calls[1]?.line).toBe('GET http://127.0.0.1:8787/v1/crawl/task-1/pages?includeDuplicates=true')
+    const crawl = TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>
+    for (const name of Object.keys(scope)) expect(crawl[name], name).toMatchObject({ type: 'boolean' })
+    expect((TOOLS.find((tool) => tool.name === 'get_crawl_pages')?.inputSchema.properties as Record<string, unknown>).includeDuplicates).toMatchObject({ type: 'boolean' })
+    // Refused by the shared parser before any API call.
+    await expect(callTool(client, 'crawl', { url: 'https://example.com/', allowExternalLinks: true, allowlistedDomains: ['other.test'] })).rejects.toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
+    await expect(callTool(client, 'get_crawl_pages', { id: 'task-1', includeDuplicates: 'yes' })).rejects.toThrow('includeDuplicates must be a boolean')
+    expect(calls).toHaveLength(2)
+  })
+
   it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

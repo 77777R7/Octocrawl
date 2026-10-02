@@ -90,6 +90,8 @@ describe('Firecrawl /scrape /crawl shim', () => {
         limit: 4,
         maxDepth: 2,
         ignoreSitemap: true,
+        // The fixture's items are siblings of the listing: v1's name for following them.
+        allowBackwardLinks: true,
         scrapeOptions: { formats: ['markdown'] },
       }),
     })
@@ -122,6 +124,7 @@ describe('Firecrawl /scrape /crawl shim', () => {
         url: `${server.url}/crawl/listing`,
         includePaths: ['^/crawl/item/'],
         excludePaths: ['^/crawl/item/[12]$'],
+        crawlEntireDomain: true,
         scrapeOptions: { formats: ['links'] },
       }),
     })

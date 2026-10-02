@@ -6,20 +6,36 @@
  * Until a page on a host has reported that host's robots.txt answer
  * (setCrawlDelay), the host starts one page at a time, so a Crawl-delay holds
  * from its second request on.
- * Default host filter is the seed host, its apex/www twin and the host the
- * seed redirected to (followSeedRedirect); a non-empty allowlist replaces it
- * with the same exact / `*.domain` match as governance. includePaths /
+ *
+ * A link is admitted in this order: canonicalize, depth, host scope, the
+ * seed's path subtree, the asset and path filters, visited. The host scope is
+ * the seed host, its apex/www twin and the host the seed redirected to
+ * (followSeedRedirect), plus an allowlist's hosts (exact / `*.domain`, as
+ * governance matches them), every host under the seed's apex when
+ * allowSubdomains is set, and every host when allowExternalLinks is set.
+ * Unless crawlEntireDomain is set, a link on a seed host must lie in the
+ * seed's path subtree: its directory, or the directory of the file it names
+ * (`/3/tutorial/index.html` -> `/3/tutorial/`), or itself plus `/`; a
+ * redirect of the seed adds the final URL's subtree. includePaths /
  * excludePaths are regexes on an enqueued link's pathname (Firecrawl
  * semantics, exclude wins; a link a filter cannot decide in its time limit is
- * skipped, see pathFilter.ts), and links to assets (images, fonts, styles,
- * scripts, audio, video, programs) are not enqueued. Seeds bypass the path
- * and asset filters, so the seed URL is always fetched.
+ * skipped, see pathFilter.ts), or on its canonical URL with regexOnFullURL,
+ * and links to assets (images, fonts, styles, scripts, audio, video,
+ * programs) are not enqueued. Seeds bypass the subtree, path and asset
+ * filters, so the seed URL is always fetched.
+ *
+ * Visited is keyed by visitKey (canonicalize.ts): the canonical URL, without
+ * its query when ignoreQueryParameters is set, and folded over scheme, `www.`,
+ * trailing slash and index file when deduplicateSimilarURLs is set. A link
+ * whose key was seen under a different URL is refused as a duplicate with
+ * `collapsedInto`, the first-seen page's canonical URL; the first-seen href
+ * is what gets fetched.
  */
 
 import { isIP } from 'node:net'
 import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
-import { canonicalizeUrl, hostOf } from './canonicalize.js'
+import { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
 import { compilePathFilter, type PathFilter } from './pathFilter.js'
 
 export interface FrontierItem {
@@ -27,6 +43,10 @@ export interface FrontierItem {
   canonicalUrl: string
   depth: number
   host: string
+  /** How the URL entered the crawl: the seed, a link on a page, or a sitemap entry. */
+  via: 'seed' | 'link' | 'sitemap'
+  /** The canonical URL of the page that linked it, when a link. */
+  from?: string
 }
 
 export interface FrontierEnqueueResult {
@@ -39,10 +59,13 @@ export interface FrontierEnqueueResult {
     | 'malformed'
     | 'depth'
     | 'host_denied'
+    | 'subtree_denied'
     | 'path_denied'
     | 'path_undecided'
     | 'asset_denied'
     | 'scheme_denied'
+  /** On a duplicate that is a variant of an earlier URL (not the same URL again): the canonical URL it was folded into. */
+  collapsedInto?: string
 }
 
 export interface FrontierDequeue {
@@ -65,34 +88,71 @@ export interface FrontierOptions {
   crawlDelayMsByHost?: ReadonlyMap<string, number>
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
+  /** Match includePaths / excludePaths against the canonical URL instead of the pathname. */
+  regexOnFullURL?: boolean
+  /** Drop the query string from every canonical URL. */
+  ignoreQueryParameters?: boolean
+  /** Fold scheme, `www.`, trailing slash and index file in the visited key. */
+  deduplicateSimilarURLs?: boolean
+  /** Follow links anywhere on a seed host, not only in the seed's path subtree. */
+  crawlEntireDomain?: boolean
+  /** Admit every host under the seed's apex. */
+  allowSubdomains?: boolean
+  /** Admit every host. */
+  allowExternalLinks?: boolean
+}
+
+/** A path subtree links on a seed host may lie in: the exact path, or anything under `dir`. */
+interface Subtree {
+  pathname: string
+  dir: string
 }
 
 export class Frontier {
   readonly seedCanonicalUrl: string
   private readonly seedHosts = new Set<string>()
+  /** The seed host with one leading `www.` removed; `*.apex` is what allowSubdomains admits. */
+  private readonly seedApex: string
+  private readonly subtrees: Subtree[] = []
   private readonly maxDepth: number | null
   private readonly allowlistedDomains: readonly string[]
   private readonly includePaths: readonly PathFilter[]
   private readonly excludePaths: readonly PathFilter[]
+  private readonly regexOnFullURL: boolean
+  private readonly ignoreQueryParameters: boolean
+  private readonly deduplicateSimilarURLs: boolean
+  private readonly crawlEntireDomain: boolean
+  private readonly allowSubdomains: boolean
+  private readonly allowExternalLinks: boolean
   private readonly perHostConcurrency: number
   private readonly perHostMinDelayMs: number
   private crawlDelayMsByHost: ReadonlyMap<string, number>
   private readonly pending: FrontierItem[] = []
-  private readonly visited = new Set<string>()
+  /** Visit key -> the first URL seen under it (its canonical URL) and every variant offered since, by canonical URL with query: a repeat of one of them is a duplicate, a new one is collapsed. */
+  private readonly visited = new Map<string, { canonicalUrl: string; variants: Set<string> }>()
   private readonly inFlight = new Map<string, number>()
   private readonly lastStartedAtMs = new Map<string, number>()
   /** Hosts a page has reported robots.txt for, with or without a Crawl-delay. */
   private readonly robotsKnown = new Set<string>()
 
   constructor(options: FrontierOptions) {
-    const seed = canonicalizeUrl(options.seedUrl)
+    this.ignoreQueryParameters = options.ignoreQueryParameters === true
+    const seed = canonicalizeUrl(options.seedUrl, undefined, { ignoreQuery: this.ignoreQueryParameters })
     if (seed === null) throw new Error(`Frontier seed is not an http(s) URL: ${options.seedUrl}`)
     this.seedCanonicalUrl = seed
-    this.addSeedHost(hostOf(seed))
+    const seedHost = hostOf(seed)
+    this.seedApex = seedHost.startsWith('www.') ? seedHost.slice(4) : seedHost
+    this.addSeedHost(seedHost)
+    this.addSubtree(new URL(seed).pathname)
     this.maxDepth = options.maxDepth === undefined ? null : options.maxDepth
     this.allowlistedDomains = options.allowlistedDomains ?? []
     this.includePaths = (options.includePaths ?? []).map((pattern) => compilePathFilter(pattern))
     this.excludePaths = (options.excludePaths ?? []).map((pattern) => compilePathFilter(pattern))
+    this.regexOnFullURL = options.regexOnFullURL === true
+    this.deduplicateSimilarURLs = options.deduplicateSimilarURLs === true
+    this.crawlEntireDomain = options.crawlEntireDomain === true
+    this.allowSubdomains = options.allowSubdomains === true
+    this.allowExternalLinks = options.allowExternalLinks === true
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
@@ -157,7 +217,7 @@ export class Frontier {
   }
 
   has(canonicalUrl: string): boolean {
-    return this.visited.has(canonicalUrl)
+    return this.visited.has(this.keyOf(canonicalUrl))
   }
 
   /**
@@ -165,7 +225,8 @@ export class Frontier {
    * page is not crawled again, while unfinished URLs can still be seeded.
    */
   markVisited(canonicalUrl: string): void {
-    this.visited.add(canonicalUrl)
+    const key = this.keyOf(canonicalUrl)
+    if (!this.visited.has(key)) this.visited.set(key, { canonicalUrl, variants: new Set([canonicalUrl]) })
   }
 
   /** Queued pages, or those of them `where` accepts. */
@@ -202,12 +263,14 @@ export class Frontier {
 
   /**
    * The seed answered from `finalUrl`, and its links resolve against that URL:
-   * its host and that host's apex/www twin count as the seed host from now on.
-   * An explicit allowlist is never widened.
+   * its host and that host's apex/www twin count as the seed host from now
+   * on, and its path subtree is in scope beside the seed's own.
    */
   followSeedRedirect(finalUrl: string): void {
-    const canonical = canonicalizeUrl(finalUrl)
-    if (canonical !== null) this.addSeedHost(hostOf(canonical))
+    const canonical = canonicalizeUrl(finalUrl, undefined, { ignoreQuery: this.ignoreQueryParameters })
+    if (canonical === null) return
+    this.addSeedHost(hostOf(canonical))
+    this.addSubtree(new URL(canonical).pathname)
   }
 
   private offer(
@@ -216,10 +279,12 @@ export class Frontier {
     acceptedReason: 'enqueued' | 'seeded',
     base?: string,
   ): FrontierEnqueueResult {
-    const canonicalUrl = canonicalizeUrl(url, base)
-    if (canonicalUrl === null) {
+    // The canonical URL with its query tells a repeat of the same URL from a variant folded into it.
+    const fullCanonicalUrl = canonicalizeUrl(url, base)
+    if (fullCanonicalUrl === null) {
       return { accepted: false, canonicalUrl: null, reason: urlLooksLikeNonHttp(url, base) ? 'scheme_denied' : 'malformed' }
     }
+    const canonicalUrl = this.ignoreQueryParameters ? canonicalizeUrl(fullCanonicalUrl, undefined, { ignoreQuery: true })! : fullCanonicalUrl
     if (this.maxDepth !== null && depth > this.maxDepth) {
       return { accepted: false, canonicalUrl, reason: 'depth' }
     }
@@ -229,23 +294,40 @@ export class Frontier {
     }
     if (acceptedReason === 'enqueued') {
       const pathname = new URL(canonicalUrl).pathname
+      if (!this.crawlEntireDomain && this.seedHosts.has(host) && !this.inSeedSubtree(pathname)) {
+        return { accepted: false, canonicalUrl, reason: 'subtree_denied' }
+      }
       if (isAssetPath(pathname)) return { accepted: false, canonicalUrl, reason: 'asset_denied' }
-      const allowed = this.pathAllowed(pathname)
+      const allowed = this.pathAllowed(this.regexOnFullURL ? canonicalUrl : pathname)
       if (allowed !== true) return { accepted: false, canonicalUrl, reason: allowed === false ? 'path_denied' : 'path_undecided' }
     }
-    if (this.visited.has(canonicalUrl)) {
-      return { accepted: false, canonicalUrl, reason: 'duplicate' }
+    const key = this.keyOf(canonicalUrl)
+    const seen = this.visited.get(key)
+    if (seen !== undefined) {
+      if (seen.variants.has(fullCanonicalUrl)) return { accepted: false, canonicalUrl, reason: 'duplicate' }
+      seen.variants.add(fullCanonicalUrl)
+      return { accepted: false, canonicalUrl, reason: 'duplicate', collapsedInto: seen.canonicalUrl }
     }
-    this.visited.add(canonicalUrl)
-    this.pending.push({ url: resolvedHref(url, base) ?? canonicalUrl, canonicalUrl, depth, host })
+    this.visited.set(key, { canonicalUrl, variants: new Set([fullCanonicalUrl]) })
+    this.pending.push({
+      url: resolvedHref(url, base) ?? canonicalUrl,
+      canonicalUrl,
+      depth,
+      host,
+      via: acceptedReason === 'seeded' ? 'seed' : 'link',
+      ...(base === undefined ? {} : { from: base }),
+    })
     return { accepted: true, canonicalUrl, reason: acceptedReason }
   }
 
+  private keyOf(canonicalUrl: string): string {
+    return visitKey(canonicalUrl, { deduplicateSimilarURLs: this.deduplicateSimilarURLs })
+  }
+
   private hostAllowed(host: string): boolean {
-    if (this.allowlistedDomains.length > 0) {
-      return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
-    }
-    return this.seedHosts.has(host)
+    if (this.seedHosts.has(host) || this.allowExternalLinks) return true
+    if (this.allowSubdomains && host.endsWith(`.${this.seedApex}`)) return true
+    return this.allowlistedDomains.some((entry) => hostMatchesAllowlist(host, entry))
   }
 
   private addSeedHost(host: string): void {
@@ -254,23 +336,45 @@ export class Frontier {
     if (twin !== null) this.seedHosts.add(twin)
   }
 
+  private addSubtree(pathname: string): void {
+    const dir = subtreeDir(pathname)
+    if (!this.subtrees.some((subtree) => subtree.pathname === pathname && subtree.dir === dir)) this.subtrees.push({ pathname, dir })
+  }
+
+  private inSeedSubtree(pathname: string): boolean {
+    return this.subtrees.some((subtree) => pathname === subtree.pathname || pathname.startsWith(subtree.dir))
+  }
+
   /** Exclude wins; null when a filter that could change the answer did not decide in its time limit. */
-  private pathAllowed(pathname: string): boolean | null {
+  private pathAllowed(subject: string): boolean | null {
     let undecided = false
     for (const pattern of this.excludePaths) {
-      const match = pattern.test(pathname)
+      const match = pattern.test(subject)
       if (match === true) return false
       if (match === null) undecided = true
     }
     if (undecided) return null
     if (this.includePaths.length === 0) return true
     for (const pattern of this.includePaths) {
-      const match = pattern.test(pathname)
+      const match = pattern.test(subject)
       if (match === true) return true
       if (match === null) undecided = true
     }
     return undecided ? null : false
   }
+}
+
+/**
+ * The directory a seed's links must lie under: the path itself when it names
+ * a directory, the directory of the file it names when its last segment has
+ * a dot, else the path as a directory (`/search` covers `/search/x`; the exact
+ * `/search` passes as the seed's own path).
+ */
+function subtreeDir(pathname: string): string {
+  if (pathname.endsWith('/')) return pathname
+  const cut = pathname.lastIndexOf('/')
+  const last = pathname.slice(cut + 1)
+  return last.includes('.') ? pathname.slice(0, cut + 1) : `${pathname}/`
 }
 
 /** `www.example.com` and `example.com` name one site; an IP address or a one-label host has no twin. */

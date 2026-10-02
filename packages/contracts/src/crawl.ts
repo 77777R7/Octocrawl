@@ -32,9 +32,9 @@ export interface ScrapeAtom {
 
 /**
  * What one run of the orchestrator crawls. A new task stores its budget,
- * maxDepth, allowlistedDomains, includePaths and excludePaths; a resumed
- * (`resumeFrom`) or existing (`taskId`) task runs with the ones it stored, so
- * a resume never widens the crawl it continues.
+ * maxDepth, allowlistedDomains, includePaths, excludePaths and URL-scope
+ * options; a resumed (`resumeFrom`) or existing (`taskId`) task runs with the
+ * ones it stored, so a resume never widens the crawl it continues.
  */
 export interface CrawlSpec {
   seedUrl: string
@@ -43,6 +43,7 @@ export interface CrawlSpec {
   mode: CrawlMode
   budget: CrawlBudget
   maxDepth: number | null
+  /** Hosts links may lead to beside the seed's host, its www twin and where the seed redirected. */
   allowlistedDomains: readonly string[]
   resumeFrom: string | null
   useCached: boolean
@@ -54,6 +55,48 @@ export interface CrawlSpec {
    */
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
+  /** The URL-scope options, as CrawlStartRequest names them; DEFAULT_CRAWL_SPEC has their defaults. */
+  regexOnFullURL?: boolean
+  ignoreQueryParameters?: boolean
+  deduplicateSimilarURLs?: boolean
+  crawlEntireDomain?: boolean
+  allowSubdomains?: boolean
+  allowExternalLinks?: boolean
+}
+
+/**
+ * What a crawl attempt's pages offered the frontier and what became of each
+ * link: enqueued, an exact repeat (`duplicate`), a variant folded into a
+ * first-seen page (`collapsed`: a query the crawl ignores, `/a/` after `/a`,
+ * `/index.html` after `/`, the www twin), or refused by the host scope, the
+ * start URL's path subtree, includePaths / excludePaths or maxDepth. The
+ * `offered` total also counts links no counter names (assets, non-http
+ * schemes, a path a filter could not decide). `duplicateContent` counts pages
+ * fetched and then found to repeat an earlier page's body. Null on a batch,
+ * which discovers nothing.
+ */
+export interface CrawlDiscovery {
+  offered: number
+  enqueued: number
+  duplicate: number
+  collapsed: number
+  hostDenied: number
+  subtreeDenied: number
+  pathDenied: number
+  depthDenied: number
+  duplicateContent: number
+}
+
+export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
+  offered: 0,
+  enqueued: 0,
+  duplicate: 0,
+  collapsed: 0,
+  hostDenied: 0,
+  subtreeDenied: 0,
+  pathDenied: 0,
+  depthDenied: 0,
+  duplicateContent: 0,
 }
 
 export interface CrawlReport {
@@ -69,6 +112,8 @@ export interface CrawlReport {
   costUnknown?: boolean
   contentTokens: number | null
   contentTokensUnknown?: boolean
+  /** The latest attempt's link discovery counters; null for a batch and for a crawl stored before they were kept. */
+  discovery: CrawlDiscovery | null
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
 }
@@ -130,4 +175,10 @@ export const DEFAULT_CRAWL_SPEC: Omit<CrawlSpec, 'seedUrl' | 'taskDir'> = {
   allowlistedDomains: [],
   resumeFrom: null,
   useCached: false,
+  regexOnFullURL: false,
+  ignoreQueryParameters: false,
+  deduplicateSimilarURLs: true,
+  crawlEntireDomain: false,
+  allowSubdomains: false,
+  allowExternalLinks: false,
 }

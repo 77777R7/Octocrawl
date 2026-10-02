@@ -16,10 +16,12 @@
 import {
   CONTENTFUL_STATUS,
   DEFAULT_CRAWL_SPEC,
+  EMPTY_CRAWL_DISCOVERY,
   stepStatusFromResult,
   type Attempt,
   type BudgetKind,
   type CrawlBudget,
+  type CrawlDiscovery,
   type CrawlReport,
   type CrawlSpec,
   type FetchResult,
@@ -33,6 +35,17 @@ import { reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
+
+/** The URL-scope options a run gives its frontier (CrawlStartRequest names them). */
+type CrawlScopeOptions = Required<Pick<CrawlSpec, 'regexOnFullURL' | 'ignoreQueryParameters' | 'deduplicateSimilarURLs' | 'crawlEntireDomain' | 'allowSubdomains' | 'allowExternalLinks'>>
+
+/** Up to this many collapsed and host-refused links are named in a page's `links_offered` trace event. */
+const LINK_SAMPLE_LIMIT = 20
+
+/** What became of one page's links at the frontier: the `links_offered` trace event's detail. */
+type LinksOffered = Omit<CrawlDiscovery, 'duplicateContent'> & {
+  samples: { collapsed: Array<{ url: string; into: string }>; hostDenied: string[] }
+}
 
 export interface CrawlClock {
   now(): number
@@ -127,6 +140,8 @@ export class CrawlOrchestrator {
     let failed: unknown = null
     let task: Task | undefined
     let attempt: Attempt | undefined
+    // A crawl's link discovery counters, written with the attempt after every page; a batch discovers nothing.
+    let discovery: CrawlDiscovery | null = null
     const meters = () => ({
       pagesFetched: pagesFetched + cachedPages,
       wallMs: this.clock.now() - startedAtMs,
@@ -135,6 +150,7 @@ export class CrawlOrchestrator {
       contentTokens,
       contentTokensUnknown,
       budgetExceeded,
+      ...(discovery === null ? {} : { discovery }),
     })
 
     const markTimeBudget = (): void => {
@@ -154,12 +170,14 @@ export class CrawlOrchestrator {
       // A crawl runs with the options it stored; a batch, and a crawl stored
       // before its depth and hosts were kept, with the caller's.
       const stored = task.batch === undefined ? task.crawl : undefined
+      if (task.batch === undefined) discovery = { ...EMPTY_CRAWL_DISCOVERY }
       const frontier = new Frontier({
         seedUrl: task.seedUrl,
         maxDepth: stored?.maxDepth !== undefined ? stored.maxDepth : spec.maxDepth,
         allowlistedDomains: stored?.allowlistedDomains ?? spec.allowlistedDomains,
         includePaths: stored?.includePaths ?? spec.includePaths,
         excludePaths: stored?.excludePaths ?? spec.excludePaths,
+        ...scopeOptions(spec, stored),
         ...this.frontierOptions,
       })
       const priorSteps = await this.store.listSteps(task.id)
@@ -276,9 +294,25 @@ export class CrawlOrchestrator {
             const hash = result.evidence.rawBodySha256
             if (task?.batch === undefined && hash !== null && CONTENTFUL_STATUS.has(result.status)) {
               const prior = seenHash.get(hash)
-              if (prior !== undefined && prior !== item.canonicalUrl) { result = duplicateResult(item.url, result, prior); links = [] }
+              if (prior !== undefined && prior !== item.canonicalUrl) {
+                result = duplicateResult(item.url, result, prior); links = []
+                if (discovery !== null) discovery.duplicateContent++
+              }
               else seenHash.set(hash, item.canonicalUrl)
             }
+            // A contentful page's links go to the frontier before its step is
+            // written, so a crawl page's trace says what became of each of them.
+            // A batch page's links are offered too (its depth limit refuses
+            // them) and leave no record: a batch discovers nothing.
+            const contentful = CONTENTFUL_STATUS.has(result.status)
+            if (contentful) {
+              const offered = offerLinks(frontier, links, item)
+              if (discovery !== null) {
+                addDiscovery(discovery, offered)
+                result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'links_offered', detail: offered }] }
+              }
+            }
+            if (discovery !== null) result = { ...result, trace: [{ at: 0, lane: result.lane, event: 'discovered', detail: { via: item.via, from: item.from ?? null } }, ...result.trace] }
             const at = new Date(this.clock.now()).toISOString()
             // Written from here on, no longer in flight (the write itself is synchronous).
             inFlight = false
@@ -303,10 +337,7 @@ export class CrawlOrchestrator {
             }
             // A status read while the crawl runs sees its progress.
             await this.store.putAttempt({ ...runningAttempt, ...meters() })
-            if (CONTENTFUL_STATUS.has(result.status)) {
-              for (const href of links) frontier.enqueue(href, item.depth + 1, item.canonicalUrl)
-              wakeWorkers()
-            }
+            if (contentful) wakeWorkers()
           } catch (err) {
             stopping = true
             wakeWorkers()
@@ -403,7 +434,7 @@ export class CrawlOrchestrator {
       mode: spec.mode,
       status: 'running',
       budget: spec.budget,
-      crawl: { maxDepth: spec.maxDepth, allowlistedDomains: spec.allowlistedDomains, includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [] },
+      crawl: { maxDepth: spec.maxDepth, allowlistedDomains: spec.allowlistedDomains, includePaths: spec.includePaths ?? [], excludePaths: spec.excludePaths ?? [], ...scopeOptions(spec, undefined) },
       createdAt: startedAt,
       updatedAt: startedAt,
     }
@@ -461,6 +492,80 @@ export class CrawlOrchestrator {
       }
     }
   }
+}
+
+/**
+ * The URL-scope options a run gives its frontier: the task's stored ones. A
+ * crawl stored before they were kept runs under the rule it was started
+ * with, the whole host and exact canonical URLs; a batch (nothing stored)
+ * takes the spec's, which the engine sets to the same rule.
+ */
+function scopeOptions(spec: CrawlSpec, stored: Task['crawl'] | undefined): CrawlScopeOptions {
+  if (stored === undefined) {
+    return {
+      regexOnFullURL: spec.regexOnFullURL ?? DEFAULT_CRAWL_SPEC.regexOnFullURL ?? false,
+      ignoreQueryParameters: spec.ignoreQueryParameters ?? DEFAULT_CRAWL_SPEC.ignoreQueryParameters ?? false,
+      deduplicateSimilarURLs: spec.deduplicateSimilarURLs ?? DEFAULT_CRAWL_SPEC.deduplicateSimilarURLs ?? true,
+      crawlEntireDomain: spec.crawlEntireDomain ?? DEFAULT_CRAWL_SPEC.crawlEntireDomain ?? false,
+      allowSubdomains: spec.allowSubdomains ?? DEFAULT_CRAWL_SPEC.allowSubdomains ?? false,
+      allowExternalLinks: spec.allowExternalLinks ?? DEFAULT_CRAWL_SPEC.allowExternalLinks ?? false,
+    }
+  }
+  return {
+    regexOnFullURL: stored.regexOnFullURL ?? false,
+    ignoreQueryParameters: stored.ignoreQueryParameters ?? false,
+    deduplicateSimilarURLs: stored.deduplicateSimilarURLs ?? false,
+    crawlEntireDomain: stored.crawlEntireDomain ?? true,
+    allowSubdomains: stored.allowSubdomains ?? false,
+    allowExternalLinks: stored.allowExternalLinks ?? false,
+  }
+}
+
+/**
+ * Offer a page's links to the frontier and count what became of each: the
+ * `links_offered` trace event. A link folded into an earlier page (a query
+ * the crawl ignores, `/a/` after `/a`, the www twin) is `collapsed`, with up
+ * to LINK_SAMPLE_LIMIT named; so is a host the scope refused.
+ */
+function offerLinks(frontier: Frontier, links: readonly string[], page: FrontierItem): LinksOffered {
+  const offered: LinksOffered = { offered: 0, enqueued: 0, duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, depthDenied: 0, samples: { collapsed: [], hostDenied: [] } }
+  for (const href of links) {
+    offered.offered++
+    const verdict = frontier.enqueue(href, page.depth + 1, page.canonicalUrl)
+    if (verdict.accepted) { offered.enqueued++; continue }
+    switch (verdict.reason) {
+      case 'duplicate':
+        if (verdict.collapsedInto === undefined) { offered.duplicate++; break }
+        offered.collapsed++
+        if (offered.samples.collapsed.length < LINK_SAMPLE_LIMIT) offered.samples.collapsed.push({ url: absoluteHref(href, page.canonicalUrl), into: verdict.collapsedInto })
+        break
+      case 'host_denied':
+        offered.hostDenied++
+        if (offered.samples.hostDenied.length < LINK_SAMPLE_LIMIT) offered.samples.hostDenied.push(absoluteHref(href, page.canonicalUrl))
+        break
+      case 'subtree_denied': offered.subtreeDenied++; break
+      case 'path_denied': offered.pathDenied++; break
+      case 'depth': offered.depthDenied++; break
+      default: break
+    }
+  }
+  return offered
+}
+
+function addDiscovery(discovery: CrawlDiscovery, offered: LinksOffered): void {
+  discovery.offered += offered.offered
+  discovery.enqueued += offered.enqueued
+  discovery.duplicate += offered.duplicate
+  discovery.collapsed += offered.collapsed
+  discovery.hostDenied += offered.hostDenied
+  discovery.subtreeDenied += offered.subtreeDenied
+  discovery.pathDenied += offered.pathDenied
+  discovery.depthDenied += offered.depthDenied
+}
+
+/** The link as the page gave it, made absolute against the page; as given when it does not parse. */
+function absoluteHref(href: string, base: string): string {
+  try { return new URL(href, base).href } catch { return href }
 }
 
 /** What an attempt has spent. Pages are the task's, counted by the frontier's admit test. */

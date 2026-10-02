@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { MAX_FILE_BYTES_CEILING, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -123,7 +123,7 @@ export const TOOLS = [
   },
   {
     name: 'crawl',
-    description: 'Start a multi-page crawl. Returns { taskId } (HTTP 202 equivalent).',
+    description: 'Start a multi-page crawl. Returns { taskId } (HTTP 202 equivalent). By default it follows links in the start URL\'s path subtree on its host and www twin, folds similar URLs into one page, and reports every collapsed or refused link in get_crawl\'s discovery counters and each page\'s links_offered trace event (get_crawl_pages with debug).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -140,6 +140,12 @@ export const TOOLS = [
         includeLinks: { type: 'boolean' },
         includePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes a discovered link must match; the start URL is always fetched.' },
         excludePaths: { type: 'array', items: { type: 'string' }, description: 'Pathname regexes that skip a discovered link; they win over includePaths.' },
+        regexOnFullURL: { type: 'boolean', description: 'Match includePaths and excludePaths against each link\'s canonical URL (scheme, host, path and query) instead of its pathname. Default false.' },
+        ignoreQueryParameters: { type: 'boolean', description: 'Treat URLs that differ only in their query string as one page: the first variant seen is fetched, later ones are reported as collapsed in the page\'s links_offered trace event and the report\'s discovery. Default false.' },
+        deduplicateSimilarURLs: { type: 'boolean', description: 'Treat /a and /a/, / and /index.html, www and apex, http and https as one page: the first variant seen is fetched, later ones are reported as collapsed. Default true. A page fetched and then found to repeat an earlier page\'s body stays status duplicate and is left out of get_crawl_pages unless includeDuplicates is set.' },
+        crawlEntireDomain: { type: 'boolean', description: 'Follow links anywhere on the start URL\'s host. Default false: links on that host are followed only inside the start URL\'s path subtree (its directory, or the directory of the file it names); the rest are reported as subtreeDenied.' },
+        allowSubdomains: { type: 'boolean', description: 'Follow links to every host under the start URL\'s apex (the host with one leading www. removed; no public-suffix list, so a seed on www.gov.uk admits every *.gov.uk host). Default false. Each new host gets its own robots.txt read.' },
+        allowExternalLinks: { type: 'boolean', description: 'Follow links to any host, each with its own robots.txt read; maxDepth and maxPages bound the walk. Default false. Cannot be combined with allowlistedDomains.' },
         ...PAGE_OPTION_PROPERTIES,
         ...INTEGRATION_PROPERTY,
       },
@@ -161,7 +167,7 @@ export const TOOLS = [
   },
   {
     name: 'get_crawl_pages',
-    description: 'Read a paginated list of crawl page results by task id. Pages omit the routing audit and trace unless debug is true.',
+    description: 'Read a paginated list of crawl page results by task id. Pages omit the routing audit and trace unless debug is true, and leave out pages whose content repeated an earlier page\'s (status duplicate) unless includeDuplicates is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -170,6 +176,7 @@ export const TOOLS = [
         limit: { type: 'number', minimum: 1, maximum: 1000 },
         attemptId: { type: 'string' },
         debug: { type: 'boolean' },
+        includeDuplicates: { type: 'boolean', description: 'List the pages whose body repeated an earlier page\'s too (status duplicate, markdown null). Default false.' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -309,6 +316,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       includeLinks: req.includeLinks,
       includePaths: req.includePaths,
       excludePaths: req.excludePaths,
+      ...crawlScopeOptions(req),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -377,6 +385,18 @@ function integrationOf(req: RequestAttribution): Pick<RequestAttribution, 'integ
   return req.integration === undefined ? {} : { integration: req.integration }
 }
 
+/** The URL-scope options of a parsed crawl request, those that were set. */
+function crawlScopeOptions(req: CrawlStartRequest): Pick<CrawlStartRequest, 'regexOnFullURL' | 'ignoreQueryParameters' | 'deduplicateSimilarURLs' | 'crawlEntireDomain' | 'allowSubdomains' | 'allowExternalLinks'> {
+  return {
+    ...(req.regexOnFullURL === undefined ? {} : { regexOnFullURL: req.regexOnFullURL }),
+    ...(req.ignoreQueryParameters === undefined ? {} : { ignoreQueryParameters: req.ignoreQueryParameters }),
+    ...(req.deduplicateSimilarURLs === undefined ? {} : { deduplicateSimilarURLs: req.deduplicateSimilarURLs }),
+    ...(req.crawlEntireDomain === undefined ? {} : { crawlEntireDomain: req.crawlEntireDomain }),
+    ...(req.allowSubdomains === undefined ? {} : { allowSubdomains: req.allowSubdomains }),
+    ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }),
+  }
+}
+
 /** The execution options of a parsed request, those that were set: headers, mobile, skipTlsVerification, fastMode and blockAds. */
 function executionOptions(req: Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'>): Pick<PageOptions, 'headers' | 'mobile' | 'skipTlsVerification' | 'fastMode' | 'blockAds'> {
   return {
@@ -437,11 +457,12 @@ async function callMonitorTool(client: W2L, name: string, rec: Record<string, un
   throw new RequestError(`unknown tool: ${name}`)
 }
 
-function readCrawlQuery(args: unknown): { id: string; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean } } {
+function readCrawlQuery(args: unknown): { id: string; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean; includeDuplicates?: boolean } } {
   const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
   if (typeof rec?.id !== 'string' || rec.id.length === 0) throw new RequestError('id is required')
   if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit))) throw new RequestError('limit must be an integer')
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
+  if (rec.includeDuplicates !== undefined && typeof rec.includeDuplicates !== 'boolean') throw new RequestError('includeDuplicates must be a boolean')
   return {
     id: rec.id,
     options: {
@@ -449,6 +470,7 @@ function readCrawlQuery(args: unknown): { id: string; options: { cursor?: string
       limit: rec.limit as number | undefined,
       attemptId: typeof rec.attemptId === 'string' ? rec.attemptId : undefined,
       debug: rec.debug as boolean | undefined,
+      ...(rec.includeDuplicates === undefined ? {} : { includeDuplicates: rec.includeDuplicates as boolean }),
     },
   }
 }

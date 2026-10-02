@@ -5,6 +5,7 @@
 
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { join } from 'node:path'
 import {
   buildChannels,
@@ -364,6 +365,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         cursor: query?.cursor,
         limit: query?.limit ?? 50,
         kind,
+        ...(query?.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates }),
       })
       const includeLinks = linksRequested(task)
       return {
@@ -376,7 +378,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
-  function launchTask(task: Task, store: SqliteTaskStore, req: { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean }): void {
+  function launchTask(task: Task, store: SqliteTaskStore, req: TaskRunOptions): void {
     const mode = defaultApiMode(task.mode)
     // Batch and crawl tasks apply their stored formats and page options to
     // every page. A task stored before crawl formats existed has neither and
@@ -385,7 +387,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {})
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.allowlistedDomains.length ? { allowlistedDomains: req.allowlistedDomains } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -449,6 +452,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       resumeFrom: req.resume ? task.id : null,
       useCached: req.useCached,
       taskId: task.id,
+      ...req.scope,
     }).then(async () => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await store.close()
@@ -473,7 +477,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     void store.getTask(name).then(task => {
       const unfinished = task !== null && !inflight.has(task.id) && ['pending', 'running', 'paused'].includes(task.status)
       if (unfinished && task.batch) {
-        launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(task.batch.urls.map(url => new URL(url).hostname))], useCached: false, resume: true })
+        launchTask(task, store, batchRunOptions(task.batch.urls, true))
       } else if (unfinished && crawlOptionsStored(task)) {
         launchTask(task, store, crawlRunOptions(task, true))
       } else void store.close()
@@ -580,6 +584,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxDepth: req.maxDepth ?? null,
           allowlistedDomains: req.allowlistedDomains ?? [],
           useCached: req.useCached === true,
+          regexOnFullURL: req.regexOnFullURL === true,
+          ignoreQueryParameters: req.ignoreQueryParameters === true,
+          deduplicateSimilarURLs: req.deduplicateSimilarURLs !== false,
+          crawlEntireDomain: req.crawlEntireDomain === true,
+          allowSubdomains: req.allowSubdomains === true,
+          allowExternalLinks: req.allowExternalLinks === true,
           ...pageOptions(req),
         },
         ...attributionOf(req),
@@ -620,7 +630,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
-      launchTask(task, store, { maxDepth: 0, allowlistedDomains: [...new Set(urls.map(url => new URL(url).hostname))], useCached: false, resume: false })
+      launchTask(task, store, batchRunOptions(urls, false))
       return { taskId }
       } finally { batchStartInProgress = false }
     },
@@ -931,9 +941,61 @@ function crawlOptionsStored(task: Task): boolean {
   return task.batch === undefined && task.crawl?.maxDepth !== undefined
 }
 
-/** The run options a crawl task was stored with. */
-function crawlRunOptions(task: Task, resume: boolean): { maxDepth: number | null; allowlistedDomains: readonly string[]; useCached: boolean; resume: boolean } {
-  return { maxDepth: task.crawl?.maxDepth ?? null, allowlistedDomains: task.crawl?.allowlistedDomains ?? [], useCached: task.crawl?.useCached === true, resume }
+/** The URL-scope options of a run, as CrawlStartRequest names them. */
+type CrawlScopeOptions = Required<Pick<CrawlStartRequest, 'regexOnFullURL' | 'ignoreQueryParameters' | 'deduplicateSimilarURLs' | 'crawlEntireDomain' | 'allowSubdomains' | 'allowExternalLinks'>>
+
+/** What launchTask runs a task with: its stored limits and scope, and the hosts governance lets its ladder fetch (empty: no restriction). */
+interface TaskRunOptions {
+  maxDepth: number | null
+  allowlistedDomains: readonly string[]
+  useCached: boolean
+  resume: boolean
+  scope: CrawlScopeOptions
+  policyAllowlist: readonly string[]
+}
+
+/** A batch never discovers: its frontier takes the whole host and exact canonical URLs, and governance its own URLs' hosts. */
+const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }
+
+function batchRunOptions(urls: readonly string[], resume: boolean): TaskRunOptions {
+  const hosts = [...new Set(urls.map(url => new URL(url).hostname))]
+  return { maxDepth: 0, allowlistedDomains: hosts, useCached: false, resume, scope: BATCH_SCOPE, policyAllowlist: hosts }
+}
+
+/**
+ * The run options a crawl task was stored with. A task stored before the
+ * URL-scope options were kept runs under the rule it was started with: the
+ * whole host (`crawlEntireDomain`) and exact canonical URLs (no
+ * `deduplicateSimilarURLs`).
+ */
+function crawlRunOptions(task: Task, resume: boolean): TaskRunOptions {
+  const stored = task.crawl
+  const allowlistedDomains = stored?.allowlistedDomains ?? []
+  const scope: CrawlScopeOptions = {
+    regexOnFullURL: stored?.regexOnFullURL ?? false,
+    ignoreQueryParameters: stored?.ignoreQueryParameters ?? false,
+    deduplicateSimilarURLs: stored?.deduplicateSimilarURLs ?? false,
+    crawlEntireDomain: stored?.crawlEntireDomain ?? true,
+    allowSubdomains: stored?.allowSubdomains ?? false,
+    allowExternalLinks: stored?.allowExternalLinks ?? false,
+  }
+  return { maxDepth: stored?.maxDepth ?? null, allowlistedDomains, useCached: stored?.useCached === true, resume, scope, policyAllowlist: crawlPolicyAllowlist(task.seedUrl, allowlistedDomains, scope) }
+}
+
+/**
+ * The hosts governance lets a crawl's ladder fetch, from the frontier's host
+ * rule. With `allowExternalLinks`, or when the request names no hosts, there
+ * is no list: the frontier alone scopes the crawl, as before, so a seed that
+ * redirects to another host keeps working. When hosts are named, the seed's
+ * host and its www twin are always on the list too (the seed must be
+ * fetched), and `*.apex` when `allowSubdomains` admits the apex's subdomains.
+ */
+function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly string[], scope: Pick<CrawlScopeOptions, 'allowSubdomains' | 'allowExternalLinks'>): readonly string[] {
+  if (scope.allowExternalLinks || allowlistedDomains.length === 0) return []
+  const host = new URL(seedUrl).hostname.toLowerCase()
+  const apex = host.startsWith('www.') ? host.slice(4) : host
+  const twin = host.startsWith('www.') ? apex : host.includes('.') && isIP(host) === 0 ? `www.${host}` : null
+  return [...new Set([host, ...(twin === null ? [] : [twin]), ...allowlistedDomains, ...(scope.allowSubdomains ? [`*.${apex}`] : [])])]
 }
 
 /** Why a crawl cannot be resumed now, or null when it can. */

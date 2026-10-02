@@ -111,7 +111,8 @@ async function interruptedAfterFirstPage(atom: ScrapeAtom, spec: Parameters<Craw
   }
 }
 
-const SEED = 'https://fixture.test/listing'
+// The seed is the site's root: a crawl stays in the seed's path subtree by default (frontier.test.ts covers the rule).
+const SEED = 'https://fixture.test/'
 const ITEM_A = 'https://fixture.test/a'
 const ITEM_B = 'https://fixture.test/b'
 
@@ -226,6 +227,40 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(dup?.result?.trace.some((t) => t.event === 'duplicate_content')).toBe(true)
     const other = steps.find((s) => s.canonicalUrl === ITEM_B)
     expect(other?.status).toBe('success')
+    // The duplicate is counted, and left out of the pages consumers read unless they ask for it.
+    expect(report.discovery).toMatchObject({ duplicateContent: 1, offered: 2, enqueued: 2 })
+    const listed = (query: { includeDuplicates?: boolean }) => store.listStepsPage(report.taskId, { limit: 10, kind: 'pages', ...query }).then((page) => page.steps.map((s) => s.canonicalUrl).sort())
+    expect(await listed({})).toEqual([ITEM_B, SEED].sort())
+    expect(await listed({ includeDuplicates: true })).toEqual([ITEM_A, ITEM_B, SEED].sort())
+  })
+
+  it('reports what became of each page\'s links, with samples, in its trace and on the attempt', async () => {
+    const HUB = 'https://fixture.test/list/'
+    const PAGE_1 = 'https://fixture.test/list/?page=1'
+    const ITEM = 'https://fixture.test/list/item'
+    const atom = new FakeAtom(new Map([
+      [HUB, outcome(HUB, [PAGE_1, 'https://fixture.test/list/?page=2', PAGE_1, 'https://other.test/x', 'https://fixture.test/about', ITEM])],
+      [ITEM, outcome(ITEM, [])],
+    ]))
+    const { store, go } = runWith(atom, { seedUrl: HUB, taskDir: '/tmp/w2l-crawl', ignoreQueryParameters: true })
+    const report = await go()
+    // The query variants fold into the seed (the first is fetched as the seed itself), the repeat is a plain duplicate,
+    // other.test is outside the host scope and /about outside the seed's /list/ subtree.
+    expect(atom.fetches).toEqual([HUB, ITEM])
+    const discovery = { offered: 6, enqueued: 1, duplicate: 1, collapsed: 2, hostDenied: 1, subtreeDenied: 1, pathDenied: 0, depthDenied: 0, duplicateContent: 0 }
+    expect(report.discovery).toEqual(discovery)
+    expect((await store.getAttempt(report.attemptId))?.discovery).toEqual(discovery)
+    expect((await store.getTask(report.taskId))?.crawl).toMatchObject({ ignoreQueryParameters: true, crawlEntireDomain: false })
+    const steps = await store.listSteps(report.taskId, report.attemptId)
+    const seed = steps.find((s) => s.canonicalUrl === HUB)!
+    expect(seed.result?.trace[0]).toMatchObject({ event: 'discovered', detail: { via: 'seed', from: null } })
+    expect(seed.result?.trace.at(-1)).toEqual({ at: 5, lane: 'http', event: 'links_offered', detail: {
+      offered: 6, enqueued: 1, duplicate: 1, collapsed: 2, hostDenied: 1, subtreeDenied: 1, pathDenied: 0, depthDenied: 0,
+      samples: { collapsed: [{ url: PAGE_1, into: HUB }, { url: 'https://fixture.test/list/?page=2', into: HUB }], hostDenied: ['https://other.test/x'] },
+    } })
+    const item = steps.find((s) => s.canonicalUrl === ITEM)!
+    expect(item.result?.trace[0]).toMatchObject({ event: 'discovered', detail: { via: 'link', from: HUB } })
+    expect(item.result?.trace.at(-1)).toMatchObject({ event: 'links_offered', detail: { offered: 0 } })
   })
 
   it('restores the queue on resume and refetches by default', async () => {
@@ -273,7 +308,10 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
       const resumed = await runWith(resumeAtom, { seedUrl: SEED, taskDir: dir, resumeFrom: firstReport.taskId }, resumeStore).go()
       expect(resumed.status).toBe('completed')
       expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
-      expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({ maxDepth: null, allowlistedDomains: [], includePaths: ['^/[ab]$'], excludePaths: ['^/b$'] })
+      expect((await resumeStore.getTask(firstReport.taskId))?.crawl).toEqual({
+        maxDepth: null, allowlistedDomains: [], includePaths: ['^/[ab]$'], excludePaths: ['^/b$'],
+        regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: true, crawlEntireDomain: false, allowSubdomains: false, allowExternalLinks: false,
+      })
       await resumeStore.close()
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -513,7 +551,7 @@ describe('CrawlOrchestrator task options, budget and politeness', () => {
   })
 
   it('follows links on the host the seed redirected to, also after a resume', async () => {
-    const MOVED = 'https://moved.test/listing'
+    const MOVED = 'https://moved.test/'
     const MOVED_A = 'https://moved.test/a'
     const redirected: ScrapeOutcome = { result: { ...page(SEED, { links: [MOVED_A] }), evidence: { ...page(SEED).evidence, finalUrl: MOVED } }, links: [MOVED_A] }
     const pages = new Map<string, ScrapeOutcome>([[SEED, redirected], [MOVED_A, outcome(MOVED_A, [])]])

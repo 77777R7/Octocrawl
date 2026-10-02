@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -216,6 +216,26 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toMatchObject({ formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/catalogue/'], excludePaths: ['^/catalogue/category/'] })
     expect(() => parseCrawlStartRequest({ url, includePaths: ['('] })).toThrow('includePaths contains an invalid regular expression: (')
     expect(() => parseCrawlStartRequest({ url, excludePaths: '^/a' })).toThrow('excludePaths must be an array')
+  })
+
+  it('accepts the crawl URL-scope booleans, refuses other types by name, and refuses allowExternalLinks beside an allowlist', () => {
+    const url = 'https://example.com/docs/'
+    const scope = { regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: true, allowExternalLinks: true }
+    expect(parseCrawlStartRequest({ url, ...scope })).toMatchObject(scope)
+    for (const name of Object.keys(scope)) {
+      expect(parseCrawlStartRequest({ url })).not.toHaveProperty(name)
+      expect(() => parseCrawlStartRequest({ url, [name]: 'yes' })).toThrow(`${name} must be a boolean`)
+      // A crawl's scope is not a scrape or batch option.
+      expect(() => parseScrapeRequest({ url, [name]: true })).toThrow(`unsupported parameter: ${name}`)
+      expect(() => parseBatchStartRequest({ urls: [url], [name]: true })).toThrow(`unsupported parameter: ${name}`)
+    }
+    expect(() => parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: ['other.test'] })).toThrow('allowExternalLinks cannot be combined with allowlistedDomains')
+    expect(parseCrawlStartRequest({ url, allowExternalLinks: true, allowlistedDomains: [] })).toMatchObject({ allowExternalLinks: true })
+    expect(parseCrawlStartRequest({ url, allowExternalLinks: false, allowlistedDomains: ['other.test'] })).toMatchObject({ allowlistedDomains: ['other.test'] })
+    expect(parseCrawlPageQuery({ includeDuplicates: 'true' })).toMatchObject({ includeDuplicates: true })
+    expect(parseCrawlPageQuery({ includeDuplicates: 'false' })).toMatchObject({ includeDuplicates: false })
+    expect(parseCrawlPageQuery({})).not.toHaveProperty('includeDuplicates')
+    expect(() => parseCrawlPageQuery({ includeDuplicates: '1' })).toThrow('includeDuplicates must be true or false')
   })
 
   it('refuses a path filter that can backtrack catastrophically, with invalid_request, and keeps lookaround', () => {

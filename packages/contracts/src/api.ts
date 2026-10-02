@@ -213,6 +213,31 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   includePaths?: readonly string[]
   /** Pathname regexes that skip a discovered link; they win over includePaths. */
   excludePaths?: readonly string[]
+  /**
+   * Match includePaths / excludePaths against a discovered link's canonical
+   * URL (scheme, host, path and query) instead of its pathname. Default false.
+   */
+  regexOnFullURL?: boolean
+  /**
+   * URLs that differ only in their query string are one page: the first
+   * variant seen is fetched, later ones are reported as collapsed. Default false.
+   */
+  ignoreQueryParameters?: boolean
+  /**
+   * `/a` and `/a/`, `/` and `/index.html`, `www.` and the apex, http and https
+   * name one page: the first variant seen is fetched, later ones are reported
+   * as collapsed. Default true.
+   */
+  deduplicateSimilarURLs?: boolean
+  /**
+   * Follow links anywhere on the start URL's host. Default false: links on
+   * that host are followed only inside the start URL's path subtree.
+   */
+  crawlEntireDomain?: boolean
+  /** Follow links to subdomains of the start URL's host (`*.apex`, with one leading `www.` removed). Default false. */
+  allowSubdomains?: boolean
+  /** Follow links to any host; cannot be combined with allowlistedDomains. Default false. */
+  allowExternalLinks?: boolean
 }
 
 export interface CrawlAccepted {
@@ -240,6 +265,8 @@ export interface CrawlPageQuery {
   cursor?: string
   limit?: number
   debug?: boolean
+  /** List the pages whose content repeated an earlier page's (status `duplicate`) too; left out by default. */
+  includeDuplicates?: boolean
 }
 export type CrawlPagesResponse = CrawlPageList<CrawlPage>
 export type CrawlErrorsResponse = CrawlPageList<CrawlError>
@@ -353,7 +380,8 @@ function asRecord(body: unknown): Record<string, unknown> {
 const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
@@ -839,17 +867,28 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
+  const allowlistedDomains = readAllowlist(rec.allowlistedDomains)
+  const scope: Partial<Record<(typeof CRAWL_SCOPE_KEYS)[number], boolean>> = {}
+  for (const key of CRAWL_SCOPE_KEYS) {
+    const value = readBoolean(rec[key], key)
+    if (value !== undefined) scope[key] = value
+  }
+  // Either the hosts to follow are listed, or every host is followed; both at once contradict each other.
+  if (scope.allowExternalLinks === true && allowlistedDomains !== undefined && allowlistedDomains.length > 0) {
+    throw new RequestError('allowExternalLinks cannot be combined with allowlistedDomains')
+  }
   return {
     url: readUrl(rec.url),
     mode,
     maxPages: readBound(rec.maxPages, 'maxPages', 1),
     maxDepth: readBound(rec.maxDepth, 'maxDepth', 0),
     useCached,
-    allowlistedDomains: readAllowlist(rec.allowlistedDomains),
+    allowlistedDomains,
     formats: readFormats(rec.formats),
     includeLinks: rec.includeLinks as boolean | undefined,
     includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
     excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
+    ...scope,
     ...page,
     ...readAttribution(rec),
   }
@@ -885,5 +924,12 @@ export function parseCrawlPageQuery(query: Record<string, string | undefined>): 
   if (query.cursor !== undefined && query.cursor.length === 0) throw new RequestError('cursor must not be empty')
   if (query.attemptId !== undefined && query.attemptId.length === 0) throw new RequestError('attemptId must not be empty')
   if (query.debug !== undefined && query.debug !== 'true' && query.debug !== 'false') throw new RequestError('debug must be true or false')
-  return { cursor: query.cursor, limit, attemptId: query.attemptId, debug: query.debug === undefined ? undefined : query.debug === 'true' }
+  if (query.includeDuplicates !== undefined && query.includeDuplicates !== 'true' && query.includeDuplicates !== 'false') throw new RequestError('includeDuplicates must be true or false')
+  return {
+    cursor: query.cursor,
+    limit,
+    attemptId: query.attemptId,
+    debug: query.debug === undefined ? undefined : query.debug === 'true',
+    ...(query.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates === 'true' }),
+  }
 }

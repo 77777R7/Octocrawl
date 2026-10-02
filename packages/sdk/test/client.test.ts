@@ -52,6 +52,7 @@ describe('W2L SDK', () => {
     const report = await client.getCrawl('task-1')
     expect(report.pagesFetched).toBe(1)
     expect((await client.getCrawlPages('task-1', { limit: 1 })).items).toHaveLength(1)
+    expect((await client.getCrawlPages('task-1', { includeDuplicates: true })).items).toHaveLength(1)
     expect((await client.getCrawlErrors('task-1')).items).toEqual([])
     expect((await client.cancelCrawl('task-1')).status).toBe('cancelled')
     expect(await client.resumeCrawl('task-1')).toEqual({ taskId: 'task-1' })
@@ -60,6 +61,7 @@ describe('W2L SDK', () => {
       'POST http://127.0.0.1:8787/v1/crawl',
       'GET http://127.0.0.1:8787/v1/crawl/task-1',
       'GET http://127.0.0.1:8787/v1/crawl/task-1/pages?limit=1',
+      'GET http://127.0.0.1:8787/v1/crawl/task-1/pages?includeDuplicates=true',
       'GET http://127.0.0.1:8787/v1/crawl/task-1/errors',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/cancel',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/resume',

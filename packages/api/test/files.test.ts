@@ -187,7 +187,8 @@ describe('file download in batch and crawl', () => {
   })
 
   it('reads the PDF and CSV a crawled page links to', async () => {
-    const start = await post('/v1/crawl', { url: `${origin}/hub`, maxPages: 5 })
+    // The hub's files are its siblings, outside the /hub/ subtree a crawl keeps to by default.
+    const start = await post('/v1/crawl', { url: `${origin}/hub`, maxPages: 5, crawlEntireDomain: true })
     const taskId = start.json.taskId as string
     await finished(() => engine.getCrawl(taskId))
     const pages = (await engine.getCrawlPages(taskId, { limit: 10 }))!.items

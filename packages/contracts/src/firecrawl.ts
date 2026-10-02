@@ -34,8 +34,9 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
-  'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl); data lists the failed and blocked pages too (with metadata.error) but not the duplicates, whose content is an earlier entry\'s, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'A crawl follows links inside the start URL\'s path subtree on its host and www twin by default (crawlEntireDomain false), folds /a and /a/, / and /index.html, www and apex, http and https into one page (deduplicateSimilarURLs true) and reports every collapsed or refused link in the native crawl status (discovery) and each page\'s trace (links_offered); allowSubdomains takes every host under the start URL\'s apex (no public-suffix list), allowExternalLinks every host, each page with its own robots.txt read.',
   'origin (the Firecrawl SDKs\' client label) and integration are stored, not echoed: the scrape record (GET /v1/scrapes/:id) and the crawl task carry them, and nothing sent to the target changes.',
   'data.metadata carries scrapeId (a UUID per call, which GET /v1/scrapes/:id looks up), proxyUsed (operator for the server\'s environment proxy, user for the caller\'s own egress, else null), timezone (the browser rung\'s declared zone, null on the HTTP rung), creditsUsed: null (W2L counts no credits), concurrencyLimited and concurrencyQueueDurationMs (whether and how long the per-origin ceiling held the fetch back). cacheState and cachedAt are left out until W2L has a cache.',
   'A page whose result W2L has advice about (a login wall, a robots.txt rule, a gate, a cut, a script-filled shell) carries data.agent_hints, one sentence each; the native response calls them agentHints. A request refused for an option W2L does not offer carries agent_hints in the error envelope, and a caller over the server\'s per-minute rate limit gets HTTP 429 { success: false, error, code: rate_limited, agent_hints } with Retry-After.',
@@ -150,6 +151,8 @@ const SHIM_FORMATS: readonly string[] = ['markdown', 'links', 'html', 'rawHtml']
 const SHIM_PAGE_FIELDS = ['title', 'description', 'language', 'keywords', 'robots', 'favicon'] as const
 /** Scrape options passed to the native request as they are; the native parser validates them. */
 const SHIM_PAGE_OPTIONS = ['onlyMainContent', 'waitFor', 'timeout', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
+/** Crawl URL-scope options that keep their Firecrawl name on the native request; the native parser validates them. */
+const SHIM_CRAWL_SCOPE_OPTIONS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'allowSubdomains', 'allowExternalLinks'] as const
 
 /** Accepted only with the value W2L already implements; any other value is rejected. */
 const SHIM_FIXED_VALUES: Readonly<Record<string, { value: boolean; reason: string }>> = {
@@ -187,7 +190,7 @@ export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
   const problems = noProblems()
-  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions'], problems)
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain'], problems)
   checkShimFixedValue(rec, '', 'ignoreSitemap', problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
@@ -201,6 +204,13 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
   if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
   if (rec.excludePaths !== undefined) native.excludePaths = rec.excludePaths
+  for (const key of SHIM_CRAWL_SCOPE_OPTIONS) if (rec[key] !== undefined) native[key] = rec[key]
+  // v1 allowBackwardLinks is v2 crawlEntireDomain; the v2 name wins when both are sent.
+  if (rec.allowBackwardLinks !== undefined) {
+    if (typeof rec.allowBackwardLinks !== 'boolean') throw new RequestError('allowBackwardLinks must be a boolean')
+    native.crawlEntireDomain = rec.allowBackwardLinks
+  }
+  if (rec.crawlEntireDomain !== undefined) native.crawlEntireDomain = rec.crawlEntireDomain
   return parseCrawlStartRequest(native)
 }
 
@@ -285,7 +295,8 @@ export function parseFirecrawlCrawlStatusQuery(query: Record<string, string | un
 export function wrapCrawlStatus(report: Pick<CrawlReport, 'status'>, steps: readonly StepRecord[], counts: FirecrawlCrawlCounts): FirecrawlCrawlStatus {
   const data: FirecrawlPage[] = []
   for (const step of steps) {
-    if (step.result !== null) data.push(firecrawlPage(step.result))
+    // A page whose body repeated an earlier page's is not a document of its own; `total` still counts it.
+    if (step.result !== null && step.status !== 'duplicate') data.push(firecrawlPage(step.result))
   }
   return {
     status: firecrawlCrawlStatus(report.status),

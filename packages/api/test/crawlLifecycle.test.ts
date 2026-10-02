@@ -257,18 +257,22 @@ describe('crawl lifecycle', () => {
     await waitFor(second, taskId, (r) => r.status === 'completed')
     const app = createApp(second)
     const page1 = await (await app.request(`/fc/v1/crawl/${taskId}?limit=4`)).json() as { status: string; completed: number; total: number; next?: string; data: Array<{ metadata: { sourceURL: string; statusCode: number | null; error?: string } }> }
-    // `/c` is a 404 and `/d` repeats `/`: both are data entries with metadata.error, and neither is completed.
+    // `/c` is a 404: a data entry with metadata.error, not completed. `/d` repeats `/`: counted in total and in the
+    // native discovery, left out of data (its content is the entry for `/`).
     expect(page1).toMatchObject({ status: 'completed', completed: 5, total: 7 })
-    expect(page1.data).toHaveLength(4)
     const next = new URL(page1.next!)
     const page2 = await (await app.request(`${next.pathname}${next.search}`)).json() as typeof page1
-    expect(page2.data).toHaveLength(3)
     expect(page2).not.toHaveProperty('next')
     const data = [...page1.data, ...page2.data]
-    expect(new Set(data.map((page) => new URL(page.metadata.sourceURL).pathname))).toEqual(new Set(['/', ...LETTERS, ...DOCUMENTS]))
+    expect(data).toHaveLength(6)
+    expect(new Set(data.map((page) => new URL(page.metadata.sourceURL).pathname))).toEqual(new Set(['/', '/a', '/b', '/c', ...DOCUMENTS]))
     expect(data.find((page) => page.metadata.sourceURL.endsWith('/c'))?.metadata).toMatchObject({ statusCode: 404, error: 'http_error' })
-    expect(data.find((page) => page.metadata.sourceURL.endsWith('/d'))?.metadata).toMatchObject({ error: 'duplicate' })
     expect(data.filter((page) => page.metadata.error === undefined)).toHaveLength(page1.completed)
+    expect((await second.getCrawl(taskId))?.discovery).toMatchObject({ duplicateContent: 1 })
+    // The native page list leaves it out too, unless asked for.
+    const pathsOf = (items: Array<{ url: string }>) => items.map((item) => new URL(item.url).pathname).sort()
+    expect(pathsOf((await second.getCrawlPages(taskId, { limit: 10 }))!.items)).toEqual(['/', '/a', '/b', ...DOCUMENTS].sort())
+    expect(pathsOf((await second.getCrawlPages(taskId, { limit: 10, includeDuplicates: true }))!.items)).toEqual(['/', ...LETTERS.filter((path) => path !== '/c'), ...DOCUMENTS].sort())
   })
 
   it('waits the robots.txt Crawl-delay between page starts and records the delay it applied', async () => {

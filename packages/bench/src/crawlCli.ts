@@ -217,6 +217,8 @@ export async function runCrawl(args: CrawlArgs): Promise<number> {
         allowlistedDomains: run.allowlistedDomains,
         resumeFrom,
         useCached: args.useCached,
+        // The CLI has no URL-scope flags yet: it keeps following the whole host, as it always did (a resume runs with the task's stored options).
+        crawlEntireDomain: true,
       })
       const steps = await store.listSteps(report.taskId, report.attemptId)
       const contentful = steps.filter((s) => s.result !== null && CONTENTFUL_STATUS.has(s.result.status)).length

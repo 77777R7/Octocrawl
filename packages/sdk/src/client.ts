@@ -503,6 +503,7 @@ export class W2L {
     if (options.limit !== undefined) params.set('limit', String(options.limit))
     if (options.attemptId !== undefined) params.set('attemptId', options.attemptId)
     if (options.debug !== undefined) params.set('debug', String(options.debug))
+    if (options.includeDuplicates !== undefined) params.set('includeDuplicates', String(options.includeDuplicates))
     const suffix = params.size === 0 ? '' : `?${params.toString()}`
     return this.get<CrawlPageList<T>>(`${path}${suffix}`, request, `crawl not found: ${path}`)
   }

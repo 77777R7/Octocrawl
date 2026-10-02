@@ -116,6 +116,8 @@ describe('w2l crawl against the fixture graph', () => {
         taskDir: dir,
         allowlistedDomains: [host],
         budget: { maxPages: 20, maxWallMs: null, maxCostUsd: null, maxTokens: null },
+        // The fixture's items are siblings of the listing; the task stores the rule, so the resume below needs no flag.
+        crawlEntireDomain: true,
       })
       expect(report.pagesFetched).toBe(1)
       expect(report.status).toBe('paused')
@@ -258,6 +260,8 @@ describe('w2l crawl against the fixture graph', () => {
         resumeFrom: taskId,
         allowlistedDomains: [host],
         budget: { maxPages: 20, maxWallMs: null, maxCostUsd: null, maxTokens: null },
+        // The killed task stored no options, so the caller's rule applies: the fixture's items are siblings of the listing.
+        crawlEntireDomain: true,
       })
       expect(resumed.taskId).toBe(taskId)
       expect(resumed.status).toBe('completed')

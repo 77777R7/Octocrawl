@@ -323,6 +323,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       cachedPages: 0,
       budgetExceeded: null,
       loopDetected: false,
+      discovery: null,
     }
     const steps: StepRecord[] = [
       {
@@ -364,6 +365,29 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(firecrawlCrawlCounts('running', counts, 3)).toEqual({ completed: 3, total: 8 })
     expect(firecrawlCrawlCounts('paused', counts, null)).toEqual({ completed: 3, total: null })
     expect(firecrawlCrawlCounts('cancelled', counts, 3)).toEqual({ completed: 3, total: 5 })
+  })
+
+  it('maps the crawl URL-scope options, allowBackwardLinks as crawlEntireDomain, and leaves duplicate pages out of status data', () => {
+    const url = 'https://example.com/docs/'
+    const scope = { regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, allowSubdomains: true, allowExternalLinks: true }
+    expect(parseFirecrawlCrawlRequest({ url, ...scope, crawlEntireDomain: true })).toMatchObject({ ...scope, crawlEntireDomain: true })
+    expect(parseFirecrawlCrawlRequest({ url, allowBackwardLinks: true })).toMatchObject({ crawlEntireDomain: true })
+    // The v2 name wins when both are sent.
+    expect(parseFirecrawlCrawlRequest({ url, allowBackwardLinks: true, crawlEntireDomain: false })).toMatchObject({ crawlEntireDomain: false })
+    expect(parseFirecrawlCrawlRequest({ url })).not.toHaveProperty('crawlEntireDomain')
+    expect(() => parseFirecrawlCrawlRequest({ url, allowBackwardLinks: 'yes' })).toThrow('allowBackwardLinks must be a boolean')
+    expect(() => parseFirecrawlCrawlRequest({ url, allowSubdomains: 1 })).toThrow('allowSubdomains must be a boolean')
+    expect(() => parseFirecrawlCrawlRequest({ url, allowExternalLinks: true, scrapeOptions: { allowSubdomains: true } })).toThrow('unsupported parameter: scrapeOptions.allowSubdomains')
+    const step = (path: string, status: 'success' | 'duplicate'): StepRecord => ({
+      id: path, taskId: 'task-1', attemptId: 'attempt-1', url: `https://example.com${path}`, canonicalUrl: `https://example.com${path}`, depth: 1, status, lane: 'http', contentHash: 'abc', cached: false,
+      result: page({ requestedUrl: `https://example.com${path}`, status, markdown: status === 'success' ? 'MAIN' : null }),
+      createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-18T00:00:00.000Z',
+    })
+    const status = wrapCrawlStatus({ status: 'completed' }, [step('/', 'success'), step('/copy', 'duplicate')], { completed: 1, total: 2 })
+    expect(status.data.map((entry) => entry.metadata.sourceURL)).toEqual(['https://example.com/'])
+    expect(status.total).toBe(2)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /crawlEntireDomain/.test(d) && /allowBackwardLinks/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /not the duplicates/.test(d))).toBe(true)
   })
 
   it('maps headers, mobile, skipTlsVerification, fastMode and blockAds for scrape and for a crawl\'s scrapeOptions, with the native refusals', () => {
