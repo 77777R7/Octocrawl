@@ -24,6 +24,7 @@ import {
   firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
   parseFirecrawlCrawlStatusQuery,
+  parseFirecrawlMapRequest,
   parseFirecrawlScrapeRequest,
   parseMapRequest,
   parseScrapeRequest,
@@ -35,6 +36,7 @@ import {
   type MonitorRevision,
   wrapCrawlAccepted,
   wrapCrawlStatus,
+  wrapMap,
   wrapScrape,
   type ScrapeResponse,
 } from '@w2l/contracts'
@@ -491,6 +493,12 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const req = parseFirecrawlCrawlRequest(body)
     const accepted = await engine.startCrawl(req)
     return c.json(wrapCrawlAccepted(accepted, req.url), 200)
+  })
+
+  /** A map as Firecrawl answers one: 200 with the links as strings, success false when it found nothing; a client disconnect cancels it. */
+  app.post('/fc/v1/map', async (c) => {
+    const req = parseFirecrawlMapRequest(await c.req.json())
+    return c.json(wrapMap(await engine.map(req, { signal: c.req.raw.signal })), 200)
   })
 
   /** One page of the latest attempt's steps; `next` carries the native cursor to the following one. */
