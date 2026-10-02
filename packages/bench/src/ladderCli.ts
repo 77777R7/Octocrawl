@@ -30,8 +30,11 @@ import {
   CONTENTFUL_STATUS,
   describeEgressProxy,
   formatIdentitySummary,
+  identityBundleFrom,
   identityForRoute,
   maxFileBytesFromEnv,
+  modeIdentity,
+  previewIdentity,
   withEnvironmentProxy,
   withOperatorContact,
 } from '@w2l/contracts'
@@ -155,6 +158,13 @@ export function buildChannels(
     localPreviewRobotsException?: boolean
     /** Where the HTTP and browser rungs save files (PDF, CSV, ...) as received. */
     fileStore?: FileStore | null
+    /**
+     * Hosted public preview only: the HTTP and browser rungs add W2L's
+     * product token to the standard User-Agent (previewIdentity), so sites
+     * can see the preview and address it in robots.txt. Local runs and the
+     * API leave it unset; other modes refuse it.
+     */
+    previewProductToken?: boolean
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -162,9 +172,11 @@ export function buildChannels(
   // the browser down at the end.
   const originScheduler = opts.originScheduler ?? new OriginScheduler(opts.networkPolicy ?? defaultNetworkPolicy())
   const fileStore = opts.fileStore ?? null
-  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore)
-  const declared: IdentityBundle = identityForRoute(mode)
+  const preview = opts.previewProductToken === true
+  if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
+  const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview)
+  const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
 
   // ----------------------------------------------------------------------
   // authed_session: the ONLY rung that uses login state. It exists solely in

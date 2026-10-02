@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { buildChannels, formatScrapeReport, parseArgs, USAGE } from '../src/ladderCli.js'
-import { identityBundleFrom, modeIdentity, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
@@ -186,6 +186,16 @@ describe('buildChannels', () => {
   it('research mode without a vendor key still builds only local rungs — the vendor rung does not exist', () => {
     const channels = buildChannels('research')
     expect(channels.map((c) => c.id)).toEqual(['http', 'browser_local'])
+  })
+
+  it('declares the preview product token on the local rungs only when asked, and only in standard mode', () => {
+    const standard = modeIdentity('standard').userAgent
+    expect(buildChannels('standard').map((c) => c.identity?.userAgent)).toEqual([standard, standard])
+    const preview = buildChannels('standard', { previewProductToken: true })
+    expect(preview.map((c) => c.identity?.userAgent)).toEqual([`${standard} ${PREVIEW_PRODUCT_TOKEN}`, `${standard} ${PREVIEW_PRODUCT_TOKEN}`])
+    for (const mode of ['research', 'authed'] as const) {
+      expect(() => buildChannels(mode, { previewProductToken: true }), mode).toThrow(/standard mode/)
+    }
   })
 
   it('every channel exposes close() so the owner can release resources', () => {

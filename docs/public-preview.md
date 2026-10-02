@@ -33,6 +33,14 @@ The anonymous allowance is three attempts per browser visitor per UTC day and 10
 
 Amazon.sg browser requests also use one Firestore-backed origin lease across the two Cloud Run instances. It preserves spacing and observed Retry-After cooldown, and exhausted visitors are rejected by a read-only quota check before acquiring that lease. This coordination is specific to Amazon.sg; generic public HTTP pages still use per-request scheduling, so this release does not claim shared cross-instance pacing for every domain.
 
+## How the preview identifies itself
+
+The preview names W2L to the sites it reads, so their owners can see it in their logs and address it in robots.txt. Every request it sends (robots.txt, the page, and every request of the Amazon.sg browser context) carries the standard-mode Chrome User-Agent followed by `W2L-Preview/1.0 (+https://github.com/77777R7/w2l)` (`PREVIEW_PRODUCT_TOKEN` in `packages/contracts/src/compliance.ts`). The client hints (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`) are unchanged and still describe the Chrome that sends the request: the Chrome 128 floor on the HTTP lane, the running Chromium's major in the browser. `capturePreview` turns this on with `buildChannels`' `previewProductToken` option; the local API, CLI and MCP leave it unset, so their standard mode still sends the plain Chrome User-Agent, and research mode keeps its own `w2l-research` identity. The HTTP lane's trace and the browser's compliance record carry the User-Agent as sent, token included.
+
+robots.txt groups match by substring of the whole User-Agent, and the longest matching name wins (`matchRobotsGroup` in `packages/http-core/src/robots.ts`). A group for `w2l-preview`, or for `w2l`, which also matches research mode, therefore governs the preview in place of `*`; without one, `*` applies. A disallowed page is never requested and returns `blocked` with diagnostic `robots_disallowed`. The public docs give site owners the same instructions (`apps/public-web/content/limits.md`).
+
+Amazon.sg receives the token too. How it treats the new User-Agent is unmeasured: after a deploy that changes the User-Agent, run one Amazon.sg product preview with the owner token and compare it with the previous revision's result before relying on the Amazon route.
+
 ## Request and response
 
 `POST /api/preview` takes a JSON body of at most 8 KiB. Only `url` is required, and the page sends nothing else unless the visitor changes an option:
