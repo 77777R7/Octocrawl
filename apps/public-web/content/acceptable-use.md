@@ -1,0 +1,24 @@
+# Acceptable use policy
+
+> **DRAFT for the owner's review. Not reviewed by a lawyer. Not published.** Text in [square brackets] is a decision only the owner can make.
+
+This policy applies to the hosted preview on this site. It does not restrict your rights under the [AGPL-3.0](https://github.com/77777R7/w2l/blob/main/LICENSE) when you run the OctoCrawl software yourself; there, you are responsible for following the law and each site's rules.
+
+Last updated [date].
+
+## Do not use the preview to
+
+- **Reach what is not public.** Submit only pages anyone can open without signing in. Do not try to reach private networks, cloud metadata or other internal addresses; the preview refuses them.
+- **Get around access controls.** Do not use it to bypass logins, paywalls, CAPTCHAs, verification pages or robots.txt. The preview reports those pages as blocked; do not try to work around that result.
+- **Collect personal data.** Do not use it to gather personal data for marketing, sales leads or profiling, or to track individuals. Public posts can include names and handles. If your research involves personal data, you may need ethics approval or another legal basis.
+- **Script the preview, or get around its daily limit.** The preview is for trying OctoCrawl in a browser: do not call it from scripts, and do not clear cookies or rotate addresses to get more previews. To automate, run OctoCrawl yourself.
+- **Harm the service or other sites.** Do not overload, probe or attack the preview or the sites it reads, or use it for anything unlawful.
+- **Misrepresent results.** Do not present a blocked, incomplete or failed result as verified data.
+
+## What happens if this policy is broken
+
+Requests may be refused, access may be limited, and the preview may be paused for everyone while a problem is dealt with.
+
+## Report misuse
+
+See [Contact](/docs/contact/).
