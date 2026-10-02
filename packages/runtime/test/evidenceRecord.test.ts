@@ -152,10 +152,13 @@ describe('toEvidenceRecord', () => {
     expect(toEvidenceRecord(result(), { mode: 'standard' }, { json: { ...json, data: null, evidence: [] } })).toMatchObject({ outputSha256: { json: null }, fieldEvidence: {} })
   })
 
-  it('names a raw snapshot by its content hash and leaves an unknown file unknown', () => {
-    const withFiles = result({ evidence: { ...result().evidence, artifacts: [`/tmp/raw/${RAW}.html`, '/tmp/other/page.png'] } })
+  it('names a raw snapshot by its content hash, a screenshot by the result\'s own description, and leaves an unknown file unknown', () => {
+    const SHOT = 'c'.repeat(64)
+    const screenshot = { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 13456, sha256: SHOT, path: `/tmp/raw/${SHOT}.png`, base64: 'iVBO' }
+    const withFiles = result({ screenshot, evidence: { ...result().evidence, artifacts: [`/tmp/raw/${RAW}.html`, `/tmp/raw/${SHOT}.png`, '/tmp/other/page.png'] } })
     expect(toEvidenceRecord(withFiles, { mode: 'standard' }, {}).artifacts).toEqual([
       { kind: 'snapshot', path: `/tmp/raw/${RAW}.html`, sha256: RAW, bytes: null, contentType: null },
+      { kind: 'screenshot', path: `/tmp/raw/${SHOT}.png`, sha256: SHOT, bytes: 13456, contentType: 'image/png' },
       { kind: null, path: '/tmp/other/page.png', sha256: null, bytes: null, contentType: null },
     ])
   })

@@ -2,7 +2,7 @@
  * Agent hints: what a scrape response says about the request itself, in one
  * sentence each, so an agent reading the result knows the next honest step:
  * a recorded override, a session of its own, a wait, a request without
- * fastMode. Not a status and not a warning about the page: a hint is about
+ * fastMode, a lighter screenshot. Not a status and not a warning about the page: a hint is about
  * the request. It never quotes page text, only a host name, a status code,
  * a rule or a time, and it never points around a refusal. Present on a
  * response (`agentHints`) only when there is one.
@@ -17,6 +17,9 @@ export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane
 export function lowContentYieldHint(browserTried: boolean): string {
   return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet`
 }
+
+/** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
+export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
 /** The hint a file result carries: what its markdown is. */
 export function fileHint(file: NonNullable<FetchResult['file']>): string {
@@ -107,6 +110,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: Pick<La
   // A thin http answer the browser lane did not improve on, or could not be offered to.
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(lowContentYieldHint(browserTried))
   if (fastModeDeclined) hints.push(FAST_MODE_DECLINED_HINT)
+  // The browser lane rendered the page but could not capture the screenshot asked for.
+  if (result.warnings?.some((warning) => warning.code === 'screenshot_unavailable')) hints.push(SCREENSHOT_UNAVAILABLE_HINT)
   if (result.status === 'failed' && result.failureReason === 'http_error' && result.markdown !== null) {
     hints.push(`the server answered ${result.evidence.httpStatus ?? 'an error status'}; the markdown is that error page, not the requested page`)
   }

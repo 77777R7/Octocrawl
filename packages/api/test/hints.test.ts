@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, SCREENSHOT_UNAVAILABLE_HINT, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -87,5 +87,12 @@ describe('agent hints', () => {
     expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
     expect(hints(file('xlsx', null, null))).toEqual(['the response was a xlsx file not saved; it has no markdown'])
+  })
+
+  it('says the page stands when the browser lane could not capture the screenshot asked for, and names the lighter request', () => {
+    const unavailable = result({ lane: 'browser_local', warnings: [{ code: 'screenshot_unavailable', message: 'The browser lane rendered the page but could not capture the requested screenshot (Timeout 30000ms exceeded); the page result stands without it.' }] })
+    expect(hints(unavailable, ['browser_local'])).toEqual([SCREENSHOT_UNAVAILABLE_HINT])
+    expect(SCREENSHOT_UNAVAILABLE_HINT).toContain('screenshot_failed')
+    expect(SCREENSHOT_UNAVAILABLE_HINT).toContain('fullPage false')
   })
 })

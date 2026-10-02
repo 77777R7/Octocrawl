@@ -151,7 +151,7 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images"]')
+      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images","screenshot","screenshot@fullPage"]')
       expect(properties).toMatchObject({
         includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
         excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
@@ -184,6 +184,31 @@ describe('MCP tools', () => {
     }
     // The entry's shape is checked before any API call, as for every other option.
     await expect(callTool(client, 'scrape', { url: 'https://example.com/', formats: ['attributes'] })).rejects.toThrow('attributes format requires selectors')
+    expect(bodies).toHaveLength(3)
+  })
+
+  it('offers the screenshot format as a string, the full-page alias and an entry, and forwards it for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const entry = { type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }
+    await callTool(client, 'scrape', { url: 'https://example.com/', formats: ['markdown', 'screenshot'] })
+    await callTool(client, 'crawl', { url: 'https://example.com/', formats: ['screenshot@fullPage'] })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], formats: ['markdown', entry] })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, formats: ['markdown', 'screenshot'], origin: SDK_ORIGIN },
+      { url: 'https://example.com/', formats: [{ type: 'screenshot', fullPage: true }], origin: SDK_ORIGIN },
+      { urls: ['https://example.com/a'], formats: ['markdown', entry], origin: SDK_ORIGIN },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(JSON.stringify(properties.formats)).toContain('"screenshot@fullPage"')
+      expect(JSON.stringify(properties.formats)).toContain('{"const":"screenshot"}')
+    }
+    // The entry's bounds are checked before any API call, as for every other option.
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', formats: [{ type: 'screenshot', quality: 101 }] })).rejects.toThrow('screenshot quality must be an integer between 1 and 100')
     expect(bodies).toHaveLength(3)
   })
 

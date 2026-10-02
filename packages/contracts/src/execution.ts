@@ -1,6 +1,6 @@
 import type { RobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
-import type { AttributeSelector } from './structured.js'
+import type { AttributeSelector, ScreenshotOptions } from './structured.js'
 
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 export interface ExecutionContext {
@@ -146,4 +146,15 @@ export interface FetchOptions {
    * trace event or warning.
    */
   removeBase64Images?: boolean
+  /**
+   * Capture the rendered page as an image (the `screenshot` format): a PNG,
+   * or a JPEG at `quality`, of the viewport (the request's `viewport` within
+   * the declared screen, else the declared one) or of the document's whole
+   * height (`fullPage`, without scrolling first), taken after load,
+   * stability and `waitFor` and before the DOM is read, CSS-pixel sized. The
+   * local browser lane alone honours it, and the API selects that lane alone
+   * for such a request; the http and provider lanes ignore it. Set from the
+   * requested formats (a `screenshot` entry), not by a caller.
+   */
+  screenshot?: ScreenshotOptions
 }

@@ -67,13 +67,13 @@ describe('Firecrawl /scrape /crawl shim', () => {
       return { status: res.status, body: await res.json() }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/fc/v1/scrape', { url, formats: ['markdown', 'screenshot'], proxy: 'auto' })).toEqual({
+    expect(await post('/fc/v1/scrape', { url, formats: ['markdown', 'summary'], proxy: 'auto' })).toEqual({
       status: 400,
       body: {
         success: false,
-        error: 'unsupported parameter: proxy; unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml, images)',
+        error: 'unsupported parameter: proxy; unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)',
         code: 'unsupported_parameter',
-        details: { parameters: ['proxy'], formats: ['screenshot'] },
+        details: { parameters: ['proxy'], formats: ['summary'] },
       },
     })
     expect(await post('/fc/v1/scrape', { url, actions: [{ type: 'wait', milliseconds: 500 }] })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('actions') } })

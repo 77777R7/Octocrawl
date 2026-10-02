@@ -33,12 +33,12 @@ const PAGE_OPTION_PROPERTIES = {
 const INTEGRATION_PROPERTY = {
   integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
 } as const
-/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then. */
-const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules.'
-/** One entry of `formats`: a format name, a json schema request, or an attributes request. */
+/** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then; screenshot is null then. */
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules. screenshot (or screenshot@fullPage, or one { type: "screenshot", fullPage, quality, viewport } entry) captures the rendered page on the browser rung alone, which the request then selects (no http attempt; a server without a browser rung refuses it): a PNG, or a JPEG at quality 1 to 100, CSS-pixel sized at the declared 1280x800 viewport or the viewport asked for (320..1920 by 240..1080), of the viewport or the whole document (fullPage, without scrolling), returned as { contentType, width, height, fullPage, viewport, deviceScaleFactor, quality, bytes, sha256, path, base64 }, null when the page could not be captured.'
+/** One entry of `formats`: a format name, a json schema request, an attributes request or a screenshot request. */
 const FORMAT_ITEMS = {
   anyOf: [
-    { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml', 'images'] },
+    { type: 'string', enum: ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'screenshot', 'screenshot@fullPage'] },
     {
       type: 'object',
       properties: {
@@ -60,6 +60,22 @@ const FORMAT_ITEMS = {
         },
       },
       required: ['type', 'selectors'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        type: { const: 'screenshot' },
+        fullPage: { type: 'boolean' },
+        quality: { type: 'integer', minimum: 1, maximum: 100 },
+        viewport: {
+          type: 'object',
+          properties: { width: { type: 'integer', minimum: 320, maximum: 1920 }, height: { type: 'integer', minimum: 240, maximum: 1080 } },
+          required: ['width', 'height'],
+          additionalProperties: false,
+        },
+      },
+      required: ['type'],
       additionalProperties: false,
     },
   ],

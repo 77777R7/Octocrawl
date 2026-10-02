@@ -133,11 +133,11 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
-    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml, images)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'summary'] })).toThrow('unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
     expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
-    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
-      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: screenshot')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['summary'], location: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: summary')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
@@ -153,7 +153,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     const attributes = { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }] }
     expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'images', attributes] })).toEqual({ url, formats: ['markdown', 'images', attributes] })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['images', 'images'] } })).toMatchObject({ formats: ['images'] })
-    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', { type: 'json', schema: {} }] })).toThrow('unsupported format: json (the /fc shim supports markdown, links, html, rawHtml, images)')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', { type: 'json', schema: {} }] })).toThrow('unsupported format: json (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
     expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [] }] })).toThrow('attributes format requires selectors')
     expect(() => parseFirecrawlScrapeRequest({ url, formats: [42] })).toThrow('formats must be an array of strings or { type } objects')
     const served = wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', images: ['https://example.com/a.png'], attributes: [{ selector: 'a', attribute: 'href', values: ['/x', '/y'] }] })).data
@@ -164,17 +164,35 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /data\.images/.test(d) && /Base64-Image-Removed/.test(d))).toBe(true)
   })
 
+  it('maps the screenshot format in its three spellings for scrape and a crawl\'s scrapeOptions, and serves data.screenshot as a data URI', () => {
+    const url = 'https://example.com/'
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toEqual({ url, formats: ['markdown', 'screenshot'] })
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['screenshot@fullPage'] })).toEqual({ url, formats: [{ type: 'screenshot', fullPage: true }] })
+    const entry = { type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['markdown', entry] } })).toMatchObject({ formats: ['markdown', entry] })
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
+    expect(() => parseFirecrawlScrapeRequest({ url, formats: ['screenshot', 'screenshot@fullPage'] })).toThrow('formats must contain at most one screenshot entry')
+    const screenshot = { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot })).data.screenshot).toBe('data:image/png;base64,iVBO')
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot: { ...screenshot, contentType: 'image/jpeg', quality: 60 } })).data.screenshot).toBe('data:image/jpeg;base64,iVBO')
+    // Asked for, and the browser rung could not capture it: null, never a placeholder; not asked for: no key.
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln', screenshot: null })).data).toMatchObject({ screenshot: null })
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data).not.toHaveProperty('screenshot')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /data\.screenshot/.test(d) && /browser rung/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /No fire-engine/.test(d) && /screenshots/.test(d))).toBe(false)
+  })
+
   it('gives shim rejections a code and names what was rejected in details', () => {
     const url = 'https://example.com/'
     const thrown = (fn: () => unknown): unknown => {
       try { fn() } catch (error) { return error }
       return undefined
     }
-    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'json', 'screenshot'] })))
-      .toMatchObject({ code: 'unsupported_format', details: { formats: ['json', 'screenshot'] } })
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'json', 'summary'] })))
+      .toMatchObject({ code: 'unsupported_format', details: { formats: ['json', 'summary'] } })
     // Parameters and formats together: the parameter code wins and details keep both lists.
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], actions: [] } })))
-      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['screenshot'] } })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, proxy: 'stealth', scrapeOptions: { formats: ['summary'], actions: [] } })))
+      .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy', 'scrapeOptions.actions'], formats: ['summary'] } })
     expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })))
       .toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreSitemap'] } })
     expect(thrown(() => parseFirecrawlScrapeRequest({ url: 'ftp://example.com/' }))).toMatchObject({ code: 'invalid_request' })

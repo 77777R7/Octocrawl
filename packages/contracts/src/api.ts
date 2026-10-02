@@ -5,14 +5,14 @@
  * CrawlReport — no second result enum. Types only.
  */
 
-import type { CrawlMode, RobotsOverride } from './compliance.js'
+import { BROWSER_FINGERPRINT, browserFingerprintFor, type CrawlMode, type RobotsOverride } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchOptions } from './execution.js'
 import type { FetchResult, FetchWarning, LadderRunAudit } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
-import type { AttributeSelector, ScrapeFormat, StructuredExtractionResult } from './structured.js'
+import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -27,10 +27,11 @@ export const MAX_WAIT_FOR_MS = 60_000
  * Per-page capture options shared by scrape, batch and crawl (for batch and
  * crawl they apply to every page). A robots override is never one of them:
  * it names one URL (`ScrapeRequest.robotsOverride`, `BatchStartRequest.robotsOverrides`).
- * Nor are `includeHtml`, `includeRawHtml`, `includeImages` and `attributes`:
- * the `html`, `rawHtml`, `images` and `attributes` formats ask for those.
+ * Nor are `includeHtml`, `includeRawHtml`, `includeImages`, `attributes` and
+ * `screenshot`: the `html`, `rawHtml`, `images`, `attributes` and `screenshot`
+ * formats ask for those.
  */
-export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes'> {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -180,7 +181,7 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'attributes')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'attributes' | 'screenshot')[]
   markdown?: string | null
   /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
   html?: string | null
@@ -191,6 +192,8 @@ export interface CompactScrapeResponse {
   images?: readonly string[]
   /** Present when an `attributes` entry was asked for and the page was read as content, as on the full response. */
   attributes?: FetchResult['attributes']
+  /** Present when a `screenshot` entry was asked for, as on the full response: the capture, or null when the browser lane rendered no page or could not capture it. */
+  screenshot?: FetchResult['screenshot']
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
   metadata: ScrapeResponseMetadata
@@ -616,15 +619,23 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
 }
 
 /** The formats a request names as strings; `attributes` carries its selectors and is named as an object. */
-const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images']
+const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'screenshot']
 const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes']
+/** Firecrawl v1's spelling of a full-page screenshot: `{ type: 'screenshot', fullPage: true }`. */
+const SCREENSHOT_FULL_PAGE_ALIAS = 'screenshot@fullPage'
 const JSON_FORMAT_KEYS: readonly string[] = ['type', 'schema', 'prompt', 'modelFallback']
 const ATTRIBUTES_FORMAT_KEYS: readonly string[] = ['type', 'selectors']
 const ATTRIBUTE_SELECTOR_KEYS: readonly string[] = ['selector', 'attribute']
+const SCREENSHOT_FORMAT_KEYS: readonly string[] = ['type', 'fullPage', 'quality', 'viewport']
+const SCREENSHOT_VIEWPORT_KEYS: readonly string[] = ['width', 'height']
+/** The smallest window a screenshot may ask for; the largest is the declared screen (`BROWSER_FINGERPRINT.screen`, 1920x1080). */
+export const MIN_SCREENSHOT_VIEWPORT = { width: 320, height: 240 } as const
 /** An HTML attribute name, as the attributes format reads it. */
 const ATTRIBUTE_NAME = /^[A-Za-z_][A-Za-z0-9_:.-]*$/
 const ATTRIBUTES_SELECTORS_MESSAGE = 'attributes format requires selectors: an array of 1 to 50 {selector, attribute} entries'
-const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, html, rawHtml, images, a json schema request or an attributes request'
+const SCREENSHOT_VIEWPORT_MESSAGE = `screenshot viewport must be {width, height} with integers within ${MIN_SCREENSHOT_VIEWPORT.width}..${BROWSER_FINGERPRINT.screen.width} by ${MIN_SCREENSHOT_VIEWPORT.height}..${BROWSER_FINGERPRINT.screen.height}`
+const SCREENSHOT_ENTRIES_MESSAGE = 'formats must contain at most one screenshot entry'
+const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, html, rawHtml, images, screenshot, a json schema request, an attributes request or a screenshot request'
 
 /**
  * The selectors of an attributes format: 1 to 50 `{ selector, attribute }`
@@ -645,12 +656,61 @@ function readAttributeSelectors(value: unknown): readonly AttributeSelector[] {
   })
 }
 
+/**
+ * A screenshot entry's options: `fullPage` a boolean, `quality` an integer
+ * 1 to 100 (a JPEG; unset is a PNG) and `viewport` a `{ width, height }`
+ * within the declared screen. A key W2L does not know is refused by name,
+ * never dropped. Only the options the entry set are kept.
+ */
+function readScreenshotFormat(rec: Record<string, unknown>): ScreenshotFormatRequest {
+  for (const key of Object.keys(rec)) if (!SCREENSHOT_FORMAT_KEYS.includes(key)) throw new RequestError(`unsupported screenshot format option: ${key}`)
+  if (rec.fullPage !== undefined && typeof rec.fullPage !== 'boolean') throw new RequestError('screenshot fullPage must be a boolean')
+  if (rec.quality !== undefined && (typeof rec.quality !== 'number' || !Number.isInteger(rec.quality) || rec.quality < 1 || rec.quality > 100)) throw new RequestError('screenshot quality must be an integer between 1 and 100')
+  const viewport = readScreenshotViewport(rec.viewport)
+  return {
+    type: 'screenshot',
+    ...(rec.fullPage === undefined ? {} : { fullPage: rec.fullPage }),
+    ...(rec.quality === undefined ? {} : { quality: rec.quality }),
+    ...(viewport === undefined ? {} : { viewport }),
+  }
+}
+
+/** `{ width, height }`, integers within the smallest window and the declared desktop screen (with `mobile`, checkScreenshotViewport tightens it to the mobile screen). */
+function readScreenshotViewport(value: unknown): ScreenshotViewport | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(SCREENSHOT_VIEWPORT_MESSAGE)
+  const rec = value as Record<string, unknown>
+  for (const key of Object.keys(rec)) if (!SCREENSHOT_VIEWPORT_KEYS.includes(key)) throw new RequestError(`unsupported screenshot viewport option: ${key}`)
+  const { width, height } = rec
+  const within = (n: unknown, min: number, max: number): n is number => typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max
+  if (!within(width, MIN_SCREENSHOT_VIEWPORT.width, BROWSER_FINGERPRINT.screen.width) || !within(height, MIN_SCREENSHOT_VIEWPORT.height, BROWSER_FINGERPRINT.screen.height)) throw new RequestError(SCREENSHOT_VIEWPORT_MESSAGE)
+  return { width, height }
+}
+
+/**
+ * A screenshot viewport is a window within the declared screen: the desktop
+ * identity's 1920x1080 (readFormats checks it) or, with `mobile`, the mobile
+ * identity's 412x915. A window larger than the screen would contradict the
+ * identity (identityBundleIssues), so it is refused before anything is fetched.
+ */
+function checkScreenshotViewport(mobile: boolean | undefined, formats: readonly ScrapeFormat[] | undefined): void {
+  if (mobile !== true) return
+  const screen = browserFingerprintFor('mobile').screen
+  for (const format of formats ?? []) {
+    if (typeof format !== 'object' || format.type !== 'screenshot' || format.viewport === undefined) continue
+    if (format.viewport.width > screen.width || format.viewport.height > screen.height) {
+      throw new RequestError(`screenshot viewport ${format.viewport.width}x${format.viewport.height} is not within the declared mobile screen ${screen.width}x${screen.height}`)
+    }
+  }
+}
+
 function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length === 0) throw new RequestError('formats must be a non-empty array')
   // Name every unsupported format (string or {type}) before any other check.
   const unsupported = new Set<string>()
   for (const item of value) {
+    if (item === SCREENSHOT_FULL_PAGE_ALIAS) continue
     const type: unknown = item !== null && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>).type : item
     if (typeof type === 'string' && !FORMAT_NAMES.includes(type)) unsupported.add(type)
   }
@@ -663,6 +723,13 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
     if (typeof item === 'string') {
       // The attributes format carries its selectors, so it is named as an object.
       if (item === 'attributes') throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
+      // One screenshot per request, however it is spelled: the string, Firecrawl v1's full-page alias or an object.
+      if (item === 'screenshot' || item === SCREENSHOT_FULL_PAGE_ALIAS) {
+        if (logical.has('screenshot')) throw new RequestError(SCREENSHOT_ENTRIES_MESSAGE)
+        logical.add('screenshot')
+        formats.push(item === 'screenshot' ? 'screenshot' : { type: 'screenshot', fullPage: true })
+        continue
+      }
       if (!STRING_FORMATS.includes(item)) throw new RequestError(FORMAT_ENTRY_MESSAGE)
       if (logical.has(item)) throw new RequestError('formats must not contain duplicates')
       logical.add(item)
@@ -676,6 +743,13 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
       if (logical.has('attributes')) throw new RequestError('formats must contain at most one attributes entry')
       logical.add('attributes')
       formats.push({ type: 'attributes', selectors: readAttributeSelectors(rec.selectors) })
+      continue
+    }
+    if (rec.type === 'screenshot') {
+      const screenshot = readScreenshotFormat(rec)
+      if (logical.has('screenshot')) throw new RequestError(SCREENSHOT_ENTRIES_MESSAGE)
+      logical.add('screenshot')
+      formats.push(screenshot)
       continue
     }
     if (rec.type !== 'json') throw new RequestError(FORMAT_ENTRY_MESSAGE)
@@ -867,7 +941,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
-  return {
+  const req: ScrapeRequest = {
     url: readUrl(rec.url),
     mode,
     allowlistedDomains: readAllowlist(rec.allowlistedDomains),
@@ -878,6 +952,8 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
     ...readAttribution(rec),
   }
+  checkScreenshotViewport(req.mobile, req.formats)
+  return req
 }
 
 export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
@@ -891,7 +967,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
-  return {
+  const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
     maxPages: readBound(rec.maxPages, 'maxPages', 1),
@@ -905,6 +981,8 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     ...page,
     ...readAttribution(rec),
   }
+  checkScreenshotViewport(req.mobile, req.formats)
+  return req
 }
 
 export function parseBatchStartRequest(body: unknown): BatchStartRequest {
@@ -920,12 +998,14 @@ export function parseBatchStartRequest(body: unknown): BatchStartRequest {
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec)
   checkMobileMode(mode, page.mobile)
-  return {
+  const req: BatchStartRequest = {
     urls, mode, formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
     ...page,
     ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
     ...readAttribution(rec),
   }
+  checkScreenshotViewport(req.mobile, req.formats)
+  return req
 }
 
 export function parseCrawlPageQuery(query: Record<string, string | undefined>): CrawlPageQuery {

@@ -122,9 +122,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
-      .toThrow('unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml, images, attributes)')
-    expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'screenshot' }] })).toThrow('unsupported format: screenshot')
+    expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
+      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, screenshot, attributes)')
+    expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'summary' }] })).toThrow('unsupported format: summary')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
   })
@@ -172,10 +172,36 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href' }], prompt: 'x' }] })).toThrow('unsupported attributes format option: prompt')
     expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href', all: true }] }] })).toThrow('unsupported attributes selector option: all')
     expect(() => parseScrapeRequest({ url, formats: [attributes, attributes] })).toThrow('formats must contain at most one attributes entry')
-    expect(() => parseScrapeRequest({ url, formats: [{ type: 'images' }] })).toThrow('formats entries must be markdown, links, json, html, rawHtml, images, a json schema request or an attributes request')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'images' }] })).toThrow('formats entries must be markdown, links, json, html, rawHtml, images, screenshot, a json schema request, an attributes request or a screenshot request')
     // The lanes' own switches are not request fields: the formats ask for the images and attributes.
     expect(() => parseScrapeRequest({ url, includeImages: true })).toThrow('unsupported parameter: includeImages')
     expect(() => parseScrapeRequest({ url, attributes: [] })).toThrow('unsupported parameter: attributes')
+  })
+
+  it('accepts a screenshot entry as a string, Firecrawl v1\'s full-page alias or an object within its bounds, one per request, each refusal by name', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, formats: ['markdown', 'screenshot'] }).formats).toEqual(['markdown', 'screenshot'])
+    expect(parseScrapeRequest({ url, formats: ['screenshot@fullPage'] }).formats).toEqual([{ type: 'screenshot', fullPage: true }])
+    expect(parseBatchStartRequest({ urls: [url], formats: [{ type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }] }).formats).toEqual([{ type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }])
+    expect(parseCrawlStartRequest({ url, formats: [{ type: 'screenshot' }] }).formats).toEqual([{ type: 'screenshot' }])
+    // A window within the declared mobile screen is fine with the mobile identity.
+    expect(parseScrapeRequest({ url, mobile: true, formats: [{ type: 'screenshot', viewport: { width: 400, height: 900 } }] }).formats).toHaveLength(1)
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'screenshot', fullPage: 'yes' }] })).toThrow('screenshot fullPage must be a boolean')
+    for (const quality of [0, 101, 60.5, '60']) expect(() => parseScrapeRequest({ url, formats: [{ type: 'screenshot', quality }] })).toThrow('screenshot quality must be an integer between 1 and 100')
+    const viewportMessage = 'screenshot viewport must be {width, height} with integers within 320..1920 by 240..1080'
+    for (const viewport of [[1280, 800], null, { width: 319, height: 800 }, { width: 1921, height: 800 }, { width: 1280, height: 239 }, { width: 1280, height: 1081 }, { width: 1280.5, height: 800 }, { height: 800 }]) {
+      expect(() => parseScrapeRequest({ url, formats: [{ type: 'screenshot', viewport }] })).toThrow(viewportMessage)
+    }
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'screenshot', clip: {} }] })).toThrow('unsupported screenshot format option: clip')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'screenshot', viewport: { width: 800, height: 600, scale: 2 } }] })).toThrow('unsupported screenshot viewport option: scale')
+    for (const formats of [['screenshot', 'screenshot'], ['screenshot', 'screenshot@fullPage'], ['screenshot', { type: 'screenshot' }], [{ type: 'screenshot' }, { type: 'screenshot', fullPage: true }]]) {
+      expect(() => parseScrapeRequest({ url, formats })).toThrow('formats must contain at most one screenshot entry')
+    }
+    // A window larger than the declared screen would contradict the identity; the desktop bounds are the desktop screen, the mobile identity's is 412x915.
+    expect(() => parseScrapeRequest({ url, mobile: true, formats: [{ type: 'screenshot', viewport: { width: 1280, height: 800 } }] })).toThrow('screenshot viewport 1280x800 is not within the declared mobile screen 412x915')
+    expect(() => parseCrawlStartRequest({ url, mobile: true, formats: ['markdown', { type: 'screenshot', viewport: { width: 412, height: 1000 } }] })).toThrow('is not within the declared mobile screen 412x915')
+    // The lane's own switch is not a request field: the format asks for the capture.
+    expect(() => parseScrapeRequest({ url, screenshot: {} })).toThrow('unsupported parameter: screenshot')
   })
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
@@ -275,7 +301,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const url = 'https://example.com/'
     expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
     expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
-    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'screenshot' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'screenshot'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'changeTracking' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'changeTracking'] } })
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
     expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
     expect((invalid as { details?: unknown }).details).toBeUndefined()

@@ -95,6 +95,8 @@ export interface CrawlPage {
   images?: readonly string[]
   /** Present when the task asked for an `attributes` format and the page was read as content, as on a scrape result. */
   attributes?: FetchResult['attributes']
+  /** Present when the task asked for the `screenshot` format and the page rendered, as on a scrape result: the capture, or null when the browser lane could not capture it. */
+  screenshot?: FetchResult['screenshot']
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */

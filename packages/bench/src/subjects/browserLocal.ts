@@ -29,6 +29,7 @@ import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
+import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
 import { hostedBrowserRequestAllowed } from './browserRequestPolicy.js'
 import { MainFrameDocuments, reported, type MainFrameEntry } from './browserDocuments.js'
@@ -519,11 +520,27 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // The fingerprint of the declared identity: the desktop one, or the
       // mobile one (a phone viewport, touch) for the mobile identity.
       const fingerprint = browserFingerprintFor(identity.device)
+      // The screenshot format's window: the viewport asked for when it fits
+      // the declared identity (identityBundleIssues: the screen is at least
+      // the viewport), else the declared one and the capture says why. The
+      // screen, the scale factor and everything else stay as declared; a
+      // managed profile's context already exists and keeps its own window.
+      const window = managedContext === null
+        ? screenshotViewport(options.screenshot, identity, fingerprint)
+        : { viewport: fingerprint.viewport, issues: options.screenshot?.viewport === undefined ? [] : ['a managed profile keeps the window of its own context'] }
+      if (options.screenshot?.viewport !== undefined) {
+        trace.push({
+          at: Date.now() - start,
+          lane: 'browser_local',
+          event: 'screenshot_viewport',
+          detail: { requested: options.screenshot.viewport, viewport: window.viewport, declared: fingerprint.viewport, screen: fingerprint.screen, deviceScaleFactor: fingerprint.deviceScaleFactor, ...(window.issues.length === 0 ? {} : { refused: [...window.issues] }) },
+        })
+      }
       const pendingContext = managedContext ? Promise.resolve(managedContext) : browser.newContext({
         userAgent: identity.userAgent,
         locale: fingerprint.locale,
         timezoneId: fingerprint.timezoneId,
-        viewport: fingerprint.viewport,
+        viewport: window.viewport,
         screen: fingerprint.screen,
         deviceScaleFactor: fingerprint.deviceScaleFactor,
         isMobile: fingerprint.isMobile,
@@ -813,6 +830,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
       if (adsBlocked > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'ads_blocked', detail: { count: adsBlocked, hosts: [...adHostsBlocked] } })
+      // The screenshot format: the page as it stands after load, stability
+      // and waitFor, before the DOM is read below, so the image and the
+      // capture show the same page. It goes on whatever the rendered page
+      // turns out to be (a success, an error page, a gate) as evidence; a
+      // capture Chromium cannot make leaves null and a warning, the page kept.
+      const capture = options.screenshot === undefined ? null : await captureScreenshot(
+        page,
+        options.screenshot,
+        page.viewportSize() ?? window.viewport,
+        fingerprint.deviceScaleFactor,
+        execution,
+        trace,
+        () => Date.now() - start,
+        window.issues.length === 0 ? null : `the requested viewport ${options.screenshot.viewport!.width}x${options.screenshot.viewport!.height} does not fit the declared identity: ${window.issues.join('; ')}`,
+      )
+      throwIfExecutionStopped(execution)
       // The page as it is now, read while no new document loads, so that what
       // is read and the document's response belong together. A document
       // loaded since the last wait for stability (a script or a meta refresh
@@ -915,6 +948,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         truncated: false,
         truncatedAt: null,
         compliance: record,
+        // The screenshot asked for, on every result built from this page; its caveat when the capture failed.
+        ...(capture === null ? {} : { screenshot: capture.screenshot, ...(capture.warning === undefined ? {} : { warnings: [capture.warning] }) }),
         evidence: {
           finalUrl,
           httpStatus: documentResponse?.status() ?? null,
@@ -922,7 +957,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           redirectChainComplete: navigation.complete,
           contentType: documentHeaders['content-type'] ?? null,
           rawBodySha256,
-          artifacts: rawArtifacts,
+          artifacts: [...rawArtifacts, ...(capture?.artifacts ?? [])],
           fetchedAt,
           ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },

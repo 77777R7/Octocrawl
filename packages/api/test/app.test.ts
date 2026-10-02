@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
-import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS } from '@w2l/contracts'
+import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS, type FetchOptions, type ScreenshotEvidence } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
@@ -181,6 +181,90 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     } finally {
       local.closeAllConnections()
       await new Promise<void>((resolve) => local.close(() => resolve()))
+    }
+  })
+
+  it('binds a screenshot request to the browser lane alone and serves the capture on the compact and full responses, /fc and batch items, never repeated in the audit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-shot-'))
+    let httpCalls = 0
+    const asked: unknown[] = []
+    // The capture a browser lane would attach, shaped from what the engine asked it for.
+    const shot = (options?: FetchOptions): ScreenshotEvidence => {
+      const request = options?.screenshot ?? {}
+      const viewport = request.viewport ?? { width: 1280, height: 800 }
+      return { contentType: request.quality === undefined ? 'image/png' : 'image/jpeg', width: viewport.width, height: request.fullPage === true ? 3000 : viewport.height, fullPage: request.fullPage === true, viewport, deviceScaleFactor: 2, quality: request.quality ?? null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    }
+    const browserOnly = createApiEngine({ taskRoot: root, channelsFor: (mode) => buildChannels(mode, {
+      localSubjects: {
+        http: { fetch: async (url) => { httpCalls++; return httpOnlyChannels('standard')[0]!.fetch(url) } },
+        browser_local: { fetch: async (url, _deadline, _signal, _execution, options) => { asked.push(options?.screenshot); return { ...(await httpOnlyChannels('standard')[0]!.fetch(url)), lane: 'browser_local', screenshot: shot(options) } } },
+      },
+    }) })
+    try {
+      const app = createApp(browserOnly)
+      const post = async (path: string, body: unknown) => {
+        const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        return { status: res.status, body: await res.json() }
+      }
+      const url = `${server.url}/crawl/listing`
+      const compact = await post('/v1/scrape', { url, formats: ['markdown', { type: 'screenshot', viewport: { width: 800, height: 600 } }], debug: false })
+      expect(compact.body).toMatchObject({ status: 'success', lane: 'browser_local', channelsTried: ['browser_local'], formats: ['markdown', 'screenshot'], screenshot: { contentType: 'image/png', width: 800, height: 600, fullPage: false, viewport: { width: 800, height: 600 }, quality: null, base64: 'iVBO' } })
+      expect(asked.at(-1)).toEqual({ viewport: { width: 800, height: 600 } })
+      const full = await post('/v1/scrape', { url, formats: ['markdown', 'screenshot@fullPage'] })
+      expect(full.body).toMatchObject({ channelsTried: ['browser_local'], screenshot: { fullPage: true, width: 1280, height: 3000 } })
+      expect(full.body.ladderTrace[0]).toMatchObject({ event: 'ladder_channels_filtered', detail: { reason: 'screenshot', dropped: ['http'] } })
+      expect(full.body.summary.attempts.map((attempt: { result: { screenshot?: unknown } }) => attempt.result.screenshot)).toEqual([null])
+      expect(asked.at(-1)).toEqual({ fullPage: true })
+      const shim = await post('/fc/v1/scrape', { url, formats: ['markdown', { type: 'screenshot', quality: 60 }] })
+      expect(shim.body).toMatchObject({ success: true, data: { screenshot: 'data:image/jpeg;base64,iVBO' } })
+      expect(httpCalls).toBe(0)
+      // fastMode and a screenshot contradict each other; the refusal names both.
+      expect(await post('/v1/scrape', { url, formats: ['screenshot'], fastMode: true })).toMatchObject({ status: 400, body: { error: 'screenshot requires the browser lane, which fastMode declines', code: 'invalid_request' } })
+      // Without the format the ladder is the usual one, and the response has no screenshot key.
+      const plain = await post('/v1/scrape', { url, formats: ['markdown'], debug: false })
+      expect(plain.body).toMatchObject({ lane: 'http', channelsTried: ['http'] })
+      expect(plain.body).not.toHaveProperty('screenshot')
+      // A batch takes every URL on the browser lane and stores the capture once, on the item.
+      const batch = await post('/v1/batches', { urls: [url], formats: ['markdown', 'screenshot'] })
+      expect(batch.status).toBe(202)
+      await browserOnly.close()
+      const items = await (await createApp(browserOnly).request(`/v1/batches/${batch.body.taskId}/items?debug=true`)).json()
+      expect(items.items).toHaveLength(1)
+      expect(items.items[0]).toMatchObject({ status: 'success', lane: 'browser_local', screenshot: { contentType: 'image/png', width: 1280, height: 800, fullPage: false } })
+      expect(items.items[0].audit.summary.attempts.map((attempt: { result: { screenshot?: unknown } }) => attempt.result.screenshot)).toEqual([null])
+      expect(items.items[0].evidenceRecord.artifacts).toEqual([])
+      expect(httpCalls).toBe(1)
+    } finally {
+      await browserOnly.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a screenshot by name on a server without a browser lane, before anything is fetched', async () => {
+    const roots = await Promise.all([mkdtemp(join(tmpdir(), 'w2l-shot-')), mkdtemp(join(tmpdir(), 'w2l-shot-'))])
+    const engines = [
+      createApiEngine({ taskRoot: roots[0], httpOnly: true }),
+      createApiEngine({ taskRoot: roots[1], channelsFor: httpOnlyChannels, channelPolicy: () => 'http_only' }),
+    ]
+    try {
+      const url = `${server.url}/crawl/listing`
+      for (const engine of engines) {
+        const app = createApp(engine)
+        const post = async (path: string, body: unknown) => {
+          const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+          return { status: res.status, body: await res.json() }
+        }
+        const refusal = { status: 400, body: { error: 'screenshot requires the browser lane, which this deployment does not offer', code: 'invalid_request' } }
+        expect(await post('/v1/scrape', { url, formats: ['markdown', 'screenshot'] })).toMatchObject(refusal)
+        expect(await post('/v1/batches', { urls: [url], formats: ['screenshot@fullPage'] })).toMatchObject(refusal)
+        expect(await post('/v1/crawl', { url, formats: [{ type: 'screenshot' }] })).toMatchObject(refusal)
+        expect(await post('/fc/v1/scrape', { url, formats: ['screenshot'] })).toMatchObject({ status: 400, body: { success: false, error: refusal.body.error } })
+        // Nothing was stored for the refused batch and crawl.
+        expect((await (await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], debug: false }) })).json()).status).toBe('success')
+      }
+    } finally {
+      await Promise.all(engines.map((engine) => engine.close()))
+      await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })))
     }
   })
 
@@ -668,8 +752,8 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       return { status: res.status, error: ((await res.json()) as { error?: string }).error }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'screenshot', 'summary'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: screenshot, summary (supported: markdown, links, json, html, rawHtml, images, attributes)' })
+    expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
+      .toEqual({ status: 400, error: 'unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, screenshot, attributes)' })
     expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], proxy: 'auto' })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: proxy') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })

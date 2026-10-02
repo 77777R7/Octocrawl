@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
+import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
@@ -178,6 +178,24 @@ describe('format entries by type', () => {
     expect(both.images).toEqual(['https://images.example/subject.jpg'])
     // Not asked for: the result's images stay off the compact response.
     expect(await prepareScrapeResponse(extracted, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now())).not.toHaveProperty('images')
+  })
+
+  it('carries the screenshot asked for on the full and compact responses, null when the run has none, and nulls the attempt copies so the image travels once', async () => {
+    const screenshot = { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' }
+    const browser: FetchResult = { ...result, lane: 'browser_local', screenshot }
+    const run = { ...browser, channelsTried: ['browser_local'], ladderTrace: [], summary: { ...summary, channelsTried: ['browser_local'], attempts: [{ channel: 'browser_local', result: browser }] } }
+    const compact = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', 'screenshot'], debug: false }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(compact.formats).toEqual(['markdown', 'screenshot'])
+    expect(compact.screenshot).toEqual(screenshot)
+    const full = await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown', { type: 'screenshot' }], debug: true }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.screenshot).toEqual(screenshot)
+    // debug keeps the attempt's Markdown; the image alone is not repeated.
+    expect(full.summary.attempts.map((attempt) => attempt.result.screenshot)).toEqual([null])
+    expect(full.summary.attempts[0]!.result.markdown).toBe(result.markdown)
+    // Asked for, and the run carried none (no page rendered): null, never invented. Not asked for: no key.
+    const none = await prepareScrapeResponse({ ...result, channelsTried: ['browser_local'], ladderTrace: [], summary }, { url: result.requestedUrl, formats: ['screenshot'], debug: false }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(none).toMatchObject({ formats: ['screenshot'], screenshot: null })
+    expect(await prepareScrapeResponse(run, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now())).not.toHaveProperty('screenshot')
   })
 })
 
