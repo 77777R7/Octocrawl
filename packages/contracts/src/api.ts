@@ -360,7 +360,31 @@ export interface MapRequest extends RequestAttribution {
   limit?: number
   /** Milliseconds for the whole map, 1000 to MAX_MAP_TIMEOUT_MS; default DEFAULT_MAP_TIMEOUT_MS. At the deadline the map answers with what it found. */
   timeout?: number
+  /**
+   * Keep only the URLs in which every word (1 to MAP_SEARCH_MAX_WORDS words,
+   * 1 to MAP_SEARCH_MAX_CHARS characters, trimmed) appears, case-insensitively,
+   * in the percent-decoded URL or the link's title. A filter, not a ranking:
+   * discovery order is kept, and it runs before `limit` is counted.
+   */
+  search?: string
+  /** How the map uses the site's sitemap: include (default), skip (the start page alone), only (no page body read). */
+  sitemap?: SitemapMode
+  /** Admit every host under the start URL's apex (the crawl's allowSubdomains). Default false. */
+  includeSubdomains?: boolean
+  /** Fold URLs that differ only in their query string into the first one seen; the returned URL has no query. Default false. */
+  ignoreQueryParameters?: boolean
+  /** The crawl's scope options, under their crawl names and rules. */
+  includePaths?: readonly string[]
+  excludePaths?: readonly string[]
+  regexOnFullURL?: boolean
+  crawlEntireDomain?: boolean
+  /** Default true, as on a crawl. */
+  deduplicateSimilarURLs?: boolean
 }
+
+/** A map's `search`: at most this many characters after trimming, and this many whitespace-separated words. */
+export const MAP_SEARCH_MAX_CHARS = 200
+export const MAP_SEARCH_MAX_WORDS = 10
 
 export interface CrawlAccepted {
   taskId: string
@@ -702,8 +726,10 @@ const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides'
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
+/** The scope options a map takes under their crawl names; allowSubdomains is includeSubdomains on a map, and allowExternalLinks is not offered. */
+const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
 /** What a map takes. No page option (headers, mobile, skipTlsVerification, formats, ...): a map has nothing to loosen. */
-const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', ...ATTRIBUTION_KEYS] as const
+export const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', 'search', 'sitemap', ...MAP_SCOPE_KEYS, 'includePaths', 'excludePaths', ...ATTRIBUTION_KEYS] as const
 
 /**
  * An option W2L does not know is an error, never silently dropped; `at`
@@ -1487,10 +1513,23 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   return req
 }
 
+/** `search`: a string of 1 to MAP_SEARCH_MAX_CHARS characters after trimming, with at most MAP_SEARCH_MAX_WORDS words; returned trimmed. */
+function readMapSearch(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  if (trimmed.length === 0 || trimmed.length > MAP_SEARCH_MAX_CHARS || trimmed.split(/\s+/).length > MAP_SEARCH_MAX_WORDS) {
+    throw new RequestError(`search must be a string of 1 to ${MAP_SEARCH_MAX_CHARS} characters with at most ${MAP_SEARCH_MAX_WORDS} words`)
+  }
+  return trimmed
+}
+
 /**
- * A map request: url, mode (standard or research), limit, timeout, origin
- * and integration. Anything else is refused by name, `useIndex` with the
- * supported route; nothing is silently ignored.
+ * A map request: url, mode (standard or research), limit, timeout, search,
+ * sitemap, includeSubdomains, the crawl's scope options under their crawl
+ * names (ignoreQueryParameters, includePaths, excludePaths, regexOnFullURL,
+ * crawlEntireDomain, deduplicateSimilarURLs), origin and integration.
+ * Anything else is refused by name, `useIndex` with the supported route;
+ * nothing is silently ignored.
  */
 export function parseMapRequest(body: unknown): MapRequest {
   const rec = asRecord(body)
@@ -1502,11 +1541,25 @@ export function parseMapRequest(body: unknown): MapRequest {
     throw new RequestError(`limit must be an integer from 1 to ${MAX_MAP_LIMIT}`)
   }
   const timeout = readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, MAX_MAP_TIMEOUT_MS)
+  const search = readMapSearch(rec.search)
+  const sitemap = readSitemapMode(rec.sitemap)
+  const scope: Partial<Record<(typeof MAP_SCOPE_KEYS)[number], boolean>> = {}
+  for (const key of MAP_SCOPE_KEYS) {
+    const value = readBoolean(rec[key], key)
+    if (value !== undefined) scope[key] = value
+  }
+  const includePaths = readPathPatterns(rec.includePaths, 'includePaths')
+  const excludePaths = readPathPatterns(rec.excludePaths, 'excludePaths')
   return {
     url: readUrl(rec.url),
     ...(rec.mode === undefined ? {} : { mode: rec.mode }),
     ...(limit === undefined ? {} : { limit: limit as number }),
     ...(timeout === undefined ? {} : { timeout }),
+    ...(search === undefined ? {} : { search }),
+    ...(sitemap === undefined ? {} : { sitemap }),
+    ...scope,
+    ...(includePaths === undefined ? {} : { includePaths }),
+    ...(excludePaths === undefined ? {} : { excludePaths }),
     ...readAttribution(rec),
   }
 }

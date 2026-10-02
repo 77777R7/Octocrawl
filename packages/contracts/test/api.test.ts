@@ -548,17 +548,37 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 describe('parseMapRequest', () => {
   const url = 'https://www.sitemaps.org/'
 
-  it('takes url, mode, limit, timeout, origin and integration, and nothing it does not offer', () => {
+  it('takes url, mode, limit, timeout, search, sitemap and the scope options, and nothing it does not offer', () => {
     expect(parseMapRequest({ url })).toEqual({ url })
     expect(parseMapRequest({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })).toEqual({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })
     expect(parseMapRequest({ url, limit: 1, timeout: 300_000, mode: 'standard' })).toMatchObject({ limit: 1, timeout: 300_000 })
-    // The search and scope options are refused by name until they are offered; so are the page options a map has no use for.
-    for (const key of ['search', 'sitemap', 'includeSubdomains', 'ignoreQueryParameters', 'includePaths', 'excludePaths', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs', 'headers', 'mobile', 'skipTlsVerification', 'formats', 'location']) {
-      expect(thrown(() => parseMapRequest({ url, [key]: true })), key).toMatchObject({ code: 'unsupported_parameter', details: { parameters: [key] }, message: `unsupported parameter: ${key} (supported: url, mode, limit, timeout, origin, integration)` })
+    const scoped = { url, search: '  sitemap  protocol ', sitemap: 'only', includeSubdomains: true, ignoreQueryParameters: true, includePaths: ['^/docs/'], excludePaths: ['/old/'], regexOnFullURL: false, crawlEntireDomain: true, deduplicateSimilarURLs: false }
+    expect(parseMapRequest(scoped)).toEqual({ ...scoped, search: 'sitemap  protocol' })
+    // The page options a map has no use for are refused by name, and so are the crawl's host flags: includeSubdomains is a map's.
+    const supported = 'url, mode, limit, timeout, search, sitemap, includeSubdomains, ignoreQueryParameters, regexOnFullURL, crawlEntireDomain, deduplicateSimilarURLs, includePaths, excludePaths, origin, integration'
+    for (const key of ['allowSubdomains', 'allowExternalLinks', 'maxPages', 'headers', 'mobile', 'skipTlsVerification', 'formats', 'location']) {
+      expect(thrown(() => parseMapRequest({ url, [key]: true })), key).toMatchObject({ code: 'unsupported_parameter', details: { parameters: [key] }, message: `unsupported parameter: ${key} (supported: ${supported})` })
     }
     expect(thrown(() => parseMapRequest({ url, useIndex: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['useIndex'] }, agentHints: [REFUSAL_HINTS.useIndex] })
     expect(thrown(() => parseMapRequest({ url, ignoreRobotsTxt: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
     expect(thrown(() => parseMapRequest({ url, stealth: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
+  })
+
+  it('checks search, sitemap and the scope options with their messages, the crawl\'s own for the shared ones', () => {
+    const searchMessage = /^search must be a string of 1 to 200 characters with at most 10 words$/
+    for (const search of ['', '   ', 'x'.repeat(201), Array.from({ length: 11 }, (_, i) => `w${i}`).join(' '), 7, null]) expect(() => parseMapRequest({ url, search }), String(search)).toThrow(searchMessage)
+    expect(parseMapRequest({ url, search: 'x'.repeat(200) }).search).toHaveLength(200)
+    expect(parseMapRequest({ url, search: Array.from({ length: 10 }, (_, i) => `w${i}`).join('\t') }).search).toContain('w9')
+    for (const sitemap of ['include', 'skip', 'only'] as const) expect(parseMapRequest({ url, sitemap })).toEqual({ url, sitemap })
+    for (const sitemap of ['all', 'INCLUDE', true, null]) expect(() => parseMapRequest({ url, sitemap })).toThrow(/^sitemap must be include, skip, or only$/)
+    for (const key of ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs']) {
+      expect(() => parseMapRequest({ url, [key]: 'true' }), key).toThrow(new RegExp(`^${key} must be a boolean$`))
+    }
+    // The path patterns take the crawl's bounds and refusals.
+    expect(() => parseMapRequest({ url, includePaths: '^/docs/' })).toThrow('includePaths must be an array of at most 1000 regular expressions of 1 to 2000 characters')
+    expect(() => parseMapRequest({ url, excludePaths: ['('] })).toThrow('excludePaths contains an invalid regular expression: (')
+    expect(() => parseMapRequest({ url, includePaths: ['(a+)+$'] })).toThrow(/^includePaths contains a regular expression that can take too long to match/)
+    expect(() => parseCrawlStartRequest({ url, includePaths: ['(a+)+$'] })).toThrow(/^includePaths contains a regular expression that can take too long to match/)
   })
 
   it('refuses mode authed, and a limit or timeout out of range, each with its message', () => {

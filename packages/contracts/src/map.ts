@@ -101,7 +101,7 @@ export interface MapRefused {
   robots: number
   /** On a host whose robots.txt was not read: past MAP_MAX_ROBOTS_HOSTS, or after the deadline. */
   robotsUnchecked: number
-  /** Left out by `search`; always 0 until the search option is offered. */
+  /** In scope but left out by `search`: not every word is in the URL or the title in hand. Counted before robots.txt and `limit`. */
   searchFiltered: number
   /** Accepted candidates offered after `limit` links were in hand. */
   overLimit: number

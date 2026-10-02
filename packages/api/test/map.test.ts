@@ -147,4 +147,24 @@ describe('POST /v1/map', () => {
     expect(second.status).toBe(429)
     expect(await second.json()).toMatchObject({ code: 'rate_limited' })
   })
+
+  it('passes the sitemap mode, search and scope options to the map: only reads no page (and is offered for a browser-only URL), skip requests no sitemap', async () => {
+    const { origin, post, requests } = await setup({ engine: { channelPolicy: (url) => (new URL(url).pathname === '/docs/' ? 'browser_only' : 'ladder') } })
+    const url = `${origin}/docs/`
+    const only = (await post({ url, sitemap: 'only', search: 'news' })).body as MapResponse
+    expect(only.links.map((link) => [link.url.replace(origin, ''), link.title])).toEqual([['/docs/news-1', 'Harbour & tide news']])
+    expect(only).toMatchObject({ status: 'completed', sources: { startPage: null, sitemap: { mode: 'only' } } })
+    // /docs/, guide, private/x and only-sitemap are in scope and do not match; /outside is not in scope.
+    expect(only.refused).toMatchObject({ searchFiltered: 4, subtreeDenied: 1, robots: 0 })
+    expect(requests.filter((path) => path.startsWith('/docs'))).toEqual([])
+    // Reading the page is refused for that URL, before anything is fetched.
+    expect(await post({ url, sitemap: 'skip' })).toMatchObject({ status: 400, body: { error: 'map is not available for this URL: this server reads it with the browser lane only' } })
+
+    const plain = await setup()
+    const skip = (await plain.post({ url: `${plain.origin}/docs/`, sitemap: 'skip', includePaths: ['^/docs/(guide|tables)$'] })).body as MapResponse
+    expect(skip.links.map((link) => link.url.replace(plain.origin, ''))).toEqual(['/docs/', '/docs/guide', '/docs/tables'])
+    expect(skip.sources.sitemap).toBeNull()
+    expect(plain.requests.filter((path) => path.includes('sitemap') || path.endsWith('.xml') || path.endsWith('.gz'))).toEqual([])
+  })
 })
+

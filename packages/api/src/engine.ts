@@ -288,6 +288,12 @@ export interface ApiEngineOptions {
 }
 
 
+/** A map with sitemap skip reads no sitemap: its runner never loads one, and this reader says so if it were asked. */
+const NO_SITEMAP: MapSources['sitemap'] = {
+  load: async () => { throw new Error('sitemap skip: no sitemap is read') },
+  close: async () => {},
+}
+
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
 const DEFAULT_WORKER_COUNT = 4
 
@@ -816,30 +822,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * looked up once per map; the sitemaps by a reader of their own on the
    * engine's policy, scheduler and robots cache. A hosted engine's caps and
    * the operator's channel policy are checked before anything is fetched.
+   * With sitemap skip no sitemap reader is made; with sitemap only no page
+   * is read, so no lane is chosen and a browser-only URL is not refused.
    */
   async function runMap(req: MapRequest, context: ExecutionContext): Promise<MapResponse> {
     if (req.limit !== undefined && req.limit > mapMaxLimit) throw new RequestError(`limit must be at most ${mapMaxLimit} on this server`)
     if (req.timeout !== undefined && req.timeout > mapMaxTimeoutMs) throw new RequestError(`timeout must be at most ${mapMaxTimeoutMs} on this server`)
-    if (options.channelPolicy?.(req.url) === 'browser_only') throw new RequestError('map is not available for this URL: this server reads it with the browser lane only')
+    const readsPage = req.sitemap !== 'only'
+    if (readsPage && options.channelPolicy?.(req.url) === 'browser_only') throw new RequestError('map is not available for this URL: this server reads it with the browser lane only')
     const mode = req.mode ?? 'standard'
-    const rungs = channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml'])
+    const rungs = readsPage ? channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml']) : null
     const requestedAt = new Date().toISOString()
     const id = crypto.randomUUID()
     const signal = context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal
     const userAgentFor = (url: string): string => prepareHttpIdentity(mode, networkPolicy.contact ?? null, new URL(url).hostname).identity.userAgent
     const robots = robotsCacheFor(mode)
     const lookups = new Map<string, ReturnType<RobotsOriginCache['lookup']>>()
-    const runner = new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
-    const sitemap = new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots })
+    const runner = rungs === null ? null : new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots })
     const sources: MapSources = {
       async readStartPage(url, scope) {
+        if (runner === null) throw new Error('a sitemap-only map reads no page')
         const run = await runner.run(url, undefined, scope, fetchOptions(undefined, ['rawHtml']))
         const result = run.result
         const links = typeof result.rawHtml === 'string' ? collectLinkDetails(result.rawHtml, result.evidence.finalUrl || url) : []
         const clientRendered = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected') === true || httpLaneAskedForBrowser(result)
         return { result, links, clientRendered }
       },
-      sitemap,
+      sitemap: sitemap ?? NO_SITEMAP,
       async robotsVerdict(url, scope) {
         const userAgent = userAgentFor(url)
         const origin = new URL(url).origin
@@ -856,7 +866,22 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const operation = (async () => {
       try {
-        const run = await new MapRunner(sources).run({ id, url: req.url, ...(req.limit === undefined ? {} : { limit: req.limit }), ...(req.timeout === undefined ? {} : { timeoutMs: req.timeout }) }, { signal })
+        // The runner takes an absent option as its default.
+        const run = await new MapRunner(sources).run({
+          id,
+          url: req.url,
+          limit: req.limit,
+          timeoutMs: req.timeout,
+          search: req.search,
+          sitemap: req.sitemap,
+          includeSubdomains: req.includeSubdomains,
+          ignoreQueryParameters: req.ignoreQueryParameters,
+          includePaths: req.includePaths,
+          excludePaths: req.excludePaths,
+          regexOnFullURL: req.regexOnFullURL,
+          crawlEntireDomain: req.crawlEntireDomain,
+          deduplicateSimilarURLs: req.deduplicateSimilarURLs,
+        }, { signal })
         const agentHints = mapAgentHints(run, mapMaxTimeoutMs)
         const { elapsedMs, ...rest } = run
         const response: MapResponse = { ...rest, ...(agentHints.length === 0 ? {} : { agentHints }), elapsedMs }
@@ -869,7 +894,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           return { ...response, warnings: [...response.warnings, { code: 'map_record_unwritten' as const, message: `the map record could not be written, so GET /v1/maps/${id} will not find it` }] }
         }
       } finally {
-        await sitemap.close()
+        await sitemap?.close()
       }
     })()
     activeScrapes.add(operation)
