@@ -217,7 +217,11 @@ function scheduleCapability(): void {
     const request = new AbortController()
     capabilityRequest = request
     try {
-      const response = await fetch(`/api/capability?url=${encodeURIComponent(url)}`, { signal: request.signal, credentials: 'same-origin' })
+      // In the body, not the query string: the hosting request log keeps every request's path and query.
+      const response = await fetch('/api/capability', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+        signal: request.signal, credentials: 'same-origin',
+      })
       if (!response.ok) return
       const result = await response.json() as CapabilityResponse
       if (request.signal.aborted || normalizeUrl(input.value) !== url) return

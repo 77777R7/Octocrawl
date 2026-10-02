@@ -21,6 +21,12 @@ export function quotaStatus(siteUsed: number, visitorUsed: number): QuotaStatus 
   return { decision, limit: VISITOR_DAILY_PREVIEWS, remaining }
 }
 
+/** When a day's counters may go: one day after that UTC day ends. A Firestore TTL policy on `expireAt` in the
+ * publicPreviewQuotas collection group deletes them after that (docs/public-preview.md). */
+export function quotaExpiry(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2))
+}
+
 export interface PreviewQuota {
   /** Advisory read-only check before acquiring a scarce origin permit. */
   check?(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaDecision>
@@ -96,7 +102,7 @@ export class FirestorePreviewQuota implements PreviewQuota {
       const response = await this.fetcher(`${this.endpointBase}:commit`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ writes: [this.write(all), this.write(own)] }),
+        body: JSON.stringify({ writes: [this.write(all, now), this.write(own, now)] }),
         signal: this.requestSignal(execution, 5_000),
       })
       if (response.ok) return 'ok'
@@ -111,9 +117,9 @@ export class FirestorePreviewQuota implements PreviewQuota {
     throw new Error('Firestore quota contention exceeded retry budget')
   }
 
-  private write(doc: DocumentRead): Record<string, unknown> {
+  private write(doc: DocumentRead, now: Date): Record<string, unknown> {
     return {
-      update: { name: doc.name, fields: { count: { integerValue: String(doc.count + 1) } } },
+      update: { name: doc.name, fields: { count: { integerValue: String(doc.count + 1) }, expireAt: { timestampValue: quotaExpiry(now).toISOString() } } },
       currentDocument: doc.updateTime === null ? { exists: false } : { updateTime: doc.updateTime },
     }
   }

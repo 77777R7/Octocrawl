@@ -33,7 +33,7 @@ export function pageMarkup(): string {
             <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
-              <p class="hero-description">Readable Markdown and checked fields from public pages, for AI agents, RAG pipelines and MCP&nbsp;clients. When a page can’t be read, you get the reason.</p>
+              <p class="hero-description">Readable Markdown and checked fields from public pages, ready for an AI&nbsp;agent, a RAG pipeline or a&nbsp;citation. When a page can’t be read, you get the reason.</p>
             </div>
           </div>
         </div>
@@ -297,7 +297,7 @@ export function pageMarkup(): string {
           <div class="footer-brand-cell">
             <a class="brand footer-brand" href="#top" aria-label="W2L home"><img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="40" height="40" /><span class="brand-name">W2L<span class="brand-dot">.</span></span></a>
             <p class="footer-tagline">Start with one link.</p>
-            <p class="footer-note">Open-source web extraction for AI agents</p>
+            <p class="footer-note">Open-source web data you can cite</p>
           </div>
           <div class="footer-cards">
             <a class="footer-card is-primary" href="#top"><span class="footer-card-mark" aria-hidden="true">→</span>Try a page<span class="card-arrow" aria-hidden="true">↑</span></a>

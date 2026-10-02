@@ -167,6 +167,22 @@ Cloud Run domain mapping is not available in `asia-southeast1`, and Cloudflare's
 
 With `W2L_PUBLIC_ORIGIN` set, page requests that did not come through the Worker (including direct `*.run.app` visits) get a 301 to the domain; `/api/*` and `/healthz` never redirect, so the release checks and holdout scripts keep working against the `run.app` URL. The Worker's free tier allows 100,000 requests a day.
 
+### Quota counter expiry
+
+Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day after the UTC day it counts (`quotaExpiry` in `packages/public-preview/src/quota.ts`). Firestore deletes expired documents only once a TTL policy exists on that field, so create it once per project:
+
+```sh
+gcloud firestore fields ttls update expireAt --collection-group=publicPreviewQuotas --enable-ttl --project="$W2L_PROJECT_ID"
+```
+
+Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their three previews back for the rest of the day):
+
+```sh
+gcloud firestore bulk-delete --collection-ids=publicPreviewQuotas --project="$W2L_PROJECT_ID"
+```
+
+Firestore usually removes an expired document within a day of its `expireAt`. The privacy page says counters expire, so both steps must be done before that page is deployed.
+
 ### Page events
 
 The page sends first-party events to `POST /api/events` (same origin only; fixed event names and short properties). When the browser signals Do Not Track or Global Privacy Control, the page sends no events and the server logs neither events nor preview outcomes for that request. Each is one stdout line with `event: "w2l_web_event"`. Every anonymous `/api/preview` answer also logs one `event: "w2l_preview"` line with its state, diagnostic code, the target's host (never its path or query), whether options were used and the server time. Both carry `vid`, a pseudonym that changes every UTC day (an HMAC of the visitor key under `W2L_QUOTA_HASH_KEY`), and `automated`, a user-agent guess for filtering crawlers. Owner-token evaluation runs are not counted. The public [privacy page](../apps/public-web/content/privacy.md) describes all of this to visitors; change it with any change to what is logged. Read them in Cloud Logging:
