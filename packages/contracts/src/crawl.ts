@@ -5,6 +5,7 @@
  * Types only — no I/O.
  */
 
+import type { AgentHints, RequestAttribution } from './api.js'
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
 import type { Evidence, FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
@@ -68,6 +69,8 @@ export interface CrawlReport {
   costUnknown?: boolean
   contentTokens: number | null
   contentTokensUnknown?: boolean
+  /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
+  attribution?: RequestAttribution
 }
 
 export interface CrawlPage {
@@ -80,6 +83,8 @@ export interface CrawlPage {
   markdown: string | null
   /** The fetch's caveats (a recorded robots override), as on a scrape result; absent when it had none. */
   warnings?: readonly FetchWarning[]
+  /** What to change about the request next time (a login wall, a robots.txt rule, a cut), as on a scrape response; absent when nothing applies. */
+  agentHints?: AgentHints
   /** Present when the task asked for the `html` format, as on a scrape result; null when the page has none. */
   html?: string | null
   /** Present when the task asked for the `rawHtml` format, as on a scrape result; null when the page has none. */

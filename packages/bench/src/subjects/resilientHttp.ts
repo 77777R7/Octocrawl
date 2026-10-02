@@ -18,6 +18,7 @@ import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { assertSafeUrl, BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, htmlFormats, isNoContentStatus, isSuccessStatus, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
@@ -43,7 +44,14 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   private readonly prepared: ReturnType<typeof prepareHttpIdentity>
-  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number) => ResilientFetcher
+  /**
+   * One wire request. `headers` are the identity's own, sent on every hop;
+   * `wire.headers` are the caller's custom headers, sent only to
+   * `initialUrl`'s origin (a cross-origin hop gets the identity alone and
+   * `wire.onWithheld` says so); `routes` are the request's own routes when it
+   * relaxed certificate verification, else the subject's.
+   */
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -58,7 +66,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    */
   constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
-    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, previewProductToken)
+    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, 'desktop', undefined, previewProductToken)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
@@ -67,17 +75,21 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.localPreviewProxy = localPreviewProxyUrl ? new ProxyAgent(validateLocalPreviewProxy(localPreviewProxyUrl)) : null
     this.robotsCache = new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy)) => async (url, init) => {
+    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
+      // The caller's headers go to the origin it named; a hop elsewhere gets the identity alone.
+      const customNames = wire === undefined ? [] : Object.keys(wire.headers)
+      const sameOrigin = new URL(url).origin === new URL(initialUrl).origin
+      if (wire !== undefined && customNames.length > 0 && !sameOrigin) wire.onWithheld(url, customNames)
       const response = await request(url, {
-        dispatcher: this.dispatcherFor(url),
+        dispatcher: this.dispatcherFor(url, routes),
         method: 'GET',
         headersTimeout: init.headersTimeoutMs,
         bodyTimeout: init.bodyTimeoutMs,
-        // Validators are bound to one representation; never forward on redirects.
-        headers: { ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}) },
+        // The identity after the custom headers, so it is never overridden. Validators are bound to one representation; never forward on redirects.
+        headers: { ...(wire !== undefined && sameOrigin ? wire.headers : {}), ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}) },
         signal: init.signal ?? signal,
       }).catch((error: unknown) => { throw proxyRefusal(error) ?? error })
       const responseHeaders = response.headers
@@ -112,16 +124,19 @@ export class ResilientHttpSubject implements SubjectAdapter {
   /**
    * The identity for a page, used for its robots.txt and every request made
    * for it: research mode with a contact declares SEC's own format to SEC.gov
-   * (see researchUserAgent), the subject's one identity everywhere else.
+   * (see researchUserAgent), the subject's one identity everywhere else; the
+   * mobile browser identity when the request asks for it (`mobile`), with the
+   * request's custom headers (`headers`) before it.
    */
-  private preparedFor(url: string): ReturnType<typeof prepareHttpIdentity> {
-    const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname, this.previewProductToken)
+  private preparedFor(url: string, options: FetchOptions): ReturnType<typeof prepareHttpIdentity> {
+    const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname, options.mobile === true ? 'mobile' : 'desktop', options.headers, this.previewProductToken)
     prepared.identity.respectsRobots = this.prepared.identity.respectsRobots
     return prepared
   }
 
-  private dispatcherFor(url: string): Dispatcher {
-    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : this.egress.dispatcherFor(url)
+  /** The dispatcher for a URL: the local preview proxy for its fixed hosts, else `routes` (a request's relaxed-TLS routes) or the subject's own. */
+  private dispatcherFor(url: string, routes: EgressRoutes | null = null): Dispatcher {
+    return this.localPreviewProxy !== null && isLocalPreviewProxyTarget(url) ? this.localPreviewProxy : (routes ?? this.egress).dispatcherFor(url)
   }
 
   /** `host:port` of the environment proxy a request to this URL goes through; null when it does not. */
@@ -141,24 +156,30 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const markDeadline = (result: FetchResult): FetchResult =>
       result.failureReason === 'timeout' && deadlinePassed() ? { ...result, usage: { ...result.usage, deadlineExceeded: true } } : result
     let permit: OriginPermit | undefined
+    // The request's own routes when it relaxed certificate verification: the
+    // one place rejectUnauthorized is false, closed with the fetch. The
+    // subject's shared routes, the robots cache's and the delivery worker's
+    // keep verifying.
+    const relaxed = options.skipTlsVerification === true ? new EgressRoutes(this.networkPolicy, undefined, { rejectUnauthorized: false }) : null
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const retryAt = this.scheduler.retryAt(origin)
-      const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
+      const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), ...(relaxed === null ? {} : { warnings: [tlsUnverifiedWarning(new URL(url).hostname)] }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), ...(permit?.limitedByConcurrency ? { concurrencyWaitMs: permit.concurrencyWaitMs } : {}), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
       return markDeadline(timed)
     } finally {
       scope.dispose()
       permit?.release()
+      await relaxed?.close()
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions, relaxed: EgressRoutes | null = null, concurrencyWaitMs?: number): Promise<FetchResult> {
     const { signal, deadlineAt, onRetryAfter, onRobotsOverride } = execution
     const start = Date.now()
     let robotsMs = 0
@@ -175,6 +196,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       queueMs,
       robotsMs,
       cooldownWaitMs,
+      // Only when the origin's concurrency ceiling held this fetch's permit.
+      ...(concurrencyWaitMs === undefined ? {} : { concurrencyWaitMs }),
       retryWaitMs,
       requestMs: Math.max(0, transportMs - bodyReadMs),
       bodyReadMs,
@@ -187,15 +210,19 @@ export class ResilientHttpSubject implements SubjectAdapter {
       totalMs,
     })
     // Set when a robots disallow was set aside by the caller's recorded
-    // decision; every result of this fetch then carries the warning.
+    // decision; every result of this fetch then carries the warning. So does
+    // every result of a fetch that relaxed certificate verification.
     let overrideWarning: FetchWarning | null = null
+    const tlsWarning: FetchWarning | null = relaxed === null ? null : tlsUnverifiedWarning(new URL(url).hostname)
+    const leadWarnings = (): FetchWarning[] => [...(overrideWarning === null ? [] : [overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
     const timedDenied = (failureReason: FetchResult['failureReason'], retryAt?: number): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const denied = this.denied(url, start, trace, failureReason)
+      const warnings = leadWarnings()
       return {
         ...denied,
         ...(retryAt === undefined ? {} : { retryAt }),
-        ...(overrideWarning === null ? {} : { warnings: [overrideWarning] }),
+        ...(warnings.length === 0 ? {} : { warnings }),
         usage: {
           ...denied.usage,
           wallMs: totalMs,
@@ -204,11 +231,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
       }
     }
     const trace: TraceEvent[] = []
-    const prepared = this.preparedFor(url)
+    const prepared = this.preparedFor(url, options)
     const honest = recordHttpIdentity(prepared, trace, 0)
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
     }
+    // What the caller added is on the record, values included.
+    const customHeaders = Object.entries(prepared.customHeaders).map(([name, value]) => ({ name, value }))
+    if (customHeaders.length > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'request_headers_added', detail: { headers: customHeaders } })
+    if (relaxed !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'tls_verification_skipped', detail: { host: new URL(url).hostname } })
     if (this.localPreviewRobotsException) {
       trace.push({ at: Date.now() - start, lane: 'http', event: 'local_platform_robots_exception', detail: { host: new URL(url).hostname } })
     }
@@ -228,7 +259,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (prepared.identity.respectsRobots) {
       const robotsStart = performance.now()
       let cached: Awaited<ReturnType<RobotsOriginCache['lookup']>>
-      try { cached = await this.robotsCache.lookup(url, prepared.identity.userAgent, execution) }
+      // A relaxed fetch reads robots.txt through its own relaxed routes too, so the verdict is the publisher's rather than `unreachable`.
+      try { cached = await this.robotsCache.lookup(url, prepared.identity.userAgent, execution, relaxed === null ? undefined : (target) => this.dispatcherFor(target, relaxed)) }
       catch (error) {
         robotsMs = performance.now() - robotsStart
         if (signal?.aborted) return timedDenied('timeout')
@@ -267,6 +299,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
         // this says who set it aside and why, and the result's warnings
         // repeat it.
         const override = options.robotsOverride
+        if (robotsDecision.unreachable !== undefined && cached?.error?.tls === true) {
+          // robots.txt could not be read because the host's certificate does not
+          // verify; the page would fail the same way. That is the fact to report.
+          trace.push({ at: Date.now() - start, lane: 'http', event: 'request_failed', detail: { reason: 'tls_error', url: robotsDecision.robotsUrl, error: cached.error.name, ...(cached.error.code === null ? {} : { code: cached.error.code }) } })
+          return timedDenied('tls_error')
+        }
         if (override === undefined || robotsDecision.unreachable !== undefined) return timedDenied('policy_denied')
         trace.push({
           at: Date.now() - start,
@@ -286,13 +324,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
     const transportStart = performance.now()
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
-    const out = await resilientFetch(url, this.fetcherFor(url, prepared.headers, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
+    const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
     }, (target, proxy) => {
       trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
-    }, maxFileBytes), {
+    }, maxFileBytes, {
+      headers: prepared.customHeaders,
+      onWithheld: (to, names) => trace.push({ at: Date.now() - start, lane: 'http', event: 'custom_headers_withheld', detail: { to, names: [...names] } }),
+    }, relaxed), {
       signal,
       deadlineAt,
       onRetryAfter: (target, retryAt) => {
@@ -421,9 +462,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }
     const finish = <T extends FetchResult>(result: T): T => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
+      const lead = leadWarnings()
       return {
         ...result,
-        ...(overrideWarning === null ? {} : { warnings: [overrideWarning, ...(result.warnings ?? [])] }),
+        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -546,7 +588,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // includeTags names, which is the answer on any page that is not
     // blocked; excludeTags is left out of all of these.
     const extractStart = performance.now()
-    const extracted = extractTf.extract(body, { url: out.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
+    const extracted = extractTf.extract(body, { url: out.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
     const extractionTotalMs = performance.now() - extractStart
     parseMs = extracted.timings.parseMs
     extractMs = Math.max(extracted.timings.extractMs, extractionTotalMs - parseMs)

@@ -7,6 +7,10 @@ interface Waiter {
   resolve: (permit: OriginPermit) => void
   reject: (reason: unknown) => void
   abort: () => void
+  /** Set while the origin's concurrency ceiling holds this waiter back: when the hold began (monotonic). */
+  heldSince?: number
+  /** Milliseconds the ceiling has held this waiter so far. */
+  heldMs: number
 }
 
 interface OriginState {
@@ -19,8 +23,18 @@ interface OriginState {
 }
 
 export interface OriginPermit {
+  /** Every wait but a cooldown: the concurrency ceiling and the minimum interval. */
   queueMs: number
   cooldownWaitMs: number
+  /** True when the origin's concurrency ceiling (every slot taken) held this permit back at some point. */
+  limitedByConcurrency: boolean
+  /**
+   * Milliseconds the ceiling held it: from joining (or from the moment the
+   * last slot was taken) until a slot freed, a concurrent cooldown and the
+   * minimum interval excluded, which stay in `cooldownWaitMs` and `queueMs`.
+   * 0 when the permit was not held.
+   */
+  concurrencyWaitMs: number
   release(): void
 }
 
@@ -77,7 +91,7 @@ export class OriginScheduler {
     const state = this.state(origin)
     return new Promise<OriginPermit>((resolve, reject) => {
       const waiter: Waiter = {
-        joinedAt: performance.now(), signal, resolve, reject,
+        joinedAt: performance.now(), signal, resolve, reject, heldMs: 0,
         abort: () => {
           const index = state.waiters.indexOf(waiter)
           if (index >= 0) state.waiters.splice(index, 1)
@@ -103,7 +117,20 @@ export class OriginScheduler {
   private pump(origin: string, state: OriginState): void {
     if (state.timer) clearTimeout(state.timer)
     state.timer = undefined
-    if (state.active >= this.limit || state.waiters.length === 0) return
+    if (state.waiters.length === 0) return
+    const mono = performance.now()
+    // Every slot taken: whoever waits now is held by the ceiling until one frees.
+    if (state.active >= this.limit) {
+      for (const waiter of state.waiters) waiter.heldSince ??= mono
+      return
+    }
+    // A slot is free: the hold ends here for everyone; what follows (a
+    // cooldown, the minimum interval) is pacing, counted elsewhere.
+    for (const waiter of state.waiters) {
+      if (waiter.heldSince === undefined) continue
+      waiter.heldMs += Math.max(0, mono - waiter.heldSince)
+      waiter.heldSince = undefined
+    }
     const now = Date.now()
     const readyAt = Math.max(state.cooldownUntil, state.lastStartedAt + this.minDelayMs)
     if (readyAt > now) {
@@ -116,10 +143,14 @@ export class OriginScheduler {
     state.lastStartedAt = now
     const waited = Math.max(0, performance.now() - waiter.joinedAt)
     const cooldownWaitMs = Math.min(waited, Math.max(0, state.cooldownUntil - (now - waited)))
+    // A hold that ran beside a cooldown is the cooldown's: the concurrency wait never exceeds the rest.
+    const concurrencyWaitMs = Math.min(waiter.heldMs, Math.max(0, waited - cooldownWaitMs))
     let released = false
     waiter.resolve({
       queueMs: Math.max(0, waited - cooldownWaitMs),
       cooldownWaitMs,
+      limitedByConcurrency: waiter.heldMs > 0,
+      concurrencyWaitMs,
       release: () => {
         if (released) return
         released = true

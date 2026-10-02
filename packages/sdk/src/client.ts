@@ -22,10 +22,12 @@ import type {
   MonitorPreview,
   MonitorRun,
   MonitorRunDetail,
+  ScrapeRecord,
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
-import { DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, type ApiErrorCode } from '@w2l/contracts'
+import { DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
+import { SDK_VERSION } from './version.js'
 
 export interface W2LOptions {
   baseUrl: string
@@ -77,7 +79,16 @@ function headersWait(ms: number): { dispatch(options: object, handler: unknown):
  */
 export interface RequestOptions {
   signal?: AbortSignal
+  /**
+   * The `origin` a scrape, crawl or batch is recorded under when its options
+   * set none: a host built on the SDK (the MCP server) names its own client
+   * here. The default is `js-sdk@<SDK_VERSION>`.
+   */
+  origin?: string
 }
+
+/** What the SDK records as `origin` unless the caller or the host says otherwise. */
+export const SDK_ORIGIN = `js-sdk@${SDK_VERSION}`
 
 /**
  * Polling for waitBatch and waitCrawl. A status request that fails with a
@@ -128,19 +139,23 @@ export interface BatchCollected {
 
 /**
  * The API answered with an error status. `code` is the API error code when the
- * body carried one; `body` is the parsed JSON body, or its text if it was not JSON.
+ * body carried one (`rate_limited` for HTTP 429); `body` is the parsed JSON
+ * body, or its text if it was not JSON. The SDK retries no 429 itself: a
+ * caller waits `retryAfterMs` and asks again.
  */
 export class W2LError extends Error {
   override readonly name = 'W2LError'
   constructor(
     message: string,
     readonly status: number,
-    readonly code: ApiErrorCode | undefined,
+    readonly code: ApiErrorCode | typeof RATE_LIMITED_CODE | undefined,
     readonly method: 'GET' | 'POST',
     readonly path: string,
     readonly body: unknown,
     /** The response's Retry-After in milliseconds; null when it sent none or one that does not parse. */
     readonly retryAfterMs: number | null = null,
+    /** The body's `agentHints` (the next honest step for a refused option, the wait for a rate limit); empty when it carried none. */
+    readonly agentHints: readonly string[] = [],
   ) {
     super(message)
   }
@@ -151,8 +166,10 @@ async function responseError(method: 'GET' | 'POST', path: string, res: Response
   const text = await res.text()
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
-  const code = body !== null && typeof body === 'object' && isApiErrorCode((body as { code?: unknown }).code) ? (body as { code: ApiErrorCode }).code : undefined
-  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body, retryAfterMs(res.headers.get('retry-after')))
+  const fields = body !== null && typeof body === 'object' ? (body as { code?: unknown; agentHints?: unknown }) : {}
+  const code = isApiErrorCode(fields.code) || fields.code === RATE_LIMITED_CODE ? fields.code : undefined
+  const agentHints = Array.isArray(fields.agentHints) ? fields.agentHints.filter((hint): hint is string => typeof hint === 'string') : []
+  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body, retryAfterMs(res.headers.get('retry-after')), agentHints)
 }
 
 /** Retry-After as delay-seconds or an HTTP-date, in milliseconds from now. */
@@ -217,15 +234,20 @@ export class W2L {
     // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
     // wait that long plus a margin, and no longer.
     const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
-    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url }, 200, request, deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
+    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
+  }
+
+  /** The record of one scrape call, by the `scrapeId` its response carried (`metadata.scrapeId`); a W2LError with code `not_found` for an id the server has no record of. */
+  async getScrape(id: string, request: RequestOptions = {}): Promise<ScrapeRecord> {
+    return this.get<ScrapeRecord>(`/v1/scrapes/${encodeURIComponent(id)}`, request, `scrape not found: ${id}`)
   }
 
   async crawl(url: string, opts: Omit<CrawlStartRequest, 'url'> = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
-    return this.post<CrawlAccepted>('/v1/crawl', { ...opts, url }, 202, request)
+    return this.post<CrawlAccepted>('/v1/crawl', { ...opts, url, origin: originOf(opts, request) }, 202, request)
   }
 
   async batchScrape(urls: readonly string[], opts: Omit<BatchStartRequest, 'urls'> = {}, request: RequestOptions = {}): Promise<CrawlAccepted> {
-    return this.post<CrawlAccepted>('/v1/batches', { ...opts, urls }, 202, request)
+    return this.post<CrawlAccepted>('/v1/batches', { ...opts, urls, origin: originOf(opts, request) }, 202, request)
   }
 
   async getBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {
@@ -491,6 +513,11 @@ export class W2L {
     if (!res.ok) throw await responseError('GET', path, res)
     return (await res.json()) as T
   }
+}
+
+/** The `origin` a request is recorded under: the caller's, else the host's (RequestOptions), else the SDK's own. */
+function originOf(opts: { origin?: string }, request: RequestOptions): string {
+  return opts.origin ?? request.origin ?? SDK_ORIGIN
 }
 
 /** Resolves after ms, or rejects with the signal's reason when it aborts first. */

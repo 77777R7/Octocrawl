@@ -42,6 +42,16 @@ import type { NetworkPolicy } from './policy.js'
  */
 export type CrawlMode = 'research' | 'standard' | 'authed' | 'proxy'
 
+/**
+ * The two declared browser identities. `desktop` is the one every browser
+ * mode has always sent; `mobile` (`mobile: true` on a request) is a second
+ * declared identity, Android Chrome with aligned hints and a phone viewport,
+ * that passes the same coherence and honesty checks. Neither is a statement
+ * about the host: the desktop identity claims macOS on any machine and the
+ * mobile one Android on desktop Chromium, each internally coherent.
+ */
+export type IdentityDevice = 'desktop' | 'mobile'
+
 /** Canonical UA shape per mode. Values live in http-core/bench (ua.ts), not here. */
 export interface ModeIdentity {
   mode: CrawlMode
@@ -63,6 +73,15 @@ export interface ModeIdentity {
    * the record's `robots` contradicts is a verifiable lie.
    */
   respectsRobots: boolean
+  /**
+   * Which of the two declared browser identities this is: the desktop one
+   * (macOS Chrome) or the mobile one (Android Chrome, `mobile: true`). Absent
+   * on the research identity, which declares a bot, not a device. The lanes
+   * record it (`identity_sent.detail.device`, `identity_declared`); the
+   * compliance record (schemaVersion 2) has no field for it and carries the
+   * device in its as-sent `sentHeaders` instead.
+   */
+  device?: IdentityDevice
   /**
    * The lane this mode resolves to. Modes are policy, lanes are execution:
    *   research → browser_local (declared bot identity)
@@ -206,35 +225,130 @@ export function browserClientHints(chromeMajor: number): Readonly<Record<string,
 }
 
 /**
- * Fingerprint context fields that must match the UA for a consistent browser
- * identity. Applied to the Playwright context by the subject; kept here so the
- * values are single-sourced with the UA rather than drifted per-subject.
+ * The mobile Chrome UA of the second declared identity (`mobile: true`): a
+ * Pixel 7 on Android 14, the same Chrome major as the desktop UA. Android on
+ * desktop Chromium the way the desktop identity is macOS on any host:
+ * internally coherent, not a statement about the machine.
  */
-export const BROWSER_FINGERPRINT = {
+export function mobileBrowserUserAgent(chromeMajor: number): string {
+  return `Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Mobile Safari/537.36`
+}
+
+/** Client hints aligned to the mobile UA: the same brands and major, `sec-ch-ua-mobile: ?1`, platform Android. */
+export function mobileBrowserClientHints(chromeMajor: number): Readonly<Record<string, string>> {
+  return {
+    'sec-ch-ua': `"Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}", "Not;A=Brand";v="24"`,
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+  }
+}
+
+/**
+ * The user-agent metadata Chromium derives its own client hints from
+ * (`Emulation.setUserAgentOverride.userAgentMetadata`): the brands of
+ * `sec-ch-ua` in the same order, the platform of `sec-ch-ua-platform`, the
+ * mobile flag of `sec-ch-ua-mobile`. The browser lane sets it on every page
+ * so that the hints Chromium generates itself, on a redirect hop and on the
+ * page's own requests, where a context's extra headers do not reach, are the
+ * declared ones rather than the headless shell's (`HeadlessChrome`), and so
+ * that `navigator.userAgentData` says the same as the wire.
+ */
+export interface BrowserUserAgentMetadata {
+  brands: readonly { brand: string; version: string }[]
+  fullVersionList: readonly { brand: string; version: string }[]
+  platform: string
+  platformVersion: string
+  architecture: string
+  model: string
+  mobile: boolean
+}
+
+/** The metadata behind the declared identity's client hints (browserClientHints, mobileBrowserClientHints), for a Chrome major and device. */
+export function browserUserAgentMetadata(chromeMajor: number, device: IdentityDevice = 'desktop'): BrowserUserAgentMetadata {
+  const brands = [
+    { brand: 'Chromium', version: String(chromeMajor) },
+    { brand: 'Google Chrome', version: String(chromeMajor) },
+    { brand: 'Not;A=Brand', version: '24' },
+  ]
+  return {
+    brands,
+    fullVersionList: brands.map(({ brand, version }) => ({ brand, version: `${version}.0.0.0` })),
+    platform: device === 'mobile' ? 'Android' : 'macOS',
+    platformVersion: device === 'mobile' ? '14.0.0' : '10.15.7',
+    architecture: device === 'mobile' ? '' : 'x86',
+    model: device === 'mobile' ? 'Pixel 7' : '',
+    mobile: device === 'mobile',
+  }
+}
+
+/** The `sec-ch-ua` value Chromium serializes from `brands`, so the metadata and the declared hint can be compared. */
+export function serializeBrands(brands: readonly { brand: string; version: string }[]): string {
+  return brands.map(({ brand, version }) => `"${brand}";v="${version}"`).join(', ')
+}
+
+/**
+ * Fingerprint context fields that must match the UA for a consistent browser
+ * identity: applied to the Playwright context by the subject, kept here so
+ * the values are single-sourced with the UA rather than drifted per subject.
+ */
+export interface BrowserFingerprint {
+  locale: string
+  timezoneId: string
+  viewport: { width: number; height: number }
+  screen: { width: number; height: number }
+  deviceScaleFactor: number
+  /** Whether the context reports a mobile device (`navigator.maxTouchPoints`, the viewport meta); false for the desktop identity. */
+  isMobile: boolean
+  hasTouch: boolean
+}
+
+/** The desktop identity's fingerprint. */
+export const BROWSER_FINGERPRINT: Readonly<BrowserFingerprint> = {
   locale: 'en-US',
   timezoneId: 'America/Los_Angeles',
   viewport: { width: 1280, height: 800 },
   screen: { width: 1920, height: 1080 },
   deviceScaleFactor: 2,
-} as const
+  isMobile: false,
+  hasTouch: false,
+}
+
+/** The mobile identity's fingerprint: a 412x915 phone viewport at 2.625 device pixels per CSS pixel, touch, the same locale and time zone. */
+export const MOBILE_BROWSER_FINGERPRINT: Readonly<BrowserFingerprint> = {
+  locale: 'en-US',
+  timezoneId: 'America/Los_Angeles',
+  viewport: { width: 412, height: 915 },
+  screen: { width: 412, height: 915 },
+  deviceScaleFactor: 2.625,
+  isMobile: true,
+  hasTouch: true,
+}
+
+/** The fingerprint of a declared browser identity; the desktop one for an identity that declares no device (research). */
+export function browserFingerprintFor(device: IdentityDevice | undefined): Readonly<BrowserFingerprint> {
+  return device === 'mobile' ? MOBILE_BROWSER_FINGERPRINT : BROWSER_FINGERPRINT
+}
 
 /**
  * The identity for a mode. `standard`, `authed`, and `proxy` share one
  * consistent-browser identity (they differ only in execution lane — session,
- * egress); `research` is the declared bot with no client hints, declaring the
- * operator's `contact` when there is one, in the format the page's `host`
- * asks for (see researchUserAgent).
+ * egress), the desktop one unless `device` asks for the mobile one;
+ * `research` is the declared bot with no client hints and no device,
+ * declaring the operator's `contact` when there is one, in the format the
+ * page's `host` asks for (see researchUserAgent).
  */
-export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null, host: string | null = null): ModeIdentity {
+export function modeIdentity(mode: CrawlMode, chromeMajor: number = CHROME_MAJOR_FLOOR, contact: string | null = null, host: string | null = null, device: IdentityDevice = 'desktop'): ModeIdentity {
+  const userAgent = device === 'mobile' ? mobileBrowserUserAgent(chromeMajor) : browserUserAgent(chromeMajor)
+  const clientHints = device === 'mobile' ? mobileBrowserClientHints(chromeMajor) : browserClientHints(chromeMajor)
   switch (mode) {
     case 'research':
       return { mode, userAgent: researchUserAgent(contact, host), clientHints: {}, respectsRobots: true, lane: 'browser_local' }
     case 'standard':
-      return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_local' }
+      return { mode, userAgent, clientHints, respectsRobots: true, lane: 'browser_local', device }
     case 'authed':
-      return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_local_authed' }
+      return { mode, userAgent, clientHints, respectsRobots: true, lane: 'browser_local_authed', device }
     case 'proxy':
-      return { mode, userAgent: browserUserAgent(chromeMajor), clientHints: browserClientHints(chromeMajor), respectsRobots: true, lane: 'browser_proxy' }
+      return { mode, userAgent, clientHints, respectsRobots: true, lane: 'browser_proxy', device }
   }
 }
 

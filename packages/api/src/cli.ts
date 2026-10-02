@@ -14,8 +14,9 @@ async function main(): Promise<void> {
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
     allowRobotsOverride: listen.allowRobotsOverride,
+    hosted: listen.mode === 'hosted',
   })
-  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local' })
+  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
   let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => {
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
     void engine.close({cancelActive: true}).catch((error) => { console.error(error); process.exitCode = 1 })
   })
   for (const notice of listen.notices) console.log(`w2l-api: ${notice}`)
+  if (listen.rateLimit !== undefined) console.log(`w2l-api: rate limit ${listen.rateLimit.perMinute} requests per minute per caller on scrape, crawl and batch starts`)
   console.log(`w2l-api ${listen.mode} listening on http://${listen.host}:${listen.port}`)
 }
 

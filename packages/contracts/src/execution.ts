@@ -75,6 +75,45 @@ export interface FetchOptions {
    */
   excludeTags?: readonly string[]
   /**
+   * Extra request headers, lower-cased names, validated by the API
+   * (`readHeaders`): never the User-Agent, a client hint, a credential or a
+   * transport header. The HTTP and local browser lanes send them with the
+   * requested URL and its same-origin hops and subresources, after the
+   * declared identity, and record them (`request_headers_added`). Both lanes
+   * fetch a redirect hop to another origin with the identity alone and say so
+   * (`custom_headers_withheld`); on the browser lane the headers are added per
+   * request through Chromium's request interception, which judges every hop
+   * and every file the page loads by its own origin, so a navigation the page
+   * makes to another origin gets none either. robots.txt is fetched with the
+   * identity alone. Everything here is on the record.
+   */
+  headers?: Readonly<Record<string, string>>
+  /**
+   * Fetch as the declared mobile Chrome identity (Android User-Agent, mobile
+   * client hints, 412x915 viewport, touch) instead of the desktop one. A
+   * second declared identity, not a disguise: it passes the same coherence
+   * and honesty checks, and robots.txt is evaluated against its User-Agent.
+   * Default false. Refused with research mode, which declares a bot.
+   */
+  mobile?: boolean
+  /**
+   * Local only: load a site whose certificate does not verify (self-signed,
+   * expired, wrong name). The lanes relax verification for this one fetch
+   * and its robots.txt lookup, say so in the trace
+   * (`tls_verification_skipped`) and in a `tls_unverified` warning. Default
+   * false: a certificate failure is `failed` / `tls_error`. A hosted engine
+   * refuses the option.
+   */
+  skipTlsVerification?: boolean
+  /**
+   * Abort requests to a bundled list of ad-serving hosts on the local
+   * browser lane (`ads_blocked`), and remove ad and cookie-banner elements
+   * before extraction on every lane. Default true; false keeps them in the
+   * Markdown and `html`. The hosted browser's host allowlist stays in force
+   * whatever this says.
+   */
+  blockAds?: boolean
+  /**
    * Carry `html` on a contentful result: the cleaned HTML its Markdown was
    * written from. Set from the requested formats (`html`), not by a caller.
    */

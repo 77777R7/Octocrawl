@@ -189,6 +189,23 @@ function sanitizeResult(result: FetchResult): FetchResult {
   return result
 }
 
+/**
+ * Rungs the owner of a channel list left out before handing it to the ladder,
+ * and why: a request's `fastMode` (the http rung alone), or an option the
+ * local rungs alone honour (`headers`, `mobile`, `skipTlsVerification`), for
+ * which the vendor rungs are dropped. Each run's audit opens with one
+ * `ladder_channels_filtered` event per entry, so the audit says which rungs
+ * the request never had.
+ */
+export interface ChannelsFiltered {
+  reason: string
+  dropped: readonly string[]
+}
+
+export interface LadderRunnerOptions {
+  channelsFiltered?: readonly ChannelsFiltered[]
+}
+
 export class LadderRunner {
   constructor(
     /** Channels in escalation order. Providers go after browser_local. */
@@ -202,6 +219,7 @@ export class LadderRunner {
      * the snapshot a human produced — so the next run resumes, not restarts.
      */
     private readonly sessionStore: SessionStore | null = null,
+    private readonly options: LadderRunnerOptions = {},
   ) {}
 
   /**
@@ -241,6 +259,9 @@ export class LadderRunner {
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
     const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [] }
+    for (const filtered of this.options.channelsFiltered ?? []) {
+      progress.ladderTrace.push({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: filtered.reason, dropped: [...filtered.dropped] } })
+    }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
     try { return carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides) }

@@ -8,7 +8,7 @@
  * on contradiction. This is not disguise — it is refusing to ship a lie.
  */
 
-import { BROWSER_FINGERPRINT, isResearchUserAgent, modeIdentity, type CrawlMode, type ModeIdentity } from './compliance.js'
+import { browserFingerprintFor, isResearchUserAgent, modeIdentity, type BrowserFingerprint, type CrawlMode, type IdentityDevice, type ModeIdentity } from './compliance.js'
 
 export interface IdentityBundle {
   userAgent: string
@@ -17,6 +17,11 @@ export interface IdentityBundle {
   timezoneId: string
   viewport: { width: number; height: number }
   screen: { width: number; height: number }
+  /** Device pixels per CSS pixel; absent on a bundle built before the mobile identity existed. */
+  deviceScaleFactor?: number
+  /** Whether the context reports a mobile device; must agree with `sec-ch-ua-mobile` and the UA. */
+  isMobile?: boolean
+  hasTouch?: boolean
 }
 
 const LOCALE_RE = /^[A-Za-z]{2,3}([-_][A-Za-z0-9]+)*$/
@@ -89,6 +94,19 @@ export function identityBundleIssues(bundle: IdentityBundle): string[] {
   }
   if (uaMajor !== null && Object.keys(clientHints).length === 0) {
     issues.push('browser UA is missing aligned client hints')
+  }
+
+  // The mobile claim is made three times (UA token, sec-ch-ua-mobile, the
+  // context's isMobile) and must be made the same way each time.
+  const mobileHint = clientHints['sec-ch-ua-mobile']
+  const uaMobile = /\bMobile\b/.test(ua)
+  if (mobileHint !== undefined && mobileHint !== '?0' && mobileHint !== '?1') {
+    issues.push(`sec-ch-ua-mobile must be ?0 or ?1, got ${mobileHint}`)
+  } else if (mobileHint !== undefined && uaMajor !== null && (mobileHint === '?1') !== uaMobile) {
+    issues.push(`mobile mismatch: UA ${uaMobile ? 'has' : 'lacks'} the Mobile token but sec-ch-ua-mobile is ${mobileHint}`)
+  }
+  if (bundle.isMobile !== undefined && uaMajor !== null && bundle.isMobile !== uaMobile) {
+    issues.push(`mobile mismatch: UA ${uaMobile ? 'has' : 'lacks'} the Mobile token but isMobile is ${bundle.isMobile}`)
   }
 
   return issues
@@ -168,13 +186,16 @@ export type IdentityOverride = Partial<
  * The identity a fetch presents, given a mode and optional user route.
  * `access` is accepted so callers cannot "forget" it — it is ignored.
  * An override that would retune timezone/locale/viewport to a proxy geo is
- * refused: that is fingerprint spoofing wearing a routing costume.
+ * refused: that is fingerprint spoofing wearing a routing costume. `device`
+ * picks between the two declared browser identities (desktop, mobile): a
+ * declared second identity is not an override, and both pass the same checks.
  */
 export function identityForRoute(
   mode: CrawlMode,
   access: RouteAccess | null | undefined = null,
   chromeMajor?: number,
   override?: IdentityOverride | null,
+  device: IdentityDevice = 'desktop',
 ): IdentityBundle {
   void access
   if (override !== undefined && override !== null && Object.keys(override).length > 0) {
@@ -183,12 +204,13 @@ export function identityForRoute(
         'Do not retune timezone/locale/viewport to a proxy geo.',
     )
   }
-  return identityBundleFrom(modeIdentity(mode, chromeMajor))
+  return identityBundleFrom(modeIdentity(mode, chromeMajor, null, null, device))
 }
 
+/** The bundle of an identity with its fingerprint: the device's own (browserFingerprintFor) unless one is given. */
 export function identityBundleFrom(
   identity: ModeIdentity,
-  fingerprint: typeof BROWSER_FINGERPRINT = BROWSER_FINGERPRINT,
+  fingerprint: Readonly<BrowserFingerprint> = browserFingerprintFor(identity.device),
 ): IdentityBundle {
   return {
     userAgent: identity.userAgent,
@@ -197,6 +219,9 @@ export function identityBundleFrom(
     timezoneId: fingerprint.timezoneId,
     viewport: fingerprint.viewport,
     screen: fingerprint.screen,
+    deviceScaleFactor: fingerprint.deviceScaleFactor,
+    isMobile: fingerprint.isMobile,
+    hasTouch: fingerprint.hasTouch,
   }
 }
 
@@ -209,5 +234,5 @@ export function formatIdentitySummary(bundle: IdentityBundle): string {
   const platform =
     platformFromUa(bundle.userAgent) ?? platformFromHints(bundle.clientHints) ?? 'unknown'
   const chrome = major !== null ? `Chrome/${major}` : 'browser'
-  return `${chrome} · ${platform} · ${bundle.locale}`
+  return `${chrome} · ${platform} · ${bundle.locale}${bundle.isMobile === true ? ' · mobile' : ''}`
 }

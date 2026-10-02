@@ -82,6 +82,16 @@ type ResolvedAddress = { address: string; family: number }
 type Resolver = (hostname: string, options: { all: true }) => Promise<ResolvedAddress[]>
 
 /**
+ * How a route treats the target's certificate. The default verifies. A route
+ * built with `rejectUnauthorized: false` (a request's `skipTlsVerification`)
+ * is created for that one fetch and closed after it: it is never the shared
+ * guarded dispatcher, the robots cache's own routes or the delivery worker.
+ */
+export interface EgressTlsOptions {
+  rejectUnauthorized?: boolean
+}
+
+/**
  * Chromium does not use Undici's socket lookup. In the hosted browser mode,
  * resolve the finite operator allowlist once and force Chromium's resolver to
  * use only those validated IPs. Everything else must fail name resolution.
@@ -126,7 +136,7 @@ export async function pinnedBrowserHostRules(hosts: readonly string[], policy: N
  * validated address. A separate URL preflight cannot prevent DNS rebinding
  * between validation and connect.
  */
-export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver = lookup): Agent {
+export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver = lookup, tls: EgressTlsOptions = {}): Agent {
   const safeLookup: LookupFunction = (hostname, options, callback) => {
     const wantedFamily = options.family === 4 || options.family === 'IPv4' ? 4
       : options.family === 6 || options.family === 'IPv6' ? 6 : 0
@@ -167,7 +177,7 @@ export function createGuardedDispatcher(policy: NetworkPolicy, resolve: Resolver
     })
   }
   return new Agent({
-    connect: { lookup: safeLookup },
+    connect: { lookup: safeLookup, ...(tls.rejectUnauthorized === false ? { rejectUnauthorized: false } : {}) },
     keepAliveTimeout: 1_000,
     keepAliveMaxTimeout: 1_000,
     maxHeaderSize: MAX_RESPONSE_HEADER_BYTES,
@@ -185,10 +195,11 @@ export class EgressRoutes {
   private readonly proxies = new Map<string, ProxyAgent>()
   private closing: Promise<void> | null = null
 
-  constructor(private readonly policy: NetworkPolicy, resolve: Resolver = lookup) {
-    this.direct = createGuardedDispatcher(policy, resolve)
+  /** `tls` relaxes certificate verification on every route of this instance: only for routes a single fetch owns and closes (see EgressTlsOptions). */
+  constructor(private readonly policy: NetworkPolicy, resolve: Resolver = lookup, tls: EgressTlsOptions = {}) {
+    this.direct = createGuardedDispatcher(policy, resolve, tls)
     for (const server of [policy.egressProxy?.https, policy.egressProxy?.http]) {
-      if (server != null && !this.proxies.has(server.url)) this.proxies.set(server.url, createProxyDispatcher(server))
+      if (server != null && !this.proxies.has(server.url)) this.proxies.set(server.url, createProxyDispatcher(server, tls))
     }
   }
 
@@ -211,10 +222,12 @@ export class EgressRoutes {
   }
 }
 
-function createProxyDispatcher(server: ProxyServer): ProxyAgent {
+function createProxyDispatcher(server: ProxyServer, tls: EgressTlsOptions = {}): ProxyAgent {
   return new ProxyAgent({
     uri: server.url,
     ...(server.username === undefined ? {} : { token: `Basic ${Buffer.from(`${server.username}:${server.password ?? ''}`).toString('base64')}` }),
+    // The TLS to the target through the CONNECT tunnel; the proxy itself is reached over plain HTTP.
+    ...(tls.rejectUnauthorized === false ? { requestTls: { rejectUnauthorized: false } } : {}),
     // Like curl: http: targets are sent in absolute form, https: targets are tunnelled with CONNECT.
     proxyTunnel: false,
     keepAliveTimeout: 1_000,

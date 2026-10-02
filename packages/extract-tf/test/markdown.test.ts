@@ -103,6 +103,28 @@ describe('htmlToMarkdown', () => {
   it('is empty on empty input', () => {
     expect(htmlToMarkdown('')).toBe('')
   })
+
+  it('keeps today\'s Markdown and html with the default blockAds, and shows a cookie banner with blockAds: false', () => {
+    const html = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
+<body><main>
+<div id="cookie-consent" role="dialog"><p>We use cookies to personalise content.</p></div>
+<h1>Kiln temperatures and glaze vitrification</h1>
+<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>
+<p>Sediment cores from the estuary date to 1873. Researchers compared them against the almanac kept at the plinth house.</p>
+</main></body></html>`
+    const pruned = extractTf.extract(html)
+    const md = htmlToMarkdown(pruned.mainHtml)
+    expect(md).toContain('# Kiln temperatures and glaze vitrification')
+    expect(md).toContain('The kiln reached 1240 degrees before the glaze vitrified.')
+    expect(md).not.toContain('We use cookies')
+    expect(pruned.mainHtml).not.toContain('cookie-consent')
+    const kept = extractTf.extract(html, { blockAds: false })
+    const loose = htmlToMarkdown(kept.mainHtml)
+    expect(loose).toContain('We use cookies to personalise content.')
+    expect(loose).toContain('The kiln reached 1240 degrees before the glaze vitrified.')
+    // The html format is this same mainHtml: it follows the switch too.
+    expect(kept.mainHtml).toContain('<div id="cookie-consent" role="dialog">')
+  })
 })
 
 const BASE = 'https://fixture.test/docs/page'

@@ -36,7 +36,7 @@ export function errorPageEvidence(status: number | null, contentType: string | n
   let markdown: string | null
   if (wholePageAsked(options)) markdown = wholePageMarkdown(body, url, options.excludeTags)
   else {
-    const extracted = extractTf.extract(body, { url, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
+    const extracted = extractTf.extract(body, { url, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
     // Error pages are often too small for main-content extraction; then the
     // whole body is what the server said, unless the caller named the
     // elements to keep.

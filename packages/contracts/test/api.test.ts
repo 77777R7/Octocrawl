@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -149,7 +149,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, actions: [], mobile: true })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseScrapeRequest({ url, actions: [], location: {} })).toThrow('unsupported parameters: actions, location')
     expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
   })
@@ -248,5 +248,82 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
     expect(invalid).toMatchObject({ status: 400, code: 'invalid_request', message: 'url must be http(s)' })
     expect((invalid as { details?: unknown }).details).toBeUndefined()
+  })
+
+  it('accepts custom headers, lower-cases their names, and refuses by name what the lanes never send on a caller\'s behalf', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, headers: { 'X-Test': 'w2l', 'Accept-Language': 'de' } }).headers).toEqual({ 'x-test': 'w2l', 'accept-language': 'de' })
+    expect(parseBatchStartRequest({ urls: [url], headers: { Referer: 'https://example.com/' } }).headers).toEqual({ referer: 'https://example.com/' })
+    expect(parseCrawlStartRequest({ url, headers: { 'If-None-Match': '"v1"', 'Cache-Control': 'no-cache' } }).headers).toEqual({ 'if-none-match': '"v1"', 'cache-control': 'no-cache' })
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('headers')
+    for (const headers of [['x-test'], 'x-test: w2l', { 'x-test': 1 }, null]) expect(() => parseScrapeRequest({ url, headers })).toThrow('headers must be an object of string values')
+    expect(() => parseScrapeRequest({ url, headers: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`x-${i}`, 'v'])) })).toThrow('headers must contain at most 32 entries')
+    expect(parseScrapeRequest({ url, headers: Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`x-${i}`, 'v'])) }).headers).toHaveProperty('x-31')
+    expect(() => parseScrapeRequest({ url, headers: { 'x test': 'v' } })).toThrow('headers.x test is not a valid header name')
+    expect(() => parseScrapeRequest({ url, headers: { '': 'v' } })).toThrow('headers. is not a valid header name')
+    expect(() => parseBatchStartRequest({ urls: [url], headers: { 'X-Test': 'a', 'x-test': 'b' } })).toThrow('headers.x-test is given twice')
+    expect(() => parseScrapeRequest({ url, headers: { 'x-test': 'a\r\nx-other: b' } })).toThrow('headers.x-test must be a string of at most 4096 characters without control characters')
+    expect(() => parseCrawlStartRequest({ url, headers: { 'x-test': 'a'.repeat(4097) } })).toThrow('headers.x-test must be a string of at most 4096 characters without control characters')
+    expect(parseScrapeRequest({ url, headers: { 'x-test': 'a'.repeat(4096) } }).headers?.['x-test']).toHaveLength(4096)
+    const refused: Array<[string, string]> = [
+      ['User-Agent', "headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity"],
+      ['Sec-CH-UA-Mobile', "headers.sec-ch-ua-mobile is refused: the User-Agent and client hints are W2L's declared identity"],
+      ['Sec-Fetch-Site', "headers.sec-fetch-site is refused: the User-Agent and client hints are W2L's declared identity"],
+      ['Cookie', "headers.cookie is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record"],
+      ['Authorization', "headers.authorization is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record"],
+      ['Accept-Encoding', 'headers.accept-encoding is refused: transport headers are set by the lane'],
+      ['Host', 'headers.host is refused: transport headers are set by the lane'],
+    ]
+    for (const [name, message] of refused) {
+      expect(thrown(() => parseScrapeRequest({ url, headers: { [name]: 'x' } })), name).toMatchObject({ status: 400, code: 'invalid_request', message })
+      expect(() => parseBatchStartRequest({ urls: [url], headers: { [name]: 'x' } }), name).toThrow(message)
+    }
+    expect(headerRefusal('accept-language')).toBeNull()
+    expect(headerRefusal('x-test')).toBeNull()
+  })
+
+  it('accepts mobile, skipTlsVerification, fastMode and blockAds as booleans on scrape, batch and crawl, and refuses mobile with research mode', () => {
+    const url = 'https://example.com/'
+    const options = { mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
+    expect(parseScrapeRequest({ url, ...options })).toMatchObject(options)
+    expect(parseBatchStartRequest({ urls: [url], ...options })).toMatchObject(options)
+    expect(parseCrawlStartRequest({ url, ...options })).toMatchObject(options)
+    for (const name of ['mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const) {
+      expect(parseScrapeRequest({ url })).not.toHaveProperty(name)
+      expect(() => parseScrapeRequest({ url, [name]: 'true' })).toThrow(`${name} must be a boolean`)
+      expect(() => parseCrawlStartRequest({ url, [name]: 1 })).toThrow(`${name} must be a boolean`)
+    }
+    const research = 'mobile is not available in research mode: the research identity declares a bot, not a device'
+    expect(() => parseScrapeRequest({ url, mode: 'research', mobile: true })).toThrow(research)
+    expect(() => parseBatchStartRequest({ urls: [url], mode: 'research', mobile: true })).toThrow(research)
+    expect(() => parseCrawlStartRequest({ url, mode: 'research', mobile: true })).toThrow(research)
+    expect(parseScrapeRequest({ url, mode: 'research', mobile: false })).toMatchObject({ mode: 'research', mobile: false })
+  })
+
+  it('takes origin and integration as printable labels on scrape, batch and crawl, and refuses anything else by name', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, origin: 'js-sdk@0.3.0', integration: 'nightly-prices' })).toMatchObject({ origin: 'js-sdk@0.3.0', integration: 'nightly-prices' })
+    expect(parseBatchStartRequest({ urls: [url], integration: 'x'.repeat(100) }).integration).toHaveLength(100)
+    expect(parseCrawlStartRequest({ url, origin: 'mcp-claude-desktop@1.2' })).toMatchObject({ origin: 'mcp-claude-desktop@1.2' })
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('origin')
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('integration')
+    for (const value of ['', 'x'.repeat(101), 'with space', 'tab\there', 'ünïcode', 1, null, ['a']]) {
+      expect(() => parseScrapeRequest({ url, integration: value }), JSON.stringify(value)).toThrow('integration must be a string of 1 to 100 printable characters without spaces')
+      expect(() => parseCrawlStartRequest({ url, origin: value }), JSON.stringify(value)).toThrow('origin must be a string of 1 to 100 printable characters without spaces')
+    }
+  })
+
+  it('names the supported route in agentHints when refusing stealth, a stealth proxy or ignoreRobotsTxt, and gives other unknown keys none', () => {
+    const url = 'https://example.com/'
+    expect(thrown(() => parseScrapeRequest({ url, stealth: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['stealth'] }, agentHints: [REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'stealth' }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseCrawlStartRequest({ url, proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect((thrown(() => parseScrapeRequest({ url, proxy: 'basic' })) as RequestError).agentHints).toBeUndefined()
+    expect((thrown(() => parseScrapeRequest({ url, actions: [] })) as RequestError).agentHints).toBeUndefined()
+    expect(refusalHint('scrapeOptions.proxy', 'stealth')).toBe(REFUSAL_HINTS.stealth)
+    expect(refusalHint('scrapeOptions.location', {})).toBeNull()
+    // The 429 answer is not a request error: its code stays outside the set, and its body names the wait.
+    expect(isApiErrorCode(RATE_LIMITED_CODE)).toBe(false)
+    expect(rateLimitedBody(2, 7)).toEqual({ error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: 7, agentHints: ['wait 7 s before the next request'] })
   })
 })

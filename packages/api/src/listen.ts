@@ -18,12 +18,18 @@ export interface ListenConfig {
   allowRobotsOverride: boolean
   /** Startup lines about the environment proxy, printed once. */
   notices: readonly string[]
+  /**
+   * The per-caller budget for requests that start work (`W2L_RATE_LIMIT_PER_MINUTE`
+   * or `--rate-limit-per-minute`), per bearer token; absent means no limit.
+   */
+  rateLimit?: { perMinute: number }
 }
 
 export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ListenConfig {
   const hosted = argv.includes('--hosted') || env['W2L_API_MODE'] === 'hosted'
   const port = parsePort(argv, env)
   const tokens = readTokens(argv, env)
+  const rateLimit = parseRateLimit(argv, env)
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -38,6 +44,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       defaultMaxPages: 100,
       allowRobotsOverride: false,
       notices: [hostedProxyNotice(env)].filter(notice => notice !== null),
+      ...(rateLimit === undefined ? {} : { rateLimit }),
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -50,7 +57,23 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     defaultMaxPages: null,
     allowRobotsOverride: true,
     notices: networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : [],
+    ...(rateLimit === undefined ? {} : { rateLimit }),
   }
+}
+
+/** The largest per-minute budget `W2L_RATE_LIMIT_PER_MINUTE` / `--rate-limit-per-minute` takes. */
+export const MAX_RATE_LIMIT_PER_MINUTE = 100_000
+
+/** `--rate-limit-per-minute N` wins over `W2L_RATE_LIMIT_PER_MINUTE`; unset or empty means no limit; anything else stops startup. */
+function parseRateLimit(argv: readonly string[], env: NodeJS.ProcessEnv): { perMinute: number } | undefined {
+  const flag = readFlag(argv, '--rate-limit-per-minute')
+  const raw = (flag ?? env['W2L_RATE_LIMIT_PER_MINUTE'] ?? '').trim()
+  if (raw.length === 0) return undefined
+  const perMinute = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isInteger(perMinute) || perMinute < 1 || perMinute > MAX_RATE_LIMIT_PER_MINUTE) {
+    throw new Error(`${flag === undefined ? 'W2L_RATE_LIMIT_PER_MINUTE' : '--rate-limit-per-minute'} must be an integer between 1 and ${MAX_RATE_LIMIT_PER_MINUTE}`)
+  }
+  return { perMinute }
 }
 
 function tunedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv): NetworkPolicy {

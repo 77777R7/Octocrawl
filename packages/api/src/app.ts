@@ -1,12 +1,16 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
+import { createHash } from 'node:crypto'
 import { CrawlStateError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
 import {
   API_ERROR_STATUS,
+  type AgentHints,
   type ApiErrorBody,
   type ApiErrorCode,
   type ApiErrorDetails,
+  RATE_LIMITED_STATUS,
+  rateLimitedBody,
   parseCrawlStartRequest,
   parseBatchStartRequest,
   parseCrawlPageQuery,
@@ -38,12 +42,58 @@ export interface AppOptions {
    * the cause goes to the server log.
    */
   exposeInternalErrors?: boolean
+  /**
+   * The operator's per-caller budget for the requests that start work
+   * (`POST /v1/scrape`, `/v1/crawl`, `/v1/batches`, `/fc/v1/scrape`,
+   * `/fc/v1/crawl`): this many per sliding minute, per bearer token (or for
+   * the one local caller when the server takes no token). Over it: HTTP 429
+   * with `Retry-After`. In memory, per process; absent means no limit.
+   */
+  rateLimit?: { perMinute: number }
 }
 
-/** Every error response: { error, code, details? }, after success: false under /fc for Firecrawl clients. */
-function fail(c: Context, code: ApiErrorCode, message: string, details?: ApiErrorDetails) {
-  const body: ApiErrorBody = { error: message, code, ...(details === undefined ? {} : { details }) }
-  return c.json(c.req.path.startsWith('/fc/') ? { success: false, ...body } : body, API_ERROR_STATUS[code])
+/** Every error response: { error, code, details?, agentHints? }, after success: false under /fc for Firecrawl clients, which read the hints as agent_hints. */
+function fail(c: Context, code: ApiErrorCode, message: string, details?: ApiErrorDetails, agentHints?: AgentHints) {
+  const body: ApiErrorBody = { error: message, code, ...(details === undefined ? {} : { details }), ...(agentHints === undefined || agentHints.length === 0 ? {} : { agentHints }) }
+  return c.json(c.req.path.startsWith('/fc/') ? firecrawlEnvelope(body) : body, API_ERROR_STATUS[code])
+}
+
+/** Firecrawl's error envelope: `success: false`, the native fields, and the hints under Firecrawl's spelling. */
+function firecrawlEnvelope<T extends { agentHints?: AgentHints }>(body: T): Omit<T, 'agentHints'> & { success: false; agent_hints?: AgentHints } {
+  const { agentHints, ...rest } = body
+  return { success: false, ...rest, ...(agentHints === undefined ? {} : { agent_hints: agentHints }) }
+}
+
+/** The bearer token a request presents, or '' when it presents none. */
+function presentedToken(c: Context): string {
+  const header = c.req.header('authorization') ?? ''
+  return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
+}
+
+/** The requests the rate limit counts: those that start work. Status reads are free. */
+const RATE_LIMITED_POSTS: ReadonlySet<string> = new Set(['/v1/scrape', '/v1/crawl', '/v1/batches', '/fc/v1/scrape', '/fc/v1/crawl'])
+
+/**
+ * A sliding 60 s window per caller key, in memory: the moments of the
+ * requests it admitted. Over the budget, it says how many whole seconds
+ * until the oldest of them leaves the window (at least 1).
+ */
+class SlidingWindowLimiter {
+  private readonly admitted = new Map<string, number[]>()
+  constructor(private readonly perMinute: number) {}
+
+  /** Null when the request is admitted (and counted), else the seconds to wait. */
+  retryAfterSeconds(key: string, now = Date.now()): number | null {
+    let moments = this.admitted.get(key)
+    if (moments === undefined) {
+      moments = []
+      this.admitted.set(key, moments)
+    }
+    while (moments.length > 0 && moments[0]! <= now - 60_000) moments.shift()
+    if (moments.length >= this.perMinute) return Math.max(1, Math.ceil((moments[0]! + 60_000 - now) / 1000))
+    moments.push(now)
+    return null
+  }
 }
 
 export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
@@ -53,8 +103,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   if (tokens.length > 0) {
     const accepts = bearerTokenMatcher(tokens)
     app.use('*', async (c, next) => {
-      const header = c.req.header('authorization') ?? ''
-      const presented = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
+      const presented = presentedToken(c)
       if (presented.length === 0 || !accepts(presented)) {
         return fail(c, 'unauthorized', 'unauthorized')
       }
@@ -62,9 +111,30 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     })
   }
 
+  if (options.rateLimit !== undefined) {
+    const perMinute = options.rateLimit.perMinute
+    const limiter = new SlidingWindowLimiter(perMinute)
+    // After the token check: an unauthorized request counts for no one. The key is the token's digest, never the token.
+    app.use('*', async (c, next) => {
+      if (c.req.method !== 'POST' || !RATE_LIMITED_POSTS.has(c.req.path)) return next()
+      const key = tokens.length === 0 ? 'local' : createHash('sha256').update(presentedToken(c), 'utf8').digest('hex')
+      const retryAfterSeconds = limiter.retryAfterSeconds(key)
+      if (retryAfterSeconds === null) return next()
+      const body = rateLimitedBody(perMinute, retryAfterSeconds)
+      c.header('Retry-After', String(retryAfterSeconds))
+      return c.json(c.req.path.startsWith('/fc/') ? firecrawlEnvelope({ error: body.error, code: body.code, agentHints: body.agentHints }) : body, RATE_LIMITED_STATUS)
+    })
+  }
+
   app.post('/v1/scrape', async (c) => {
     const req = parseScrapeRequest(await c.req.json())
     return c.json(await engine.scrape(req, { signal: c.req.raw.signal }), 200)
+  })
+
+  /** The record of one scrape call, by the `scrapeId` its response carried. */
+  app.get('/v1/scrapes/:id', async (c) => {
+    const record = await engine.getScrape(c.req.param('id'))
+    return record === null ? fail(c, 'not_found', 'not found') : c.json(record, 200)
   })
 
   app.post('/v1/crawl', async (c) => {
@@ -327,7 +397,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.notFound((c) => fail(c, 'not_found', `no route for ${c.req.method} ${c.req.path}`))
 
   app.onError((err, c) => {
-    if (err instanceof RequestError) return fail(c, err.code, err.message, err.details)
+    if (err instanceof RequestError) return fail(c, err.code, err.message, err.details, err.agentHints)
     if (err instanceof SyntaxError) return fail(c, 'invalid_json', 'body must be JSON')
     if (options.exposeInternalErrors === true) return fail(c, 'internal_error', err.message)
     console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err.stack ?? String(err) }))

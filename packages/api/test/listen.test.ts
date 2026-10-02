@@ -66,6 +66,18 @@ describe('parseListen', () => {
     expect(() => parseListen([], { W2L_CONTACT: 'Jürgen' })).toThrow(/W2L_CONTACT/)
   })
 
+  it('takes a per-caller rate limit from W2L_RATE_LIMIT_PER_MINUTE or --rate-limit-per-minute, and refuses a value outside 1 to 100000', () => {
+    expect(parseListen([], {})).not.toHaveProperty('rateLimit')
+    expect(parseListen([], { W2L_RATE_LIMIT_PER_MINUTE: '' })).not.toHaveProperty('rateLimit')
+    expect(parseListen([], { W2L_RATE_LIMIT_PER_MINUTE: ' 60 ' }).rateLimit).toEqual({ perMinute: 60 })
+    expect(parseListen(['--rate-limit-per-minute', '2'], { W2L_RATE_LIMIT_PER_MINUTE: '60' }).rateLimit).toEqual({ perMinute: 2 })
+    expect(parseListen(['--hosted', '--token', 'secret', '--rate-limit-per-minute=100000'], {}).rateLimit).toEqual({ perMinute: 100000 })
+    for (const value of ['0', '100001', '1.5', '-1', 'ten', '1e3']) {
+      expect(() => parseListen([], { W2L_RATE_LIMIT_PER_MINUTE: value }), value).toThrow('W2L_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 100000')
+    }
+    expect(() => parseListen(['--rate-limit-per-minute', '0'], {})).toThrow('--rate-limit-per-minute must be an integer between 1 and 100000')
+  })
+
   it('hosted mode never uses the proxy variables and says once that it ignored them', () => {
     const hosted = parseListen(['--hosted', '--token', 'secret'], { HTTPS_PROXY: 'socks5://127.0.0.1:1080', NO_PROXY: 'localhost' })
     expect(hosted.networkPolicy.egressProxy).toBeUndefined()

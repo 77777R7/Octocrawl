@@ -504,7 +504,7 @@ export class ProviderSubject implements SubjectAdapter {
       }
     }
 
-    const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags })
+    const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
     const links = collectLinks(res.body, res.finalUrl)
     trace.push({
       at: wallMs,

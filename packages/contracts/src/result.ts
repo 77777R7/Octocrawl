@@ -5,9 +5,17 @@ import type { StructuredExtractionResult } from './structured.js'
 import type { FileDescription } from './file.js'
 
 export interface ResourceTimings {
+  /** Every wait in the origin scheduler but a cooldown: the concurrency ceiling and the minimum interval between requests. */
   queueMs?: number
   robotsMs?: number
   cooldownWaitMs?: number
+  /**
+   * Present when the per-origin concurrency ceiling held this lane's permit
+   * back: the milliseconds it waited for a slot, cooldown and pacing
+   * excluded (both stay in `cooldownWaitMs` / `queueMs`). Absent when the
+   * permit started at once, or when the lane acquired none.
+   */
+  concurrencyWaitMs?: number
   retryWaitMs?: number
   /** Initial request/headers time, excluding body read and retry sleep. */
   requestMs?: number
@@ -193,9 +201,11 @@ export interface HandoffRequest {
 export interface FetchWarning {
   /**
    * Machine-readable code. `robots_overridden`: a robots.txt rule was set
-   * aside by a recorded override. `client_rendered_suspected`: the HTTP
-   * lane's page looks like a shell for data its scripts fill in (see
-   * RenderSignals), so the capture may not be the page a browser shows.
+   * aside by a recorded override. `tls_unverified`: the certificate was not
+   * verified at the caller's request (`skipTlsVerification`), so the content
+   * cannot be attributed to the host with certainty. `client_rendered_suspected`:
+   * the HTTP lane's page looks like a shell for data its scripts fill in
+   * (see RenderSignals), so the capture may not be the page a browser shows.
    */
   code: string
   message: string
@@ -285,6 +295,7 @@ export interface FetchResult {
   /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
    * warning first when a recorded override set a robots.txt rule aside, then
+   * `tls_unverified` when the fetch skipped certificate verification, then
    * `client_rendered_suspected` when the HTTP lane read the page as a shell
    * its scripts fill in. Kept on batch items and the compact scrape response
    * too.

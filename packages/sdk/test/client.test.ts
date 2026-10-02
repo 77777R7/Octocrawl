@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Agent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici'
-import { W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
+import { SDK_ORIGIN, SDK_VERSION, W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -349,6 +350,49 @@ describe('W2L SDK', () => {
     expect(error).toMatchObject({ name: 'W2LError', status: 400, code: 'unsupported_format', method: 'POST', path: '/v1/scrape', body,
       message: `POST /v1/scrape failed: 400 ${JSON.stringify(body)}` })
     await expect(client.getCrawl('gone')).rejects.toMatchObject({ message: 'crawl not found: gone', status: 404, code: 'not_found', method: 'GET', path: '/v1/crawl/gone' })
+  })
+
+  it('records every scrape, crawl and batch under origin js-sdk@<version>, keeps a caller\'s or a host\'s origin, and pins the version to package.json', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      const scrape = String(input).endsWith('/v1/scrape')
+      return new Response(scrape ? '{"status":"success"}' : '{"taskId":"task-1"}', { status: scrape ? 200 : 202 })
+    }) as typeof fetch })
+    await client.scrape('https://example.com/', { debug: false })
+    await client.crawl('https://example.com/', { maxPages: 1 })
+    await client.batchScrape(['https://example.com/a'], { integration: 'nightly-prices' })
+    await client.scrape('https://example.com/', { origin: 'my-app@2' })
+    await client.scrape('https://example.com/', {}, { origin: 'mcp-host@1' })
+    expect(bodies.map((body) => body.origin)).toEqual([SDK_ORIGIN, SDK_ORIGIN, SDK_ORIGIN, 'my-app@2', 'mcp-host@1'])
+    expect(bodies[2]).toMatchObject({ urls: ['https://example.com/a'], integration: 'nightly-prices' })
+    expect(SDK_ORIGIN).toBe(`js-sdk@${SDK_VERSION}`)
+    expect(SDK_VERSION).toBe((JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version)
+  })
+
+  it('reads a scrape record by its id, and a missing one is a W2LError not_found', async () => {
+    const record = { scrapeId: '7c1d4d2c-0f3e-4a7b-9b1a-2f0d4d1b5a6e', status: 'success', lane: 'http', origin: SDK_ORIGIN }
+    const client = new W2L({ baseUrl: 'http://localhost', fetch: (async (input) => String(input).endsWith(`/v1/scrapes/${record.scrapeId}`)
+      ? new Response(JSON.stringify(record))
+      : new Response('{"error":"not found","code":"not_found"}', { status: 404 })) as typeof fetch })
+    expect(await client.getScrape(record.scrapeId)).toEqual(record)
+    await expect(client.getScrape('gone')).rejects.toMatchObject({ name: 'W2LError', message: 'scrape not found: gone', status: 404, code: 'not_found', method: 'GET', path: '/v1/scrapes/gone' })
+  })
+
+  it('throws W2LError for a 429 with its code, the Retry-After as milliseconds (delta-seconds or an HTTP-date) and the hints, and retries nothing', async () => {
+    const body = { error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: 7, agentHints: ['wait 7 s before the next request'] }
+    let calls = 0
+    const answering = (headers: Record<string, string>) => new W2L({ baseUrl: 'http://localhost', fetch: (async () => { calls++; return new Response(JSON.stringify(body), { status: 429, headers }) }) as typeof fetch })
+    const delta = await answering({ 'retry-after': '7' }).scrape('https://example.com/').catch((reason: unknown) => reason)
+    expect(delta).toBeInstanceOf(W2LError)
+    expect(delta).toMatchObject({ status: 429, code: 'rate_limited', retryAfterMs: 7_000, agentHints: ['wait 7 s before the next request'], body, method: 'POST', path: '/v1/scrape' })
+    const dated = await answering({ 'retry-after': new Date(Date.now() + 30_000).toUTCString() }).scrape('https://example.com/').catch((reason: unknown) => reason) as W2LError
+    expect(dated.retryAfterMs).toBeGreaterThan(20_000)
+    expect(dated.retryAfterMs).toBeLessThanOrEqual(30_000)
+    expect(calls).toBe(2)
+    // A body without hints and a response without the header: empty and null, never invented.
+    const bare = await new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"conflict","code":"conflict"}', { status: 409 })) as typeof fetch }).runMonitor('catalog').catch((reason: unknown) => reason)
+    expect(bare).toMatchObject({ status: 409, code: 'conflict', retryAfterMs: null, agentHints: [] })
   })
 
   it('leaves the code undefined when the error body carries none', async () => {

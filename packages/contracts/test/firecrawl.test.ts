@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { CrawlReport, FetchResult, StepRecord } from '../src/index.js'
+import type { CrawlReport, FetchResult, ScrapeResponse, StepRecord } from '../src/index.js'
 import {
   FIRECRAWL_SHIM_DIFFS,
   FIRECRAWL_SHIM_SNAPSHOT,
   parseFirecrawlCrawlRequest,
   parseFirecrawlScrapeRequest,
+  REFUSAL_HINTS,
   RequestError,
   wrapCrawlAccepted,
   wrapCrawlStatus,
@@ -47,6 +48,24 @@ function page(partial: Partial<FetchResult> & Pick<FetchResult, 'status' | 'requ
   }
 }
 
+const SCRAPE_ID = '7c1d4d2c-0f3e-4a7b-9b1a-2f0d4d1b5a6e'
+/** The facts of the call that `/fc` passes through, as the API shapes them on a scrape response. */
+const CALL_FACTS = { scrapeId: SCRAPE_ID, proxyUsed: null, timezone: null, creditsUsed: null, concurrencyLimited: false, concurrencyQueueDurationMs: 0 } as const
+
+/** A scrape response as the API shapes it from a result: the run's audit, the id and the merged `metadata`. */
+function scrape(partial: Partial<FetchResult> & Pick<FetchResult, 'status' | 'requestedUrl'>, extra: Partial<Pick<ScrapeResponse, 'agentHints'>> = {}): ScrapeResponse {
+  const result = page(partial)
+  const { creditsUsed: _credits, ...facts } = CALL_FACTS
+  return {
+    ...result, ...extra, scrapeId: SCRAPE_ID, channelsTried: ['http'], ladderTrace: [],
+    summary: { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: null, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 0, unknown: true }, artifacts: [] },
+    metadata: {
+      title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null, ...result.metadata,
+      ...facts, sourceURL: result.requestedUrl, url: result.evidence.finalUrl, statusCode: result.evidence.httpStatus, contentType: result.evidence.contentType,
+    },
+  }
+}
+
 describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('freezes scrape/crawl only and lists the known diffs', () => {
     expect(FIRECRAWL_SHIM_SNAPSHOT.capturedAt).toBe('2026-09-18')
@@ -70,6 +89,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       url: 'https://example.com/',
       formats: ['markdown', 'links'],
       onlyMainContent: true,
+      origin: 'js-sdk@1.29.3',
     })
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', onlyMainContent: false, waitFor: 2000, timeout: 15000 })).toMatchObject({
       onlyMainContent: false,
@@ -114,10 +134,10 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toThrow('unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)')
-    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], mobile: true, waitFor: 500 })).toThrow('unsupported parameters: actions, mobile')
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
-    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], headers: {}, waitFor: 1 } }))
-      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.headers; unsupported format: screenshot')
+    expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['screenshot'], location: {}, waitFor: 1 } }))
+      .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: screenshot')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: false })).toThrow('ignoreSitemap: false is not supported')
     // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
@@ -152,7 +172,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('does not wrap a challenge page as success', () => {
     const wrapped = wrapScrape(
-      page({
+      scrape({
         requestedUrl: 'https://example.com/challenge',
         status: 'blocked',
         blockReason: 'cloudflare_challenge',
@@ -173,7 +193,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('keeps an error-status page success: false while returning its markdown and status code', () => {
     const wrapped = wrapScrape(
-      page({
+      scrape({
         requestedUrl: 'https://example.com/missing',
         status: 'failed',
         failureReason: 'http_error',
@@ -195,26 +215,26 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       data: {
         markdown: '# 404 Not Found',
         links: [],
-        metadata: { sourceURL: 'https://example.com/missing', url: 'https://example.com/missing', statusCode: 404, contentType: 'text/html', error: 'http_error' },
+        metadata: { sourceURL: 'https://example.com/missing', url: 'https://example.com/missing', statusCode: 404, contentType: 'text/html', error: 'http_error', ...CALL_FACTS },
       },
     })
   })
 
   it('wraps a contentful scrape and a crawl start onto the Firecrawl envelope', () => {
-    const scrape = wrapScrape(
-      page({
+    const wrapped = wrapScrape(
+      scrape({
         requestedUrl: 'https://example.com/listing',
         status: 'success',
         markdown: 'Harbour lantern catalog',
         links: ['https://example.com/item/1'],
       }),
     )
-    expect(scrape).toEqual({
+    expect(wrapped).toEqual({
       success: true,
       data: {
         markdown: 'Harbour lantern catalog',
         links: ['https://example.com/item/1'],
-        metadata: { sourceURL: 'https://example.com/listing', url: 'https://example.com/listing', statusCode: 200, contentType: 'text/html' },
+        metadata: { sourceURL: 'https://example.com/listing', url: 'https://example.com/listing', statusCode: 200, contentType: 'text/html', ...CALL_FACTS },
       },
     })
     expect(wrapCrawlAccepted({ taskId: 'task-1' }, 'https://example.com/listing')).toEqual({
@@ -225,17 +245,17 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   })
 
   it('serves html and rawHtml when the result carries them, null included, and leaves them out otherwise', () => {
-    const asked = wrapScrape(page({ requestedUrl: 'https://example.com/', status: 'success', markdown: 'Kiln', html: '<main><p>Kiln</p></main>', rawHtml: '<!doctype html><html><body><main><p>Kiln</p></main></body></html>' }))
+    const asked = wrapScrape(scrape({ requestedUrl: 'https://example.com/', status: 'success', markdown: 'Kiln', html: '<main><p>Kiln</p></main>', rawHtml: '<!doctype html><html><body><main><p>Kiln</p></main></body></html>' }))
     expect(asked.data).toMatchObject({ markdown: 'Kiln', html: '<main><p>Kiln</p></main>', rawHtml: '<!doctype html><html><body><main><p>Kiln</p></main></body></html>' })
-    expect(wrapScrape(page({ requestedUrl: 'https://example.com/report.pdf', status: 'success', markdown: 'Report', html: null })).data).toMatchObject({ html: null })
-    const plain = wrapScrape(page({ requestedUrl: 'https://example.com/', status: 'success', markdown: 'Kiln' })).data
+    expect(wrapScrape(scrape({ requestedUrl: 'https://example.com/report.pdf', status: 'success', markdown: 'Report', html: null })).data).toMatchObject({ html: null })
+    const plain = wrapScrape(scrape({ requestedUrl: 'https://example.com/', status: 'success', markdown: 'Kiln' })).data
     expect(plain).not.toHaveProperty('html')
     expect(plain).not.toHaveProperty('rawHtml')
   })
 
   it('maps the page metadata into data.metadata and leaves out what the page did not declare', () => {
     const wrapped = wrapScrape(
-      page({
+      scrape({
         requestedUrl: 'https://example.com/',
         status: 'success',
         markdown: 'Example Domain',
@@ -260,17 +280,38 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       url: 'https://example.com/',
       statusCode: 200,
       contentType: 'text/html',
+      ...CALL_FACTS,
     })
   })
 
   it('names the final URL after a redirect and leaves an unknown content type out', () => {
-    const moved = wrapScrape(page({
+    const moved = wrapScrape(scrape({
       requestedUrl: 'http://example.com/old',
       status: 'success',
       markdown: 'Moved page',
       evidence: { finalUrl: 'https://example.com/new', httpStatus: 200, redirectChain: ['http://example.com/old', 'https://example.com/new'], contentType: null, rawBodySha256: null, artifacts: [] },
     }))
-    expect(moved.data.metadata).toEqual({ sourceURL: 'http://example.com/old', url: 'https://example.com/new', statusCode: 200 })
+    expect(moved.data.metadata).toEqual({ sourceURL: 'http://example.com/old', url: 'https://example.com/new', statusCode: 200, ...CALL_FACTS })
+  })
+
+  it('passes the call\'s facts and the hints through, maps origin and integration, and names the supported route for a stealth proxy', () => {
+    const url = 'https://example.com/'
+    const limited = wrapScrape({ ...scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' }, { agentHints: ['the content was cut at character 10; ask for rawHtml or a narrower includeTags'] }), metadata: { ...scrape({ requestedUrl: url, status: 'success' }).metadata, proxyUsed: 'operator', timezone: 'America/Los_Angeles', concurrencyLimited: true, concurrencyQueueDurationMs: 2345.5 } })
+    expect(limited.data.metadata).toMatchObject({ scrapeId: SCRAPE_ID, proxyUsed: 'operator', timezone: 'America/Los_Angeles', creditsUsed: null, concurrencyLimited: true, concurrencyQueueDurationMs: 2345.5 })
+    expect(limited.data.agent_hints).toEqual(['the content was cut at character 10; ask for rawHtml or a narrower includeTags'])
+    expect(limited.data).not.toHaveProperty('agentHints')
+    expect(wrapScrape(scrape({ requestedUrl: url, status: 'success', markdown: 'Kiln' })).data).not.toHaveProperty('agent_hints')
+    // No cache exists: no cacheState or cachedAt, not even an invented miss.
+    expect(limited.data.metadata).not.toHaveProperty('cacheState')
+    expect(parseFirecrawlScrapeRequest({ url, origin: 'js-sdk@1.29.3', integration: 'parity-check' })).toMatchObject({ origin: 'js-sdk@1.29.3', integration: 'parity-check' })
+    expect(parseFirecrawlCrawlRequest({ url, origin: 'py-sdk@2', integration: 'nightly' })).toMatchObject({ origin: 'py-sdk@2', integration: 'nightly' })
+    expect(() => parseFirecrawlScrapeRequest({ url, integration: 'with space' })).toThrow('integration must be a string of 1 to 100 printable characters without spaces')
+    const thrown = (fn: () => unknown): unknown => { try { fn() } catch (error) { return error } return undefined }
+    expect(thrown(() => parseFirecrawlScrapeRequest({ url, proxy: 'stealth' }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy'] }, agentHints: [REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true, scrapeOptions: { proxy: 'enhanced' } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt, REFUSAL_HINTS.stealth] })
+    expect((thrown(() => parseFirecrawlScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /scrapeId/.test(d) && /creditsUsed/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /agent_hints/.test(d) && /rate_limited/.test(d))).toBe(true)
   })
 
   it('projects crawl steps into Firecrawl status data without inventing credits', () => {
@@ -323,5 +364,19 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(firecrawlCrawlCounts('running', counts, 3)).toEqual({ completed: 3, total: 8 })
     expect(firecrawlCrawlCounts('paused', counts, null)).toEqual({ completed: 3, total: null })
     expect(firecrawlCrawlCounts('cancelled', counts, 3)).toEqual({ completed: 3, total: 5 })
+  })
+
+  it('maps headers, mobile, skipTlsVerification, fastMode and blockAds for scrape and for a crawl\'s scrapeOptions, with the native refusals', () => {
+    const url = 'https://example.com/'
+    const options = { headers: { 'X-Test': 'w2l' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
+    expect(parseFirecrawlScrapeRequest({ url, ...options })).toEqual({ url, ...options, headers: { 'x-test': 'w2l' } })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: options })).toMatchObject({ ...options, headers: { 'x-test': 'w2l' } })
+    expect(() => parseFirecrawlScrapeRequest({ url, headers: { 'User-Agent': 'curl/8' } })).toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
+    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { headers: { Cookie: 'sid=1' } } })).toThrow('headers.cookie is refused')
+    expect(() => parseFirecrawlScrapeRequest({ url, mobile: 'yes' })).toThrow('mobile must be a boolean')
+    expect(() => parseFirecrawlScrapeRequest({ url, mode: 'research', mobile: true })).toThrow('unsupported parameter: mode')
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /skipTlsVerification/.test(d) && /hosted/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /blockAds/.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /headers never override/.test(d))).toBe(true)
   })
 })
