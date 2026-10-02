@@ -764,7 +764,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try {
       const canonical = req.urls.map(url => canonicalizeUrl(url))
       if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
-      // A retried submission is answered from the record before anything is counted, created or fetched; an append is not a new job and is not counted against the batch limit.
+      // A retried submission is answered from the record before anything is counted, created or fetched; an append creates no task, and appendToBatch counts it against the batch limit only when it runs a completed batch again.
       const submission = claimSubmission<BatchAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
       if (req.appendToId !== undefined) return await appendToBatch(req, canonical as string[], submission)
@@ -1053,12 +1053,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   /**
    * `appendToId`: the URLs go to the end of the batch's stored list, the
-   * job's options stay, and no new task is created (so the active-batch limit
-   * is not consulted). A running orchestrator seeds the tail itself from the
-   * row it re-reads; a batch no run is working on (completed, or left by a
-   * crash) is relaunched as a resume, which seeds only the URLs without a
-   * step. The record is the longer list in the checkpoint and the steps of
-   * the appended URLs in whichever attempt fetched them.
+   * job's options stay, and no new task is created. A running orchestrator
+   * seeds the tail itself from the row it re-reads, so an append to a
+   * pending, running or paused batch adds no run and is not counted against
+   * the active-batch limit; a batch no run is working on (completed, or left
+   * by a crash) is relaunched as a resume, which seeds only the URLs without
+   * a step, and a completed batch, active again from that relaunch, counts
+   * against the limit as a new batch does. The record is the longer list in
+   * the checkpoint and the steps of the appended URLs in whichever attempt
+   * fetched them.
    */
   async function appendToBatch(req: ParsedBatchStartRequest, canonical: readonly string[], submission: Submission<BatchAccepted>): Promise<BatchAccepted> {
     const id = req.appendToId!
@@ -1074,6 +1077,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const repeated = canonical.findIndex((url) => present.has(url))
       if (repeated !== -1) throw new RequestError(`appended url is already in the batch: ${req.urls[repeated]}`)
       if (task.status === 'cancelled' || task.status === 'failed') throw new CrawlStateError(`batch is ${task.status}`)
+      // A completed batch runs again for the new URLs and so is active again: under an active-batch limit that is refused as a new
+      // batch is while the limit is reached, before anything is written or recorded. Its own row is `completed`, so it is not among
+      // those counted; a pending, running or paused batch is counted already, and its append adds no run.
+      if (task.status === 'completed' && options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
+        throw new RequestError('active batch limit reached')
+      }
       const now = new Date().toISOString()
       const invalidURLs = req.invalidURLs === undefined ? undefined : [...req.invalidURLs]
       // Pushed to the end, in order: the orchestrator seeds the tail past what it has seeded, by index.

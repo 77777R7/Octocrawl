@@ -264,7 +264,7 @@ describe('persistent URL-array batch', () => {
     await expect(w2l.appendToBatch(held.taskId, [`${f.origin}/item/9`])).rejects.toMatchObject({ status: 409, body: { error: 'batch is cancelled', code: 'conflict' } })
   })
 
-  it('accepts an append while the one active hosted batch runs, since an append adds no job', async () => {
+  it('accepts an append while the one active hosted batch runs, since an append to a running batch adds no job', async () => {
     const f = await fixture({ maxActiveBatches: 1 })
     f.setSlow(true)
     let started!: () => void
@@ -280,6 +280,43 @@ describe('persistent URL-array batch', () => {
     f.release()
     expect(await w2l.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3, remaining: 0 })
     expect([...f.seen].sort()).toEqual(['/item/1', '/item/2', '/item/3'])
+  })
+
+  it('refuses an append that would run a completed batch again while the one active hosted batch runs, and counts the re-run once it is taken', async () => {
+    const f = await fixture({ maxActiveBatches: 1 })
+    const engine = f.engine()
+    cleanup.push(() => engine.close({ cancelActive: true }))
+    let releaseReRun = () => {}
+    cleanup.push(async () => releaseReRun())
+    const { client: w2l } = client(engine)
+    const done = await w2l.batchScrape([`${f.origin}/item/1`])
+    expect(await w2l.waitBatch(done.taskId)).toMatchObject({ status: 'completed', completed: 1 })
+    f.setSlow(true)
+    let started!: () => void
+    const slowStarted = new Promise<void>(resolve => { started = resolve })
+    f.setStarted(started)
+    const held = await w2l.batchScrape([`${f.origin}/item/2`])
+    await slowStarted
+    // The completed batch would be active again: refused as a new batch is, with nothing written to it and nothing recorded for the key.
+    const more = [`${f.origin}/item/3`, `${f.origin}/item/4`]
+    await expect(w2l.appendToBatch(done.taskId, more, { idempotencyKey: 'append-at-rest' })).rejects.toMatchObject({ status: 400, body: { error: 'active batch limit reached', code: 'invalid_request' } })
+    expect(await w2l.getBatch(done.taskId)).toMatchObject({ status: 'completed', requested: 1, completed: 1 })
+    f.release()
+    expect(await w2l.waitBatch(held.taskId)).toMatchObject({ status: 'completed', completed: 1 })
+    // Once the other batch is done the same append goes through under the same key (the refusal left no record to replay), and its
+    // re-run is the active batch: held on its first new URL, it refuses a new batch as any active one does.
+    let reRunStarted!: () => void
+    const reRunning = new Promise<void>(resolve => { reRunStarted = resolve })
+    const reRunHeld = new Promise<void>(resolve => { releaseReRun = resolve })
+    f.setHold(async path => { if (path.endsWith('/item/3')) { reRunStarted(); await reRunHeld } })
+    expect(await w2l.appendToBatch(done.taskId, more, { idempotencyKey: 'append-at-rest' })).toEqual({ taskId: done.taskId, requested: 3, appended: 2 })
+    await reRunning
+    await expect(w2l.batchScrape([`${f.origin}/item/5`])).rejects.toMatchObject({ status: 400, body: { error: 'active batch limit reached' } })
+    releaseReRun()
+    expect(await w2l.waitBatch(done.taskId)).toMatchObject({ status: 'completed', requested: 3, completed: 3, remaining: 0 })
+    expect([...f.seen].sort()).toEqual(['/item/1', '/item/2', '/item/3', '/item/4'])
+    const store = SqliteTaskStore.openReadOnly(join(f.root, done.taskId))
+    try { expect((await store.listAttempts(done.taskId)).map(attempt => attempt.status)).toEqual(['completed', 'completed']) } finally { await store.close() }
   })
 
   it('lists the items that did not succeed on /errors, every attempt included, with the URLs robots.txt refused', async () => {
