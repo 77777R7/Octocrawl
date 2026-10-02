@@ -161,13 +161,13 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const retryAt = this.scheduler.retryAt(origin)
-      const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), ...(relaxed === null ? {} : { warnings: [tlsUnverifiedWarning(new URL(url).hostname)] }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
+      const timed = { ...result, ...(retryAt === undefined ? {} : { retryAt }), ...(relaxed === null ? {} : { warnings: [tlsUnverifiedWarning(new URL(url).hostname)] }), usage: { ...result.usage, wallMs: totalMs, timings: { queueMs: permit?.queueMs ?? (retryAt === undefined ? totalMs : 0), robotsMs: 0, cooldownWaitMs: permit?.cooldownWaitMs ?? (retryAt === undefined ? 0 : totalMs), ...(permit?.limitedByConcurrency ? { concurrencyWaitMs: permit.concurrencyWaitMs } : {}), retryWaitMs: 0, requestMs: 0, bodyReadMs: 0, transportMs: 0, parseMs: 0, extractMs: 0, formatMs: 0, serializeMs: 0, modelMs: 0, totalMs } } }
       return markDeadline(timed)
     } finally {
       scope.dispose()
@@ -176,7 +176,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions, relaxed: EgressRoutes | null = null): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, validators: { etag?: string; lastModified?: string }, monotonicStart: number, initialQueueMs: number, initialCooldownWaitMs: number, options: FetchOptions, relaxed: EgressRoutes | null = null, concurrencyWaitMs?: number): Promise<FetchResult> {
     const { signal, deadlineAt, onRetryAfter, onRobotsOverride } = execution
     const start = Date.now()
     let robotsMs = 0
@@ -193,6 +193,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       queueMs,
       robotsMs,
       cooldownWaitMs,
+      // Only when the origin's concurrency ceiling held this fetch's permit.
+      ...(concurrencyWaitMs === undefined ? {} : { concurrencyWaitMs }),
       retryWaitMs,
       requestMs: Math.max(0, transportMs - bodyReadMs),
       bodyReadMs,

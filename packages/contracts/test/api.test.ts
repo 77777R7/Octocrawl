@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -298,5 +298,32 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchStartRequest({ urls: [url], mode: 'research', mobile: true })).toThrow(research)
     expect(() => parseCrawlStartRequest({ url, mode: 'research', mobile: true })).toThrow(research)
     expect(parseScrapeRequest({ url, mode: 'research', mobile: false })).toMatchObject({ mode: 'research', mobile: false })
+  })
+
+  it('takes origin and integration as printable labels on scrape, batch and crawl, and refuses anything else by name', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, origin: 'js-sdk@0.3.0', integration: 'nightly-prices' })).toMatchObject({ origin: 'js-sdk@0.3.0', integration: 'nightly-prices' })
+    expect(parseBatchStartRequest({ urls: [url], integration: 'x'.repeat(100) }).integration).toHaveLength(100)
+    expect(parseCrawlStartRequest({ url, origin: 'mcp-claude-desktop@1.2' })).toMatchObject({ origin: 'mcp-claude-desktop@1.2' })
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('origin')
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('integration')
+    for (const value of ['', 'x'.repeat(101), 'with space', 'tab\there', 'ünïcode', 1, null, ['a']]) {
+      expect(() => parseScrapeRequest({ url, integration: value }), JSON.stringify(value)).toThrow('integration must be a string of 1 to 100 printable characters without spaces')
+      expect(() => parseCrawlStartRequest({ url, origin: value }), JSON.stringify(value)).toThrow('origin must be a string of 1 to 100 printable characters without spaces')
+    }
+  })
+
+  it('names the supported route in agentHints when refusing stealth, a stealth proxy or ignoreRobotsTxt, and gives other unknown keys none', () => {
+    const url = 'https://example.com/'
+    expect(thrown(() => parseScrapeRequest({ url, stealth: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['stealth'] }, agentHints: [REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'stealth' }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseCrawlStartRequest({ url, proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect((thrown(() => parseScrapeRequest({ url, proxy: 'basic' })) as RequestError).agentHints).toBeUndefined()
+    expect((thrown(() => parseScrapeRequest({ url, actions: [] })) as RequestError).agentHints).toBeUndefined()
+    expect(refusalHint('scrapeOptions.proxy', 'stealth')).toBe(REFUSAL_HINTS.stealth)
+    expect(refusalHint('scrapeOptions.location', {})).toBeNull()
+    // The 429 answer is not a request error: its code stays outside the set, and its body names the wait.
+    expect(isApiErrorCode(RATE_LIMITED_CODE)).toBe(false)
+    expect(rateLimitedBody(2, 7)).toEqual({ error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: 7, agentHints: ['wait 7 s before the next request'] })
   })
 })

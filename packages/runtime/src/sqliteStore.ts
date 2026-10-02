@@ -15,6 +15,7 @@ interface TaskRow {
   budget_json: string
   batch_json: string | null
   crawl_json?: string | null
+  attribution_json?: string | null
   created_at: string
   updated_at: string
 }
@@ -137,6 +138,7 @@ export class SqliteTaskStore implements TaskStore {
       try { this.db.exec('ALTER TABLE attempts ADD COLUMN recovered_from_attempt_id TEXT') } catch {}
       try { this.db.exec('ALTER TABLE tasks ADD COLUMN batch_json TEXT') } catch {}
       try { this.db.exec('ALTER TABLE tasks ADD COLUMN crawl_json TEXT') } catch {}
+      try { this.db.exec('ALTER TABLE tasks ADD COLUMN attribution_json TEXT') } catch {}
       chmodSync(dbPath, 0o600)
     }
   }
@@ -145,8 +147,8 @@ export class SqliteTaskStore implements TaskStore {
     assertId('task.id', task.id)
     this.db
       .prepare(
-        `INSERT INTO tasks (id, seed_url, task_dir, mode, status, budget_json, batch_json, crawl_json, created_at, updated_at)
-         VALUES (@id, @seed_url, @task_dir, @mode, @status, @budget_json, @batch_json, @crawl_json, @created_at, @updated_at)
+        `INSERT INTO tasks (id, seed_url, task_dir, mode, status, budget_json, batch_json, crawl_json, attribution_json, created_at, updated_at)
+         VALUES (@id, @seed_url, @task_dir, @mode, @status, @budget_json, @batch_json, @crawl_json, @attribution_json, @created_at, @updated_at)
          ON CONFLICT(id) DO UPDATE SET
            seed_url = excluded.seed_url,
            task_dir = excluded.task_dir,
@@ -155,6 +157,7 @@ export class SqliteTaskStore implements TaskStore {
            budget_json = excluded.budget_json,
            batch_json = excluded.batch_json,
            crawl_json = excluded.crawl_json,
+           attribution_json = excluded.attribution_json,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at`,
       )
@@ -167,6 +170,7 @@ export class SqliteTaskStore implements TaskStore {
         budget_json: JSON.stringify(task.budget),
         batch_json: task.batch === undefined ? null : JSON.stringify(task.batch),
         crawl_json: task.crawl === undefined ? null : JSON.stringify(task.crawl),
+        attribution_json: task.attribution === undefined ? null : JSON.stringify(task.attribution),
         created_at: task.createdAt,
         updated_at: task.updatedAt,
       })
@@ -383,6 +387,7 @@ function taskFromRow(row: TaskRow): Task {
     budget: JSON.parse(row.budget_json) as CrawlBudget,
     ...(row.batch_json ? { batch: JSON.parse(row.batch_json) as NonNullable<Task['batch']> } : {}),
     ...(row.crawl_json ? { crawl: JSON.parse(row.crawl_json) as NonNullable<Task['crawl']> } : {}),
+    ...(row.attribution_json ? { attribution: JSON.parse(row.attribution_json) as NonNullable<Task['attribution']> } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

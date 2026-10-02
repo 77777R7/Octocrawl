@@ -8,9 +8,9 @@
 import type { CrawlMode, RobotsOverride } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport } from './crawl.js'
 import type { FetchOptions } from './execution.js'
-import type { FetchResult, LadderRunAudit } from './result.js'
+import type { FetchResult, FetchWarning, LadderRunAudit } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
-import type { DocumentExtraction } from './extractor.js'
+import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { ScrapeFormat, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
@@ -52,7 +52,52 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
 /** The caveats a scrape response may carry for an agent: what to change about the request, in one sentence each. */
 export type AgentHints = readonly string[]
 
-export interface ScrapeRequest extends PageOptions {
+/**
+ * Who a request is from, for W2L's own records only: the scrape record and
+ * the task checkpoint carry both, the crawl and batch status reports them as
+ * `attribution`, and nothing sent to the target changes. Each is 1 to 100
+ * printable ASCII characters without spaces (`^[\x21-\x7e]+$`).
+ */
+export interface RequestAttribution {
+  /** The client that made the request: the SDK sends `js-sdk@<version>`, the MCP server `mcp-<client name>@<client version>`. */
+  origin?: string
+  /** The caller's own label for the integration or workflow the request belongs to. */
+  integration?: string
+}
+
+/**
+ * The facts of one scrape call, under Firecrawl's names, on the full and
+ * compact scrape responses (`metadata`, beside the page's own declarations)
+ * and on `/fc`. Nothing here is guessed: `proxyUsed` is the route the
+ * answering lane recorded, `timezone` the time zone the browser lane
+ * declares (null on the HTTP lane, where none goes on the wire), and the
+ * concurrency pair says whether the per-origin ceiling held an attempt back.
+ */
+export interface ScrapeMetadata {
+  /** A UUID minted for this call; `GET /v1/scrapes/:id` returns its record. */
+  scrapeId: string
+  /** The URL as requested (`requestedUrl`). */
+  sourceURL: string
+  /** The final URL, after redirects (`evidence.finalUrl`). */
+  url: string
+  /** The status of the response that answered `url` (`evidence.httpStatus`); null when none did. */
+  statusCode: number | null
+  /** That response's `content-type` header (`evidence.contentType`); null when there was none. */
+  contentType: string | null
+  /** `operator` when the request went through the server's environment proxy, `user` when the compliance record names the caller's own egress, else null. */
+  proxyUsed: 'operator' | 'user' | null
+  /** The IANA time zone the browser lane declares; null for an HTTP-lane result. */
+  timezone: string | null
+  /** True when the per-origin concurrency ceiling (`W2L_PER_HOST_CONCURRENCY`) held an attempt of this scrape back. */
+  concurrencyLimited: boolean
+  /** Milliseconds the attempts of this scrape waited on that ceiling, cooldown and pacing excluded; 0 when none did. */
+  concurrencyQueueDurationMs: number
+}
+
+/** A scrape response's `metadata`: the page's declarations (all null on a page that was not read as content) and the call's facts. */
+export type ScrapeResponseMetadata = PageMetadata & ScrapeMetadata
+
+export interface ScrapeRequest extends PageOptions, RequestAttribution {
   url: string
   mode?: ApiCrawlMode
   allowlistedDomains?: readonly string[]
@@ -76,8 +121,40 @@ export interface RobotsUrlOverride extends RobotsOverride {
   url: string
 }
 
-/** `evidenceRecord` is set on every response the API sends (see evidenceRecord.ts). */
-export type ScrapeResponse = FetchResult & LadderRunAudit & { snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord; agentHints?: AgentHints }
+/** One scrape as the ladder ran it, before the API shapes the response: the result, its routing audit and the request's hints. */
+export type ScrapeRun = FetchResult & LadderRunAudit & { agentHints?: AgentHints }
+
+/**
+ * The full scrape response: the run, its `scrapeId`, `metadata` carrying the
+ * call's facts beside the page's declarations, and the snapshot and Evidence
+ * Record set on every response the API sends (see evidenceRecord.ts).
+ */
+export type ScrapeResponse = ScrapeRun & { scrapeId: string; metadata: ScrapeResponseMetadata; snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord }
+
+/**
+ * What `GET /v1/scrapes/:id` returns: the record of one scrape call, written
+ * beside the task root (`scrapes/<scrapeId>.json`) before the response was
+ * sent. It holds no page body: the request (header values replaced by their
+ * names), who made it, the verdict and the facts of the fetch.
+ */
+export interface ScrapeRecord extends RequestAttribution {
+  scrapeId: string
+  /** UTC ISO time the API took the request. */
+  requestedAt: string
+  /** The parsed request; each custom header's value is replaced by its name. */
+  request: ScrapeRequest
+  status: FetchResult['status']
+  failureReason: FetchResult['failureReason']
+  blockReason: FetchResult['blockReason']
+  budgetExceeded: FetchResult['budgetExceeded']
+  lane: FetchResult['lane']
+  channelsTried: readonly string[]
+  metadata: ScrapeResponseMetadata
+  snapshot: CompactScrapeResponse['snapshot']
+  usage: { wallMs: number; totalMs: number; requestCount: number; attemptCount: number; browserMs: number }
+  warnings?: readonly FetchWarning[]
+  agentHints?: AgentHints
+}
 
 export interface CompactScrapeResponse {
   requestedUrl: string
@@ -106,7 +183,8 @@ export interface CompactScrapeResponse {
   rawHtml?: string | null
   links?: readonly string[]
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
-  metadata?: FetchResult['metadata']
+  /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
+  metadata: ScrapeResponseMetadata
   json?: StructuredExtractionResult | null
   /** The file the response was, as on the full response; absent for a web page. */
   file?: FetchResult['file']
@@ -120,7 +198,7 @@ export interface CompactScrapeResponse {
   channelsTried: readonly string[]
 }
 
-export interface CrawlStartRequest extends PageOptions {
+export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   url: string
   mode?: ApiCrawlMode
   maxPages?: number | null
@@ -141,7 +219,7 @@ export interface CrawlAccepted {
   taskId: string
 }
 
-export interface BatchStartRequest extends PageOptions {
+export interface BatchStartRequest extends PageOptions, RequestAttribution {
   urls: readonly string[]
   mode?: ApiCrawlMode
   formats?: readonly ScrapeFormat[]
@@ -205,11 +283,35 @@ export interface ApiErrorDetails {
   formats?: readonly string[]
 }
 
-/** Native error body. /fc sends the same fields after `success: false`. */
+/** Native error body. /fc sends the same fields after `success: false`, with the hints as `agent_hints`. */
 export interface ApiErrorBody {
   error: string
   code: ApiErrorCode
   details?: ApiErrorDetails
+  /** For a refused option W2L does not offer: the supported route, one sentence each. */
+  agentHints?: AgentHints
+}
+
+/**
+ * The code of the one answer that is not a request error: the request was
+ * well formed, and the caller is over the server's per-minute budget
+ * (HTTP 429, `Retry-After`). It is not one of API_ERROR_CODES, which name
+ * what was wrong with a request.
+ */
+export const RATE_LIMITED_CODE = 'rate_limited' as const
+export const RATE_LIMITED_STATUS = 429
+
+/** The native 429 body; /fc sends `{ success: false, error, code, agent_hints }` with the same header. */
+export interface RateLimitedBody {
+  error: string
+  code: typeof RATE_LIMITED_CODE
+  /** Seconds until the window admits a request again, at least 1; also the `Retry-After` header. */
+  retryAfterSeconds: number
+  agentHints: AgentHints
+}
+
+export function rateLimitedBody(perMinute: number, retryAfterSeconds: number): RateLimitedBody {
+  return { error: `rate limit exceeded: ${perMinute} requests per minute`, code: RATE_LIMITED_CODE, retryAfterSeconds, agentHints: [`wait ${retryAfterSeconds} s before the next request`] }
 }
 
 export class RequestError extends Error {
@@ -218,10 +320,27 @@ export class RequestError extends Error {
     message: string,
     readonly code: 'invalid_request' | 'unsupported_parameter' | 'unsupported_format' = 'invalid_request',
     readonly details?: ApiErrorDetails,
+    /** The supported route, when the refused option is one W2L does not offer. */
+    readonly agentHints?: AgentHints,
   ) {
     super(message)
     this.name = 'RequestError'
   }
+}
+
+/** The hints a refusal carries for the options W2L does not offer: the next honest step, never a way around the refusal. */
+export const REFUSAL_HINTS = {
+  stealth: "W2L does not offer a stealth mode or stealth proxies: every fetch declares W2L's identity; a proxy or session you own (mode authed) is the supported route",
+  ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
+  hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
+} as const
+
+/** The hint for a refused request key, or null when the key has none (an option W2L simply does not know). */
+export function refusalHint(key: string, value: unknown): string | null {
+  const name = key.slice(key.lastIndexOf('.') + 1)
+  if (name === 'stealth' || (name === 'proxy' && (value === 'stealth' || value === 'enhanced'))) return REFUSAL_HINTS.stealth
+  if (name === 'ignoreRobotsTxt') return REFUSAL_HINTS.ignoreRobotsTxt
+  return null
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -232,17 +351,25 @@ function asRecord(body: unknown): Record<string, unknown> {
 }
 
 const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds'] as const
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS] as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS] as const
+const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
+const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 
-/** An option W2L does not know is an error, never silently dropped; `at` names a nested object's place in the request. */
+/**
+ * An option W2L does not know is an error, never silently dropped; `at`
+ * names a nested object's place in the request. A refused option W2L does
+ * not offer (`stealth`, a stealth `proxy`, `ignoreRobotsTxt`) names the
+ * supported route in `agentHints`.
+ */
 function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[], at = ''): void {
   const prefix = at === '' ? '' : `${at}.`
-  const unknown = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key)).map((key) => prefix + key)
-  if (unknown.length > 0) {
-    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.map((key) => prefix + key).join(', ')})`, 'unsupported_parameter', { parameters: unknown })
+  const unknownKeys = Object.keys(rec).filter((key) => rec[key] !== undefined && !known.includes(key))
+  if (unknownKeys.length > 0) {
+    const unknown = unknownKeys.map((key) => prefix + key)
+    const hints = [...new Set(unknownKeys.map((key) => refusalHint(key, rec[key])).filter((hint): hint is string => hint !== null))]
+    throw new RequestError(`unsupported ${unknown.length === 1 ? 'parameter' : 'parameters'}: ${unknown.join(', ')} (supported: ${known.map((key) => prefix + key).join(', ')})`, 'unsupported_parameter', { parameters: unknown }, hints.length === 0 ? undefined : hints)
   }
 }
 
@@ -629,6 +756,22 @@ function readBoolean(value: unknown, name: string): boolean | undefined {
   return value
 }
 
+/** The characters an attribution label may hold: printable ASCII without spaces, 1 to 100 of them. */
+const ATTRIBUTION_LABEL = /^[\x21-\x7e]{1,100}$/
+
+function readLabel(value: unknown, name: 'origin' | 'integration'): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !ATTRIBUTION_LABEL.test(value)) throw new RequestError(`${name} must be a string of 1 to 100 printable characters without spaces`)
+  return value
+}
+
+/** `origin` and `integration`, those that were set. */
+function readAttribution(rec: Record<string, unknown>): RequestAttribution {
+  const origin = readLabel(rec.origin, 'origin')
+  const integration = readLabel(rec.integration, 'integration')
+  return { ...(origin === undefined ? {} : { origin }), ...(integration === undefined ? {} : { integration }) }
+}
+
 /** The mobile identity is a browser's; the research identity declares a bot and has no device to emulate. */
 function checkMobileMode(mode: ApiCrawlMode | undefined, mobile: boolean | undefined): void {
   if (mode === 'research' && mobile === true) throw new RequestError('mobile is not available in research mode: the research identity declares a bot, not a device')
@@ -681,6 +824,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     debug: rec.debug as boolean | undefined,
     ...page,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
+    ...readAttribution(rec),
   }
 }
 
@@ -707,6 +851,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     includePaths: readPathPatterns(rec.includePaths, 'includePaths'),
     excludePaths: readPathPatterns(rec.excludePaths, 'excludePaths'),
     ...page,
+    ...readAttribution(rec),
   }
 }
 
@@ -727,6 +872,7 @@ export function parseBatchStartRequest(body: unknown): BatchStartRequest {
     urls, mode, formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
     ...page,
     ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
+    ...readAttribution(rec),
   }
 }
 

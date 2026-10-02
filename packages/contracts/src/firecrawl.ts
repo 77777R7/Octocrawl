@@ -6,8 +6,8 @@
  * honour is rejected by name (HTTP 400, success: false), never ignored.
  */
 
-import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest } from './api.js'
-import { parseCrawlStartRequest, parseScrapeRequest, RequestError } from './api.js'
+import type { AgentHints, CrawlAccepted, CrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
+import { parseCrawlStartRequest, parseScrapeRequest, refusalHint, RequestError } from './api.js'
 import type { CrawlReport } from './crawl.js'
 import type { FetchResult } from './result.js'
 import type { StepRecord, StepStatus, TaskStatus } from './checkpoint.js'
@@ -35,7 +35,10 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl), and data lists those pages too, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode and blockAds; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, origin, integration and the same scrapeOptions (applied to every page). Formats other than markdown/links/html/rawHtml and parameters the shim does not map (proxy, location, actions, screenshot, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'origin (the Firecrawl SDKs\' client label) and integration are stored, not echoed: the scrape record (GET /v1/scrapes/:id) and the crawl task carry them, and nothing sent to the target changes.',
+  'data.metadata carries scrapeId (a UUID per call, which GET /v1/scrapes/:id looks up), proxyUsed (operator for the server\'s environment proxy, user for the caller\'s own egress, else null), timezone (the browser rung\'s declared zone, null on the HTTP rung), creditsUsed: null (W2L counts no credits), concurrencyLimited and concurrencyQueueDurationMs (whether and how long the per-origin ceiling held the fetch back). cacheState and cachedAt are left out until W2L has a cache.',
+  'A page whose result W2L has advice about (a login wall, a robots.txt rule, a gate, a cut, a script-filled shell) carries data.agent_hints, one sentence each; the native response calls them agentHints. A request refused for an option W2L does not offer carries agent_hints in the error envelope, and a caller over the server\'s per-minute rate limit gets HTTP 429 { success: false, error, code: rate_limited, agent_hints } with Retry-After.',
   'headers never override the User-Agent, the client hints, a credential (authorization, cookie) or a transport header: such a header is HTTP 400 naming it, where Firecrawl sends it. The headers go to the requested origin after the declared identity and are on the record (the trace, the browser lane\'s signed sentHeaders); both rungs withhold them from a redirect hop to another origin and say so (custom_headers_withheld).',
   'mobile selects a declared Android Chrome identity (User-Agent, client hints, 412x915 viewport, touch) that robots.txt is evaluated against and the record carries; the page is whatever the site serves to it, with no DOM rewriting. It is refused with mode research.',
   'skipTlsVerification relaxes certificate verification for one local request and its robots.txt lookup, recorded in the trace (tls_verification_skipped) and a tls_unverified warning the native response carries; a hosted W2L refuses it with HTTP 400. Without it a bad certificate is success: false with failed: tls_error. Firecrawl\'s Python SDK sends true by default; W2L verifies by default.',
@@ -56,6 +59,8 @@ export interface FirecrawlPage {
   /** Present when the `rawHtml` format was asked for; null when the page has none. */
   rawHtml?: string | null
   links?: string[]
+  /** What to change about the request next time, one sentence each (the native `agentHints`); present when W2L has any. */
+  agent_hints?: string[]
   /** Page fields appear only when the page declares them (W2L's `metadata`, null values left out). */
   metadata: {
     title?: string
@@ -73,6 +78,14 @@ export interface FirecrawlPage {
     contentType?: string
     /** On a page that did not succeed: W2L's failure, block or budget reason code (`http_error`, `cloudflare_challenge`, ...), or its status when it has none (`empty_verified`). */
     error?: string
+    /** The facts of the scrape call (native `metadata`), on a scrape response; a crawl status page has no call of its own and leaves them out. */
+    scrapeId?: string
+    proxyUsed?: ScrapeMetadata['proxyUsed']
+    timezone?: string | null
+    /** Null: W2L counts no credits. */
+    creditsUsed?: null
+    concurrencyLimited?: boolean
+    concurrencyQueueDurationMs?: number
   }
 }
 
@@ -148,21 +161,33 @@ interface ShimProblems {
   parameters: string[]
   values: string[]
   formats: Set<string>
+  /** The supported route for a refused option W2L does not offer (a stealth proxy, ignoreRobotsTxt). */
+  hints: string[]
+}
+
+const noProblems = (): ShimProblems => ({ parameters: [], values: [], formats: new Set(), hints: [] })
+
+/** `origin` (the Firecrawl SDKs' client label) and `integration`: stored on W2L's own records, validated by the native parser. */
+const SHIM_ATTRIBUTION = ['origin', 'integration'] as const
+
+function readShimAttribution(rec: Record<string, unknown>): Record<string, unknown> {
+  const mapped: Record<string, unknown> = {}
+  for (const key of SHIM_ATTRIBUTION) if (rec[key] !== undefined) mapped[key] = rec[key]
+  return mapped
 }
 
 export function parseFirecrawlScrapeRequest(body: unknown): ScrapeRequest {
   const rec = asRecord(body)
-  const problems: ShimProblems = { parameters: [], values: [], formats: new Set() }
-  // `origin` is the Firecrawl SDKs' client label; it does not change the result.
-  const options = readShimScrapeOptions(rec, '', ['url', 'origin'], problems)
+  const problems = noProblems()
+  const options = readShimScrapeOptions(rec, '', ['url', ...SHIM_ATTRIBUTION], problems)
   throwShimProblems(problems)
-  return parseScrapeRequest({ url: rec.url, ...options })
+  return parseScrapeRequest({ url: rec.url, ...options, ...readShimAttribution(rec) })
 }
 
 export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
   const rec = asRecord(body)
-  const problems: ShimProblems = { parameters: [], values: [], formats: new Set() }
-  checkShimKeys(rec, '', ['url', 'origin', 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions'], problems)
+  const problems = noProblems()
+  checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'scrapeOptions'], problems)
   checkShimFixedValue(rec, '', 'ignoreSitemap', problems)
   let pageOptions: Record<string, unknown> = {}
   if (rec.scrapeOptions !== undefined) {
@@ -171,7 +196,7 @@ export function parseFirecrawlCrawlRequest(body: unknown): CrawlStartRequest {
     pageOptions = readShimScrapeOptions(options as Record<string, unknown>, 'scrapeOptions.', [], problems)
   }
   throwShimProblems(problems)
-  const native: Record<string, unknown> = { url: rec.url, ...pageOptions }
+  const native: Record<string, unknown> = { url: rec.url, ...pageOptions, ...readShimAttribution(rec) }
   if (rec.limit !== undefined) native.maxPages = rec.limit
   if (rec.maxDepth !== undefined) native.maxDepth = rec.maxDepth
   if (rec.includePaths !== undefined) native.includePaths = rec.includePaths
@@ -193,7 +218,12 @@ function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, key
 }
 
 function checkShimKeys(rec: Record<string, unknown>, prefix: string, known: readonly string[], problems: ShimProblems): void {
-  for (const key of Object.keys(rec)) if (rec[key] !== undefined && !known.includes(key)) problems.parameters.push(`${prefix}${key}`)
+  for (const key of Object.keys(rec)) {
+    if (rec[key] === undefined || known.includes(key)) continue
+    problems.parameters.push(`${prefix}${key}`)
+    const hint = refusalHint(key, rec[key])
+    if (hint !== null && !problems.hints.includes(hint)) problems.hints.push(hint)
+  }
 }
 
 function checkShimFixedValue(rec: Record<string, unknown>, prefix: string, key: string, problems: ShimProblems): void {
@@ -220,15 +250,16 @@ function throwShimProblems(problems: ShimProblems): void {
   throw new RequestError(parts.join('; '), parameters.length > 0 ? 'unsupported_parameter' : 'unsupported_format', {
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(formats.length > 0 ? { formats } : {}),
-  })
+  }, problems.hints.length === 0 ? undefined : problems.hints)
 }
 
-export function wrapScrape(result: FetchResult): FirecrawlScrapeResponse {
-  const data = firecrawlPage(result)
-  if (result.status === 'success' || result.status === 'partial') {
+/** The native scrape response as Firecrawl's envelope: the page with the call's facts in `data.metadata` and its hints as `data.agent_hints`. */
+export function wrapScrape(response: ScrapeResponse): FirecrawlScrapeResponse {
+  const data = firecrawlPage(response, response.metadata, response.agentHints)
+  if (response.status === 'success' || response.status === 'partial') {
     return { success: true, data }
   }
-  return { success: false, error: scrapeError(result), data }
+  return { success: false, error: scrapeError(response), data }
 }
 
 export function wrapCrawlAccepted(native: CrawlAccepted, seedUrl: string): FirecrawlCrawlStarted {
@@ -275,7 +306,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-function firecrawlPage(result: FetchResult): FirecrawlPage {
+function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?: AgentHints): FirecrawlPage {
   const error =
     result.status === 'blocked'
       ? (result.blockReason ?? 'blocked')
@@ -298,6 +329,7 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
     ...(result.html === undefined ? {} : { html: result.html }),
     ...(result.rawHtml === undefined ? {} : { rawHtml: result.rawHtml }),
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
+    ...(agentHints === undefined || agentHints.length === 0 ? {} : { agent_hints: [...agentHints] }),
     metadata: {
       ...declared,
       sourceURL: result.requestedUrl,
@@ -305,6 +337,15 @@ function firecrawlPage(result: FetchResult): FirecrawlPage {
       statusCode: result.evidence.httpStatus,
       ...(result.evidence.contentType === null ? {} : { contentType: result.evidence.contentType }),
       ...(error !== undefined ? { error } : {}),
+      // The call's facts, on a scrape response; a crawl status page has no call of its own.
+      ...(scrape === undefined ? {} : {
+        scrapeId: scrape.scrapeId,
+        proxyUsed: scrape.proxyUsed,
+        timezone: scrape.timezone,
+        creditsUsed: null,
+        concurrencyLimited: scrape.concurrencyLimited,
+        concurrencyQueueDurationMs: scrape.concurrencyQueueDurationMs,
+      }),
     },
   }
 }

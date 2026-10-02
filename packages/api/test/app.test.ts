@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
-import { identityForRoute } from '@w2l/contracts'
+import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
@@ -24,6 +24,9 @@ function httpOnlyChannels(mode: 'standard' | 'research' | 'authed') {
     },
   })
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year. '.repeat(3)
 
 describe('REST /v1/scrape and /v1/crawl', () => {
   let server: FixtureServer
@@ -189,8 +192,9 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       favicon: null,
       canonicalUrl: null,
     }
-    expect((await post('/v1/scrape', { url })).metadata).toEqual(declared)
-    expect((await post('/v1/scrape', { url, formats: ['markdown'], debug: false })).metadata).toEqual(declared)
+    // Scrape responses carry the page's declarations beside the call's facts; batch items and crawl pages the declarations alone.
+    expect((await post('/v1/scrape', { url })).metadata).toMatchObject(declared)
+    expect((await post('/v1/scrape', { url, formats: ['markdown'], debug: false })).metadata).toMatchObject(declared)
     expect((await post('/fc/v1/scrape', { url })).data.metadata).toEqual({
       title: 'Harbour lantern catalog',
       description: 'Synthetic fixture page for benchmark purposes.',
@@ -199,6 +203,12 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       url,
       statusCode: 200,
       contentType: 'text/html; charset=utf-8',
+      scrapeId: expect.stringMatching(UUID),
+      proxyUsed: null,
+      timezone: null,
+      creditsUsed: null,
+      concurrencyLimited: false,
+      concurrencyQueueDurationMs: 0,
     })
     const batch = await post('/v1/batches', { urls: [url] })
     const crawl = await post('/v1/crawl', { url, maxPages: 1 })
@@ -207,6 +217,164 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     const pages = await (await app.request(`/v1/crawl/${crawl.taskId}/pages`)).json()
     expect(items.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
     expect(pages.items.map((item: { metadata?: unknown }) => item.metadata)).toEqual([declared])
+  })
+
+  it('mints a scrapeId per call, carries the call\'s facts in metadata on the full and compact responses, and serves the record at GET /v1/scrapes/:id', async () => {
+    const url = `${server.url}/crawl/listing`
+    const full = (await postJson('/v1/scrape', { url, integration: 'app-test', origin: 'test-suite@1' })).body
+    expect(full.scrapeId).toMatch(UUID)
+    expect(full.metadata).toMatchObject({ scrapeId: full.scrapeId, sourceURL: url, url, statusCode: 200, contentType: 'text/html; charset=utf-8', proxyUsed: null, timezone: null, concurrencyLimited: false, concurrencyQueueDurationMs: 0, title: 'Harbour lantern catalog' })
+    // The compact response names the call under metadata only, and each call has its own id.
+    const compact = (await postJson('/v1/scrape', { url, debug: false })).body
+    expect(compact).not.toHaveProperty('scrapeId')
+    expect(compact.metadata.scrapeId).toMatch(UUID)
+    expect(compact.metadata.scrapeId).not.toBe(full.scrapeId)
+    const app = createApp(engine)
+    const got = await app.request(`/v1/scrapes/${full.scrapeId}`)
+    expect(got.status).toBe(200)
+    const record = await got.json()
+    expect(record).toMatchObject({
+      scrapeId: full.scrapeId, status: 'success', lane: 'http', channelsTried: ['http'], origin: 'test-suite@1', integration: 'app-test',
+      request: { url }, metadata: full.metadata, snapshot: { httpStatus: 200, contentType: 'text/html; charset=utf-8' },
+      usage: { requestCount: 1, attemptCount: 1, browserMs: 0 },
+    })
+    expect(Date.parse(record.requestedAt)).toBeGreaterThan(Date.now() - 60_000)
+    expect(record.usage.totalMs).toBeGreaterThanOrEqual(record.usage.wallMs)
+    // No body, no trace, no audit: the attribution sits beside the request, not inside it.
+    expect(record).not.toHaveProperty('markdown')
+    expect(record).not.toHaveProperty('trace')
+    expect(record.request).not.toHaveProperty('origin')
+    expect(record.request).not.toHaveProperty('integration')
+    // The page's declared title is metadata; its body (the catalogue items) is not in the record.
+    expect(record.metadata.title).toBe('Harbour lantern catalog')
+    expect(JSON.stringify(record)).not.toContain('teapot')
+    // A page that was not read as content has the call's facts with its page fields null, and a record of its own.
+    const failed = (await postJson('/v1/scrape', { url: `${server.url}/error/404`, debug: false })).body
+    expect(failed.metadata).toMatchObject({ statusCode: 404, title: null, canonicalUrl: null, scrapeId: expect.stringMatching(UUID), url: `${server.url}/error/404` })
+    expect((await (await app.request(`/v1/scrapes/${failed.metadata.scrapeId}`)).json())).toMatchObject({ status: 'failed', failureReason: 'http_error', agentHints: ['the server answered 404; the markdown is that error page, not the requested page'] })
+    // Header values stay out of the record; each is replaced by its name.
+    const headed = (await postJson('/v1/scrape', { url, headers: { 'X-Test': 'not-for-the-record' }, debug: false })).body
+    expect((await (await app.request(`/v1/scrapes/${headed.metadata.scrapeId}`)).json()).request.headers).toEqual({ 'x-test': 'x-test' })
+    for (const id of [crypto.randomUUID(), 'not-an-id']) {
+      const missing = await app.request(`/v1/scrapes/${id}`)
+      expect(missing.status, id).toBe(404)
+      expect(await missing.json()).toEqual({ error: 'not found', code: 'not_found' })
+    }
+  })
+
+  it('says when the per-origin ceiling held a scrape back, and for how long, on the native response and /fc', async () => {
+    const slow = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(404).end(); return }
+      setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>Survey</title></head><body><main><article><h1>Hourly survey</h1><p>${PROSE}</p></article></main></body></html>`), 300)
+    })
+    await new Promise<void>(resolve => slow.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(slow.address() as AddressInfo).port}/survey`
+    const root = await mkdtemp(join(tmpdir(), 'w2l-api-queue-'))
+    // One slot per origin, as W2L_PER_HOST_CONCURRENCY=1 gives the API; the test channels take the same policy.
+    const policy = { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 1 }
+    const single = createApiEngine({ taskRoot: root, perHostConcurrency: 1, perHostMinDelayMs: 1, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('browser arm was reached') } } } }) })
+    try {
+      const app = createApp(single)
+      const post = async (path: string, body: unknown) => (await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()
+      const [a, b, c, shim] = await Promise.all([post('/v1/scrape', { url, debug: false }), post('/v1/scrape', { url, debug: false }), post('/v1/scrape', { url }), post('/fc/v1/scrape', { url })])
+      const facts = [a.metadata, b.metadata, c.metadata, shim.data.metadata].sort((x, y) => x.concurrencyQueueDurationMs - y.concurrencyQueueDurationMs)
+      expect([a, b, c].every((response) => response.status === 'success')).toBe(true)
+      expect(shim.success).toBe(true)
+      // Each fetch holds the one slot for at least 300 ms: the first waited for none, the others for the ones before them.
+      expect(facts[0]).toMatchObject({ concurrencyLimited: false, concurrencyQueueDurationMs: 0 })
+      expect(facts.slice(1).every((fact) => fact.concurrencyLimited === true)).toBe(true)
+      expect(facts[1]!.concurrencyQueueDurationMs).toBeGreaterThanOrEqual(250)
+      expect(facts[2]!.concurrencyQueueDurationMs).toBeGreaterThanOrEqual(500)
+      expect(facts[3]!.concurrencyQueueDurationMs).toBeGreaterThanOrEqual(750)
+      // The lane's own timings carry the hold, on the full response's attempt audit.
+      expect(c.usage.timings.queueMs).toBeGreaterThanOrEqual(c.usage.timings.concurrencyWaitMs ?? 0)
+      expect(c.summary.attempts.map((attempt: { result: { usage: { timings: { concurrencyWaitMs?: number } } } }) => attempt.result.usage.timings.concurrencyWaitMs !== undefined)).toEqual([c.metadata.concurrencyLimited])
+    } finally {
+      await single.close()
+      slow.closeAllConnections()
+      await new Promise<void>(resolve => slow.close(() => resolve()))
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('stores origin and integration with a batch or crawl and reports them as attribution on its status, and nothing else echoes them', async () => {
+    const url = `${server.url}/crawl/listing`
+    const batch = await postJson('/v1/batches', { urls: [url], integration: 'nightly-prices', origin: 'suite@1' })
+    const crawl = await postJson('/v1/crawl', { url, maxPages: 1 })
+    expect(batch.status).toBe(202)
+    await engine.close()
+    const app = createApp(engine)
+    const report = await (await app.request(`/v1/batches/${batch.body.taskId}`)).json()
+    expect(report).toMatchObject({ status: 'completed', attribution: { origin: 'suite@1', integration: 'nightly-prices' } })
+    expect(JSON.stringify((await (await app.request(`/v1/batches/${batch.body.taskId}/items`)).json()).items)).not.toContain('nightly-prices')
+    expect(await (await app.request(`/v1/crawl/${crawl.body.taskId}`)).json()).not.toHaveProperty('attribution')
+    expect(await postJson('/v1/batches', { urls: [url], integration: 'has space' })).toEqual({ status: 400, body: { error: 'integration must be a string of 1 to 100 printable characters without spaces', code: 'invalid_request' } })
+  })
+
+  it('carries agentHints for a login wall, a robots.txt rule and a refused stealth option, and none on a plain success', async () => {
+    // A login wall is answered by the http rung; these channels have no browser rung to offer it to.
+    const hintRoot = await mkdtemp(join(tmpdir(), 'w2l-api-hints-'))
+    const httpOnly = createApiEngine({ taskRoot: hintRoot, channelsFor: (mode) => httpOnlyChannels(mode).filter((channel) => channel.id === 'http') })
+    const local = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private/'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><p>private</p></body></html>')
+    })
+    await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve))
+    try {
+      const app = createApp(httpOnly)
+      const post = async (path: string, body: unknown) => {
+        const res = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        return { status: res.status, body: await res.json() }
+      }
+      const wall = `${server.url}/block/login-wall`
+      const login = 'the page asks for a login; W2L does not create accounts; use mode authed with your own session'
+      const full = (await post('/v1/scrape', { url: wall })).body
+      expect(full).toMatchObject({ status: 'blocked', blockReason: 'login_wall', agentHints: [login] })
+      expect((await post('/v1/scrape', { url: wall, debug: false })).body).toMatchObject({ status: 'blocked', agentHints: [login] })
+      expect((await post('/fc/v1/scrape', { url: wall })).body).toMatchObject({ success: false, data: { agent_hints: [login] } })
+      expect(await (await app.request(`/v1/scrapes/${full.scrapeId}`)).json()).toMatchObject({ blockReason: 'login_wall', agentHints: [login] })
+      const denied = (await post('/v1/scrape', { url: `http://127.0.0.1:${(local.address() as AddressInfo).port}/private/report`, debug: false })).body
+      expect(denied).toMatchObject({ status: 'failed', failureReason: 'policy_denied', agentHints: ["robots.txt of 127.0.0.1 disallows this URL for W2L's identity (rule /private/); a robotsOverride with a recorded reason fetches it on the record"] })
+      // A refusal of what W2L does not offer names the supported route, natively and on /fc.
+      expect(await post('/v1/scrape', { url: wall, stealth: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['stealth'] }, agentHints: [REFUSAL_HINTS.stealth] } })
+      expect(await post('/fc/v1/scrape', { url: wall, proxy: 'stealth' })).toMatchObject({ status: 400, body: { success: false, code: 'unsupported_parameter', agent_hints: [REFUSAL_HINTS.stealth] } })
+      expect((await post('/fc/v1/scrape', { url: wall, proxy: 'stealth' })).body).not.toHaveProperty('agentHints')
+      const plain = (await post('/v1/scrape', { url: `${server.url}/crawl/listing`, debug: false })).body
+      expect(plain.status).toBe('success')
+      expect(plain).not.toHaveProperty('agentHints')
+    } finally {
+      await httpOnly.close()
+      local.closeAllConnections()
+      await new Promise<void>(resolve => local.close(() => resolve()))
+      await rm(hintRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('limits the requests that start work per bearer token, answers 429 with Retry-After and the wait, and leaves status reads free', async () => {
+    const url = `${server.url}/crawl/listing`
+    const app = createApp(engine, { tokens: ['alpha', 'beta'], rateLimit: { perMinute: 2 } })
+    const post = (path: string, token: string, body: unknown = { url, debug: false }) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) })
+    expect((await post('/v1/scrape', 'alpha')).status).toBe(200)
+    expect((await post('/v1/scrape', 'alpha')).status).toBe(200)
+    const limited = await post('/v1/scrape', 'alpha')
+    expect(limited.status).toBe(429)
+    const retryAfter = Number(limited.headers.get('retry-after'))
+    expect(retryAfter).toBeGreaterThanOrEqual(1)
+    expect(retryAfter).toBeLessThanOrEqual(60)
+    expect(await limited.json()).toEqual({ error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', retryAfterSeconds: retryAfter, agentHints: [`wait ${retryAfter} s before the next request`] })
+    // Another token has its own budget; a status read is not counted; a wrong token is refused before it counts; /fc wears Firecrawl's envelope.
+    expect((await post('/v1/scrape', 'beta')).status).toBe(200)
+    expect((await app.request('/v1/crawl/none', { headers: { authorization: 'Bearer alpha' } })).status).toBe(404)
+    expect((await post('/v1/scrape', 'nope')).status).toBe(401)
+    const shim = await post('/fc/v1/crawl', 'alpha', { url })
+    expect(shim.status).toBe(429)
+    expect(shim.headers.get('retry-after')).toMatch(/^\d+$/)
+    expect(await shim.json()).toEqual({ success: false, error: 'rate limit exceeded: 2 requests per minute', code: 'rate_limited', agent_hints: [expect.stringMatching(/^wait \d+ s before the next request$/)] })
+    // Without tokens the one local caller has the budget.
+    const local = createApp(engine, { rateLimit: { perMinute: 1 } })
+    const plain = () => local.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, debug: false }) })
+    expect((await plain()).status).toBe(200)
+    expect((await plain()).status).toBe(429)
   })
 
   it('supports JSON-only and Markdown plus JSON without changing legacy defaults', async () => {

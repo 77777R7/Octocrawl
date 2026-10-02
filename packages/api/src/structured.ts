@@ -8,18 +8,24 @@ import type {
   JsonSchema,
   JsonValue,
   LabelledValue,
+  LadderExecutionSummary,
+  Lane,
+  PageMetadata,
   ProductFact,
   ProductFacts,
   ScrapeFormat,
+  ScrapeMetadata,
   ScrapeRequest,
   ScrapeResponse,
+  ScrapeResponseMetadata,
+  ScrapeRun,
   StructuredExtractionIssue,
   StructuredExtractionResult,
   StructuredFieldEvidence,
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
+import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode } from '@w2l/contracts'
 import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
@@ -891,7 +897,7 @@ export async function extractStructured(
   return { status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null }
 }
 
-function requestedFormats(req: ScrapeRequest, result?: ScrapeResponse): readonly ScrapeFormat[] {
+function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly ScrapeFormat[] {
   if (req.formats !== undefined) return req.formats
   // MCP marks its compact request with debug=false. Keep REST/SDK legacy
   // defaults, while returning adapter JSON (including incomplete identity
@@ -921,12 +927,20 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary']): ScrapeRespon
   }
 }
 
+/**
+ * The run as the API answers it: the formats the request asked for, JSON
+ * extraction, the `scrapeId` and `metadata` of the call, the snapshot, the
+ * Evidence Record and the timings; compact unless `debug` is true. The id is
+ * minted here when the caller (the engine, which writes the scrape record
+ * under it) gives none.
+ */
 export async function prepareScrapeResponse(
-  result: ScrapeResponse,
+  result: ScrapeRun,
   req: ScrapeRequest,
   execution: ExecutionContext,
   modelConfig: StructuredModelConfig | null,
   overallStart: number,
+  scrapeId: string = crypto.randomUUID(),
 ): Promise<ScrapeResponse | CompactScrapeResponse> {
   const formats = requestedFormats(req, result)
   const modelStart = performance.now()
@@ -936,7 +950,7 @@ export async function prepareScrapeResponse(
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
-  const next: ScrapeResponse = {
+  const next: ScrapeRun = {
     ...result,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
@@ -950,6 +964,8 @@ export async function prepareScrapeResponse(
   const totalMs = Math.max(0, performance.now() - overallStart)
   const withTiming: ScrapeResponse = {
     ...next,
+    scrapeId,
+    metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
     evidenceRecord: scrapeEvidenceRecord(result, req, next),
     usage: {
@@ -981,11 +997,65 @@ function scrapeEvidenceRecord(result: FetchResult, req: ScrapeRequest, delivered
   return toEvidenceRecord(result, { mode: defaultApiMode(req.mode) }, { markdown: delivered.markdown, ...(delivered.json === undefined ? {} : { json: delivered.json }) })
 }
 
+/** The page fields of a result that was not read as content: nothing was read, so nothing is declared. */
+const NO_PAGE_METADATA: PageMetadata = { title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null }
+
+const BROWSER_LANES: ReadonlySet<Lane> = new Set<Lane>(['browser_local', 'browser_local_authed', 'browser_proxy'])
+
+/**
+ * Which egress the answering lane recorded: the caller's own, from the signed
+ * compliance record (`access.egressOwner`), else the server's environment
+ * proxy, from `evidence.envProxy` or the `egress_proxy` trace events, else
+ * none. Never a guess: a lane that does not report its route gives null.
+ */
+function proxyUsedOf(result: Pick<FetchResult, 'compliance' | 'evidence' | 'trace'>): ScrapeMetadata['proxyUsed'] {
+  if (result.compliance?.access.egressOwner === 'user') return 'user'
+  if (typeof result.evidence.envProxy === 'string' || result.trace.some((event) => event.event === 'egress_proxy')) return 'operator'
+  return null
+}
+
+/** The time zone the browser lane declared (its fingerprint's, for the identity it declared); null elsewhere, where none goes on the wire. */
+function timezoneOf(result: Pick<FetchResult, 'lane' | 'trace'>): string | null {
+  if (!BROWSER_LANES.has(result.lane)) return null
+  const device = result.trace.find((event) => event.event === 'identity_declared')?.detail?.device
+  return browserFingerprintFor(device === 'mobile' ? 'mobile' : 'desktop').timezoneId
+}
+
+/**
+ * Whether the per-origin concurrency ceiling held any attempt of the run
+ * back, and for how long in all: each lane tried acquired its own permit and
+ * reports the hold on its result's timings (`concurrencyWaitMs`).
+ */
+function concurrencySignal(summary: Pick<LadderExecutionSummary, 'attempts'>): Pick<ScrapeMetadata, 'concurrencyLimited' | 'concurrencyQueueDurationMs'> {
+  const waits = summary.attempts.map((attempt) => attempt.result.usage.timings?.concurrencyWaitMs).filter((wait): wait is number => typeof wait === 'number')
+  return { concurrencyLimited: waits.length > 0, concurrencyQueueDurationMs: waits.reduce((sum, wait) => sum + wait, 0) }
+}
+
+/**
+ * A scrape response's `metadata`: the page's own declarations when the page
+ * was read as content (all null otherwise: a blocked or failed page is
+ * evidence, not the page asked for, and nothing is declared from it), and
+ * the facts of the call under Firecrawl's names.
+ */
+export function scrapeResponseMetadata(run: ScrapeRun, scrapeId: string): ScrapeResponseMetadata {
+  return {
+    ...(run.metadata ?? NO_PAGE_METADATA),
+    scrapeId,
+    sourceURL: run.requestedUrl,
+    url: run.evidence.finalUrl,
+    statusCode: run.evidence.httpStatus,
+    contentType: run.evidence.contentType,
+    proxyUsed: proxyUsedOf(run),
+    timezone: timezoneOf(run),
+    ...concurrencySignal(run.summary),
+  }
+}
+
 /**
  * The capture identity of whatever response was received, success or not,
  * in both the full and the compact response shape.
  */
-function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snapshot'] {
+export function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snapshot'] {
   return {
     rawBodySha256: result.evidence.rawBodySha256,
     artifacts: result.evidence.artifacts,
@@ -1034,7 +1104,7 @@ export function compactScrapeResponse(
       adapter: next.document.adapter,
       ...(next.document.adapterValidation === undefined ? {} : { adapterValidation: next.document.adapterValidation }),
     } }),
-    ...(next.metadata === undefined ? {} : { metadata: next.metadata }),
+    metadata: next.metadata,
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
     ...(next.file === undefined ? {} : { file: next.file }),
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),

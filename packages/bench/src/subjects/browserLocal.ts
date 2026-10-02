@@ -292,6 +292,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const monotonicStart = performance.now()
     let queueMs = 0
     let cooldownWaitMs = 0
+    // Set when the origin's concurrency ceiling held this fetch's permit: how long.
+    let concurrencyWaitMs: number | undefined
     // Set when a robots disallow was set aside by the caller's recorded
     // decision; every result of this fetch then carries the warning first,
     // and every result of a fetch that relaxed certificate verification the
@@ -311,6 +313,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             ...(result.usage.timings ?? {}),
             queueMs,
             cooldownWaitMs,
+            ...(concurrencyWaitMs === undefined ? {} : { concurrencyWaitMs }),
             totalMs,
           },
         },
@@ -323,6 +326,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       permit = await this.scheduler.acquire(origin, scope.signal)
       queueMs = permit.queueMs
       cooldownWaitMs = permit.cooldownWaitMs
+      if (permit.limitedByConcurrency) concurrencyWaitMs = permit.concurrencyWaitMs
       throwIfExecutionStopped(scope)
       const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) })
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)

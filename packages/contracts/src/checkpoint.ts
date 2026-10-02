@@ -8,7 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
-import type { PageOptions, RobotsUrlOverride } from './api.js'
+import type { PageOptions, RequestAttribution, RobotsUrlOverride } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { FetchResult, LadderRunAudit } from './result.js'
 import type { ScrapeFormat } from './structured.js'
@@ -78,6 +78,8 @@ export interface Task {
     /** A resume reuses the pages this task already fetched instead of fetching them again. */
     useCached?: boolean
   } & PageOptions
+  /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
+  attribution?: RequestAttribution
   createdAt: string
   updatedAt: string
 }

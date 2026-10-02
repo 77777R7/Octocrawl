@@ -5,9 +5,17 @@ import type { StructuredExtractionResult } from './structured.js'
 import type { FileDescription } from './file.js'
 
 export interface ResourceTimings {
+  /** Every wait in the origin scheduler but a cooldown: the concurrency ceiling and the minimum interval between requests. */
   queueMs?: number
   robotsMs?: number
   cooldownWaitMs?: number
+  /**
+   * Present when the per-origin concurrency ceiling held this lane's permit
+   * back: the milliseconds it waited for a slot, cooldown and pacing
+   * excluded (both stay in `cooldownWaitMs` / `queueMs`). Absent when the
+   * permit started at once, or when the lane acquired none.
+   */
+  concurrencyWaitMs?: number
   retryWaitMs?: number
   /** Initial request/headers time, excluding body read and retry sleep. */
   requestMs?: number

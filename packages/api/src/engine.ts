@@ -4,6 +4,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   buildChannels,
@@ -46,8 +47,12 @@ import {
   type RobotsUrlOverride,
   type ScrapeFormat,
   type CompactScrapeResponse,
+  type RequestAttribution,
+  type ScrapeRecord,
   type ScrapeResponse,
+  type ScrapeRun,
   type ScrapeAtom,
+  REFUSAL_HINTS,
   type DeliveryDestinationInput,
   type DeliveryDestination,
   type DeliveryQuery,
@@ -68,7 +73,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { extractionInput, extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from './structured.js'
+import { extractionInput, extractStructured, prepareScrapeResponse, scrapeSnapshot, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -96,6 +101,8 @@ export class CrawlStateError extends Error {
 
 export interface ApiEngine {
   scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
+  /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
+  getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   startCrawl(req: CrawlStartRequest): Promise<CrawlAccepted>
   startBatch(req: BatchStartRequest): Promise<CrawlAccepted>
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
@@ -241,9 +248,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
   const hosted = options.hosted === true
-  /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored. */
+  /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
-    if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode')
+    if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
+  }
+  // One record per scrape call, written before the response is sent and read
+  // back by GET /v1/scrapes/:id. No page body; no retention in M2.
+  const scrapesDir = join(taskRoot, 'scrapes')
+  let scrapesDirReady: Promise<void> | null = null
+  const writeScrapeRecord = async (record: ScrapeRecord): Promise<void> => {
+    scrapesDirReady ??= mkdir(scrapesDir, { recursive: true }).then(() => undefined, (error: unknown) => { scrapesDirReady = null; throw error })
+    await scrapesDirReady
+    await writeFile(join(scrapesDir, `${record.scrapeId}.json`), JSON.stringify(record, null, 2))
   }
   const originScheduler = new OriginScheduler(networkPolicy)
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
@@ -464,41 +480,71 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }).catch(() => { void store.close() })
   }
 
-  return {
-    async scrape(req, context = {}) {
-      checkFileCap(req)
-      checkSelectors(req)
-      checkRobotsOverride('robotsOverride', req.robotsOverride)
-      checkHostedOptions(req)
-      const overallStart = performance.now()
-      // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
-      const deadlineAt = req.timeout === undefined
-        ? context.deadlineAt ?? Date.now() + DEFAULT_SCRAPE_TIMEOUT_MS
-        : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
-      const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
-      const mode = defaultApiMode(req.mode)
-      const rungs = channelsForUrl(mode, req.url, req)
-      const policy: CrawlPolicy = {
-        mode,
-        ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
-          ? { allowlistedDomains: req.allowlistedDomains }
-          : {}),
+  /**
+   * One scrape: the ladder run, the shaped response and, for an API call
+   * (`record`), the scrape record under the id the response carries. A
+   * Monitor's capture mints an id for its response but leaves no record: a
+   * preview persists nothing, and a run's observation is the Monitor's own.
+   */
+  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean): Promise<ScrapeResponse | CompactScrapeResponse> {
+    checkFileCap(req)
+    checkSelectors(req)
+    checkRobotsOverride('robotsOverride', req.robotsOverride)
+    checkHostedOptions(req)
+    const overallStart = performance.now()
+    const requestedAt = new Date().toISOString()
+    const scrapeId = crypto.randomUUID()
+    // `timeout` is the whole scrape's deadline; a caller's own deadline (a Monitor run) still bounds it.
+    const deadlineAt = req.timeout === undefined
+      ? context.deadlineAt ?? Date.now() + DEFAULT_SCRAPE_TIMEOUT_MS
+      : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
+    const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
+    const mode = defaultApiMode(req.mode)
+    const rungs = channelsForUrl(mode, req.url, req)
+    const policy: CrawlPolicy = {
+      mode,
+      ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
+        ? { allowlistedDomains: req.allowlistedDomains }
+        : {}),
+    }
+    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const operation = (async () => {
+      const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
+      const agentHints = agentHintsFor(req, run)
+      const full: ScrapeRun = {
+        ...run.result,
+        channelsTried: run.channelsTried,
+        ladderTrace: run.ladderTrace,
+        summary: run.summary,
+        ...(agentHints.length === 0 ? {} : { agentHints }),
       }
-      const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
-      const operation = (async () => {
-        const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
-        const agentHints = agentHintsFor(req, run)
-        const full: ScrapeResponse = {
-          ...run.result,
-          channelsTried: run.channelsTried,
-          ladderTrace: run.ladderTrace,
-          summary: run.summary,
-          ...(agentHints.length === 0 ? {} : { agentHints }),
-        }
-        return prepareScrapeResponse(full, req, scope, null, overallStart)
-      })()
-      activeScrapes.add(operation)
-      try { return await operation } finally { activeScrapes.delete(operation); scope.dispose() }
+      const response = await prepareScrapeResponse(full, req, scope, null, overallStart, scrapeId)
+      if (!record) return response
+      // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
+      try {
+        await writeScrapeRecord(scrapeRecordOf(scrapeId, requestedAt, req, full, response))
+        return response
+      } catch (error) {
+        console.error(JSON.stringify({ component: 'api', event: 'scrape_record_unwritten', scrapeId, error: error instanceof Error ? error.message : String(error) }))
+        if (!('trace' in response)) return response
+        return { ...response, trace: [...response.trace, { at: Math.round(performance.now() - overallStart), lane: response.lane, event: 'scrape_record_unwritten', detail: { scrapeId } }] }
+      }
+    })()
+    activeScrapes.add(operation)
+    try { return await operation } finally { activeScrapes.delete(operation); scope.dispose() }
+  }
+
+  return {
+    scrape: (req, context = {}) => runScrape(req, context, true),
+
+    async getScrape(scrapeId) {
+      if (!UUID.test(scrapeId)) return null
+      try {
+        return JSON.parse(await readFile(join(scrapesDir, `${scrapeId}.json`), 'utf8')) as ScrapeRecord
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
     },
 
     async startCrawl(req) {
@@ -536,6 +582,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           useCached: req.useCached === true,
           ...pageOptions(req),
         },
+        ...attributionOf(req),
         createdAt: now,
         updatedAt: now,
       }
@@ -569,6 +616,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
           ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
         },
+        ...attributionOf(req),
         createdAt: now, updatedAt: now,
       }
       await store.putTask(task)
@@ -708,7 +756,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // Assessment and capture are identical to a run, but no monitor or event is persisted.
       const result = revision.config?.captureMode === 'http'
         ? await conditionalHttp.fetch(revision.url, context.deadlineAt ?? Date.now() + 300_000, context.signal)
-        : await this.scrape({url:revision.url,debug:true}, context) as ScrapeResponse
+        : await runScrape({url:revision.url,debug:true}, context, false) as ScrapeResponse
       const assessment = revision.config ? assessConfiguredDocument(result, revision) : assessFirecrawlIntroduction(result)
       return {url:revision.url,finalUrl:result.evidence.finalUrl ?? null,status:result.status,assessment,sampleMarkdown:result.markdown?.slice(0, 3000) ?? null,capturedAt:Date.now()}
     },
@@ -727,7 +775,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const result = await conditionalHttp.fetch(revision.url, capture.deadlineAt, capture.signal, capture, capture.onRetryAfter)
           return {result, links: result.links ?? []}
         }
-        const result = await this.scrape({url: revision.url, debug: true}, capture) as ScrapeResponse
+        const result = await runScrape({url: revision.url, debug: true}, capture, false) as ScrapeResponse
         return {result, links: result.links ?? [], audit: {channelsTried: result.channelsTried, ladderTrace: result.ladderTrace, summary: result.summary}}
       }, triggerKey, {...context, signal})
       activeScrapes.add(operation)
@@ -826,6 +874,46 @@ function pageOptions(req: PageOptions): PageOptions {
   return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }), ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }) }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** `origin` and `integration` as the request said them, for the task's `attribution`; nothing when it named neither. */
+function attributionOf(req: RequestAttribution): Pick<Task, 'attribution'> {
+  const attribution: RequestAttribution = { ...(req.origin === undefined ? {} : { origin: req.origin }), ...(req.integration === undefined ? {} : { integration: req.integration }) }
+  return Object.keys(attribution).length === 0 ? {} : { attribution }
+}
+
+/**
+ * The record of one scrape call: the request with each header's value
+ * replaced by its name, who made it, the verdict and the call's facts. No
+ * page body, no trace, no audit: the response carries those.
+ */
+function scrapeRecordOf(scrapeId: string, requestedAt: string, req: ScrapeRequest, run: ScrapeRun, response: ScrapeResponse | CompactScrapeResponse): ScrapeRecord {
+  const { origin: _origin, integration: _integration, ...request } = req
+  return {
+    scrapeId,
+    requestedAt,
+    request: { ...request, ...(req.headers === undefined ? {} : { headers: Object.fromEntries(Object.keys(req.headers).map((name) => [name, name])) }) },
+    ...attributionOf(req).attribution,
+    status: response.status,
+    failureReason: response.failureReason,
+    blockReason: response.blockReason,
+    budgetExceeded: response.budgetExceeded,
+    lane: response.lane,
+    channelsTried: response.channelsTried,
+    metadata: response.metadata,
+    snapshot: scrapeSnapshot(run),
+    usage: {
+      wallMs: response.usage.wallMs,
+      totalMs: 'summary' in response ? response.summary.totalMs ?? response.usage.wallMs : response.usage.totalMs,
+      requestCount: response.usage.requestCount,
+      attemptCount: response.usage.attemptCount,
+      browserMs: response.usage.browserMs,
+    },
+    ...(response.warnings === undefined || response.warnings.length === 0 ? {} : { warnings: response.warnings }),
+    ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
+  }
+}
+
 /** A batch's recorded robots overrides by URL, as sent and in canonical form; every other URL has none. */
 function robotsOverrideLookup(overrides: readonly RobotsUrlOverride[]): (url: string) => RobotsOverride | undefined {
   const byUrl = new Map<string, RobotsOverride>()
@@ -879,6 +967,8 @@ function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPag
 function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): CrawlPage {
   const result = step.result
   const mode = task.mode
+  // The same hints a scrape of this page would carry, from its stored result and routing audit.
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result })
   return {
     id: step.id,
     url: step.url,
@@ -889,6 +979,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     markdown: result?.markdown ?? null,
     ...askedHtmlFormats(task, result),
     ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
+    ...(agentHints.length === 0 ? {} : { agentHints }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),

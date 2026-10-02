@@ -183,11 +183,12 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
 
   it('a hosted engine refuses skipTlsVerification before anything is fetched; a local one hands the wire options to the lanes', async () => {
     const hosted = await setup({ hosted: true })
-    const refused = { status: 400, body: { error: 'skipTlsVerification is not available in hosted mode', code: 'invalid_request' } }
+    const refused = { status: 400, body: { error: 'skipTlsVerification is not available in hosted mode', code: 'invalid_request', agentHints: ['a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning'] } }
     expect(await hosted.post('/v1/scrape', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual(refused)
     expect(await hosted.post('/v1/crawl', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual(refused)
     expect(await hosted.post('/v1/batches', { urls: [`${hosted.origin}/chrome`], skipTlsVerification: true })).toEqual(refused)
-    expect(await hosted.post('/fc/v1/scrape', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual({ status: 400, body: { success: false, ...refused.body } })
+    const { agentHints, ...fields } = refused.body
+    expect(await hosted.post('/fc/v1/scrape', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual({ status: 400, body: { success: false, ...fields, agent_hints: agentHints } })
     expect(hosted.requests).toEqual([])
     // The other options are allowed there.
     expect((await hosted.post('/v1/scrape', { url: `${hosted.origin}/chrome`, mobile: true, headers: { 'X-Test': 'w2l' }, fastMode: true, blockAds: false })).body).toMatchObject({ status: 'success', lane: 'http' })

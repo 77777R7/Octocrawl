@@ -20,6 +20,7 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
         costUnknown: true,
         contentTokens: null,
         contentTokensUnknown: true,
+        ...(task.attribution === undefined ? {} : { attribution: task.attribution }),
     }
   }
   const steps = await store.listSteps(taskId, latest.id)
@@ -50,5 +51,6 @@ export function reportFromTaskAttempt(
     costUnknown: attempt.costUnknown,
     contentTokens: attempt.contentTokens,
     contentTokensUnknown: attempt.contentTokensUnknown,
+    ...(task.attribution === undefined ? {} : { attribution: task.attribution }),
   }
 }

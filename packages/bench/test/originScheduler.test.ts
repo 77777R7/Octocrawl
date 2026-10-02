@@ -64,6 +64,31 @@ describe('bounded origin scheduling', () => {
     permit.release()
   })
 
+  it('marks a permit the concurrency ceiling held back, with its wait for a slot, and not one that waited on a cooldown alone', async () => {
+    const scheduler = new OriginScheduler({ ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 })
+    const origin = 'https://shop.example'
+    const permits = await Promise.all(Array.from({ length: 3 }, async () => {
+      const permit = await scheduler.acquire(origin)
+      await new Promise(resolve => setTimeout(resolve, 80))
+      permit.release()
+      return permit
+    }))
+    const [first, second, third] = permits
+    expect(first).toMatchObject({ limitedByConcurrency: false, concurrencyWaitMs: 0 })
+    // The second waited for the first holder's 80 ms, the third for both; the wait is part of queueMs, which keeps its meaning.
+    expect(second).toMatchObject({ limitedByConcurrency: true })
+    expect(second!.concurrencyWaitMs).toBeGreaterThanOrEqual(70)
+    expect(third!.concurrencyWaitMs).toBeGreaterThanOrEqual(150)
+    expect(permits.every(permit => permit.queueMs >= permit.concurrencyWaitMs && permit.cooldownWaitMs === 0)).toBe(true)
+    // A free slot behind a cooldown is the cooldown's wait, not the ceiling's.
+    const cooled = new OriginScheduler({ ...localNetworkPolicy(), perHostConcurrency: 2, perHostMinDelayMs: 0 })
+    cooled.cooldown(origin, Date.now() + 60)
+    const permit = await cooled.acquire(origin)
+    expect(permit).toMatchObject({ limitedByConcurrency: false, concurrencyWaitMs: 0 })
+    expect(permit.cooldownWaitMs).toBeGreaterThanOrEqual(50)
+    permit.release()
+  })
+
   it('shares one robots lookup while preserving each caller cancellation', async () => {
     let hits = 0
     const server = createServer((_req, res) => {
