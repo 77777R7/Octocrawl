@@ -41,6 +41,23 @@ describe('parseSitemapXml', () => {
     expect(parseSitemapXml('{"urlset":[]}').kind).toBe('not_sitemap')
     expect(parseSitemapXml(`﻿${URLSET(['https://example.com/'])}`).locs).toEqual(['https://example.com/'])
   })
+
+  it('reads each entry\'s lastmod and news:title only when asked, aligned with locs and never borrowed from a neighbour', () => {
+    const text = `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:n="http://www.google.com/schemas/sitemap-news/0.9">
+<url><loc>https://example.com/a</loc><lastmod> 2026-09-30T08:00:00+00:00 </lastmod><n:news><n:title>Kiln &amp; glaze</n:title></n:news></url>
+<url><lastmod>2026-01-01</lastmod><loc>https://example.com/b</loc></url>
+<url><loc>ftp://example.com/dropped</loc><lastmod>1999-01-01</lastmod></url>
+<url><loc>https://example.com/c</loc><n:news><n:title><![CDATA[Firing <guide>]]></n:title></n:news></url>
+<url><loc>https://example.com/d</loc></url>
+</urlset>`
+    const plain = parseSitemapXml(text)
+    expect(plain).toEqual({ kind: 'urlset', locs: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d'], truncated: false, dropped: 1 })
+    const detailed = parseSitemapXml(text, { details: true })
+    expect(detailed.locs).toEqual(plain.locs)
+    expect(detailed.details).toEqual([{ lastmod: '2026-09-30T08:00:00+00:00', title: 'Kiln & glaze' }, { lastmod: '2026-01-01' }, { title: 'Firing <guide>' }, {}])
+    // Without a news namespace, a title element is not a news title.
+    expect(parseSitemapXml(URLSET(['https://example.com/']).replace('</url>', '<title>Not news</title></url>'), { details: true }).details).toEqual([{ lastmod: '2026-09-30' }])
+  })
 })
 
 describe('gzip detection', () => {

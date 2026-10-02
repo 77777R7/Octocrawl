@@ -23,7 +23,28 @@ export interface ParsedSitemap {
   truncated: boolean
   /** `<loc>` values left out: not http(s), or not a URL at all. */
   dropped: number
+  /**
+   * Present only when asked for (`{ details: true }`): one entry per `locs`
+   * value, in the same order, with the `<lastmod>` and `<news:title>` of the
+   * `<url>` (or `<sitemap>`) element around it, each entity-decoded and
+   * trimmed, and absent when the element has none.
+   */
+  details?: SitemapEntryDetail[]
 }
+
+export interface SitemapEntryDetail {
+  /** As written (trimmed, entities decoded), never normalised. */
+  lastmod?: string
+  title?: string
+}
+
+export interface ParseSitemapOptions {
+  /** Read each entry's `<lastmod>` and `<news:title>` into `details`. */
+  details?: boolean
+}
+
+/** The Google News sitemap namespace, whose `<title>` names a news entry. */
+const NEWS_NAMESPACE = 'http://www.google.com/schemas/sitemap-news/0.9'
 
 const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
 
@@ -59,7 +80,7 @@ export function looksGzipped(url: string, bytes: Uint8Array): boolean {
 
 const ROOT = /<\s*(?:([A-Za-z_][\w.-]*):)?(urlset|sitemapindex)(?=[\s>/])/
 
-export function parseSitemapXml(text: string): ParsedSitemap {
+export function parseSitemapXml(text: string, options: ParseSitemapOptions = {}): ParsedSitemap {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
   const root = ROOT.exec(body)
   if (root === null) return { kind: 'not_sitemap', locs: [], truncated: false, dropped: 0 }
@@ -68,6 +89,8 @@ export function parseSitemapXml(text: string): ParsedSitemap {
   // `<loc>` in the root's own prefix, with or without a CDATA section around the value.
   const loc = new RegExp(`<${escapeRegExp(prefix)}loc(?:\\s[^>]*)?>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([^<]*))\\s*</${escapeRegExp(prefix)}loc\\s*>`, 'g')
   const locs: string[] = []
+  // Where each kept loc stands in the text, for its entry's details.
+  const spans: Array<{ start: number; end: number }> = []
   let dropped = 0
   let truncated = false
   for (let match = loc.exec(body); match !== null; match = loc.exec(body)) {
@@ -76,9 +99,54 @@ export function parseSitemapXml(text: string): ParsedSitemap {
     const value = (match[1] === undefined ? decodeXmlEntities(raw) : raw).trim()
     const href = httpHref(value)
     if (href === null) dropped++
-    else locs.push(href)
+    else { locs.push(href); spans.push({ start: match.index, end: match.index + match[0].length }) }
   }
-  return { kind, locs, truncated, dropped }
+  if (options.details !== true) return { kind, locs, truncated, dropped }
+  return { kind, locs, truncated, dropped, details: entryDetails(body, prefix, kind === 'urlset' ? 'url' : 'sitemap', spans) }
+}
+
+/**
+ * The `<lastmod>` and `<news:title>` of the element around each loc. An
+ * entry's text runs from its element's opening tag (or the loc itself) to its
+ * closing tag, never past the next loc or back before the previous one, so a
+ * file that is not quite well formed cannot lend one entry's fields to
+ * another, and the scan stays linear.
+ */
+function entryDetails(body: string, prefix: string, element: 'url' | 'sitemap', spans: ReadonlyArray<{ start: number; end: number }>): SitemapEntryDetail[] {
+  const p = escapeRegExp(prefix)
+  const open = new RegExp(`<${p}${element}(?=[\\s>])`, 'g')
+  const close = `</${prefix}${element}`
+  const lastmod = new RegExp(`<${p}lastmod(?:\\s[^>]*)?>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([^<]*))\\s*</${p}lastmod\\s*>`)
+  const news = newsPrefix(body)
+  const title = news === null ? null : new RegExp(`<${escapeRegExp(news)}:title(?:\\s[^>]*)?>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([^<]*))\\s*</${escapeRegExp(news)}:title\\s*>`)
+  const value = (match: RegExpExecArray | null): string | undefined => {
+    if (match === null) return undefined
+    const text = (match[1] === undefined ? decodeXmlEntities(match[2] ?? '') : match[1]).trim()
+    return text.length === 0 ? undefined : text
+  }
+  return spans.map((span, i) => {
+    const floor = i === 0 ? 0 : spans[i - 1]!.end
+    const ceiling = i + 1 < spans.length ? spans[i + 1]!.start : body.length
+    // The last opening tag of the entry's element between the previous loc and this one.
+    let start = span.start
+    open.lastIndex = floor
+    for (let match = open.exec(body); match !== null && match.index < span.start; match = open.exec(body)) start = match.index
+    const closing = body.indexOf(close, span.end)
+    const end = closing === -1 || closing > ceiling ? ceiling : closing
+    const text = body.slice(start, end)
+    const detail: SitemapEntryDetail = {}
+    const modified = value(lastmod.exec(text))
+    if (modified !== undefined) detail.lastmod = modified
+    const named = title === null ? undefined : value(title.exec(text))
+    if (named !== undefined) detail.title = named
+    return detail
+  })
+}
+
+/** The prefix the document binds to the Google News namespace; `news` when it binds none but writes `<news:title>` (read for what it lists); else null. */
+function newsPrefix(body: string): string | null {
+  const binding = new RegExp(`xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*["']${escapeRegExp(NEWS_NAMESPACE)}/?["']`).exec(body)
+  return binding?.[1] ?? (body.includes('<news:title') ? 'news' : null)
 }
 
 /** The absolute http(s) form of a `<loc>` value, or null when it is not one. */

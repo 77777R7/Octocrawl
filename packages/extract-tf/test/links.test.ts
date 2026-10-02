@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectLinks, extractTf, htmlToMarkdown } from '../src/index.js'
+import { collectLinkDetails, collectLinks, extractTf, htmlToMarkdown } from '../src/index.js'
 
 const NAV_MARKER = 'Pricing · Changelog · Careers'
 const FOOTER_MARKER = 'Copyright 2026 Synthetic Fixture Co'
@@ -82,5 +82,32 @@ describe('collectLinks', () => {
     for (const marker of ALL_BOILERPLATE) {
       expect(markdown).not.toContain(marker)
     }
+  })
+})
+
+describe('collectLinkDetails', () => {
+  it('gives each URL once, in document order, with the first non-empty anchor text, else aria-label, title or image alt', () => {
+    const html = `<html><head><base href="/docs/"></head><body>
+      <a href="guide.html#top"><span>  </span></a>
+      <a href="guide.html">  Firing
+        <b>guide</b> &amp; <i>glazes</i> </a>
+      <a href="guide.html">Later text</a>
+      <a href="/label" aria-label=" Open   menu "><svg></svg></a>
+      <a href="/titled" title="Kiln log"></a>
+      <a href="/logo"><img src="logo.png" alt=""><img src="mark.png" alt="Harbour office"></a>
+      <a href="/bare"></a>
+      <a href="mailto:a@b.test">mail</a>
+      <a href="/long">${'x'.repeat(310)}</a>
+    </body></html>`
+    const links = collectLinkDetails(html, 'https://fixture.test/index.html')
+    expect(links.map((link) => link.url)).toEqual(collectLinks(html, 'https://fixture.test/index.html'))
+    expect(links.slice(0, -1)).toEqual([
+      { url: 'https://fixture.test/docs/guide.html', text: 'Firing guide & glazes' },
+      { url: 'https://fixture.test/label', text: 'Open menu' },
+      { url: 'https://fixture.test/titled', text: 'Kiln log' },
+      { url: 'https://fixture.test/logo', text: 'Harbour office' },
+      { url: 'https://fixture.test/bare', text: null },
+    ])
+    expect(links.at(-1)).toEqual({ url: 'https://fixture.test/long', text: 'x'.repeat(300) })
   })
 })
