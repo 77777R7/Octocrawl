@@ -57,7 +57,7 @@ describe('REST error codes', () => {
     const app = createApp(engine)
     expect(await call(app, '/fc/v1/scrape', post('not json'))).toEqual({ status: 400, body: { success: false, error: 'body must be JSON', code: 'invalid_json' } })
     expect(await call(app, '/fc/v1/scrape', post({ url, formats: ['markdown', 'screenshot'] }))).toEqual({
-      status: 400, body: { success: false, error: 'unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml)', code: 'unsupported_format', details: { formats: ['screenshot'] } },
+      status: 400, body: { success: false, error: 'unsupported format: screenshot (the /fc shim supports markdown, links, html, rawHtml, images)', code: 'unsupported_format', details: { formats: ['screenshot'] } },
     })
     expect(await call(app, '/fc/v1/crawl/missing')).toEqual({ status: 404, body: { success: false, error: 'not found', code: 'not_found' } })
     expect(await call(app, '/fc/v2/scrape', post({ url }))).toEqual({ status: 404, body: { success: false, error: 'no route for POST /fc/v2/scrape', code: 'not_found' } })
