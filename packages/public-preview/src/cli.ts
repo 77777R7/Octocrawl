@@ -21,6 +21,8 @@ const server = createPreviewServer({
   visitorCookieSecret: process.env.W2L_QUOTA_HASH_KEY,
   evalToken: process.env.W2L_EVAL_TOKEN,
   sourceCommit: process.env.W2L_SOURCE_COMMIT,
+  // Set only once the domain serves this service: page requests on any other host are then redirected to it.
+  publicOrigin: process.env.W2L_PUBLIC_ORIGIN || undefined,
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
