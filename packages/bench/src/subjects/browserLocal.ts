@@ -376,8 +376,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // goes through routes of its own that relax it too, closed with the fetch;
     // the cache's own routes keep verifying (see EgressTlsOptions).
     const relaxedRoutes = options.skipTlsVerification === true ? new EgressRoutes(this.networkPolicy, undefined, { rejectUnauthorized: false }) : null
-    // The request route of this fetch (host allowlist, ad hosts), removed before the context closes.
+    // The request route of this fetch (host allowlist, ad hosts) and what it
+    // matches, removed before the context closes.
     let requestRoute: ((route: Route) => Promise<void>) | null = null
+    let routeMatch: string | ((target: URL) => boolean) = '**/*'
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -570,8 +572,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // ride every redirect hop (see CustomHeaderGate). The handler is kept
       // so the fetch can remove it again: a route left on a context that
       // keeps navigating holds the context's close, and on a managed
-      // context one would pile up per fetch.
+      // context one would pile up per fetch. The hosted allowlist must see
+      // every request; blockAds alone matches the ad hosts only, so a page's
+      // own navigations are not paused in a handler (a page that reloads
+      // itself without end made each fetch outlive its deadline on Linux
+      // when every request was intercepted).
       if (allowedHosts !== null || blockAds) {
+        if (allowedHosts === null) routeMatch = (target: URL) => isAdHost(target.hostname, this.adHosts)
         requestRoute = async route => {
           const request = route.request()
           const target = request.url()
@@ -597,7 +604,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           await route.continue().catch(() => {})
         }
-        await context.route('**/*', requestRoute)
+        await context.route(routeMatch, requestRoute)
       }
       if (allowedHosts !== null) {
         // HTTP routes do not intercept WebSocket handshakes. The public
@@ -1131,7 +1138,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // The route goes before the context does: Chromium can leave a request
       // of a page that keeps navigating paused in the handler, and a close
       // that waited for it would not end (the refresh-loop case).
-      if (context !== undefined && requestRoute !== null) await context.unroute('**/*', requestRoute).catch(() => {})
+      if (context !== undefined && requestRoute !== null) await context.unroute(routeMatch, requestRoute).catch(() => {})
       if (context !== this.managedContext && context !== undefined) await closeWithin(context.close(), PAGE_CLOSE_MS)
       await relaxedRoutes?.close()
     }
