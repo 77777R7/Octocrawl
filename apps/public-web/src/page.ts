@@ -33,7 +33,7 @@ export function pageMarkup(): string {
             <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">One link.<br /><em>Web data, ready.</em></h1>
-              <p class="hero-description">Paste a public URL. Get readable content and verifiable fields where supported.</p>
+              <p class="hero-description">Readable Markdown and checked fields from public pages, for AI agents, RAG pipelines and MCP&nbsp;clients. When a page can’t be read, you get the reason.</p>
             </div>
           </div>
         </div>
@@ -145,7 +145,10 @@ export function pageMarkup(): string {
       <div class="band">
         <div class="frame runs-head">
           <div><p class="section-kicker"><span class="kicker-square"></span> YOUR RESULTS</p><h2 id="runs-title">Recent runs</h2></div>
-          <p class="runs-note">This visit only · cleared when you leave the page</p>
+          <div class="runs-aside">
+            <p class="runs-note">This visit only · cleared when you leave the page</p>
+            <p class="runs-next">Use it in your agent: <a href="/docs/connect-mcp/">Connect MCP</a> · <a href="#run-it-yourself">Run it yourself</a></p>
+          </div>
         </div>
       </div>
       <div class="band"><div class="frame runs-grid" id="runs-grid"></div></div>
@@ -184,13 +187,78 @@ export function pageMarkup(): string {
       </div>
     </section>
 
+
+    <section class="why-section" id="why-w2l" aria-labelledby="why-title">
+      <div class="band">
+        <div class="frame why-grid">
+          <div class="why-intro">
+            <p class="section-kicker"><span class="kicker-square"></span> WHY W2L</p>
+            <h2 id="why-title">Can’t read a page?<br />W2L tells you why.</h2>
+            <p class="why-lead">A crawler that only checks for a response can hand your agent a login wall, a challenge page or an empty shell as if it were the page. W2L reports what it actually read, and why it stopped when it did not.</p>
+          </div>
+          <figure class="why-specimen ledger-view">
+            <dl class="ledger">
+              <div class="ledger-row"><dt><span class="ledger-mark" aria-hidden="true">›</span><span class="ledger-name">requestedUrl</span></dt><dd><span class="ledger-value is-code">https://www.linkedin.com/feed/</span></dd></div>
+              <div class="ledger-row is-blocked"><dt><span class="ledger-mark" aria-hidden="true">✗</span><span class="ledger-name">status</span></dt><dd><span class="ledger-value is-code">blocked</span></dd></div>
+              <div class="ledger-row"><dt><span class="ledger-mark" aria-hidden="true"></span><span class="ledger-name">reason</span></dt><dd><span class="ledger-value">This site does not allow automated preview of this page.</span></dd></div>
+              <div class="ledger-row"><dt><span class="ledger-mark" aria-hidden="true"></span><span class="ledger-name">markdown</span></dt><dd><span class="ledger-value is-empty">none returned</span></dd></div>
+              <div class="ledger-row"><dt><span class="ledger-mark" aria-hidden="true"></span><span class="ledger-name">totalMs</span></dt><dd><span class="ledger-value is-code">572</span></dd></div>
+            </dl>
+            <figcaption>A recorded W2L result, 24 Sep 2026, source commit <code>936fdf0</code>. No feed content came back, and the result says why.</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="band">
+        <ul class="frame why-points" role="list">
+          <li class="why-point"><span class="step-number" aria-hidden="true">01</span><h3>Failures come with a reason</h3><p>Blocked, incomplete and timed-out pages are results, each with a diagnostic code and whether the cause was observed. Nothing empty is passed off as success.</p></li>
+          <li class="why-point"><span class="step-number" aria-hidden="true">02</span><h3>Every field shows its source</h3><p>Fields are read from the page’s own JSON-LD, microdata, meta tags and tables, without a model, and each names where it came from. A field the page does not state stays empty, with the reason.</p></li>
+          <li class="why-point"><span class="step-number" aria-hidden="true">03</span><h3>Public pages, by the rules</h3><p>W2L reads robots.txt before it fetches, and does not bypass logins, CAPTCHAs or verification pages.</p></li>
+          <li class="why-point"><span class="step-number" aria-hidden="true">04</span><h3>Open source, on your machine</h3><p>AGPL-3.0. Run it on your own computer with no daily limit, through REST, the TypeScript SDK or MCP.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="selfhost-section" id="run-it-yourself" aria-labelledby="selfhost-title">
+      <div class="band">
+        <div class="frame selfhost-grid">
+          <div class="selfhost-intro">
+            <p class="section-kicker"><span class="kicker-square"></span> RUN IT YOURSELF</p>
+            <h2 id="selfhost-title">Three a day here.<br />Unlimited on yours.</h2>
+            <p class="selfhost-lead">Clone the repository, start the local API, and call it from your code or your agent. Your requests and results stay on your computer.</p>
+            <div class="selfhost-actions">
+              <a class="cta-primary" href="https://github.com/77777R7/w2l"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub</a>
+              <a class="cta-secondary" href="/docs/connect-mcp/">Connect MCP <span aria-hidden="true">↗</span></a>
+              <a class="cta-secondary" href="/docs/reference/">REST and SDK <span aria-hidden="true">↗</span></a>
+            </div>
+          </div>
+          <figure class="selfhost-specimen">
+            <div class="selfhost-sheet">
+              <div class="selfhost-head"><span class="kicker-square" aria-hidden="true"></span><span>Terminal</span><button class="selfhost-copy" id="selfhost-copy" type="button">Copy</button></div>
+              <ol class="code-lines" id="selfhost-code">
+                <li><span class="code-text">git clone https://github.com/77777R7/w2l.git</span></li>
+                <li><span class="code-text">cd w2l &amp;&amp; npm ci</span></li>
+                <li><span class="code-text">npx playwright install chromium</span></li>
+                <li><span class="code-text">npm run api</span></li>
+                <li class="is-comment"><span class="code-text"># in another terminal</span></li>
+                <li><span class="code-text">curl -sS -X POST http://127.0.0.1:8787/v1/scrape \\</span></li>
+                <li><span class="code-text">  -H 'content-type: application/json' \\</span></li>
+                <li><span class="code-text">  -d '{"url":"https://example.com"}'</span></li>
+              </ol>
+            </div>
+            <figcaption>Node.js 22.12 or later. The API listens on this computer only until you configure hosted mode.</figcaption>
+            <p class="visually-hidden" id="selfhost-status" role="status" aria-live="polite"></p>
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <footer class="site-footer">
       <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">
             <a class="brand footer-brand" href="#top" aria-label="W2L home"><img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="40" height="40" /><span class="brand-name">W2L<span class="brand-dot">.</span></span></a>
             <p class="footer-tagline">One link. Web data, ready.</p>
-            <p class="footer-note">Single-page public web preview</p>
+            <p class="footer-note">Open-source web extraction for AI agents</p>
           </div>
           <div class="footer-cards">
             <a class="footer-card" href="https://github.com/77777R7/w2l"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub<span class="card-arrow" aria-hidden="true">↗</span></a>
@@ -200,10 +268,10 @@ export function pageMarkup(): string {
       </div>
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
-          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try W2L</a></li><li><a href="#how-it-works">How it works</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try W2L</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#why-w2l">Why W2L</a></li><li><a href="#run-it-yourself">Run it yourself</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Guides</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Reference</p><ul><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Project</p><ul><li><a href="https://github.com/77777R7/w2l">GitHub ↗</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Project</p><ul><li><a href="https://github.com/77777R7/w2l">GitHub ↗</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
         </nav>
       </div>
     </footer>

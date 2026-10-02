@@ -125,6 +125,13 @@ describe('first-party analytics', () => {
     expect(JSON.stringify(lines)).not.toContain('private/path')
   })
 
+  it('logs nothing for a visitor whose browser sends Do Not Track or Global Privacy Control', async () => {
+    const { url, lines } = await site()
+    await fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', 'sec-gpc': '1' }, body: JSON.stringify({ url: 'https://docs.example' }) })
+    expect((await fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', dnt: '1' }, body: JSON.stringify({ name: 'page_view' }) })).status).toBe(204)
+    expect(lines).toEqual([])
+  })
+
   it('keeps event properties short and plain, and rotates the visitor pseudonym daily', () => {
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'markdown' } })).toEqual({ name: 'result_copy', props: { view: 'markdown' } })
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'x'.repeat(121) } })).toBeNull()

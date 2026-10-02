@@ -1,0 +1,36 @@
+# Privacy
+
+This page covers the public W2L page and its preview service. When you run W2L on your own computer, none of it applies: requests, results and logs stay on your machine.
+
+Last updated 2 October 2026.
+
+## What you submit
+
+The address you paste is fetched by the preview service, and the result goes back to your browser. The service does not save the result: your recent runs live in the page and are gone when you leave it.
+
+While you type, the page asks `GET /api/capability?url=…` for the short note under the field. That request, like every request to the service, appears in the hosting provider's request log (see below), so the address you typed is in that log.
+
+## What the page records
+
+- **One cookie, `w2l_visitor`.** A random identifier, signed by the service, kept for a year. It exists only to count your three previews a day. It is not shared with anyone and is not used for anything else.
+- **A daily preview counter.** For each UTC day, a count of previews under a keyed hash of that day and your cookie (or, without the cookie, your IP address). The hash cannot be turned back into either. These counters are kept in Google Cloud Firestore and do not yet expire.
+- **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, copy or download a result, open Get code, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` tags on the address, and the view or tab involved.
+- **Preview outcomes.** For each preview: its state (for example `success` or `blocked`), the diagnostic code, the **host** of the page you asked for (never its path or query), whether you set options, and the server time.
+
+Events and outcomes carry a pseudonym that changes every UTC day, so a visit can be counted but not followed from one day to the next, and a flag for requests that look automated. When your browser sends Do Not Track or Global Privacy Control, the page sends no events and the service logs no preview outcome.
+
+## The request log
+
+The service runs on Google Cloud Run in Singapore. Google Cloud records each HTTP request: time, method, path and query, status, response time, your IP address, user agent and referring page. Events, outcomes and this request log are kept for 30 days and then deleted.
+
+## What is never recorded
+
+- The content of the pages you extract, or the path and query of the address you submit through **Extract page**.
+- Anything from a third party: the page loads no outside scripts, fonts, ads or trackers, and its security policy allows connections to this site only.
+- Your email address or any account: there is none to create.
+
+Nothing here is sold or shared for advertising.
+
+## Questions
+
+Open an issue on [GitHub](https://github.com/77777R7/w2l/issues).

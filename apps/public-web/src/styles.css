@@ -26,7 +26,7 @@ a { color: inherit; }
 ::selection { background: #fd966c; color: #071b4f; }
 :focus-visible { outline: 3px solid #fa935f; outline-offset: 3px; }
 /* The light sections need a darker ring: #fa935f is 2.1:1 on #f7f8fb, #b8461d is 5:1. */
-.runs-section :focus-visible, .how-section :focus-visible { outline-color: #b8461d; }
+.runs-section :focus-visible, .how-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible { outline-color: #b8461d; }
 
 .page-shell { overflow: clip; }
 
@@ -375,6 +375,10 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .runs-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 64px 32px 28px; }
 .runs-head h2 { margin: 12px 0 0; font-size: clamp(28px, 3vw, 36px); line-height: 1.15; letter-spacing: -.045em; }
 .runs-note { margin: 0; color: var(--muted); font-size: 13px; }
+.runs-aside { text-align: right; }
+.runs-next { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.runs-next a { color: #1d64ac; font-weight: 650; text-underline-offset: 3px; }
+.runs-next a:hover { color: #b8461d; }
 .runs-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 16px; padding: 0 32px; }
 /* Each card spans six shared rows so Type/Status/… line up across cards even when a value wraps. */
 .run-card { display: grid; grid-row: span 6; grid-template-rows: subgrid; row-gap: 0; min-width: 0; margin-bottom: 16px; padding: 0; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 14px; color: inherit; background: #fff; text-align: left; box-shadow: 0 16px 46px rgba(17, 46, 96, .035); }
@@ -518,6 +522,38 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px); border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
 .how-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
+/* Why W2L: a recorded honest failure beside the claim, then the four points. White, between the two pale sections. */
+.why-section { border-top: 1px solid var(--line); background: #fff; }
+.why-grid, .selfhost-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: center; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
+.why-grid { padding-bottom: 40px; }
+.why-intro h2, .selfhost-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
+.why-lead, .selfhost-lead { max-width: 52ch; margin: 22px 0 0; color: var(--muted); font-size: 16px; line-height: 1.65; text-wrap: pretty; }
+.why-specimen, .selfhost-specimen { min-width: 0; margin: 0; }
+.why-specimen .ledger { margin: 0; }
+.ledger-row.is-blocked .ledger-mark, .ledger-row.is-blocked .ledger-value { color: #b8461d; }
+.why-specimen figcaption, .selfhost-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.why-specimen figcaption code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.why-points { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 32px; padding: 0 32px 104px; list-style: none; }
+.why-point { padding: 20px 0 0; border-top: 1px solid #e0e8f2; }
+.why-point .step-number { display: block; padding: 0; }
+.why-point h3 { margin: 12px 0 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
+.why-point p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+
+/* Run it yourself: the open-source way past the daily limit, with the terminal session that starts it. */
+.selfhost-section { border-top: 1px solid var(--line); }
+.selfhost-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; margin: 30px 0 0; }
+.cta-primary { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; color: #081b42; background: var(--orange); font-size: 15px; font-weight: 760; text-decoration: none; transition: background .18s ease, transform .18s ease; }
+.cta-primary:hover { background: #ff9365; transform: translateY(-1px); }
+.cta-primary svg { width: 16px; height: 16px; flex: none; }
+.cta-secondary { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #1d64ac; font-size: 14px; font-weight: 650; text-underline-offset: 3px; }
+.cta-secondary:hover { color: #b8461d; }
+.selfhost-sheet { padding: 16px 0 18px; border-radius: 20px; color: #d7e8ff; background: linear-gradient(180deg, rgba(7, 27, 79, .84), rgba(6, 22, 52, .94)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 30px 60px -32px rgba(7, 27, 79, .6); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.selfhost-head { display: flex; align-items: center; gap: 8px; margin: 0 22px 12px; padding-bottom: 10px; color: #a9bfe6; font-size: 10px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .45) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
+.selfhost-head .kicker-square { width: 6px; height: 6px; }
+.selfhost-copy { margin-left: auto; min-height: 32px; padding: 0 12px; border: 1px solid rgba(176, 200, 240, .26); border-radius: 4px; color: #d7e8ff; background: transparent; font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; }
+.selfhost-copy:hover { border-color: var(--orange); color: #ffc2a4; }
+.selfhost-sheet .code-lines { font-size: 12.5px; }
+
 /* Footer */
 .site-footer { color: #d8e5f6; background: var(--navy-deep); }
 .footer-top { display: grid; grid-template-columns: 1fr 1fr; }
@@ -560,6 +596,9 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 /* Below 1000 px the two-column specimen would squeeze the JSON pane under its 26-character lines. */
 @media (max-width: 999px) {
   .how-grid { grid-template-columns: minmax(0, 1fr); gap: 48px; padding: 72px 32px 80px; }
+  .why-grid, .selfhost-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; padding: 72px 32px 80px; }
+  .why-grid { padding-bottom: 32px; }
+  .why-points { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; padding-bottom: 80px; }
 }
 
 @media (max-width: 800px) {
@@ -625,6 +664,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .submit-button { flex: 1.4; min-width: 0; gap: 12px; }
   .runs-head { display: block; padding: 44px 18px 22px; }
   .runs-note { margin-top: 10px; }
+  .runs-aside { text-align: left; }
   .runs-grid { grid-template-columns: 1fr; padding: 0 18px; }
   .run-card-head { padding: 16px 18px; }
   .run-row { padding: 11px 18px; }
@@ -643,6 +683,17 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .readable-content { font-size: 14px; }
   .how-grid { gap: 40px; padding: 56px 18px 64px; }
   .how-replay { min-height: 0; padding: 32px 14px; border-radius: 16px; }
+  .why-grid, .selfhost-grid { gap: 32px; padding: 56px 18px 64px; }
+  .why-grid { padding-bottom: 28px; }
+  .why-points { grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 0 18px 64px; }
+  .why-specimen .ledger { padding: 12px 16px; }
+  .why-specimen .ledger-row { grid-template-columns: minmax(0, 1fr); }
+  .why-specimen .ledger dd { grid-column: 1; padding-left: 2.4ch; }
+  .selfhost-sheet { border-radius: 16px; }
+  /* Commands keep their lines on a phone: the sheet scrolls sideways instead of breaking a command mid-word. */
+  .selfhost-sheet .code-lines { overflow-x: auto; font-size: 11.5px; }
+  .selfhost-sheet .code-lines li { width: max-content; min-width: 100%; }
+  .selfhost-sheet .code-text { white-space: pre; }
   .footer-brand-cell { padding: 32px 18px; }
   .footer-tagline { font-size: 21px; }
   .footer-cards { padding: 0 18px 32px; }

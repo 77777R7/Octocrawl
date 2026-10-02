@@ -8,7 +8,7 @@ import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } f
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
-import { canonicalRedirect, dailyVisitorId, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
+import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 
 export interface PreviewServerOptions {
@@ -39,7 +39,7 @@ const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
-  '.xml': 'application/xml; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
 }
 
 function sendJson(res: ServerResponse, status: number, body: PreviewResponse | Record<string, unknown>, headers: Record<string, string> = {}): void {
@@ -197,7 +197,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       let event
       try { event = parseWebEvent(await readRequestBody(req, EVENT_BODY_BYTES)) } catch { event = null }
       if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
-      log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req) })
+      if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req) })
       res.writeHead(204, { 'cache-control': 'no-store' }).end()
       return
     }
@@ -213,11 +213,11 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     let submitted = ''
     let submittedOptions = false
     // Every anonymous outcome is logged once: its state, the target's host and the time, never the page or its path.
-    // Owner evaluation runs keep their own log line and stay out of these counts.
+    // Owner evaluation runs keep their own log line and stay out of these counts, as do visitors who opted out.
     const owner = authorizedEvaluation(req, options.evalToken)
     const send: typeof sendJson = (target, status, body, headers) => {
       const outcome = body as PreviewResponse
-      if (!owner) log({
+      if (!owner && !optedOut(req)) log({
         event: 'w2l_preview', status: outcome.status, http: status, code: outcome.diagnostic?.code ?? null,
         host: targetHost(submitted), options: submittedOptions, totalMs: Math.round(outcome.totalMs),
         vid: visitorId(req), automated: looksAutomated(req),

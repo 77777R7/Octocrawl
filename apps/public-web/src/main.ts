@@ -293,7 +293,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, set up W2L through MCP on your own computer.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run W2L on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
   })[result.status]
 }
 
@@ -323,9 +323,9 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
     content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
   })
   const docs = result.status === 'quota_exceeded'
-    ? textElement('a', 'Connect MCP ↗', 'guidance-link')
+    ? textElement('a', 'Run it yourself ↓', 'guidance-link')
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
-  docs.href = result.status === 'quota_exceeded' ? '/docs/connect-mcp/' : '/docs/limits/'
+  docs.href = result.status === 'quota_exceeded' ? '#run-it-yourself' : '/docs/limits/'
   actions.append(json, docs)
   panel.append(actions)
   return panel
@@ -1260,6 +1260,20 @@ codeCopy.addEventListener('click', async () => {
     codeStatus.textContent = 'Copied to the clipboard.'
     window.setTimeout(() => { codeCopy.textContent = 'Copy' }, 2200)
   } catch { codeStatus.textContent = 'Copy failed. Select the text manually.' }
+})
+
+// Run it yourself: the terminal lines, copied as one script.
+const selfhostCopy = document.querySelector<HTMLButtonElement>('#selfhost-copy')!
+const selfhostStatus = document.querySelector<HTMLElement>('#selfhost-status')!
+selfhostCopy.addEventListener('click', async () => {
+  track('get_code_copy', { tab: 'selfhost' })
+  const lines = [...document.querySelectorAll<HTMLElement>('#selfhost-code .code-text')].map(line => line.textContent ?? '')
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    selfhostCopy.textContent = 'Copied ✓'
+    selfhostStatus.textContent = 'Copied to the clipboard.'
+    window.setTimeout(() => { selfhostCopy.textContent = 'Copy' }, 2200)
+  } catch { selfhostStatus.textContent = 'Copy failed. Select the text manually.' }
 })
 
 form.addEventListener('submit', async (event) => {
