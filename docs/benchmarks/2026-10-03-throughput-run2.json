@@ -1,0 +1,72 @@
+{
+  "name": "throughput",
+  "startedAt": "2026-10-03T06:04:37.284Z",
+  "commit": "80997b9",
+  "node": "v26.8.1",
+  "machine": {
+    "platform": "darwin 25.6.0 arm64",
+    "cpu": "Apple M5 Pro",
+    "cores": 15,
+    "memoryGb": 48
+  },
+  "site": {
+    "hosts": 20,
+    "responseDelayMs": "80..300",
+    "pageBytes": 31896,
+    "politeness": "API defaults: 2 at once per host, 250 ms between starts"
+  },
+  "results": [
+    {
+      "label": "http lane",
+      "workers": 32,
+      "urls": 1000,
+      "hosts": 20,
+      "status": "completed",
+      "completed": 1000,
+      "succeeded": 1000,
+      "failed": 0,
+      "lanes": {
+        "http": 1000
+      },
+      "elapsedMs": 31912,
+      "pagesPerMinute": 1880,
+      "wallMs": {
+        "p50": 714.6625410000006,
+        "p95": 1190.8280000000013,
+        "max": 1489.6012919999994,
+        "measured": 1000
+      },
+      "target": {
+        "pagesPerMinute": 500,
+        "p50Ms": 800
+      },
+      "meetsTarget": true
+    },
+    {
+      "label": "browser lane",
+      "workers": 8,
+      "urls": 200,
+      "hosts": 20,
+      "status": "completed",
+      "completed": 200,
+      "succeeded": 200,
+      "failed": 0,
+      "lanes": {
+        "browser_local": 200
+      },
+      "elapsedMs": 22873,
+      "pagesPerMinute": 525,
+      "wallMs": {
+        "p50": 877.9184579999999,
+        "p95": 983.2122919999999,
+        "max": 991.626291999999,
+        "measured": 200
+      },
+      "target": {
+        "pagesPerMinute": 60,
+        "p95Ms": 8000
+      },
+      "meetsTarget": true
+    }
+  ]
+}

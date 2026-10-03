@@ -1,0 +1,93 @@
+{
+  "name": "batch-crash-1000",
+  "startedAt": "2026-10-03T06:09:05.871Z",
+  "endedAt": "2026-10-03T06:09:12.777Z",
+  "node": "v26.8.1",
+  "platform": "darwin-arm64",
+  "passed": true,
+  "checks": [
+    {
+      "name": "killed mid-run",
+      "pass": true,
+      "detail": "400 of 1000 steps on disk at the kill (status read just before: 400 completed)"
+    },
+    {
+      "name": "batch completed",
+      "pass": true,
+      "detail": {
+        "status": "completed",
+        "requested": 1000,
+        "completed": 1000,
+        "remaining": 0
+      }
+    },
+    {
+      "name": "succeeded + failed = completed",
+      "pass": true,
+      "detail": {
+        "succeeded": 1000,
+        "failed": 0
+      }
+    },
+    {
+      "name": "one item per URL",
+      "pass": true,
+      "detail": "1000 items, 1000 distinct URLs"
+    },
+    {
+      "name": "every item succeeded",
+      "pass": true,
+      "detail": "0 not success"
+    },
+    {
+      "name": "a URL on disk at the kill was fetched once",
+      "pass": true,
+      "detail": "0 of 400 fetched again"
+    },
+    {
+      "name": "every URL fetched once or twice; extra fetches at most the worker count",
+      "pass": true,
+      "detail": {
+        "neverFetched": 0,
+        "moreThanTwice": 0,
+        "extraFetches": 0,
+        "workers": 8
+      }
+    },
+    {
+      "name": "the cut attempt is marked interrupted",
+      "pass": true,
+      "detail": "interrupted/400, completed/600"
+    }
+  ],
+  "summary": {
+    "urls": 1000,
+    "hosts": 20,
+    "workers": 8,
+    "killedAtCompleted": 400,
+    "stepsOnDiskAtKill": 400,
+    "fetchesBeforeKill": 400,
+    "extraFetches": 0,
+    "robotsFetches": 20,
+    "attemptsAtKill": [
+      "running"
+    ],
+    "attempts": [
+      {
+        "status": "interrupted",
+        "pagesFetched": 400
+      },
+      {
+        "status": "completed",
+        "pagesFetched": 600
+      }
+    ],
+    "report": {
+      "status": "completed",
+      "requested": 1000,
+      "completed": 1000,
+      "succeeded": 1000,
+      "failed": 0
+    }
+  }
+}
