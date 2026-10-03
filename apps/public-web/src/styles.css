@@ -812,6 +812,11 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .section-head h2 em, .faq-intro h2 em, .selfhost-intro h2 em { color: #b8461d; font-style: normal; }
 .glyph-cloud { position: absolute; top: 12px; left: 50%; margin: 0; transform: translateX(-50%); color: rgba(20, 37, 74, .18); font: 11px/12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; pointer-events: none; }
 .glyph-cloud.is-side { top: -30px; left: -20px; transform: none; color: rgba(20, 37, 74, .11); }
+/* The moving cloud (glyphRipple.ts) fades in over its prerendered marks, and back out when it stops. */
+.glyph-cloud { transition: opacity .8s ease; }
+.glyph-ripple { opacity: 0; }
+.glyph-ripple.is-live { opacity: 1; }
+.glyph-cloud.is-handed-off { opacity: 0; }
 .faq-intro { position: relative; }
 .faq-intro > :not(.glyph-cloud) { position: relative; }
 .ink-texture { position: absolute; top: 0; right: 0; left: 0; height: 460px; opacity: .28; mix-blend-mode: multiply; background: center 60% / cover no-repeat; -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent); mask-image: linear-gradient(180deg, #000 55%, transparent); pointer-events: none; }
