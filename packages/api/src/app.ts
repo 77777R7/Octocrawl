@@ -68,6 +68,26 @@ export interface AppOptions {
    * 404 on all four, and clients poll the status and listing routes instead.
    */
   jobStreams?: boolean
+  /**
+   * Answer only requests addressed to this machine by a loopback name
+   * (`Host` 127.0.0.1, localhost or [::1]) and, when a browser sends an
+   * `Origin`, from a loopback page. A local server that reads the user's
+   * saved logins sets it: a web page the user opens must not reach it
+   * through a rebound DNS name and read pages signed in as them.
+   */
+  loopbackOnly?: boolean
+}
+
+const LOOPBACK_NAMES: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/** Whether a `Host` value or an `Origin` URL names this machine by a loopback name. */
+export function isLoopbackAuthority(value: string, origin: boolean): boolean {
+  try {
+    const url = new URL(origin ? value : `http://${value}`)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && LOOPBACK_NAMES.has(url.hostname.toLowerCase())
+  } catch {
+    return false
+  }
 }
 
 /** The WebSocket injectors of the apps that serve stream routes, for injectJobWebSockets. */
@@ -152,6 +172,17 @@ class SlidingWindowLimiter {
 export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   const app = new Hono()
   const tokens = [...(options.tokens ?? []), ...(options.token ? [options.token] : [])].filter((token) => token.length > 0)
+
+  if (options.loopbackOnly === true) {
+    app.use('*', async (c, next) => {
+      const host = c.req.header('host')
+      const origin = c.req.header('origin')
+      if (host === undefined || !isLoopbackAuthority(host, false) || (origin !== undefined && !isLoopbackAuthority(origin, true))) {
+        return fail(c, 'unauthorized', 'this local server answers requests addressed to 127.0.0.1, localhost or [::1] from this machine only')
+      }
+      await next()
+    })
+  }
 
   if (tokens.length > 0) {
     const accepts = bearerTokenMatcher(tokens)

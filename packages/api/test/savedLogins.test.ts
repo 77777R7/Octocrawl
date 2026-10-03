@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { identityBundleFrom, identityForRoute, modeIdentity, type FetchResult } from '@w2l/contracts'
 import { FileSessionStore, type Channel, type SessionSnapshot } from '@w2l/bench'
 import { createApiEngine, defaultSessionsFile, type ApiEngine } from '../src/engine.js'
+import { createApp, isLoopbackAuthority } from '../src/app.js'
 
 const URL_ = 'https://www.example.com/account'
 
@@ -74,6 +75,18 @@ describe('saved logins in the API engine', () => {
     const res = await engine!.scrape({ url: URL_, mode: 'authed' })
     expect(res.lane).toBe('http')
     expect(seen).toEqual([])
+  })
+
+  it('a loopback-only server refuses a request addressed by another name or sent from another origin', async () => {
+    await setup()
+    const app = createApp(engine!, { loopbackOnly: true })
+    const post = (headers: Record<string, string>) => app.request('http://127.0.0.1:8787/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ url: URL_, mode: 'authed' }) })
+    expect((await post({ host: 'rebound.example:8787' })).status).toBe(401)
+    expect((await post({ host: '127.0.0.1:8787', origin: 'https://evil.example' })).status).toBe(401)
+    const ok = await post({ host: '127.0.0.1:8787', origin: 'http://localhost:3000' })
+    expect(ok.status).toBe(200)
+    expect(isLoopbackAuthority('[::1]:8787', false)).toBe(true)
+    expect(isLoopbackAuthority('localhost.evil.example', false)).toBe(false)
   })
 
   it('the default file is W2L_SESSIONS_FILE, else ~/.w2l/sessions.json', () => {

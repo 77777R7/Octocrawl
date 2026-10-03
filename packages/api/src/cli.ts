@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
-import { createApp, injectJobWebSockets } from './app.js'
+import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { parseListen, parsePort } from './listen.js'
 
@@ -23,6 +23,9 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   const log = options.log ?? ((line: string) => console.log(line))
   const listen = parseListen([...argv], env)
   const taskRoot = env.W2L_TASK_ROOT ?? '.w2l/api'
+  // The user's saved logins are read by a local server that listens on loopback alone, and it then answers loopback requests only.
+  const servesLogins = listen.mode === 'local' && isLoopbackAuthority(listen.host.includes(':') && !listen.host.startsWith('[') ? `[${listen.host}]` : listen.host, false)
+  if (listen.mode === 'local' && !servesLogins) log(`saved logins (mode authed) are not read: this server listens on ${listen.host}, reachable from other machines; listen on 127.0.0.1 to use them`)
   const engine = createApiEngine({
     taskRoot,
     networkPolicy: listen.networkPolicy,
@@ -31,11 +34,11 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     mapMaxTimeoutMs: listen.mapMaxTimeoutMs,
     allowRobotsOverride: listen.allowRobotsOverride,
     hosted: listen.mode === 'hosted',
-    sessionsFile: listen.mode === 'hosted' ? null : defaultSessionsFile(env),
+    sessionsFile: servesLogins ? defaultSessionsFile(env) : null,
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
     workerCount: listen.workerCount,
   })
-  const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
+  const app = createApp(engine, { loopbackOnly: servesLogins, tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
   const worker = new DeliveryWorker(deliveryStore, {

@@ -126,6 +126,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
       .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'summary' }] })).toThrow('unsupported format: summary')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
+    // A crawl would follow a sign-out link with the user's live Chrome session; a batch fetches only the pages it names.
+    expect(() => parseCrawlStartRequest({ url, mode: 'authed' })).toThrow(/not available for crawl.*batch in mode authed/)
+    expect(parseBatchStartRequest({ urls: [url], mode: 'authed' }).mode).toBe('authed')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
   })
 

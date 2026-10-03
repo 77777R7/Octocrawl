@@ -56,7 +56,7 @@ import {
   MemoryRoutingHistory,
   type RoutingHistory,
 } from './routing/vendorRouter.js'
-import { FileSessionStore, sessionCoversHost, type SessionSnapshot, type SessionStore } from './routing/sessionStore.js'
+import { FileSessionStore, sessionCoversHost, sessionFingerprint, type SessionSnapshot, type SessionStore } from './routing/sessionStore.js'
 
 export const USAGE =
   'usage: w2l scrape [--research|--authed] [--persist-session] [--live-view] [--session-store f] [--history-file f] [--handoff] <url>\n' +
@@ -191,9 +191,13 @@ export function buildChannels(
   // own domain and must belong to this lane. A Steel resume handed to
   // Browserbase (or vice versa) is rejected rather than misapplied.
   // ----------------------------------------------------------------------
+  // One subject per saved login, keyed by its content: a login imported
+  // again (the old one expired) gets a new subject with the new cookies, in
+  // a long-running server too.
   const authedSubjects = new Map<string, BrowserLocalSubject>()
   const authedSubjectFor = (session: SessionSnapshot): BrowserLocalSubject => {
-    let subject = authedSubjects.get(session.domain)
+    const key = `${session.domain}\u0000${sessionFingerprint(session)}`
+    let subject = authedSubjects.get(key)
     if (subject === undefined) {
       const access: AccessConfigInput = {
         session: {} as SessionConfig,
@@ -206,7 +210,7 @@ export function buildChannels(
       if (session.cookies !== undefined) access.session!.cookies = session.cookies
       if (session.storageState !== undefined) access.session!.storageState = session.storageState
       subject = new BrowserLocalSubject('authed', access, opts.headed === true, opts.networkPolicy, null, originScheduler, null, undefined, undefined, fileStore)
-      authedSubjects.set(session.domain, subject)
+      authedSubjects.set(key, subject)
     }
     return subject
   }

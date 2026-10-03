@@ -1617,6 +1617,10 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const mode = readMode(rec.mode)
+  // A crawl follows every link it finds, a sign-out link included, and the
+  // saved login is the user's live Chrome session: one such fetch would
+  // sign them out there too. A batch fetches only the pages it names.
+  if (mode === 'authed') throw new RequestError('mode authed is not available for crawl: a crawl follows every link, and a sign-out link would end your session in Chrome too; list the pages and send them as a batch in mode authed')
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const allowlistedDomains = readAllowlist(rec.allowlistedDomains)

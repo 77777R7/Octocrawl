@@ -102,6 +102,17 @@ describe('w2l login import from the user\'s Chrome', () => {
     expect(cookiesForDomain(COOKIES, 'api.www.example.com').map((c) => c.name)).toEqual(['__Host-sid', 'pref', 'api'])
   })
 
+  it('a public suffix is no site: other sites\' cookies under it are never saved as one login', async () => {
+    const underSuffix = [
+      { name: 'a', value: 'x', domain: '.bbc.co.uk', path: '/', expires: -1, httpOnly: false, secure: true },
+      { name: 'b', value: 'y', domain: 'www.amazon.co.uk', path: '/', expires: -1, httpOnly: false, secure: true },
+    ]
+    expect(cookiesForDomain(underSuffix, 'co.uk')).toEqual([])
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9333\n/devtools/browser/abc\n')
+    await expect(importChromeLogin({ site: 'co.uk', sessionsFile, userDataDir, connect: fakeChrome(underSuffix).connect })).rejects.toThrow(/sets no cookie on co.uk itself.*w2l login import bbc.co.uk/)
+    await expect(readFile(sessionsFile, 'utf8')).rejects.toThrow()
+  })
+
   it('knows the stable Chrome\'s profile directory on each OS', () => {
     expect(chromeUserDataDir('darwin', {}, '/Users/a')).toBe(join('/Users/a', 'Library', 'Application Support', 'Google', 'Chrome'))
     expect(chromeUserDataDir('linux', {}, '/home/a')).toBe(join('/home/a', '.config', 'google-chrome'))

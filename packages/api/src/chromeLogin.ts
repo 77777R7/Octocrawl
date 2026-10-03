@@ -98,12 +98,20 @@ export function loginDomain(site: string): string {
   return host
 }
 
-/** The cookies a session for `domain` needs: the ones its pages are sent (a parent domain's too) and its subdomains'. */
+/**
+ * The cookies a session for `domain` needs: the ones its pages are sent (its
+ * own and a parent domain's) and, when the site sets cookies on `domain`
+ * itself, its subdomains'. A name nothing sets a cookie on is not a site:
+ * a public suffix (`co.uk`, `github.io`) has only other sites' cookies under
+ * it, and Chrome sets none on it.
+ */
 export function cookiesForDomain(cookies: readonly CdpCookie[], domain: string): StoredCookie[] {
-  return cookies
-    // A cookie on a bare top-level domain (`.com`) is no site's; Chrome refuses one anyway.
-    .filter((c) => c.domain.replace(/^\./, '').includes('.'))
-    .filter((c) => sessionCoversHost(c.domain, domain) || sessionCoversHost(domain, c.domain))
+  const bare = (c: CdpCookie): string => c.domain.toLowerCase().replace(/^\./, '')
+  // A cookie on a bare top-level domain (`.com`) is no site's; Chrome refuses one anyway.
+  const candidates = cookies.filter((c) => bare(c).includes('.'))
+  const isSite = candidates.some((c) => bare(c) === domain)
+  return candidates
+    .filter((c) => sessionCoversHost(c.domain, domain) || (isSite && sessionCoversHost(domain, c.domain)))
     .map((c) => ({
       name: c.name,
       value: c.value,
@@ -114,6 +122,11 @@ export function cookiesForDomain(cookies: readonly CdpCookie[], domain: string):
       secure: c.secure,
       ...(c.sameSite === undefined ? {} : { sameSite: c.sameSite }),
     }))
+}
+
+/** The hosts under `domain` Chrome holds cookies for, when none is set on `domain` itself. */
+function hostsBelow(cookies: readonly CdpCookie[], domain: string): string[] {
+  return [...new Set(cookies.map((c) => c.domain.toLowerCase().replace(/^\./, '')).filter((d) => d !== domain && sessionCoversHost(domain, d)))].sort()
 }
 
 /** Read the user's cookies for one site from their running Chrome and save them as that site's login. */
@@ -130,7 +143,11 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
     connection.close()
   }
   const cookies = cookiesForDomain(all, domain)
-  if (cookies.length === 0) throw new ChromeLoginError(`Chrome has no cookies for ${domain}: sign in to ${domain} in Chrome, then run this again`)
+  if (cookies.length === 0) {
+    const below = hostsBelow(all, domain)
+    if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. w2l login import ${below[0]}`)
+    throw new ChromeLoginError(`Chrome has no cookies for ${domain}: sign in to ${domain} in Chrome, then run this again`)
+  }
   const snapshot: SessionSnapshot = {
     domain,
     attestedBy: localUser(),
