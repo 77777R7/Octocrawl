@@ -79,6 +79,16 @@ beforeAll(async () => {
     const gallery = /^\/gallery\/(\d)$/.exec(url)
     if (gallery !== null) { const n = Number(gallery[1]); return html(`<h1>Gallery</h1>${PROSE}${[0, 1, 2, 3].map((i) => `<a class="tile" href="/photo/${n}-${i}"><img src="/img/${n}-${i}.png" alt=""></a>`).join('')}${n < 3 ? `<a class="next" href="/gallery/${n + 1}">Next</a>` : ''}`) }
     if (url === '/inplace') return html(`<h1>Gallery</h1>${PROSE}<div id="g">${[0, 1, 2, 3].map((i) => `<img class="tile" src="/img/1-${i}.png" alt="">`).join('')}</div><button id="next" onclick="const p = (window.p = (window.p || 1) + 1); document.querySelectorAll('img.tile').forEach((img, i) => { img.src = '/img/' + p + '-' + i + '.png' }); if (p >= 3) this.disabled = true">Next</button>`)
+    // An app that pushes ?page=N at once and fetches its rows 2.4 s later, keeping the old rows meanwhile; Next goes on page 3.
+    if (url === '/spa' || url.startsWith('/spa?')) return html(`<h1>App</h1>${PROSE}<ul id="l">${rows(1, 4)}</ul><button id="next">Next</button><script>let p = 1; document.getElementById('next').onclick = () => { p++; history.pushState({}, '', '/spa?page=' + p); const asked = p; fetch('/api?page=' + p).then((r) => r.json()).then((list) => { if (asked !== p) return; document.getElementById('l').innerHTML = list.map((t) => '<li class="row">' + t + '</li>').join(''); if (p >= 3) document.getElementById('next').remove() }) }</script>`)
+    const api = /^\/api\?page=(\d)$/.exec(url)
+    if (api !== null) { const n = Number(api[1]); setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify([1, 2, 3, 4].map((i) => `Reading ${n * 10 + i}`))) }, 2400); return }
+    // Item links whose query changes on every load (a search id), on an alias first page and a clamping paginator.
+    const qrows = (from: number) => [0, 1].map((i) => `<li class="row"><a href="/item/${from + i}?qid=${Date.now()}${Math.random()}">Reading ${from + i}</a></li>`).join('')
+    if (url === '/qalias' || url === '/qalias?page=1') return html(`<h1>Q 1</h1>${PROSE}<ul>${qrows(1)}</ul><a class="next" href="/qalias?page=${url === '/qalias' ? '1' : '2'}">Next</a>`)
+    if (url === '/qalias?page=2') return html(`<h1>Q 2</h1>${PROSE}<ul>${qrows(3)}</ul>`)
+    const qclamp = /^\/qclamp\?page=(\d+)$/.exec(url)
+    if (qclamp !== null) { const n = Number(qclamp[1]); const shown = Math.min(n, 3); return html(`<h1>Q clamp ${shown}</h1>${PROSE}<ul>${qrows(shown * 10)}</ul><a class="next" href="/qclamp?page=${n + 1}">Next</a>`) }
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -214,6 +224,19 @@ describe('list steps, real browser', () => {
     const inPlace = await run('/inplace', [{ type: 'paginate', nextSelector: '#next', waitMs: 200 }])
     expect(inPlace.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
   }, 90_000)
+
+  it('paginate waits for an app that changes the URL first and loads its rows after, and reads each page once', async () => {
+    const result = await run('/spa', [{ type: 'paginate', nextSelector: '#next', itemSelector: 'li.row', waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 12 })
+    expect(result.actions?.scrapes[1]?.html).toContain('Reading 21')
+  }, 90_000)
+
+  it('item links whose query changes on every load do not make a page read before look new', async () => {
+    const alias = await run('/qalias', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'li.row', waitMs: 200 }])
+    expect(alias.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, itemsRead: 4 })
+    const clamp = await run('/qclamp?page=1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'li.row', maxPages: 6, waitMs: 200 }])
+    expect(clamp.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'repeat', rounds: 3, itemsRead: 6 })
+  }, 120_000)
 
   it('paginate with maxPages stops there and warns', async () => {
     const result = await run('/pages/1', [{ type: 'paginate', nextSelector: 'a.next', maxPages: 2, waitMs: 200 }])
