@@ -146,7 +146,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
   if (cookies.length === 0) {
     const below = hostsBelow(all, domain)
     if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. w2l login import ${below[0]}`)
-    throw new ChromeLoginError(`Chrome has no cookies for ${domain}: sign in to ${domain} in Chrome, then run this again`)
+    throw new ChromeLoginError(`Chrome has no cookies for ${domain}: sign in to ${domain} in Chrome's default profile, in a normal (not Incognito) window, then run this again. Remote debugging reaches the default profile only`)
   }
   const snapshot: SessionSnapshot = {
     domain,

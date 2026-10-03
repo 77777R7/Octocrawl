@@ -718,8 +718,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
+    // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
+    // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.

@@ -57,6 +57,20 @@ describe('saved logins in the API engine', () => {
     expect(await readFile(sessionsFile, 'utf8')).toBe(before)
   })
 
+  it('a crawl never carries a saved login, even one stored in mode authed before crawl refused it', async () => {
+    const { seen } = await setup()
+    const accepted = await engine!.startCrawl({ url: URL_, mode: 'authed', maxDepth: 0, maxPages: 1 } as Parameters<ApiEngine['startCrawl']>[0])
+    for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes((await engine!.getCrawl(accepted.taskId))?.status ?? ""); i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(seen.every((session) => session === null || session === undefined)).toBe(true)
+  })
+
+  it('a batch in mode authed reads each page with the saved login', async () => {
+    const { seen } = await setup()
+    const accepted = await engine!.startBatch({ urls: [URL_], mode: 'authed' } as Parameters<ApiEngine['startBatch']>[0])
+    for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes((await engine!.getBatch(accepted.taskId))?.status ?? ""); i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(seen.map((session) => session?.domain)).toEqual(['example.com'])
+  })
+
   it('other modes never load a saved login', async () => {
     const { seen } = await setup()
     const res = await engine!.scrape({ url: URL_ })
