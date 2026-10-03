@@ -268,6 +268,10 @@ export interface CrawlPage {
   rawHtml?: string | null
   /** Present when the task asked for the `images` format and the page was read as content, as on a scrape result. */
   images?: readonly string[]
+  /** Present when the task asked for the `tables` format and the page was read as content, as on a scrape result. */
+  tables?: FetchResult['tables']
+  /** Present when the task's `pdf` parser asked for `pages` and the page is a PDF whose text was read, as on a scrape result. */
+  pages?: FetchResult['pages']
   /** Present when the task asked for an `attributes` format and the page was read as content, as on a scrape result. */
   attributes?: FetchResult['attributes']
   /** Present when the task asked for the `screenshot` format and the page rendered, as on a scrape result: the capture, or null when the browser lane could not capture it. */

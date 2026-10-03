@@ -49,6 +49,8 @@ export interface PdfToMarkdownOptions {
    * `pages[].removedLines` and reported with `repeated_lines_removed`.
    */
   repeatedLines?: 'keep' | 'remove'
+  /** A `<!-- page N -->` line before each page's text: written by default; false leaves them out (the page offsets still locate each page). */
+  pageMarkers?: boolean
 }
 
 export type PdfWarningCode =
@@ -210,7 +212,7 @@ export async function pdfToMarkdown(bytes: Uint8Array | ArrayBuffer, options: Pd
     if (removed && removed.size > 0) {
       warnings.push({ code: 'repeated_lines_removed', message: `Removed running headers and footers from ${removed.size} pages; each page lists them in removedLines.` })
     }
-    const { markdown, pages: read } = markdownOf(pages, removed)
+    const { markdown, pages: read } = markdownOf(pages, removed, options.pageMarkers !== false)
     if (read.some((page) => page.text !== '')) {
       warnings.unshift({ code: 'tables_unverified', message: 'Tables are not reconstructed: their cells become lines of text in reading order, so values read from a table are unverified.' })
     }

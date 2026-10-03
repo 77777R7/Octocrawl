@@ -222,7 +222,7 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images","screenshot","screenshot@fullPage"]')
+      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images","tables","screenshot","screenshot@fullPage"]')
       expect(properties).toMatchObject({
         includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
         excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },

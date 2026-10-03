@@ -153,12 +153,40 @@ describe('file download on scrape', () => {
     expect(fallback.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['model_unavailable', 'missing_required']))
   })
 
-  it('answers /fc with the PDF text as markdown', async () => {
+  it('answers /fc with the PDF text as markdown, without page markers unless asked, and its page count', async () => {
     const res = await post('/fc/v1/scrape', { url: `${origin}/report.pdf` })
-    expect(res.json).toMatchObject({ success: true, data: { metadata: { statusCode: 200, sourceURL: `${origin}/report.pdf` } } })
-    expect((res.json.data as { markdown: string }).markdown).toContain('<!-- page 1 -->\n\nAnnual data summary')
+    expect(res.json).toMatchObject({ success: true, data: { metadata: { statusCode: 200, sourceURL: `${origin}/report.pdf`, numPages: expect.any(Number) } } })
+    const markdown = (res.json.data as { markdown: string }).markdown
+    expect(markdown.startsWith('Annual data summary')).toBe(true)
+    expect(markdown).not.toContain('<!-- page')
+    const marked = await post('/fc/v1/scrape', { url: `${origin}/report.pdf`, parsers: [{ type: 'pdf', pageMarkers: true, pages: true }] })
+    expect((marked.json.data as { markdown: string }).markdown).toContain('<!-- page 1 -->\n\nAnnual data summary')
+    expect((marked.json.data as { pages: { pageNumber: number; markdown: string }[] }).pages[0]).toMatchObject({ pageNumber: 1, markdown: expect.stringContaining('Annual data summary') })
+    const unparsed = await post('/fc/v1/scrape', { url: `${origin}/report.pdf`, parsePDF: false })
+    expect(unparsed.json).toMatchObject({ success: true, data: { markdown: null } })
     const scan = await post('/fc/v1/scrape', { url: `${origin}/scan.pdf` })
     expect(scan.json).toMatchObject({ success: false, error: 'failed: empty_unverified' })
+  })
+
+  it('takes a pdf parser entry: maxPages cuts as asked, pages lists each page, pageMarkers false leaves markers out, and [] reads no PDF', async () => {
+    const cut = await post('/v1/scrape', { url: `${origin}/report.pdf`, parsers: [{ type: 'pdf', mode: 'fast', maxPages: 1, pages: true, pageMarkers: false }] })
+    const body = cut.json as unknown as Body & { pages: { pageNumber: number; markdown: string }[] }
+    expect(body.status).toBe('success')
+    expect(body.markdown).toBe('Annual data summary\nCapacity reached 120 MW.\n')
+    expect(body.pages).toEqual([{ pageNumber: 1, markdown: 'Annual data summary\nCapacity reached 120 MW.' }])
+    expect(body.file?.pdf).toMatchObject({ pageCount: 2, pagesRead: 1 })
+    expect(body.file?.pdf?.warnings.map(warning => warning.code)).toContain('page_cap')
+    // The default cap's cut is not asked for; without the entry the whole document is read, with markers.
+    const whole = (await post('/v1/scrape', { url: `${origin}/report.pdf`, parsers: ['pdf'] })).json as unknown as Body
+    expect(whole.markdown).toContain('<!-- page 2 -->\n\nPortfolio PUE: 1.32')
+    expect(whole).not.toHaveProperty('pages')
+
+    const unparsed = (await post('/v1/scrape', { url: `${origin}/report.pdf`, parsers: [] })).json as unknown as Body
+    expect(unparsed).toMatchObject({ status: 'success', markdown: null, file: { sha256: sha(REPORT), markdownFrom: null, pdf: null, warnings: [{ code: 'pdf_not_parsed' }] } })
+
+    for (const parsers of [[{ type: 'pdf', mode: 'ocr' }], ['image'], ['pdf', 'pdf'], [{ type: 'pdf', maxPages: 0 }], [{ type: 'pdf', unknown: true }]]) {
+      expect((await post('/v1/scrape', { url: `${origin}/report.pdf`, parsers })).status, JSON.stringify(parsers)).toBe(400)
+    }
   })
 
   it('catches the browser download when waitFor starts at the browser rung', async () => {

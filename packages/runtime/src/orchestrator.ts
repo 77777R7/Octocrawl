@@ -756,10 +756,10 @@ function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchRe
 // The page keeps its own links (an empty list would claim it has none); the
 // caller does not follow them because a duplicate is not contentful. Its
 // content repeats an earlier page's, so it goes in every form: the Markdown,
-// the `html`, `rawHtml`, `images` and `attributes` formats and the
+// the `html`, `rawHtml`, `images`, `tables` and `attributes` formats and the
 // `screenshot`, which a page carries only when it was read as content (a
 // crawl with the format answers `screenshot: null` for a duplicate).
-function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, screenshot: _screenshot, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
+function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot: _screenshot, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
   return {
     ...prior,
     requestedUrl: url,

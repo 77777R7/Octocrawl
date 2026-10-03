@@ -56,8 +56,12 @@ export interface FilePdfText {
 }
 
 export interface FileWarning {
-  /** `text_not_decoded`: the bytes are not valid text in their declared or default (UTF-8) encoding, so no text is returned. */
-  code: 'text_not_decoded'
+  /**
+   * `text_not_decoded`: the bytes are not valid text in their declared or
+   * default (UTF-8) encoding, so no text is returned. `pdf_not_parsed`: the
+   * request's `parsers` named no `pdf` entry, so a PDF's text was not read.
+   */
+  code: 'text_not_decoded' | 'pdf_not_parsed'
   message: string
 }
 

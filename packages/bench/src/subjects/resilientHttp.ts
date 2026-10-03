@@ -22,7 +22,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -500,7 +500,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }
     // A file is answered here, whatever its outcome: no other lane reads it better.
     if (file !== null) {
-      const content = await readFileResponse({ decision: file, contentType, declaredBytes: declaredLength(out.headers?.get('content-length') ?? null), maxBytes: maxFileBytes }, bytes, { lane: 'http', store: this.fileStore, deadlineAt, trace, at: () => Date.now() - start })
+      const content = await readFileResponse({ decision: file, contentType, declaredBytes: declaredLength(out.headers?.get('content-length') ?? null), maxBytes: maxFileBytes }, bytes, { lane: 'http', store: this.fileStore, deadlineAt, trace, at: () => Date.now() - start, ...(options.parsers === undefined ? {} : { parsers: options.parsers }) })
       formatMs = content.textMs
       return finish({
         ...base,
@@ -513,6 +513,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         markdown: content.markdown,
         links: [],
         file: content.file,
+        ...(content.pages === undefined ? {} : { pages: content.pages }),
         evidence: { ...base.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
         usage: { ...base.usage, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
       })
@@ -724,6 +725,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const warnings = clientRenderedCaveat()
     // The images and attributes formats read the body as received, like links.
     const extra = extraFormats(body, out.finalUrl, options, trace, 'http', wallMs)
+    // The tables format reads what the Markdown was written from, with the same options.
+    const tables = tablesFormat(wholePageAsked(options)
+      ? { html: body, options: { baseUrl: out.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
+      : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, out.finalUrl, options, trace, 'http', wallMs)
 
     return finish({
       ...base,
@@ -737,6 +742,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       ...(warnings.length > 0 ? { warnings } : {}),
       links,
       ...extra,
+      ...tables,
       metadata: extracted.metadata,
       document: {
         title: extracted.title,

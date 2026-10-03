@@ -114,6 +114,10 @@ interface Context {
   layout: boolean
   /** `data:` image URIs are written as targets instead of being dropped (MarkdownOptions.dataUriImages 'keep'). */
   keepDataUriImages: boolean
+  /** When set, every data table the walk writes as a GFM table is also collected here, in document order (htmlToTables). */
+  tables?: ExtractedTable[]
+  /** What the collected tables of this page may still hold, in MAX_PAGE_TABLE_CHARS units; shared by every table of one walk. */
+  tableBudget?: { left: number }
   /** What the GFM grids of this page's tables may still add as empty cells (MAX_PAGE_TABLE_PADDING). */
   tablePadding: { left: number }
 }
@@ -167,11 +171,11 @@ function cellText(cell: Element, ctx: Context): string {
 const MAX_COLSPAN = 1000
 const MAX_ROWSPAN = 65534
 /**
- * The most empty cells the grid of one table, and of all a page's tables
- * together, may add for spans and short rows (each is written as ` | `).
- * Padding is what lets a small page make a huge one: one wide row over many
- * one-cell rows pads every row to its width. A table past either is written
- * as its rows of cells, unpadded.
+ * The most empty cells the GFM grid of one table, and of all a page's
+ * tables together, may add for spans and short rows (each is written as
+ * ` | `). Padding is what lets a small page make a huge one: one wide row
+ * over many one-cell rows pads every row to its width. A table past either
+ * is written as its rows of cells, unpadded.
  */
 export const MAX_TABLE_PADDING = 500_000
 export const MAX_PAGE_TABLE_PADDING = 2_000_000
@@ -179,14 +183,16 @@ export const MAX_PAGE_TABLE_PADDING = 2_000_000
 type GridCell = { value: string; colspan: number; rowspan: number }
 
 /**
- * The cells placed on the table's grid, a spanned cell's value in its first
- * slot and the others empty, every row padded to the widest; null once the
- * grid would add more than `maxPadding` empty cells.
+ * The cells of a table, one grid row per HTML row, a spanned cell's value
+ * in every slot it covers (`fill: 'repeat'`) or in its first slot with the
+ * others empty (`fill: 'empty'`, the GFM table), every row padded to the
+ * widest; null once the grid would hold more than `maxPadding` slots that
+ * are not a cell's first.
  */
-function expandGrid(rows: GridCell[][], maxPadding: number): string[][] | null {
+function expandGrid(rows: GridCell[][], maxPadding: number, fill: 'empty' | 'repeat' = 'empty'): string[][] | null {
   const out: string[][] = []
   // Column → the rowspans still covering it, oldest first.
-  const vertical = new Map<number, { left: number }[]>()
+  const vertical = new Map<number, { left: number; value: string }[]>()
   let slots = 0
   let cells = 0
   for (const htmlRow of rows) {
@@ -194,7 +200,7 @@ function expandGrid(rows: GridCell[][], maxPadding: number): string[][] | null {
     let cursor = 0
     const fillOccupied = () => {
       for (let spans = vertical.get(cursor); spans !== undefined; spans = vertical.get(cursor)) {
-        row[cursor] = ''
+        row[cursor] = fill === 'repeat' ? spans[0]!.value : ''
         if (--spans[0]!.left === 0) spans.shift()
         if (spans.length === 0) vertical.delete(cursor)
         cursor++
@@ -205,13 +211,13 @@ function expandGrid(rows: GridCell[][], maxPadding: number): string[][] | null {
       row[cursor] = cell.value
       const cs = Math.max(1, cell.colspan)
       const rs = Math.max(1, cell.rowspan)
-      if (cs > 1) for (let x = 1; x < cs; x++) row[++cursor] = ''
+      if (cs > 1) for (let x = 1; x < cs; x++) row[++cursor] = fill === 'repeat' ? cell.value : ''
       if (rs > 1) {
         for (let w = 0; w < cs; w++) {
           const col = cursor - cs + 1 + w
           const spans = vertical.get(col)
-          if (spans) spans.push({ left: rs - 1 })
-          else vertical.set(col, [{ left: rs - 1 }])
+          if (spans) spans.push({ left: rs - 1, value: cell.value })
+          else vertical.set(col, [{ left: rs - 1, value: cell.value }])
         }
       }
       cursor++
@@ -234,18 +240,85 @@ function ownRows(table: Element): Element[] {
   return Array.from(table.querySelectorAll('tr')).filter((tr) => tr.closest('table') === table)
 }
 
-function tableToGfm(table: Element, ctx: Context): string {
+/** A row's own cells, not those of a table nested in one of them. */
+function ownCells(tr: Element): Element[] {
+  return Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr)
+}
+
+/** A table's caption and cells as `cell` writes each one; a table nested in a cell is that cell's text. */
+function tableCells(table: Element, cell: (el: Element) => string): { caption: string | null; rows: GridCell[][] } {
   const captionEl = table.querySelector(':scope > caption')
-  const caption = captionEl ? normalizeCell(cellText(captionEl, ctx)) : null
-  // A table nested in a cell is that cell's text.
-  const rows = ownRows(table).map((tr) =>
-    Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr).map((cell) => ({
-      value: normalizeCell(cellText(cell, ctx)),
-      colspan: Math.min(Number(cell.getAttribute('colspan') ?? 1) || 1, MAX_COLSPAN),
-      rowspan: Math.min(Number(cell.getAttribute('rowspan') ?? 1) || 1, MAX_ROWSPAN),
-    })),
-  )
+  const rows = ownRows(table).map((tr) => ownCells(tr).map((el) => ({
+    value: cell(el),
+    colspan: Math.min(Number(el.getAttribute('colspan') ?? 1) || 1, MAX_COLSPAN),
+    rowspan: Math.min(Number(el.getAttribute('rowspan') ?? 1) || 1, MAX_ROWSPAN),
+  })))
+  return { caption: captionEl ? cell(captionEl) : null, rows }
+}
+
+/**
+ * The most characters a table's rows may hold once its spans are repeated
+ * into every slot they cover, and the most all of a page's tables may hold
+ * together; past either, a table is given as `omitted: 'too_large'` with no
+ * rows, so a small page cannot make a huge CSV or response. A cell counts
+ * what its CSV field and its JSON string cost: its text, each `"` three
+ * more times (`""` in CSV, escaped again in JSON), each `\` once more and
+ * each control character five more (`\u00XX` in JSON), plus three for the
+ * separators and quotes.
+ */
+export const MAX_TABLE_CHARS = 2_000_000
+export const MAX_PAGE_TABLE_CHARS = 5_000_000
+
+function cellCost(value: string): number {
+  let extra = 3
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c === 34) extra += 3
+    else if (c === 92) extra += 1
+    // JSON writes a control character as \u00XX.
+    else if (c < 32) extra += 5
+  }
+  return value.length + extra
+}
+
+/**
+ * One data table as data: its caption and cells as plain text (a link is its
+ * text, an image its alt text, whitespace collapsed, no Markdown escaping),
+ * a spanned cell's value in every slot it covers, and how many leading rows
+ * are headers (in `<thead>`, or made of `<th>` cells alone). Null when it
+ * has no cells, as the GFM table is then empty.
+ */
+function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedTable | null {
+  const { caption, rows } = tableCells(table, (el) => plainCell(el, ctx))
+  if (rows.every((row) => row.length === 0)) return null
+  // What the repeated spans would hold, before any of it is built (a span past the last row adds nothing).
+  let chars = 0
+  rows.forEach((row, r) => { for (const cell of row) chars += cellCost(cell.value) * cell.colspan * Math.min(cell.rowspan, rows.length - r) })
+  const budget = ctx.tableBudget
+  if (chars > MAX_TABLE_CHARS || (budget !== undefined && chars > budget.left)) return { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
+  if (budget !== undefined) budget.left -= chars
+  let headerRows = 0
+  for (const tr of ownRows(table)) {
+    const cells = ownCells(tr)
+    if (cells.length === 0 || !(tr.parentElement?.localName === 'thead' || cells.every((el) => el.localName === 'th'))) break
+    headerRows++
+  }
+  return { tableIndex, caption: caption === '' ? null : caption, headerRows, rows: expandGrid(rows, Infinity, 'repeat')! }
+}
+
+function plainCell(cell: Element, ctx: Context): string {
+  const inline = new Inline()
+  inlineChildren(cell, inline, ctx, TEXT_MARKS)
+  return inline.finish().text.replace(/\s+/g, ' ').trim()
+}
+
+function tableToGfm(table: Element, ctx: Context): string {
+  const { caption, rows } = tableCells(table, (el) => normalizeCell(cellText(el, ctx)))
   if (rows.every((row) => row.length === 0)) return ''
+  if (ctx.tables !== undefined) {
+    const data = tableData(table, ctx, ctx.tables.length)
+    if (data !== null) ctx.tables.push(data)
+  }
   const budget = ctx.tablePadding
   const grid = expandGrid(rows, Math.min(MAX_TABLE_PADDING, budget.left))
   // Too large to pad: each row's own cells, in order and unpadded (GFM fills
@@ -371,10 +444,13 @@ interface Marks {
   link: boolean
   /** Emphasis and code spans are written as plain text (a table cell). */
   plain: boolean
+  /** Links and images too: a link is its text, an image its alt text (a cell of the `tables` format). */
+  text: boolean
 }
 
-const NO_MARKS: Marks = { strong: false, em: false, link: false, plain: false }
+const NO_MARKS: Marks = { strong: false, em: false, link: false, plain: false, text: false }
 const CELL_MARKS: Marks = { ...NO_MARKS, plain: true }
+const TEXT_MARKS: Marks = { ...CELL_MARKS, text: true }
 
 /**
  * Link and image targets are made absolute against the document base, so the
@@ -436,7 +512,10 @@ function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): vo
       out.lineBreak()
       break
     case 'img':
-      image(el, out, ctx)
+      if (marks.text) {
+        const alt = (el.getAttribute('alt') ?? '').replace(WHITESPACE, ' ').trim()
+        if (alt) out.content(alt)
+      } else image(el, out, ctx)
       break
     case 'code':
       if (marks.plain) rendered = false
@@ -498,7 +577,7 @@ function codeSpan(el: Element, out: Inline, ctx: Context): void {
 /** Render a link; false when it has no usable target (no href, or inside another link) and is only text. */
 function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
   const href = el.getAttribute('href')
-  const target = href === null || marks.link ? null : linkTarget(href, ctx.base)
+  const target = href === null || marks.link || marks.text ? null : linkTarget(href, ctx.base)
   if (target === null) return false
   const inner = new Inline()
   inlineChildren(el, inner, ctx, { ...marks, link: true })
@@ -773,6 +852,36 @@ function toUrl(value: string | null | undefined): URL | null {
 }
 
 export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): string {
+  return convert(html, options)
+}
+
+/**
+ * One data table of a page, as the Markdown writes it as a GFM table:
+ * `tableIndex` counts those tables from 0 in document order, so table N here
+ * is the Nth GFM table of the Markdown made from the same HTML and options.
+ * Layout tables and single-row tables are not data tables, and a table
+ * nested in a cell is that cell's text, as in the Markdown.
+ */
+export interface ExtractedTable {
+  tableIndex: number
+  /** The `<caption>` as plain text; null when there is none. */
+  caption: string | null
+  /** Leading rows in `<thead>` or made of `<th>` cells alone. */
+  headerRows: number
+  /** Every row padded to the table's width; a spanned cell's value fills each slot it covers. Empty when the table is omitted. */
+  rows: string[][]
+  /** Present when the table's repeated cells would exceed MAX_TABLE_CHARS, or what the page's tables have left of MAX_PAGE_TABLE_CHARS: its rows are not given. */
+  omitted?: 'too_large'
+}
+
+/** The data tables of the HTML, from the same walk htmlToMarkdown makes with the same options. */
+export function htmlToTables(html: string, options: MarkdownOptions = {}): ExtractedTable[] {
+  const tables: ExtractedTable[] = []
+  convert(html, options, tables)
+  return tables
+}
+
+function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable[]): string {
   if (html.trim().length === 0) return ''
   const whole = /<html[\s>]|<!doctype/i.test(html)
   const doc = parse(whole ? html : `<!doctype html><html><body>${html}</body></html>`)
@@ -788,7 +897,7 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING } })
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()

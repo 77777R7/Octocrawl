@@ -27,7 +27,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
@@ -1095,6 +1095,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
       const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
+      // The tables format reads what the Markdown was written from, with the same options.
+      const tables = tablesFormat(wholePageAsked(options)
+        ? { html: converted, options: { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
+        : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, pageUrl, options, trace, 'browser_local', wallMs)
       return {
         ...base,
         status: waitCutShort ? 'partial' : 'success',
@@ -1106,6 +1110,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         markdown,
         links,
         ...extra,
+        ...tables,
         metadata: extracted.metadata,
         document: {
           title: extracted.title,
@@ -1285,7 +1290,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const decision = detectFile(contentType, bytes, responseFileName(finalUrl, headers['content-disposition'] ?? null))
     if (decision === null && download === null) return null
     if (decision === null || decision === 'unsupported') return unsupported()
-    const content = await readFileResponse({ decision, contentType, declaredBytes, maxBytes }, bytes, { lane: 'browser_local', store: this.fileStore, ...(execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt }), trace, at })
+    const content = await readFileResponse({ decision, contentType, declaredBytes, maxBytes }, bytes, { lane: 'browser_local', store: this.fileStore, ...(execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt }), trace, at, ...(options.parsers === undefined ? {} : { parsers: options.parsers }) })
     const answered = base()
     return {
       ...answered,
@@ -1293,6 +1298,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       failureReason: content.failureReason,
       markdown: content.markdown,
       file: content.file,
+      ...(content.pages === undefined ? {} : { pages: content.pages }),
       evidence: { ...answered.evidence, rawBodySha256: content.rawBodySha256, artifacts: content.artifacts },
       usage: { ...answered.usage, bytesDecompressed: bytes.byteLength, contentTokens: content.contentTokens, ...(content.deadlineExceeded ? { deadlineExceeded: true } : {}) },
     }

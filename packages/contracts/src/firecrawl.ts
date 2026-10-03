@@ -56,7 +56,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'An omitted timeout stays 300000 ms (Firecrawl: 30000). A timeout is answered with HTTP 200: success: true with the content fetched so far (native status partial), or success: false with failed: timeout; Firecrawl answers it with an error.',
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them, and the Open Graph (ogTitle, ogDescription, ogUrl, ogImage, ogAudio, ogVideo, ogDeterminer, ogLocale, ogLocaleAlternate, ogSiteName), Dublin Core (dcTermsCreated, dcDateCreated, dcDate, dcTermsType, dcType, dcTermsAudience, dcTermsSubject, dcSubject, dcDescription, dcTermsKeywords) and article (publishedTime, modifiedTime, articleTag, articleSection) tags under Firecrawl\'s names, each only when the page states it, as written (no date normalisation, no fallback from another tag); twitter:* and other meta tags are not passed through, and a failed or blocked page has none.',
-  'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
+  'A PDF answers success: true with its text layer as markdown and metadata.numPages (the document\'s page count). parsers maps Firecrawl\'s pdf entry (the string or { type: "pdf", mode, maxPages, pages, pageMarkers }); mode fast and auto both read the text layer, and mode ocr and the image parser are refused by name. pageMarkers is false unless asked, as on Firecrawl; with true W2L writes a <!-- page N --> line before each page (Firecrawl writes --- and the marker between pages). pages: true adds data.pages, [{ pageNumber, markdown }]. maxPages (1 to 10000) reads the first pages, and a cut it asked for stays success: true. parsers [] or v1 parsePDF false reads no PDF: success: true with markdown null and the file saved as received. A PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
   'Map (POST /fc/v1/map) maps url, search, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only; both v1 flags true is HTTP 400), includeSubdomains, ignoreQueryParameters, limit (1 to 100000, default 5000), timeout (1000 to 300000 ms for the whole map, default 60000; Firecrawl documents no default), origin and integration onto native POST /v1/map, and answers 200 { success: true, id, links: [url strings], warning?, agent_hints? }, or 200 { success: false, id, error, links: [] } when the map found nothing because a source failed or its deadline passed; useIndex, location, ignoreCache, threatProtection and auditMetadata are refused by name (useIndex with the hint that W2L keeps no URL index). Omitted options take W2L\'s defaults: includeSubdomains and ignoreQueryParameters are false, where Firecrawl v2 documents true for both. search keeps the URLs in which every word appears in the decoded URL or the title in hand, in discovery order; Firecrawl orders by relevance. A map reads the sitemaps the site declares and one page body (the start URL, http rung only), so a site without a sitemap maps only its start page\'s links; a title is the start page\'s own, an anchor\'s text or a sitemap\'s <news:title>, never fetched from the target; robots-disallowed URLs are left out and counted on the native response (GET /v1/maps/:id), which also records every sitemap file read.',
   'A crawl\'s webhook (a URL string or { url, headers, metadata, events }) is mapped onto the native webhook and its receiver gets Firecrawl\'s payload shape: { success, type: crawl.started | crawl.page | crawl.completed | crawl.failed, id, data: [page], metadata, error? }, one durable delivery per event with retries, every request carrying x-w2l-event-id, x-w2l-event-version and x-w2l-delivery-id (and the signature pair with secretEnv, a native option). A cancelled crawl is crawl.failed with error "cancelled". The native rules apply: https (plain http for a loopback receiver of a local server only), no content-type, host or x-w2l-* header, at most 32 headers and 32 metadata strings; a hosted server takes public https receivers only. GET /v1/deliveries?jobId=<id> on the native API lists the deliveries.',
 ] as const
@@ -68,6 +68,8 @@ export interface FirecrawlPage {
   /** Present when the `rawHtml` format was asked for; null when the page has none. */
   rawHtml?: string | null
   links?: string[]
+  /** A PDF's pages, when the request's pdf parser asked for them (`pages: true`). */
+  pages?: { pageNumber: number; markdown: string }[]
   /** Present when the `images` format was asked for and the page was read as content: every image URL of the whole document. */
   images?: string[]
   /** Present when an `attributes` entry was asked for and the page was read as content: per selector, the attribute's values as written. */
@@ -119,6 +121,8 @@ export interface FirecrawlPage {
     statusCode: number | null
     /** That response's `content-type` header; left out when there was none. */
     contentType?: string
+    /** A PDF's page count, read or not; left out for anything else. */
+    numPages?: number
     /** On a page that did not succeed: W2L's failure, block or budget reason code (`http_error`, `cloudflare_challenge`, ...), or its status when it has none (`empty_verified`). */
     error?: string
     /** The facts of the scrape call (native `metadata`), on a scrape response; a crawl status page has no call of its own and leaves them out. */
@@ -261,7 +265,8 @@ export function parseFirecrawlCrawlRequest(body: unknown): ParsedCrawlStartReque
   const problems = noProblems()
   // `idempotencyKey` is the native name of the `x-idempotency-key` header the v1 SDK sends, which the API merges into the body before parsing.
   checkShimKeys(rec, '', ['url', ...SHIM_ATTRIBUTION, 'limit', 'maxDepth', 'includePaths', 'excludePaths', 'ignoreSitemap', 'sitemapOnly', 'scrapeOptions', ...SHIM_CRAWL_SCOPE_OPTIONS, 'allowBackwardLinks', 'crawlEntireDomain', 'idempotencyKey', 'webhook'], problems)
-  let pageOptions: Record<string, unknown> = {}
+  // A crawl's PDFs follow /fc's rule too: no page markers unless asked.
+  let pageOptions: Record<string, unknown> = { parsers: shimParsers(undefined, undefined, 'scrapeOptions.') }
   if (rec.scrapeOptions !== undefined) {
     const options = rec.scrapeOptions
     if (options === null || typeof options !== 'object' || Array.isArray(options)) throw new RequestError('scrapeOptions must be an object')
@@ -354,9 +359,10 @@ export function wrapJobWebhook(envelope: JobWebhookEnvelope, result: FetchResult
 
 /** The scrape options the shim maps: formats (markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage, an attributes entry and a screenshot entry), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, maxAge, minAge, storeInCache and lockdown; the native parser validates them. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
-  checkShimKeys(rec, prefix, [...keys, 'formats', ...SHIM_PAGE_OPTIONS], problems)
+  checkShimKeys(rec, prefix, [...keys, 'formats', 'parsers', 'parsePDF', ...SHIM_PAGE_OPTIONS], problems)
   const mapped: Record<string, unknown> = {}
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
+  mapped.parsers = shimParsers(rec.parsers, rec.parsePDF, prefix)
   if (rec.formats === undefined) return mapped
   const isTyped = (item: unknown): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).type === 'string'
   if (!Array.isArray(rec.formats) || rec.formats.some((item) => typeof item !== 'string' && !isTyped(item))) throw new RequestError(`${prefix}formats must be an array of strings or { type } objects`)
@@ -375,6 +381,23 @@ function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, key
     }
   }
   return { ...mapped, formats }
+}
+
+/**
+ * A PDF on /fc as on Firecrawl: no page markers unless the request asks
+ * (`pageMarkers: true` in its pdf entry); v1 `parsePDF: false` is
+ * `parsers: []`, no PDF text. Any other shape passes as it is, and the
+ * native parser checks it.
+ */
+function shimParsers(parsers: unknown, parsePDF: unknown, prefix: string): unknown {
+  if (parsePDF !== undefined && typeof parsePDF !== 'boolean') throw new RequestError(`${prefix}parsePDF must be a boolean`)
+  if (parsers === undefined) return parsePDF === false ? [] : [{ type: 'pdf', pageMarkers: false }]
+  if (!Array.isArray(parsers)) return parsers
+  return parsers.map((entry: unknown) => {
+    if (entry === 'pdf') return { type: 'pdf', pageMarkers: false }
+    if (entry !== null && typeof entry === 'object' && !Array.isArray(entry) && (entry as Record<string, unknown>).type === 'pdf' && (entry as Record<string, unknown>).pageMarkers === undefined) return { ...entry, pageMarkers: false }
+    return entry
+  })
 }
 
 function checkShimKeys(rec: Record<string, unknown>, prefix: string, known: readonly string[], problems: ShimProblems): void {
@@ -487,6 +510,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
     ...(result.html === undefined ? {} : { html: result.html }),
     ...(result.rawHtml === undefined ? {} : { rawHtml: result.rawHtml }),
     ...(result.links !== undefined ? { links: [...result.links] } : {}),
+    ...(result.pages === undefined ? {} : { pages: result.pages.map((page) => ({ pageNumber: page.pageNumber, markdown: page.markdown })) }),
     ...(result.images === undefined ? {} : { images: [...result.images] }),
     ...(result.attributes === undefined ? {} : { attributes: result.attributes.map((entry) => ({ selector: entry.selector, attribute: entry.attribute, values: [...entry.values] })) }),
     // The image as a data URI, which Firecrawl v1 clients read; null when it was asked for and there is none.
@@ -499,6 +523,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
       url: result.evidence.finalUrl,
       statusCode: result.evidence.httpStatus,
       ...(result.evidence.contentType === null ? {} : { contentType: result.evidence.contentType }),
+      ...(typeof result.file?.pdf?.pageCount === 'number' ? { numPages: result.file.pdf.pageCount } : {}),
       ...(error !== undefined ? { error } : {}),
       // The call's facts, on a scrape response; a crawl status page has no call of its own.
       ...(scrape === undefined ? {} : {
