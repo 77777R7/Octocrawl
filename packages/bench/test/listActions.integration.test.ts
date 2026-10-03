@@ -68,6 +68,17 @@ beforeAll(async () => {
     if (grid !== null) { const n = Number(grid[1]); return html(`<h1>Grid ${n}</h1>${PROSE}${Array.from({ length: 4 }, (_, i) => `<a class="tile" href="/item/${n}-${i}"><img src="/img/${n}-${i}.png" alt=""></a>`).join('')}${n < 3 ? `<a class="next" href="/grid/${n + 1}">Next</a>` : ''}`) }
     const prices = /^\/prices\/(\d)$/.exec(url)
     if (prices !== null) { const n = Number(prices[1]); return html(`<h1>Prices on day ${n}</h1>${PROSE}<ul>${['Apples', 'Pears'].map((name, i) => `<li><span class="name">${name}</span> ${n * 10 + i} cents</li>`).join('')}</ul>${n < 3 ? `<a class="next" href="/prices/${n + 1}">Next</a>` : ''}`) }
+    // Rows whose prices tick every 50 ms.
+    const ticker = /^\/ticker\/(\d)$/.exec(url)
+    if (ticker !== null) { const n = Number(ticker[1]); return html(`<h1>Quotes</h1>${PROSE}<ul>${[1, 2, 3, 4].map((i) => `<li class="q">SYM${n}${i} <span class="px"></span></li>`).join('')}</ul>${n < 4 ? `<a class="next" href="/ticker/${n + 1}">Next</a>` : ''}<script>setInterval(() => { for (const px of document.querySelectorAll('.px')) px.textContent = String(Math.random()) }, 50)</script>`) }
+    // The alias pages with a footer that differs on every load.
+    const footer = `<p>Page generated in ${Math.random().toFixed(6)} s</p>`
+    if (url === '/falias' || url === '/falias?page=1') return html(`<h1>Alias 1</h1>${PROSE}<ul>${rows(1, 2)}</ul><a class="next" href="/falias?page=${url === '/falias' ? '1' : '2'}">Next</a>${footer}`)
+    if (url === '/falias?page=2') return html(`<h1>Alias 2</h1>${PROSE}<ul>${rows(3, 4)}</ul>${footer}`)
+    // A gallery whose pages share every line of text; and one paginated in place, the URL unchanged.
+    const gallery = /^\/gallery\/(\d)$/.exec(url)
+    if (gallery !== null) { const n = Number(gallery[1]); return html(`<h1>Gallery</h1>${PROSE}${[0, 1, 2, 3].map((i) => `<a class="tile" href="/photo/${n}-${i}"><img src="/img/${n}-${i}.png" alt=""></a>`).join('')}${n < 3 ? `<a class="next" href="/gallery/${n + 1}">Next</a>` : ''}`) }
+    if (url === '/inplace') return html(`<h1>Gallery</h1>${PROSE}<div id="g">${[0, 1, 2, 3].map((i) => `<img class="tile" src="/img/1-${i}.png" alt="">`).join('')}</div><button id="next" onclick="const p = (window.p = (window.p || 1) + 1); document.querySelectorAll('img.tile').forEach((img, i) => { img.src = '/img/' + p + '-' + i + '.png' }); if (p >= 3) this.disabled = true">Next</button>`)
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -173,7 +184,7 @@ describe('list steps, real browser', () => {
   it('paginate reads pages whose items have no text, or the same text, when the pages differ', async () => {
     const grid = await run('/grid/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'a.tile', waitMs: 200 }])
     expect(grid.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 12 })
-    const prices = await run('/prices/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'li .name', waitMs: 200 }])
+    const prices = await run('/prices/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }])
     expect(prices.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
   }, 60_000)
 
@@ -182,6 +193,27 @@ describe('list steps, real browser', () => {
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'repeat', rounds: 3 })
     expect(result.warnings?.some((warning) => warning.code === 'list_not_exhausted') ?? false).toBe(false)
   }, 60_000)
+
+  it('paginate reads every page when the prices in its rows tick, with or without itemSelector', async () => {
+    const withItems = await run('/ticker/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'li.q', waitMs: 200 }])
+    expect(withItems.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 4, itemsRead: 16 })
+    const without = await run('/ticker/1', [{ type: 'paginate', nextSelector: 'a.next', waitMs: 200 }])
+    expect(without.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 4 })
+  }, 60_000)
+
+  it('with itemSelector, a page read before under another URL is skipped though a footer differs on every load', async () => {
+    const result = await run('/falias', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, itemsRead: 4 })
+  }, 60_000)
+
+  it('paginate reads a gallery whose pages share their text, by URL or in place', async () => {
+    const byUrl = await run('/gallery/1', [{ type: 'paginate', nextSelector: 'a.next', waitMs: 200 }])
+    expect(byUrl.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
+    const tiles = await run('/gallery/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'a.tile', waitMs: 200 }])
+    expect(tiles.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 12 })
+    const inPlace = await run('/inplace', [{ type: 'paginate', nextSelector: '#next', waitMs: 200 }])
+    expect(inPlace.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
+  }, 90_000)
 
   it('paginate with maxPages stops there and warns', async () => {
     const result = await run('/pages/1', [{ type: 'paginate', nextSelector: 'a.next', maxPages: 2, waitMs: 200 }])
