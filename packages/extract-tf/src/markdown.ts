@@ -118,6 +118,8 @@ interface Context {
   tables?: ExtractedTable[]
   /** What the collected tables of this page may still hold, in MAX_PAGE_TABLE_CHARS units; shared by every table of one walk. */
   tableBudget?: { left: number }
+  /** What the GFM grids of this page's tables may still add as empty cells (MAX_PAGE_TABLE_PADDING). */
+  tablePadding: { left: number }
 }
 
 /** Never content, or hidden by the page's CSS: skipped together with everything inside. */
@@ -165,24 +167,43 @@ function cellText(cell: Element, ctx: Context): string {
   return inline.finish().text.replace(/\n/g, ' ')
 }
 
+/** The span limits browsers apply (HTML: colspan at most 1000, rowspan at most 65534). */
+const MAX_COLSPAN = 1000
+const MAX_ROWSPAN = 65534
+/**
+ * The most empty cells the GFM grid of one table, and of all a page's
+ * tables together, may add for spans and short rows (each is written as
+ * ` | `). Padding is what lets a small page make a huge one: one wide row
+ * over many one-cell rows pads every row to its width. A table past either
+ * is written as its rows of cells, unpadded.
+ */
+export const MAX_TABLE_PADDING = 500_000
+export const MAX_PAGE_TABLE_PADDING = 2_000_000
+
+type GridCell = { value: string; colspan: number; rowspan: number }
+
 /**
  * The cells of a table, one grid row per HTML row, a spanned cell's value
  * in every slot it covers (`fill: 'repeat'`) or in its first slot with the
- * others empty (`fill: 'empty'`, the GFM table).
+ * others empty (`fill: 'empty'`, the GFM table), every row padded to the
+ * widest; null once the grid would hold more than `maxPadding` slots that
+ * are not a cell's first.
  */
-function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][], fill: 'empty' | 'repeat' = 'empty'): string[][] {
-  const out: (string | undefined)[][] = []
-  const vertical: { col: number; left: number; value: string }[] = []
+function expandGrid(rows: GridCell[][], maxPadding: number, fill: 'empty' | 'repeat' = 'empty'): string[][] | null {
+  const out: string[][] = []
+  // Column → the rowspans still covering it, oldest first.
+  const vertical = new Map<number, { left: number; value: string }[]>()
+  let slots = 0
+  let cells = 0
   for (const htmlRow of rows) {
-    const row: (string | undefined)[] = []
+    const row: string[] = []
     let cursor = 0
     const fillOccupied = () => {
-      for (;;) {
-        const span = vertical.find((s) => s.col === cursor)
-        if (!span) break
-        row[cursor] = fill === 'repeat' ? span.value : ''
+      for (let spans = vertical.get(cursor); spans !== undefined; spans = vertical.get(cursor)) {
+        row[cursor] = fill === 'repeat' ? spans[0]!.value : ''
+        if (--spans[0]!.left === 0) spans.shift()
+        if (spans.length === 0) vertical.delete(cursor)
         cursor++
-        if (--span.left === 0) vertical.splice(vertical.indexOf(span), 1)
       }
     }
     for (const cell of htmlRow) {
@@ -192,14 +213,25 @@ function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][
       const rs = Math.max(1, cell.rowspan)
       if (cs > 1) for (let x = 1; x < cs; x++) row[++cursor] = fill === 'repeat' ? cell.value : ''
       if (rs > 1) {
-        for (let w = 0; w < cs; w++) vertical.push({ col: cursor - cs + 1 + w, left: rs - 1, value: cell.value })
+        for (let w = 0; w < cs; w++) {
+          const col = cursor - cs + 1 + w
+          const spans = vertical.get(col)
+          if (spans) spans.push({ left: rs - 1, value: cell.value })
+          else vertical.set(col, [{ left: rs - 1, value: cell.value }])
+        }
       }
       cursor++
+      if (slots + cursor - ++cells > maxPadding) return null
     }
     fillOccupied()
+    slots += cursor
+    if (slots - cells > maxPadding) return null
     out.push(row)
   }
-  const width = Math.max(0, ...out.map((r) => r.length))
+  // A loop, not Math.max(...rows): a table of 200,000 rows would overflow the call stack.
+  let width = 0
+  for (const r of out) width = Math.max(width, r.length)
+  if (width * out.length - cells > maxPadding) return null
   return out.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''))
 }
 
@@ -214,19 +246,16 @@ function ownCells(tr: Element): Element[] {
 }
 
 /** A table's caption and cells as `cell` writes each one; a table nested in a cell is that cell's text. */
-function tableCells(table: Element, cell: (el: Element) => string): { caption: string | null; rows: { value: string; colspan: number; rowspan: number }[][] } {
+function tableCells(table: Element, cell: (el: Element) => string): { caption: string | null; rows: GridCell[][] } {
   const captionEl = table.querySelector(':scope > caption')
   const rows = ownRows(table).map((tr) => ownCells(tr).map((el) => ({
     value: cell(el),
-    colspan: Number(el.getAttribute('colspan') ?? 1) || 1,
-    rowspan: Number(el.getAttribute('rowspan') ?? 1) || 1,
+    colspan: Math.min(Number(el.getAttribute('colspan') ?? 1) || 1, MAX_COLSPAN),
+    rowspan: Math.min(Number(el.getAttribute('rowspan') ?? 1) || 1, MAX_ROWSPAN),
   })))
   return { caption: captionEl ? cell(captionEl) : null, rows }
 }
 
-/** The span limits browsers apply (HTML: colspan at most 1000, rowspan at most 65534). */
-const MAX_COLSPAN = 1000
-const MAX_ROWSPAN = 65534
 /**
  * The most characters a table's rows may hold once its spans are repeated
  * into every slot they cover, and the most all of a page's tables may hold
@@ -260,9 +289,7 @@ function cellCost(value: string): number {
  * has no cells, as the GFM table is then empty.
  */
 function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedTable | null {
-  const cells = tableCells(table, (el) => plainCell(el, ctx))
-  const rows = cells.rows.map((row) => row.map((cell) => ({ ...cell, colspan: Math.min(cell.colspan, MAX_COLSPAN), rowspan: Math.min(cell.rowspan, MAX_ROWSPAN) })))
-  const caption = cells.caption
+  const { caption, rows } = tableCells(table, (el) => plainCell(el, ctx))
   if (rows.every((row) => row.length === 0)) return null
   // What the repeated spans would hold, before any of it is built (a span past the last row adds nothing).
   let chars = 0
@@ -276,7 +303,7 @@ function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedT
     if (cells.length === 0 || !(tr.parentElement?.localName === 'thead' || cells.every((el) => el.localName === 'th'))) break
     headerRows++
   }
-  return { tableIndex, caption: caption === '' ? null : caption, headerRows, rows: expandGrid(rows, 'repeat') }
+  return { tableIndex, caption: caption === '' ? null : caption, headerRows, rows: expandGrid(rows, Infinity, 'repeat')! }
 }
 
 function plainCell(cell: Element, ctx: Context): string {
@@ -292,7 +319,20 @@ function tableToGfm(table: Element, ctx: Context): string {
     const data = tableData(table, ctx, ctx.tables.length)
     if (data !== null) ctx.tables.push(data)
   }
-  const grid = expandGrid(rows)
+  const budget = ctx.tablePadding
+  const grid = expandGrid(rows, Math.min(MAX_TABLE_PADDING, budget.left))
+  // Too large to pad: each row's own cells, in order and unpadded (GFM fills
+  // a short body row and drops cells past the header's width when rendering;
+  // the text keeps them), so it stays one table of the Markdown.
+  if (grid === null) {
+    const lines = caption ? [caption] : []
+    const header = rows[0]!.length > 0 ? rows[0]!.map((cell) => cell.value) : ['']
+    lines.push(`| ${header.join(' | ')} |`)
+    lines.push(`| ${header.map(() => '---').join(' | ')} |`)
+    for (const row of rows.slice(1)) lines.push(`| ${row.map((cell) => cell.value).join(' | ')} |`)
+    return lines.join('\n')
+  }
+  budget.left -= grid.length * grid[0]!.length - rows.reduce((n, row) => n + row.length, 0)
   // An empty corner cell stays empty: GFM allows it, and any text put there
   // would not be on the page.
   const header = grid[0]!
@@ -857,7 +897,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()

@@ -62,6 +62,17 @@ describe('htmlToTables', () => {
     expect(htmlToTables(`<table><tr><td colspan="1000">${'\u0001'.repeat(1000)}</td></tr><tr><td>y</td></tr></table>`)[0]!.omitted).toBe('too_large')
   })
 
+  it('keeps its indexes when the Markdown writes a table too large to pad unpadded', () => {
+    // One wide empty row over 2,000 one-cell rows: the GFM grid would add 2 million empty cells.
+    const html = `<table><tr><td colspan="1000"></td></tr>${'<tr><td>y</td></tr>'.repeat(2_000)}</table>` +
+      '<table><tr><td>k</td><td>v</td></tr><tr><td>1</td><td>2</td></tr></table>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown.length).toBeLessThan(html.length)
+    const tables = htmlToTables(html)
+    expect(tables).toHaveLength(gfmTables(markdown))
+    expect(tables[1]).toMatchObject({ tableIndex: 1, rows: [['k', 'v'], ['1', '2']] })
+  })
+
   it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {
     const html = '<table class="ads"><tr><td>a</td></tr><tr><td>b</td></tr></table><table><tr></tr><tr></tr></table><table><tr><td>x</td></tr><tr><td>y</td></tr></table>'
     expect(htmlToTables(html, { exclude: ['.ads'] }).map((table) => [table.tableIndex, table.rows])).toEqual([[0, [['x'], ['y']]]])
