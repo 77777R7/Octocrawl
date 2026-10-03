@@ -211,7 +211,7 @@ async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (at !== -1) {
     const inline = rest[at]!.includes('=') ? rest[at]!.slice(rest[at]!.indexOf('=') + 1) : undefined
     const value = inline ?? rest[at + 1]
-    if (value === undefined || value.startsWith('--')) { io.stderr('w2l serve: --task-root takes a value'); return 2 }
+    if (value === undefined || value === '' || value.startsWith('--')) { io.stderr('w2l serve: --task-root takes a directory'); return 2 }
     rest.splice(at, inline === undefined ? 2 : 1)
     env = { ...io.env, W2L_TASK_ROOT: value }
   }

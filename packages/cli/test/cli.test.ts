@@ -46,6 +46,7 @@ describe('flags', () => {
     expect(() => parseCommandLine('scrape', ['u', '--timeout'])).toThrow('--timeout takes a value')
     expect(() => parseCommandLine('scrape', ['u', '--mobile=yes'])).toThrow('--mobile is true or false')
     expect(() => parseCommandLine('scrape', ['u', '--no-mobile=false'])).toThrow('--no-mobile takes no value')
+    expect(() => parseCommandLine('scrape', ['u', '--task-root='])).toThrow('--task-root takes a directory')
     expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('unknown flag --out for w2l map')
     // A command runs no delivery worker, so it offers no webhook.
     expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*w2l serve/)

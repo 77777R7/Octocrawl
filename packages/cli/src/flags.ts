@@ -97,7 +97,10 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
     let name = eq === -1 ? arg.slice(2) : arg.slice(2, eq)
     const inline = eq === -1 ? undefined : arg.slice(eq + 1)
     const value = (): string => {
-      if (inline !== undefined) return inline
+      if (inline !== undefined) {
+        if (inline === '' && name === 'task-root') throw new UsageError('--task-root takes a directory')
+        return inline
+      }
       const next = argv[i + 1]
       if (next === undefined || next.startsWith('--')) throw new UsageError(`--${name} takes a value`)
       i++
