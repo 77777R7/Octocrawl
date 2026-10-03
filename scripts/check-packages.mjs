@@ -12,7 +12,7 @@
 
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createServer as netServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -53,7 +53,8 @@ try {
   const pdf = JSON.parse(await run('npx', ['w2l', 'scrape', `${origin}/report.pdf`, '--parsers', '{"type":"pdf","pages":true}']))
   check('cli scrape pdf', pdf.status === 'success' && pdf.pages?.length === 2 && pdf.markdown?.includes('Portfolio PUE: 1.32'), `${pdf.status}, ${pdf.pages?.length} pages`)
   // Run by its real path, as Windows and pnpm shims run it: only the CLI's own entry may run.
-  const direct = await promisify(execFile)('node', [join(project, 'node_modules', '@w2l', 'cli', 'dist', 'cli.js'), '--version'], { cwd: project, env, encoding: 'utf8', timeout: 20_000 }).then((out) => out, (error) => error)
+  // The real path: on macOS the temp directory itself is reached through a symlink, which would hide a stray guard.
+  const direct = await promisify(execFile)('node', [join(realpathSync(project), 'node_modules', '@w2l', 'cli', 'dist', 'cli.js'), '--version'], { cwd: project, env, encoding: 'utf8', timeout: 20_000 }).then((out) => out, (error) => error)
   check('cli by its real path', direct.stdout?.trim() === '0.3.0' && (direct.stderr ?? '').trim() === '' && direct.code === undefined, JSON.stringify({ stdout: direct.stdout?.trim(), stderr: direct.stderr?.trim().slice(0, 120), code: direct.code, killed: direct.killed }))
   let refused = 0
   try { await run('npx', ['w2l', 'scrape', `${origin}/tides`, '--max-age', '-1']) } catch (error) { refused = error.code }

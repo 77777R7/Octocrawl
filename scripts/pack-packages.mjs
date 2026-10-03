@@ -60,16 +60,28 @@ const inlineAmazonSchema = {
  * pathToFileURL(process.argv[1])`: the API server, the ladder CLI) would run
  * beside the real entry. Every guard but the entry's is turned off.
  */
+const GUARD = 'import.meta.url === pathToFileURL('
+
+/** At most one entry guard may be live in a bundle: the bin's own. */
+function assertOneEntry(outDir) {
+  for (const file of readdirSync(outDir).filter((name) => name.endsWith('.js'))) {
+    const text = readFileSync(join(outDir, file), 'utf8')
+    const live = text.split(GUARD).length - 1 - (text.split(`false && ${GUARD}`).length - 1)
+    if (live > 1) throw new Error(`${file} has ${live} live entry guards: a bundled module other than the entry would run itself`)
+  }
+}
+
 function onlyEntryRuns(entry) {
   const entryPath = join(root, entry)
   return {
     name: 'only-entry-runs',
     setup(builder) {
-      builder.onLoad({ filter: /packages[\\/][^\\/]+[\\/]src[\\/].*\.ts$/ }, (args) => {
+      // A workspace import resolves to the package's compiled dist/*.js, the entry to its src/*.ts: both are read.
+      builder.onLoad({ filter: /packages[\\/][^\\/]+[\\/](src|dist)[\\/].*\.(ts|js)$/ }, (args) => {
         if (args.path === entryPath) return undefined
         const text = readFileSync(args.path, 'utf8')
-        if (!text.includes('import.meta.url === pathToFileURL(')) return undefined
-        return { contents: text.replaceAll('import.meta.url === pathToFileURL(', 'false && import.meta.url === pathToFileURL('), loader: 'ts' }
+        if (!text.includes(GUARD)) return undefined
+        return { contents: text.replaceAll(GUARD, `false && ${GUARD}`), loader: args.path.endsWith('.ts') ? 'ts' : 'js' }
       })
     },
   }
@@ -143,6 +155,7 @@ for (const target of targets) {
     metafile: true,
     tsconfig: join(root, 'packages', target.dir, 'tsconfig.json'),
   })
+  assertOneEntry(join(dir, 'dist'))
   const imported = importedPackages(join(dir, 'dist'))
   const unknown = [...imported].filter((name) => !(name in candidates) && !BUILTINS.has(name))
   if (unknown.length > 0) throw new Error(`${target.name} imports ${unknown.join(', ')}, which no bundled workspace package declares`)
