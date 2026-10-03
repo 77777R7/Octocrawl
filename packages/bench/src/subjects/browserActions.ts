@@ -246,17 +246,28 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
   }
 }
 
-/** How long paginate waits for the page Next asked for when the page has not changed yet. */
-const NEXT_PAGE_WAIT_MS = 10_000
+/** How long paginate waits for the page Next asked for when the page has not changed yet, and loadMore for a control hidden while it loads. */
+const COME_BACK_WAIT_MS = 10_000
 
-/** The page as it stands: its HTML, URL, and a state (URL and text) that says whether it is one already read. */
-async function pageState(ctx: ActionRunContext): Promise<{ html: string; url: string; state: string; textHash: string }> {
+/** Time a list round needs beyond its pause: the page's quiet (up to SETTLE_AFTER_STEP_MS) and the measures after it. */
+const ROUND_OVERHEAD_MS = SETTLE_AFTER_STEP_MS + 1_500
+
+/**
+ * The page as it stands: its HTML, URL, and a fingerprint of what it lists:
+ * the text of the items `itemSelector` matches when it names any (so a
+ * clock or a rotating banner does not make a page read twice look new),
+ * else the page's text.
+ */
+async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; fingerprint: string }> {
   await documentLoaded(ctx)
   const html = await bounded(ctx, ctx.page.content())
   const url = ctx.page.url()
-  const text = await bounded(ctx, ctx.page.evaluate(() => document.body?.innerText ?? ''))
-  const textHash = createHash('sha256').update(text).digest('hex')
-  return { html, url, state: `${withoutHash(url)}\u0000${textHash}`, textHash }
+  const text = await bounded(ctx, ctx.page.evaluate((selector) => {
+    const items = selector === null ? [] : Array.from(document.querySelectorAll(selector))
+    return items.length > 0 ? items.map((item) => (item as HTMLElement).innerText).join('\u0000') : document.body?.innerText ?? ''
+  }, itemSelector ?? null))
+  const fingerprint = createHash('sha256').update(text).digest('hex')
+  return { html, url, state: `${withoutHash(url)}\u0000${fingerprint}`, fingerprint }
 }
 
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
@@ -296,8 +307,14 @@ async function documentLoaded(ctx: ActionRunContext): Promise<void> {
   await bounded(ctx, ctx.page.waitForLoadState('domcontentloaded', { timeout: Math.min(MAX_ACTION_WAIT_MS, left) }))
 }
 
-/** Whether a round of `waitMs` still fits before the time kept back to read the page. */
-const roundFits = (ctx: ActionRunContext, waitMs: number): boolean => timeLeft(ctx) > waitMs + 500
+/** Whether a whole round (its pause, the page's quiet, the measures) still fits before the time kept back to read the page. */
+const roundFits = (ctx: ActionRunContext, waitMs: number): boolean => timeLeft(ctx) > waitMs + ROUND_OVERHEAD_MS
+
+/** How long a wait for something to come back may last: COME_BACK_WAIT_MS, within what a round leaves. */
+const comeBackUntil = (ctx: ActionRunContext): number => Date.now() + Math.min(COME_BACK_WAIT_MS, Math.max(0, timeLeft(ctx) - ROUND_OVERHEAD_MS))
+
+/** The deadline reached inside a list step: the list stops there, as `deadline`, with what it has; the step does not fail. */
+const isDeadline = (error: unknown): boolean => error instanceof StepFailure && error.code === 'deadline_exceeded'
 
 async function scrollToEnd(action: Extract<PageAction, { type: 'scrollToEnd' }>, ctx: ActionRunContext, index: number): Promise<ListRun> {
   const max = action.maxScrolls ?? LIST_DEFAULTS.maxScrolls
@@ -307,18 +324,23 @@ async function scrollToEnd(action: Extract<PageAction, { type: 'scrollToEnd' }>,
   let rounds = 0
   let quiet = 0
   let stoppedBy: ListStop
-  for (;;) {
-    if (rounds >= max) { stoppedBy = 'max'; break }
-    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
-    await bounded(ctx, action.selector === undefined
-      ? ctx.page.evaluate(() => { window.scrollTo(0, (document.scrollingElement ?? document.body).scrollHeight) })
-      : ctx.page.locator(action.selector).first().evaluate((element) => { element.scrollTop = element.scrollHeight }))
-    rounds++
-    await afterRound(ctx, waitMs)
-    const now = await measure(ctx, action.itemSelector, action.selector)
-    quiet = grew(last, now) ? 0 : quiet + 1
-    last = now
-    if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'end'; break }
+  try {
+    for (;;) {
+      if (rounds >= max) { stoppedBy = 'max'; break }
+      if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+      await bounded(ctx, action.selector === undefined
+        ? ctx.page.evaluate(() => { window.scrollTo(0, (document.scrollingElement ?? document.body).scrollHeight) })
+        : ctx.page.locator(action.selector).first().evaluate((element) => { element.scrollTop = element.scrollHeight }))
+      rounds++
+      await afterRound(ctx, waitMs)
+      const now = await measure(ctx, action.itemSelector, action.selector)
+      quiet = grew(last, now) ? 0 : quiet + 1
+      last = now
+      if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'end'; break }
+    }
+  } catch (error) {
+    if (!isDeadline(error)) throw error
+    stoppedBy = 'deadline'
   }
   return { index, type: 'scrollToEnd', stoppedBy, rounds, items: last.items }
 }
@@ -342,23 +364,35 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
   let rounds = 0
   let quiet = 0
   let stoppedBy: ListStop
-  for (;;) {
-    // The control gone, hidden or disabled is the list's end; gone before the first click, it was never there.
-    const why = await unusable(ctx, action.selector)
-    if (why !== null) {
-      if (rounds === 0 && why === 'gone') throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
-      stoppedBy = 'end'
-      break
+  try {
+    for (;;) {
+      // The control gone, hidden or disabled is the list's end. Gone before the first click, it was never there.
+      const why = await unusable(ctx, action.selector)
+      if (why !== null) {
+        if (rounds === 0 && why === 'gone') throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
+        stoppedBy = 'end'
+        break
+      }
+      if (rounds >= max) { stoppedBy = 'max'; break }
+      if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+      await raceWithSignal(ctx.page.locator(action.selector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      rounds++
+      await afterRound(ctx, waitMs)
+      // Many sites hide or disable the control while the items it asked for load: the round is judged once it is back or the
+      // items came, within COME_BACK_WAIT_MS.
+      let now = await measure(ctx, action.itemSelector)
+      const until = comeBackUntil(ctx)
+      while (!grew(last, now) && await unusable(ctx, action.selector) !== null && Date.now() < until) {
+        await abortableSleep(250, ctx.execution.signal)
+        now = await measure(ctx, action.itemSelector)
+      }
+      quiet = grew(last, now) ? 0 : quiet + 1
+      last = now
+      if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'no_growth'; break }
     }
-    if (rounds >= max) { stoppedBy = 'max'; break }
-    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
-    await raceWithSignal(ctx.page.locator(action.selector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
-    rounds++
-    await afterRound(ctx, waitMs)
-    const now = await measure(ctx, action.itemSelector)
-    quiet = grew(last, now) ? 0 : quiet + 1
-    last = now
-    if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'no_growth'; break }
+  } catch (error) {
+    if (!isDeadline(error)) throw error
+    stoppedBy = 'deadline'
   }
   return { index, type: 'loadMore', stoppedBy, rounds, items: last.items }
 }
@@ -367,45 +401,53 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   const max = action.maxPages ?? LIST_DEFAULTS.maxPages
   const waitMs = action.waitMs ?? LIST_WAIT_MS.default
   const seenStates = new Set<string>()
+  const seenFingerprints = new Set<string>()
   let lastState: string | null = null
-  const seenTexts = new Set<string>()
+  let alreadyRead = 0
   let pages = 0
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
   let items: number | null = null
   let stoppedBy: ListStop
-  for (;;) {
-    // The page as it stands. Its URL and text seen together before: Next led back or did nothing, and the list is over. Its text
-    // alone seen before: the same page under another URL (a site's first page at both /list and /list?page=1), not read twice,
-    // and its Next is followed on.
-    let { html, url, state, textHash } = await pageState(ctx)
-    // Next clicked and the page unchanged: on a slow network its page may be on the way. It gets until NEXT_PAGE_WAIT_MS to arrive.
-    if (state === lastState) {
-      const until = Date.now() + Math.min(NEXT_PAGE_WAIT_MS, Math.max(0, timeLeft(ctx)))
-      while (state === lastState && Date.now() < until) {
-        await abortableSleep(250, ctx.execution.signal)
-        await documentLoaded(ctx)
-        ;({ html, url, state, textHash } = await pageState(ctx))
+  try {
+    for (;;) {
+      let { html, url, state, fingerprint } = await pageState(ctx, action.itemSelector)
+      // Next clicked and the page unchanged: on a slow network its page may be on the way, and gets COME_BACK_WAIT_MS to arrive.
+      if (state === lastState) {
+        const until = comeBackUntil(ctx)
+        while (state === lastState && Date.now() < until) {
+          await abortableSleep(250, ctx.execution.signal)
+          ;({ html, url, state, fingerprint } = await pageState(ctx, action.itemSelector))
+        }
       }
-    }
-    lastState = state
-    if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
-    seenStates.add(state)
-    if (!seenTexts.has(textHash)) {
-      seenTexts.add(textHash)
-      result.scrapes.push({ url, html })
-      pages++
-      if (action.itemSelector !== undefined) {
-        items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
-        itemsRead = (itemsRead ?? 0) + items
+      lastState = state
+      // Its URL and list seen together before: Next led back or did nothing, and the list is over.
+      if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
+      seenStates.add(state)
+      if (seenFingerprints.has(fingerprint)) {
+        // The same list under another URL: a site's first page at both /list and /list?page=1 is not read twice, and its Next is
+        // followed on. Twice in a row (a site that answers every page past the last with the last one) is the list's end.
+        if (++alreadyRead >= 2) { stoppedBy = 'repeat'; break }
+      } else {
+        alreadyRead = 0
+        seenFingerprints.add(fingerprint)
+        result.scrapes.push({ url, html })
+        pages++
+        if (action.itemSelector !== undefined) {
+          items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+          itemsRead = (itemsRead ?? 0) + items
+        }
       }
+      if (pages >= max) { stoppedBy = 'max'; break }
+      if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
+      if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+      await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      await afterRound(ctx, waitMs)
+      // The next page goes through the same checks as any page a step reaches, before it is read.
+      await guard()
     }
-    if (pages >= max) { stoppedBy = 'max'; break }
-    if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
-    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
-    await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
-    await afterRound(ctx, waitMs)
-    // The next page goes through the same checks as any page a step reaches, before it is read.
-    await guard()
+  } catch (error) {
+    if (!isDeadline(error)) throw error
+    stoppedBy = 'deadline'
   }
   return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead }
 }

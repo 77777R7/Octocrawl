@@ -52,6 +52,17 @@ beforeAll(async () => {
       }, 2500)
       return
     }
+    // Pages past the last answer the last (a clamping paginator); Next always offers the next number.
+    const clamp = /^\/clamp\?page=(\d+)$/.exec(url)
+    if (clamp !== null) { const n = Number(clamp[1]); const shown = Math.min(n, 3); return html(`<h1>Clamp ${shown}</h1>${PROSE}<ul>${rows(shown * 10 + 1, shown * 10 + 4)}</ul><a class="next" href="/clamp?page=${n + 1}">Next</a>`) }
+    // Pages with a ticking clock; the last one's Next links to itself.
+    const clock = /^\/clock\/(\d)$/.exec(url)
+    if (clock !== null) { const n = Number(clock[1]); return html(`<h1>Clock ${n}</h1>${PROSE}<p>Now <span id="t"></span></p><ul>${rows(n * 10 + 1, n * 10 + 4)}</ul><a class="next" href="/clock/${Math.min(n + 1, 3)}">Next</a><script>setInterval(() => { document.getElementById('t').textContent = String(Date.now()) }, 50)</script>`) }
+    // A last page whose Next goes nowhere.
+    if (url === '/noop/1') return html(`<h1>Noop 1</h1>${PROSE}<ul>${rows(1, 2)}</ul><a class="next" href="/noop/2">Next</a>`)
+    if (url === '/noop/2') return html(`<h1>Noop 2</h1>${PROSE}<ul>${rows(3, 4)}</ul><a class="next" href="#">Next</a>`)
+    // A button hidden for 2.5 s while it loads 3 more rows, until 9.
+    if (url === '/hiding') return html(`<h1>Hiding</h1>${PROSE}<ul id="list">${rows(1, 3)}</ul><button id="more" onclick="const b = this; b.style.display = 'none'; setTimeout(() => { const l = document.getElementById('list'); for (let i = 0; i < 3; i++) { const li = document.createElement('li'); li.className = 'row'; li.textContent = 'Reading ' + (l.children.length + 1); l.appendChild(li) } if (l.children.length < 9) b.style.display = '' }, 2500)">Load more</button>`)
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -126,6 +137,32 @@ describe('list steps, real browser', () => {
     const result = await run('/slow/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }])
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, itemsRead: 4 })
     expect(result.actions?.scrapes[1]?.html).toContain('Reading 4')
+  }, 60_000)
+
+  it('paginate stops on a site that answers every page past the last with the last one, without waiting for the deadline', async () => {
+    const started = Date.now()
+    const result = await run('/clamp?page=1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', maxPages: 10, waitMs: 200 }])
+    expect(Date.now() - started).toBeLessThan(20_000)
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'repeat', rounds: 3, itemsRead: 12 })
+    expect(result.warnings?.some((warning) => warning.code === 'list_not_exhausted') ?? false).toBe(false)
+  }, 60_000)
+
+  it('paginate tells pages apart by their items, so a ticking clock does not make a page read twice look new', async () => {
+    const result = await run('/clock/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', maxPages: 8, waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'repeat', rounds: 3, itemsRead: 12 })
+    expect(result.actions?.scrapes).toHaveLength(3)
+  }, 60_000)
+
+  it('a list that meets the deadline stops as deadline, keeping what it read, and the scrape does not fail', async () => {
+    const result = await run('/noop/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }], 9_000)
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: expect.stringMatching(/^(deadline|repeat)$/), rounds: 2 })
+    expect(result.status).toBe('success')
+  }, 60_000)
+
+  it('loadMore waits for a control hidden while it loads, and reads the whole list', async () => {
+    const result = await run('/hiding', [{ type: 'loadMore', selector: '#more', itemSelector: 'li.row' }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, items: 9 })
   }, 60_000)
 
   it('paginate with maxPages stops there and warns', async () => {
