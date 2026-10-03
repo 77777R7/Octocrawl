@@ -15,7 +15,10 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { builtinModules } from 'node:module'
 import { build } from 'tsup'
+
+const BUILTINS = new Set(builtinModules)
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const out = join(root, '.w2l', 'pack')
@@ -51,6 +54,43 @@ const inlineAmazonSchema = {
   },
 }
 
+/**
+ * In one bundle every module's `import.meta.url` is the bundle's, so a
+ * module that runs itself when it is the entry (`import.meta.url ===
+ * pathToFileURL(process.argv[1])`: the API server, the ladder CLI) would run
+ * beside the real entry. Every guard but the entry's is turned off.
+ */
+function onlyEntryRuns(entry) {
+  const entryPath = join(root, entry)
+  return {
+    name: 'only-entry-runs',
+    setup(builder) {
+      builder.onLoad({ filter: /packages[\\/][^\\/]+[\\/]src[\\/].*\.ts$/ }, (args) => {
+        if (args.path === entryPath) return undefined
+        const text = readFileSync(args.path, 'utf8')
+        if (!text.includes('import.meta.url === pathToFileURL(')) return undefined
+        return { contents: text.replaceAll('import.meta.url === pathToFileURL(', 'false && import.meta.url === pathToFileURL('), loader: 'ts' }
+      })
+    },
+  }
+}
+
+/** The packages a bundle imports, read from esbuild's metafile: what it must declare, and nothing more. */
+function importedPackages(outDir) {
+  const names = new Set()
+  for (const file of readdirSync(outDir).filter((name) => name.startsWith('metafile-'))) {
+    const meta = JSON.parse(readFileSync(join(outDir, file), 'utf8'))
+    for (const output of Object.values(meta.outputs)) {
+      for (const { path, external } of output.imports ?? []) {
+        if (!external || path.startsWith('node:') || path.startsWith('.')) continue
+        names.add(path.startsWith('@') ? path.split('/').slice(0, 2).join('/') : path.split('/')[0])
+      }
+    }
+    rmSync(join(outDir, file))
+  }
+  return names
+}
+
 const targets = [
   {
     name: '@w2l/sdk', dir: 'sdk', license: 'MIT', licenseFile: 'packages/sdk/LICENSE',
@@ -59,7 +99,7 @@ const targets = [
     manifest: () => ({
       main: './dist/index.cjs', module: './dist/index.js', types: './dist/types/esm/index.d.ts',
       exports: { '.': { import: { types: './dist/types/esm/index.d.ts', default: './dist/index.js' }, require: { types: './dist/types/cjs/index.d.ts', default: './dist/index.cjs' } } },
-      sideEffects: false, engines: { node: '>=18' }, dependencies: {},
+      sideEffects: false, engines: { node: '>=18.17' }, dependencies: {},
     }),
   },
   {
@@ -82,7 +122,9 @@ mkdirSync(tarballs, { recursive: true })
 for (const target of targets) {
   const source = read(`packages/${target.dir}/package.json`)
   const dir = join(out, target.dir)
-  const dependencies = target.manifest(source.version).dependencies
+  // Everything the workspace packages may import stays external; the manifest then declares what the bundle does import.
+  const candidates = target.manifest(source.version).dependencies
+  const entryFile = Object.values(target.entry)[0]
   await build({
     entry: Object.fromEntries(Object.entries(target.entry).map(([key, path]) => [key, join(root, path)])),
     outDir: join(dir, 'dist'),
@@ -96,10 +138,15 @@ for (const target of targets) {
     silent: true,
     // Every @w2l/* package goes into the bundle; what they depend on stays a declared dependency.
     noExternal: [/^@w2l\//],
-    external: Object.keys(dependencies),
-    esbuildPlugins: target.plugins ?? [],
+    external: Object.keys(candidates),
+    esbuildPlugins: [...(target.plugins ?? []), onlyEntryRuns(entryFile)],
+    metafile: true,
     tsconfig: join(root, 'packages', target.dir, 'tsconfig.json'),
   })
+  const imported = importedPackages(join(dir, 'dist'))
+  const unknown = [...imported].filter((name) => !(name in candidates) && !BUILTINS.has(name))
+  if (unknown.length > 0) throw new Error(`${target.name} imports ${unknown.join(', ')}, which no bundled workspace package declares`)
+  const dependencies = Object.fromEntries(Object.entries(candidates).filter(([name]) => imported.has(name)))
   if (target.types) sdkTypes(join(dir, 'dist', 'types'))
   const manifest = {
     name: target.name,
@@ -111,6 +158,7 @@ for (const target of targets) {
     type: 'module',
     files: ['dist', 'README.md', 'LICENSE'],
     ...target.manifest(source.version),
+    dependencies,
     publishConfig: { access: 'public' },
   }
   writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)

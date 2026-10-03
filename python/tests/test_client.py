@@ -92,6 +92,43 @@ def test_errors_carry_the_api_code_and_options_are_named_as_the_api_names_them()
         client.batch([])
 
 
+def test_crawl_reads_pages_and_errors_and_polls_through_a_transient_failure():
+    hits = {"status": 0}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(202, json={"taskId": "c1"})
+        if request.url.path == "/v1/crawl/c1":
+            hits["status"] += 1
+            if hits["status"] == 1:
+                raise httpx.ConnectError("blip")
+            if hits["status"] == 2:
+                return httpx.Response(503, json={"error": "busy"}, headers={"retry-after": "0"})
+            return httpx.Response(200, json={"taskId": "c1", "status": "completed"})
+        if request.url.path == "/v1/crawl/c1/pages":
+            return httpx.Response(200, json={"items": [ITEMS[0]], "hasMore": False, "nextCursor": None})
+        if request.url.path == "/v1/crawl/c1/errors":
+            return httpx.Response(200, json={"items": [ITEMS[1]], "hasMore": False, "nextCursor": None})
+        return httpx.Response(404, json={"error": "not found"})
+
+    client = W2L("http://w2l.test", poll_interval=0, transport=httpx.MockTransport(handle))
+    result = client.crawl("https://a.example/", max_pages=2, sitemap="skip")
+    assert result.report["status"] == "completed" and hits["status"] == 3
+    assert [row["status"] for row in result.rows()] == ["success", "failed"]
+
+
+def test_a_listing_that_has_more_but_no_cursor_is_an_error():
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(202, json={"taskId": "t1"})
+        if request.url.path == "/v1/batches/t1":
+            return httpx.Response(200, json={"status": "completed"})
+        return httpx.Response(200, json={"items": [ITEMS[0]], "hasMore": True, "nextCursor": None})
+
+    with pytest.raises(W2LError, match="no cursor"):
+        W2L("http://w2l.test", poll_interval=0, transport=httpx.MockTransport(handle)).batch(["https://a.example/"])
+
+
 def test_the_base_url_and_token_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("W2L_API_URL", "http://env.test:9000/")
     monkeypatch.setenv("W2L_API_TOKEN", "envtok")

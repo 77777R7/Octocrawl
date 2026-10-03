@@ -384,14 +384,17 @@ The bare HTTP baseline intentionally has a high false-success rate (no content e
 
 ```
 packages/
-  contracts/       TypeScript types and ground-truth schema
+  contracts/       TypeScript types and ground-truth schema (MIT)
   fixtures/        HTTP server with 56 ground-truth test cases
   http-core/       robots.txt parser (ReDoS-resistant)
   runtime/         TaskStore, frontier, bounded crawl orchestrator
-  bench/           Benchmark runner, scrape/crawl CLI, scoring
+  bench/           Benchmark runner, ladder CLI (w2l-ladder), scoring
+  cli/             w2l: scrape, crawl, batch, map, serve (AGPL)
   api/             REST server (AGPL)
   sdk/             TypeScript client (MIT)
-  mcp/             stdio and restricted Streamable HTTP MCP server (MIT)
+  mcp/             stdio and restricted Streamable HTTP MCP server (AGPL)
+
+python/            Python client w2l (MIT)
 
 examples/monitor-workflow.ts       Runnable Monitor + Delivery SDK workflow
 examples/webhook-receiver.ts       Durable idempotent sample receiver
@@ -464,8 +467,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
-Server-side code: [AGPL-3.0](LICENSE)  
-SDK and client libraries: MIT (when published)
+Server-side code, the CLI (`@w2l/cli`) and the MCP server (`@w2l/mcp`): [AGPL-3.0](LICENSE)  
+Client libraries: MIT: the TypeScript SDK (`@w2l/sdk`, which includes `@w2l/contracts`, also MIT) and the Python client (`w2l`)
 
 See [PHASE1_ENGINEERING_NOTES.md §1.3](PHASE1_ENGINEERING_NOTES.md) for the rationale.
 

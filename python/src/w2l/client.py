@@ -98,8 +98,20 @@ class W2L:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
-        response = self._http.request(method, path, **kwargs)
+    def _call(self, method: str, path: str, *, retries: int = 0, **kwargs: Any) -> Any:
+        """One API call; with `retries`, a network error, a 5xx or a 429 is tried again (a poll or a page read, never a start)."""
+        for attempt in range(retries + 1):
+            try:
+                response = self._http.request(method, path, **kwargs)
+            except httpx.TransportError:
+                if attempt == retries:
+                    raise
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            if (response.status_code >= 500 or response.status_code == 429) and attempt < retries:
+                time.sleep(min(float(response.headers.get("retry-after", 2 ** attempt)), 30))
+                continue
+            break
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -138,7 +150,7 @@ class W2L:
     def _wait(self, path: str, wait_timeout: Optional[float]) -> dict[str, Any]:
         deadline = None if wait_timeout is None else time.monotonic() + wait_timeout
         while True:
-            report = self._call("GET", path)
+            report = self._call("GET", path, retries=5)
             if report.get("status") in TERMINAL:
                 return report
             if deadline is not None and time.monotonic() >= deadline:
@@ -152,11 +164,13 @@ class W2L:
             params: dict[str, Any] = {"limit": 50}
             if cursor is not None:
                 params["cursor"] = cursor
-            page = self._call("GET", path, params=params)
+            page = self._call("GET", path, params=params, retries=5)
             items.extend(page.get("items", []))
             cursor = page.get("nextCursor")
-            if not page.get("hasMore") or cursor is None:
+            if not page.get("hasMore"):
                 return items
+            if cursor is None:
+                raise W2LError(200, f"{path} says it has more items but gives no cursor; {len(items)} items read so far")
 
 
 def _default() -> W2L:
