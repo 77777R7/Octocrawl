@@ -175,9 +175,13 @@ function localUser(): string {
 }
 
 /** A WebSocket to Chrome's browser endpoint. Chrome holds the handshake until the person answers its dialog. */
-export function connectCdp(endpoint: string, timeoutMs: number): Promise<CdpConnection> {
+export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSignal): Promise<CdpConnection> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) { reject(new ChromeLoginError('the connection to Chrome was cancelled')); return }
     const socket = new WebSocket(endpoint)
+    // Cancelled while Chrome waits for Allow: the connection is dropped, and an Allow clicked later attaches to nothing.
+    const cancel = () => { reject(new ChromeLoginError('the connection to Chrome was cancelled')); socket.close() }
+    signal?.addEventListener('abort', cancel, { once: true })
     const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
     const listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
     let nextId = 1
@@ -190,6 +194,8 @@ export function connectCdp(endpoint: string, timeoutMs: number): Promise<CdpConn
     socket.addEventListener('open', () => {
       opened = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', cancel)
+      if (signal?.aborted === true) { socket.close(); return }
       resolve({
         send(method, params = {}, sessionId) {
           // A closed socket sends nothing and answers nothing: the command fails now, not never.

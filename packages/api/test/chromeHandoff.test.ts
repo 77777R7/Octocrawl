@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ChromeLoginError, type CdpConnection } from '../src/chromeLogin.js'
+import { createServer as createNetServer, type AddressInfo } from 'node:net'
+import { ChromeLoginError, connectCdp, type CdpConnection } from '../src/chromeLogin.js'
 import { HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
 
 const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'
@@ -27,10 +28,15 @@ function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => 
       if (method === 'Target.attachToTarget') return { sessionId: 's1' }
       if (method === 'Target.closeTarget') return {}
       if (method === 'Page.navigate') return navigate()
-      if (method === 'Target.getTargetInfo') return { targetInfo: { url: shown } }
+      if (method === 'Target.getTargetInfo') {
+        // Chromium's own words for a closed tab.
+        const next = states[Math.min(read, states.length - 1)]!
+        if (next === 'closed') throw new ChromeLoginError('Chrome refused the request: No target with given id found')
+        return { targetInfo: { url: next === 'moving' ? shown : next.href } }
+      }
       if (method === 'Runtime.evaluate') {
         const state = states[Math.min(read++, states.length - 1)]!
-        if (state === 'closed') throw new ChromeLoginError('Chrome refused the request: No session with given id')
+        if (state === 'closed') throw new ChromeLoginError('Chrome refused the request: Session with given id not found.')
         if (state === 'moving') throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
         shown = state.href
         // The page's script says it is elsewhere: Chrome's address is the one read.
@@ -62,7 +68,7 @@ describe('the person\'s Chrome', () => {
     reader.close()
     expect(waiting).toEqual(['https://site.test/a captcha'])
     expect(read).toMatchObject({ requestedUrl: 'https://site.test/a', finalUrl: 'https://site.test/a', status: 200, contentType: null, html: PAGE, sawGate: 'captcha', browser: 'Chrome/144.0.7000.0' })
-    expect(chrome.calls).toEqual(['Browser.getVersion', 'Target.createTarget', 'Target.attachToTarget', 'Page.navigate@s1', ...Array(4).fill(['Runtime.evaluate@s1', 'Target.getTargetInfo']).flat(), 'Target.closeTarget', 'close'])
+    expect(chrome.calls).toEqual(['Browser.getVersion', 'Target.createTarget', 'Target.attachToTarget', 'Page.navigate@s1', ...Array(4).fill(['Target.getTargetInfo', 'Runtime.evaluate@s1']).flat(), 'Target.closeTarget', 'close'])
   })
 
   it('a page that still shows its check when the wait ends is not read, and its tab is closed', async () => {
@@ -124,6 +130,26 @@ describe('the person\'s Chrome', () => {
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 20)
     await expect(reader.read('https://site.test/a', { pollMs: 5, waitMs: 60_000, signal: controller.signal })).rejects.toThrow('was cancelled before W2L read it')
+  })
+
+  it('a cancel while Chrome waits for Allow drops the connection, and one Chrome opens after is not used', async () => {
+    // A Chrome that holds the handshake: the socket opens, the upgrade never comes.
+    const silent = createNetServer((socket) => { socket.on('error', () => undefined) })
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve))
+    try {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 100)
+      const started = Date.now()
+      await expect(connectCdp(`ws://127.0.0.1:${(silent.address() as AddressInfo).port}/devtools/browser/x`, 60_000, controller.signal)).rejects.toThrow('cancelled')
+      expect(Date.now() - started).toBeLessThan(5_000)
+    } finally {
+      silent.close()
+    }
+    const late = fakeChrome([])
+    const controller = new AbortController()
+    const opening = openUserChrome({ userDataDir, connect: async (...args) => { controller.abort(); return late.connect(...(args as [])) } }, controller.signal)
+    await expect(opening).rejects.toThrow('cancelled')
+    expect(late.calls).toEqual(['close'])
   })
 
   it('without remote debugging on, says how to turn it on', async () => {

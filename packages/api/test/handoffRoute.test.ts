@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FetchResult } from '@w2l/contracts'
@@ -72,6 +72,45 @@ describe('the handoff route', () => {
     const items = (await (await app.request(`/v1/batches/${taskId}/items`)).json() as { items: Array<Record<string, unknown>> }).items
     expect(items.every((item) => item.handoff === undefined)).toBe(true)
     expect(await post(app, `/v1/batches/${taskId}/handoff`)).toMatchObject({ status: 409, body: { error: expect.stringContaining('does not hand pages to a person') } })
+  })
+
+  it('a batch that asked for page actions offers no handoff: a page read in the person\'s Chrome cannot run them', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      channelsFor: (mode) => [buildChannels(mode, { localSubjects: { http: { fetch: async (url: string) => laneResult(url) }, browser_local: { fetch: async (url: string) => laneResult(url) } } })[1]!],
+      userChrome: { userDataDir: join(root, 'no-chrome') },
+    })
+    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`], actions: [{ type: 'wait', milliseconds: 1 }] } as never)
+    for (let i = 0; i < 200 && (await engine.getBatch(taskId))?.status !== 'completed'; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await engine.getBatch(taskId))?.waitingForPerson).toBeUndefined()
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]!.handoff).toBeUndefined()
+    await expect(engine.handOffBatch(taskId, {})).rejects.toThrow('asked for page actions, which a page read in your own Chrome cannot give')
+  })
+
+  it('W2L closing while Chrome asks the person to Allow drops the connection at once', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
+    const chromeDir = join(root, 'chrome')
+    await mkdir(chromeDir, { recursive: true })
+    await writeFile(join(chromeDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
+    let cancelled = false
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      channelsFor: (mode) => [buildChannels(mode, { localSubjects: { http: { fetch: async (url: string) => laneResult(url) }, browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!],
+      // Chrome holding the handshake until the person clicks Allow, which they never do.
+      userChrome: { userDataDir: chromeDir, connect: (_endpoint, _timeout, signal) => new Promise((_resolve, reject) => signal?.addEventListener('abort', () => { cancelled = true; reject(new Error('cancelled')) })) },
+    })
+    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`] } as never)
+    for (let i = 0; i < 200 && (await engine.getBatch(taskId))?.status !== 'completed'; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    const handing = engine.handOffBatch(taskId, {}).catch((error: unknown) => error)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const started = Date.now()
+    await engine.close()
+    engine = null
+    expect(Date.now() - started).toBeLessThan(3_000)
+    expect(cancelled).toBe(true)
+    expect(await handing).toBeInstanceOf(Error)
   })
 
   it('refuses a malformed request, and answers 404 for a batch it has not', async () => {

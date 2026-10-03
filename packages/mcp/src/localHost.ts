@@ -96,6 +96,8 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
   return {server,close:()=>{
     if(closing)return closing
     closing=(async()=>{
+      // A handoff is a request that waits on the person: end it first, or the server's close would wait for it.
+      await runtime.engine.endHandoffs()
       await new Promise<void>(done=>server.close(()=>done()))
       await runtime.close()
     })()

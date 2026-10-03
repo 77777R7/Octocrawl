@@ -31,7 +31,7 @@ export interface UserChromeOptions {
   /** How long to wait for the person to click Allow in Chrome. Default 120 s. */
   approveTimeoutMs?: number
   /** Opens the connection; a test passes its own. Default a WebSocket. */
-  connect?: (endpoint: string, timeoutMs: number) => Promise<CdpConnection>
+  connect?: (endpoint: string, timeoutMs: number, signal?: AbortSignal) => Promise<CdpConnection>
 }
 
 export interface UserChromeReadOptions {
@@ -90,9 +90,11 @@ interface DocumentResponse {
 }
 
 /** Connect to the person's running Chrome, with their approval. */
-export async function openUserChrome(options: UserChromeOptions = {}): Promise<UserChrome> {
+export async function openUserChrome(options: UserChromeOptions = {}, signal?: AbortSignal): Promise<UserChrome> {
   const endpoint = await chromeEndpoint(options.userDataDir ?? chromeUserDataDir())
-  const connection = await (options.connect ?? connectCdp)(endpoint, options.approveTimeoutMs ?? 120_000)
+  const connection = await (options.connect ?? connectCdp)(endpoint, options.approveTimeoutMs ?? 120_000, signal)
+  // A connection a test opened without the signal: one opened after a cancel is not used.
+  if (signal?.aborted === true) { connection.close(); throw new ChromeLoginError('the connection to Chrome was cancelled') }
   let browser = 'chrome'
   try {
     const version = await connection.send('Browser.getVersion') as { product?: string }
@@ -114,7 +116,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   let sawGate: string | null = null
   // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
   const gone = (error: unknown): HandoffNotThrough | null =>
-    error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /No session with given id|No target with given id|closed the connection|Target closed|target not found/i.test(error.message)
+    error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found/i.test(error.message)
       ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate)
       : null
   // Any other refusal from Chrome ends this page alone, not the handoff of the others.
@@ -152,11 +154,11 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       if (navigation !== null && gone(navigation) !== null) throw gone(navigation)
       let state: PageState
       try {
+        // The tab first, from the browser: one the person closed is gone however its page answers. Its address is Chrome's, which the page's script cannot change.
+        const info = await connection.send('Target.getTargetInfo', { targetId }) as { targetInfo?: { url?: string } }
         const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string } }
         if (typeof answer.result?.value !== 'string') { clear = 0; continue }
         state = JSON.parse(answer.result.value) as PageState
-        // The address as Chrome has it, which the page's own script cannot change.
-        const info = await connection.send('Target.getTargetInfo', { targetId }) as { targetInfo?: { url?: string } }
         if (typeof info.targetInfo?.url === 'string') state.href = info.targetInfo.url
       } catch (error) {
         // A page between two documents has no context to evaluate in; one that is gone is the person's answer.

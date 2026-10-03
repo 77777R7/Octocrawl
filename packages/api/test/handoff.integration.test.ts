@@ -187,6 +187,21 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
     }
   }, 120_000)
 
+  it('the person closing the tab ends the wait for that page at once', async () => {
+    const engine = engineFor(join(root, 'tasks-7'))
+    const stop = person(chrome, { '/dd': async (page) => { await page.waitForTimeout(1_500); await page.close() } })
+    try {
+      const taskId = await batchOf(engine, ['/dd'])
+      const started = Date.now()
+      const done = await engine.handOffBatch(taskId, { waitMs: 60_000 })
+      expect(Date.now() - started).toBeLessThan(10_000)
+      expect(done).toMatchObject({ through: 0, items: [{ reason: expect.stringContaining('was closed, or Chrome quit') }] })
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
   it('W2L shutting down ends a handoff waiting for the person, closes its tab and stores nothing', async () => {
     const engine = engineFor(join(root, 'tasks-6'))
     const taskId = await batchOf(engine, ['/dd'])
