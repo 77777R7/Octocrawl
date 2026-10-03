@@ -411,6 +411,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const contentEncoding = out.kind === 'ok' && classifyContentType(contentType) !== 'unsupported' ? contentEncodingLabel(out.headers?.get('content-encoding')) : undefined
     let wire: Uint8Array
     let bytes: Uint8Array
+    // Set when the body was read but did not decode: there is no body to hash.
+    let undecoded = false
     try {
       wire = await out.bodyBytes()
       const decodeStart = performance.now()
@@ -422,6 +424,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         if (contentful || failure === null) throw error
         trace.push({ at: Date.now() - start, lane: 'http', event: failure.event, detail: failure.detail })
         bytes = new Uint8Array()
+        undecoded = true
       } finally {
         bodyReadMs += Math.max(0, performance.now() - decodeStart)
       }
@@ -455,7 +458,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const file = contentful ? detectFile(contentType, bytes, responseFileName(out.finalUrl, out.headers?.get('content-disposition') ?? null)) : null
     // A web page is read as text and hashed as such; a file's hash is of its bytes (see below).
     const body = file === null ? new TextDecoder().decode(bytes) : ''
-    const rawBodySha256 = file === null ? sha256Utf8(body) : null
+    const rawBodySha256 = file === null && !undecoded ? sha256Utf8(body) : null
     const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
 
     const base = {

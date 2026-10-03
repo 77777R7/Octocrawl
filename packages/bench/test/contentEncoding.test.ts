@@ -170,7 +170,9 @@ describe('content codings on the HTTP lane', () => {
   it('keeps the status of an error page whose body does not decode', async () => {
     const out = await http.fetch(`${origin}/missing`)
     expect(out).toMatchObject({ status: 'failed', failureReason: 'http_error' })
-    expect(out.evidence).toMatchObject({ httpStatus: 404, contentEncoding: 'zstd' })
+    // The body was read but not decoded: no hash is claimed for it.
+    expect(out.evidence).toMatchObject({ httpStatus: 404, contentEncoding: 'zstd', rawBodySha256: null, artifacts: [] })
+    expect(out.usage.bytesWire).toBe(Buffer.byteLength('not found'))
     expect(out.trace.find(event => event.event === 'unsupported_content_encoding')?.detail).toEqual({ contentEncoding: 'zstd', coding: 'zstd' })
   })
 
