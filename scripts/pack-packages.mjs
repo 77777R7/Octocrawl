@@ -66,7 +66,8 @@ const GUARD = 'import.meta.url === pathToFileURL('
 function assertOneEntry(outDir) {
   for (const file of readdirSync(outDir).filter((name) => name.endsWith('.js'))) {
     const text = readFileSync(join(outDir, file), 'utf8')
-    const live = text.split(GUARD).length - 1 - (text.split(`false && ${GUARD}`).length - 1)
+    // esbuild may rename the import in a bundle (pathToFileURL2), so the guard is matched with any suffix.
+    const live = (text.match(/(?<!false && )import\.meta\.url === pathToFileURL\d*\(/g) ?? []).length
     if (live > 1) throw new Error(`${file} has ${live} live entry guards: a bundled module other than the entry would run itself`)
   }
 }
