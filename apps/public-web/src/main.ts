@@ -1,6 +1,7 @@
 import './styles.css'
 import { mountHeroAscii } from './ascii'
 import { mountHeroClick } from './heroClick'
+import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
@@ -98,6 +99,7 @@ try {
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
+for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
 const input = document.querySelector<HTMLInputElement>('#url-input')!
