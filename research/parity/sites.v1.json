@@ -2798,6 +2798,89 @@
         {"item": "actions-pipeline", "type": "field", "path": "actions.scrapes.length", "equals": 1},
         {"item": "actions-pipeline", "type": "markdownIncludes", "text": "Example Domain"}
       ]
+    },
+    {
+      "id": "AC13",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": {"debug": true, "formats": ["markdown"], "actions": [{"type": "wait", "milliseconds": 1000}, {"type": "click", "selector": "li.next > a"}, {"type": "wait", "selector": ".quote"}, {"type": "scrape"}, {"type": "screenshot"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC01 with onlyMainContent false. Its steps passed there, and the extractor found no main content on the list page it led to (failed/empty_unverified), which is the extractor's verdict, not the steps'.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "actions-pipeline", "type": "field", "path": "status", "equals": "success"},
+        {"item": "actions-pipeline", "type": "markdownIncludes", "text": "This life is what you make it"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.0.html", "includes": "This life is what you make it"},
+        {"item": "action-screenshot", "type": "field", "path": "actions.screenshots.length", "equals": 1},
+        {"item": "actions-pipeline", "type": "traceEvent", "match": {"event": "action", "detail.index": 4, "detail.outcome": "ok"}}
+      ]
+    },
+    {
+      "id": "AC14",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/scroll",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC05 with onlyMainContent false (the same empty_unverified on the list). One screen per scroll took the list from 10 to 20 quotes there, not 30: that check stays in AC05; here the list grows.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC15",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.scrapethissite.com/pages/ajax-javascript/",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "[id=\"2015\"]"}, {"type": "wait", "selector": ".film"}]},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC06 with the year's link named by an attribute selector: '#2015' is not a valid CSS selector (an id selector cannot start with a digit), which AC06 reports as action_error.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "markdownIncludes", "text": "Spotlight"}
+      ]
+    },
+    {
+      "id": "AC16",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "click", "selector": ".ecomerce-items-scroll-more"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC07 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC17",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC08 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC18",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "button.page-link[data-id=\"2\"]"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelector(\"button.page-link.active\").dataset.id"}, {"type": "scrape"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC09 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1}
+      ]
     }
   ]
 }
