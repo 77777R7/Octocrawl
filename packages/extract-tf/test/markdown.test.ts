@@ -180,6 +180,26 @@ describe('htmlToMarkdown', () => {
   })
 })
 
+describe('htmlToMarkdown whole documents without <html>', () => {
+  const TABLE = '<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>'
+
+  it('keeps a table that is the document\'s first element', () => {
+    expect(htmlToMarkdown(`<!doctype html>${TABLE}`)).toBe('| a | b |\n| --- | --- |\n| c | d |')
+  })
+
+  it('keeps every top-level element, not only the first', () => {
+    expect(htmlToMarkdown(`<!doctype html><p>Intro.</p>${TABLE}`)).toBe('Intro.\n\n| a | b |\n| --- | --- |\n| c | d |')
+    expect(htmlToMarkdown('<!doctype html><title>T</title><h1>H</h1><p>x</p>')).toBe('# H\n\nx')
+  })
+
+  it('reads <head> and <body> without <html> as it reads them with it', () => {
+    const page = `<head><title>T</title></head><body class="b"><h1>H</h1><p>x <a href="/y">y</a></p>${TABLE}</body>`
+    const md = htmlToMarkdown(`<!doctype html>${page}`, { baseUrl: 'https://fixture.test/' })
+    expect(md).toBe(htmlToMarkdown(`<!doctype html><html>${page}</html>`, { baseUrl: 'https://fixture.test/' }))
+    expect(md).toBe('# H\n\nx [y](https://fixture.test/y)\n\n| a | b |\n| --- | --- |\n| c | d |')
+  })
+})
+
 const BASE = 'https://fixture.test/docs/page'
 
 describe('htmlToMarkdown blocks and inline whitespace', () => {
