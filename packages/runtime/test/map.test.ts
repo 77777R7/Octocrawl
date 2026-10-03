@@ -130,9 +130,16 @@ describe('MapRunner', () => {
     const { wired } = sources(startPage([link('/docs/private/p'), link('/docs/1'), link('/docs/2'), link('/docs/3'), link('/docs/4'), link('/docs/5')]), sitemap.source)
     const map = await new MapRunner(wired).run({ id: 'm3', url: START, limit: 3 })
     expect(map.links.map((l) => l.url)).toEqual([START, `${SITE}/docs/1`, `${SITE}/docs/2`])
-    expect(map).toMatchObject({ status: 'completed', stoppedBy: 'limit' })
-    expect(map.refused).toMatchObject({ robots: 1, overLimit: 3 + 10 })
-    expect(sitemap.requests[0]!.maxUrls).toBe(0)
+    expect(map).toMatchObject({ status: 'completed', stoppedBy: 'limit', sources: { sitemap: { truncated: 'urls', files: [], listed: 0 } } })
+    // The page links filled limit: no sitemap is read, so overLimit counts only the candidates seen before the map stopped.
+    expect(map.refused).toMatchObject({ robots: 1, overLimit: 3 })
+    expect(sitemap.requests).toHaveLength(0)
+    // A sitemap that would stall past the deadline is not waited for once limit is reached: completed, not partial, no map_timeout.
+    const stalled = fakeSitemap([], { before: () => new Promise<void>(() => {}) })
+    const quick = await new MapRunner(sources(startPage([link('/docs/1'), link('/docs/2')]), stalled.source).wired).run({ id: 'm3b', url: START, limit: 2, timeoutMs: 1000 })
+    expect(quick).toMatchObject({ status: 'completed', stoppedBy: 'limit' })
+    expect(quick.warnings.map((w) => w.code)).not.toContain('map_timeout')
+    expect(stalled.requests).toHaveLength(0)
     // Room left after the page links: the sitemap fills it and stops.
     const roomy = fakeSitemap(Array.from({ length: 10 }, (_, i) => ({ url: `${SITE}/docs/s${i}` })))
     const filled = await new MapRunner(sources(startPage([link('/docs/1')]), roomy.source).wired).run({ id: 'm4', url: START, limit: 5 })

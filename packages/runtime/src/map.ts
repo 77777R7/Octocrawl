@@ -316,6 +316,11 @@ export class MapRunner {
         if (timedOut || Date.now() >= deadlineAt) {
           timedOut = true
           record.truncated = 'time'
+        } else if (links.length >= limit) {
+          // The start page's links already fill limit: the map answers at once and reads no sitemap, rather than
+          // downloading a sitemap file only to count its entries over the limit.
+          limitReached = true
+          record.truncated = 'urls'
         } else {
           sitemapStarted = true
           const before = links.length
