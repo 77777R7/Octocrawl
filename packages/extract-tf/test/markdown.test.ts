@@ -198,6 +198,24 @@ describe('htmlToMarkdown whole documents without <html>', () => {
     expect(md).toBe(htmlToMarkdown(`<!doctype html><html>${page}</html>`, { baseUrl: 'https://fixture.test/' }))
     expect(md).toBe('# H\n\nx [y](https://fixture.test/y)\n\n| a | b |\n| --- | --- |\n| c | d |')
   })
+
+  it('reads HTML that starts with <head> as a whole document, with its own <base>', () => {
+    const page = '<head><base href="https://b.fixture.test/x/"><title>T</title></head><body><p><a href="y">y</a></p></body>'
+    expect(htmlToMarkdown(`\n<!-- served bare -->\n${page}`, { baseUrl: BASE })).toBe('[y](https://b.fixture.test/x/y)')
+    // A fragment such as mainHtml, even a whole <body>, is resolved against the base the caller passes.
+    expect(htmlToMarkdown('<body><base href="https://b.fixture.test/x/"><p><a href="y">y</a></p></body>', { baseUrl: BASE }))
+      .toBe('[y](https://fixture.test/docs/y)')
+    expect(htmlToMarkdown('<header><a href="y">y</a></header>', { baseUrl: BASE })).toBe('[y](https://fixture.test/docs/y)')
+  })
+
+  it('reads a page that opens with many comments in linear time', () => {
+    const comments = '<!-- c -->'.repeat(50_000)
+    const started = performance.now()
+    expect(htmlToMarkdown(`${comments}<!doctype html><html><body><p>x</p></body></html>`)).toBe('x')
+    expect(htmlToMarkdown(`${comments}<head><base href="https://b.fixture.test/x/"></head><body><a href="y">y</a></body>`)).toBe('[y](https://b.fixture.test/x/y)')
+    expect(htmlToMarkdown(`${'<!--'.repeat(50_000)}<p>x</p>`)).toBe('')
+    expect(performance.now() - started).toBeLessThan(2_000)
+  })
 })
 
 const BASE = 'https://fixture.test/docs/page'

@@ -897,9 +897,28 @@ export function htmlToTables(html: string, options: MarkdownOptions = {}): Extra
   return tables
 }
 
+/**
+ * HTML that starts with <head>, after whitespace and comments, is a page
+ * served without <html>; a fragment never starts there. One that starts with
+ * <body> may be a fragment (mainHtml is the body itself when that is the main
+ * content), so it stays one. A scan, not a regex: a repeated comment pattern
+ * backtracks exponentially over a page that opens with many comments.
+ */
+function startsWithHead(html: string): boolean {
+  let at = 0
+  for (;;) {
+    while (at < html.length && /\s/.test(html[at]!)) at++
+    if (!html.startsWith('<!--', at)) break
+    const end = html.indexOf('-->', at + 4)
+    if (end < 0) return false
+    at = end + 3
+  }
+  return /^<head[\s>]/i.test(html.slice(at, at + 6))
+}
+
 function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable[]): string {
   if (html.trim().length === 0) return ''
-  const whole = /<html[\s>]|<!doctype/i.test(html)
+  const whole = /<html[\s>]|<!doctype/i.test(html) || startsWithHead(html)
   const doc = parse(whole ? html : `<!doctype html><html><body>${html}</body></html>`)
   const document = doc.document
   // A whole document may carry its own <base href>; a fragment such as
