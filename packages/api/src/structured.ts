@@ -912,7 +912,7 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly Scra
 }
 
 /** Whether the formats ask for one by name: a string entry, or an object entry of that `type` (a json schema request counts as `json`, a screenshot entry as `screenshot`). */
-export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'attributes' | 'screenshot'): boolean {
+export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'attributes' | 'screenshot'): boolean {
   return formats.some(format => typeof format === 'string' ? format === name : format.type === name)
 }
 
@@ -940,7 +940,7 @@ export function screenshotFormat(formats: readonly ScrapeFormat[]): ScreenshotOp
 
 /**
  * The attempt copies of the run's audit without what the response itself
- * carries: `debug` keeps their Markdown, links, html, rawHtml, images and
+ * carries: `debug` keeps their Markdown, links, html, rawHtml, images, tables and
  * attributes, the compact shapes drop them; a screenshot's base64 travels
  * once in every shape, so a copy that had one carries `screenshot: null`.
  */
@@ -948,7 +948,7 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, screenshot, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, ...rest } = result
       return {
         ...attempt,
         result: { ...(debug ? result : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1126,6 +1126,7 @@ export function compactScrapeResponse(
       ...(hasFormat(formats, 'rawHtml') ? ['rawHtml' as const] : []),
       ...(includeLinks ? ['links' as const] : []),
       ...(hasFormat(formats, 'images') ? ['images' as const] : []),
+      ...(hasFormat(formats, 'tables') ? ['tables' as const] : []),
       ...(hasFormat(formats, 'attributes') ? ['attributes' as const] : []),
       ...(hasFormat(formats, 'screenshot') ? ['screenshot' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
@@ -1136,6 +1137,8 @@ export function compactScrapeResponse(
     ...(includeLinks ? { links: next.links ?? [] } : {}),
     // Asked for, and read: a page not read as content (a file, a failed or blocked page) carries neither.
     ...(hasFormat(formats, 'images') && next.images !== undefined ? { images: next.images } : {}),
+    ...(hasFormat(formats, 'tables') && next.tables !== undefined ? { tables: next.tables } : {}),
+    ...(next.pages === undefined ? {} : { pages: next.pages }),
     ...(hasFormat(formats, 'attributes') && next.attributes !== undefined ? { attributes: next.attributes } : {}),
     // Asked for: the capture, or null when the browser lane rendered no page or could not capture it.
     ...(hasFormat(formats, 'screenshot') ? { screenshot: next.screenshot ?? null } : {}),

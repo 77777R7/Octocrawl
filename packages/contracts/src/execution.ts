@@ -47,6 +47,13 @@ export interface FetchOptions {
    */
   maxFileBytes?: number
   /**
+   * How a PDF response is read (Firecrawl's `parsers`): absent reads every
+   * PDF's text layer with W2L's defaults; `[]` reads none (the file is saved
+   * as received, without text); one `pdf` entry sets the options. Other
+   * files are unaffected.
+   */
+  parsers?: readonly PdfParser[]
+  /**
    * A recorded decision to fetch this one URL although its host's robots.txt
    * disallows it. robots.txt is still read and its verdict recorded; the
    * override goes into the trace, the warnings and, in the browser lane, the
@@ -131,6 +138,12 @@ export interface FetchOptions {
    */
   includeImages?: boolean
   /**
+   * Carry `tables` on a contentful result: every data table of the content
+   * the Markdown was written from, as data and CSV. Set from the requested
+   * formats (`tables`), not by a caller.
+   */
+  includeTables?: boolean
+  /**
    * Carry `attributes` on a contentful result: for each selector, the named
    * attribute's values on the elements it matches in the document as
    * received. Set from the requested formats (an `attributes` entry), not
@@ -157,4 +170,22 @@ export interface FetchOptions {
    * requested formats (a `screenshot` entry), not by a caller.
    */
   screenshot?: ScreenshotOptions
+}
+
+/** The largest `maxPages` a pdf parser entry may ask for. */
+export const MAX_PDF_PAGES = 10_000
+
+/**
+ * The `pdf` entry of `parsers`. W2L reads a PDF's text layer and runs no
+ * OCR, so `mode` is `fast` or `auto`, both that reader (`ocr` is refused).
+ */
+export interface PdfParser {
+  type: 'pdf'
+  mode?: 'fast' | 'auto'
+  /** Read at most this many pages, from the first (1 to MAX_PDF_PAGES); default 1000. A document cut by it is `success` with a `page_cap` warning: the cut was asked for. */
+  maxPages?: number
+  /** Also return each page's Markdown as `pages: [{ pageNumber, markdown }]`. Default false. */
+  pages?: boolean
+  /** A `<!-- page N -->` line before each page's text. Default true natively, false on `/fc` as on Firecrawl. */
+  pageMarkers?: boolean
 }

@@ -111,7 +111,7 @@ export interface ScreenshotFormatRequest extends ScreenshotOptions {
  * elements its selectors match, and `screenshot` (or a screenshot entry)
  * captures the rendered page as an image on the browser lane.
  */
-export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'screenshot' | JsonFormatRequest | AttributesFormatRequest | ScreenshotFormatRequest
+export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'screenshot' | JsonFormatRequest | AttributesFormatRequest | ScreenshotFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string

@@ -1,5 +1,6 @@
-import type { AttributeExtraction, FetchOptions, FetchResult, Lane, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import type { AttributeExtraction, FetchOptions, FetchResult, Lane, PageTable, TraceEvent } from '@w2l/contracts'
+import { collectImages, collectLinks, extractAttributes, extractTf, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import { sha256Utf8 } from '@w2l/http-core'
 
 /**
  * Response-status rules shared by every lane. A 2xx answer is judged from
@@ -85,6 +86,29 @@ export function extraFormats(raw: string, url: string, options: FetchOptions, tr
     out.attributes = attributes
   }
   return out
+}
+
+/**
+ * The `tables` format of a contentful result, only when asked for: the data
+ * tables of the HTML the Markdown was written from (`source`, with the same
+ * Markdown options), so table N is the Nth GFM table of that Markdown, each
+ * as rows and CSV, with a `tables_extracted` trace event.
+ */
+export function tablesFormat(source: { html: string; options: MarkdownOptions }, sourceUrl: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'tables'> {
+  if (options.includeTables !== true) return {}
+  const tables: PageTable[] = htmlToTables(source.html, source.options).map((table) => {
+    const csv = tableCsv(table.rows)
+    return { tableIndex: table.tableIndex, caption: table.caption, sourceUrl, headerRows: table.headerRows, columns: table.rows[0]?.length ?? 0, rows: table.rows, csv, csvSha256: sha256Utf8(csv), ...(table.omitted === undefined ? {} : { omitted: table.omitted }) }
+  })
+  const omitted = tables.filter((table) => table.omitted !== undefined).map((table) => table.tableIndex)
+  trace.push({ at, lane, event: 'tables_extracted', detail: { count: tables.length, rows: tables.map((table) => table.rows.length), columns: tables.map((table) => table.columns), ...(omitted.length === 0 ? {} : { omitted }) } })
+  return { tables }
+}
+
+/** RFC 4180 CSV: CRLF line ends, a field quoted when it holds a comma, a quote, CR or LF, a quote doubled inside it. */
+export function tableCsv(rows: readonly (readonly string[])[]): string {
+  const field = (value: string): string => /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  return rows.map((row) => row.map(field).join(',')).join('\r\n') + (rows.length > 0 ? '\r\n' : '')
 }
 
 /**
