@@ -141,6 +141,7 @@ describe('public site routes', () => {
     const local = await site()
     const copy = await fetch(`${local.url}/docs/limits/index.md`)
     expect(copy.headers.get('link')).toBe(`<${local.url}/docs/limits/>; rel="canonical"`)
+    expect((await fetch(`${local.url}/docs/limits/index%2Emd`)).headers.get('link')).toBe(`<${local.url}/docs/limits/>; rel="canonical"`)
     expect(copy.headers.get('strict-transport-security')).toBeNull()
     expect((await fetch(`${local.url}/docs/limits/`)).headers.get('link')).toBeNull()
     const configured = await site({ publicOrigin: 'https://w2l.example' })

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
-import { basename, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
@@ -210,8 +210,10 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   // private and keep it out of shared caches.
   if (status === 200 && extension === '.html') onPage()
   // A docs page's Markdown copy is for LLM readers; search engines are pointed at the page it copies.
+  // The page's address comes from the file's folder, not the request, so an encoded path cannot skew it.
+  const pageFolder = relative(root, dirname(file)).split(sep).join('/')
   const markdownCopy = status === 200 && basename(file) === 'index.md'
-    ? { link: `<${origin}${pathname.slice(0, -'index.md'.length)}>; rel="canonical"` } : {}
+    ? { link: `<${origin}${encodeURI(pageFolder ? `/${pageFolder}/` : '/')}>; rel="canonical"` } : {}
   res.writeHead(status, {
     'content-type': MIME[extension] ?? 'application/octet-stream', 'content-length': content.length,
     'cache-control': status !== 200 || extension === '.html' ? 'no-store' : 'public, max-age=3600',
