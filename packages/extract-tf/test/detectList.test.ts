@@ -148,6 +148,28 @@ describe('detectLists, on pages that would mislead it', () => {
     expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img.lazyload', attribute: 'data-src' })
   })
 
+  it('a lazy list whose placeholder is a URL is read from data-src', () => {
+    const html = `<div class="grid">${Array.from({ length: 10 }, (_, i) => `<div class="card"><img src="${i < 3 ? `/img/${i}.jpg` : '/img/placeholder.png'}" data-src="/img/${i}.jpg"><h3>Product ${i}</h3></div>`).join('')}</div>`
+    expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img', attribute: 'data-src' })
+  })
+
+  it('a parent class name of millions of characters is read in bounded time', () => {
+    const html = `<body><div class="${'a'.repeat(2_000_000)}">${'<i>x</i>'.repeat(80_000)}</div></body>`
+    const started = Date.now()
+    detectLists(html)
+    // 12 to 17 s when every child's group key held its parent's whole class.
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 60_000)
+
+  it('a text node of megabytes is scored in bounded time', () => {
+    let html = `<i>${'a '.repeat(4_000_000)}</i>`
+    for (let k = 59; k >= 0; k--) html = `<div class="p${k}"><div class="g${k}">xx ${html}</div><div class="g${k}">yy</div><div class="g${k}">zz</div></div>`
+    const started = Date.now()
+    detectLists(`<body>${html}</body>`)
+    // 11.9 s when every group read the whole text.
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 60_000)
+
   it('items hidden by their own attribute (skeletons, a template) are kept out by the selector, not a reason to find no list', () => {
     const cards = Array.from({ length: 10 }, (_, i) => `<div class="card"><h3>Product ${i}</h3><span class="price">$${i}.99</span></div>`).join('')
     for (const html of [

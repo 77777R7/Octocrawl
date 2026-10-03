@@ -57,15 +57,17 @@ const MAX_CLIMB = 8
 /** The most paths read inside one item, and the most common paths tried as fields. */
 const MAX_PATHS = 300
 const MAX_FIELD_PATHS = 48
-/** The classes of an element read: a class attribute of thousands is read as its first ones. */
+/** The classes of an element read: a class attribute of thousands is read as its first ones, and a class name longer than MAX_CLASS_CHARS not at all. */
 const MAX_CLASSES = 8
+const MAX_CLASS_CHARS = 64
 /** The classes an item's own selector step names. */
 const ITEM_STEP_CLASSES = 3
 /** The work (an element-step test, an element walked) naming the groups may cost; a candidate's fields may cost as much again, and FIELD_WORK_PER_ELEMENT for each element of its items. */
 const WORK_BUDGET = 3_000_000
 const FIELD_WORK_PER_ELEMENT = 60
-/** The elements of one item read to score its group: a group's items with huge subtrees cost no more than this each. */
+/** The nodes, and the characters of text, of one item read to score its group: an item with a huge subtree or text costs no more. */
 const SCORE_NODES = 2_000
+const SCORE_CHARS = 2_000
 /** Kept out of a selector's items: one hidden by its own attribute (a loading skeleton, a template row). */
 const NOT_HIDDEN = ':not([hidden]):not([aria-hidden="true"])'
 /** What a request may send back: a selector's characters. */
@@ -81,7 +83,8 @@ const MENU_CLASS = /(?:^|[-_])(?:nav|navbar|menu|dropdown|breadcrumbs?|paginatio
 const NOT_CONTENT: ReadonlySet<string> = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'BR', 'HR'])
 /** Elements that are part of a record, never one: an article's paragraphs and headings, a row's cells, a table's sections, a select's options. */
 const NOT_ITEM: ReadonlySet<string> = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TD', 'TH', 'THEAD', 'TBODY', 'TFOOT', 'CAPTION', 'COL', 'COLGROUP', 'OPTION', 'OPTGROUP', 'SOURCE', 'TRACK'])
-const IMAGE_SOURCES: readonly string[] = ['src', 'data-src', 'data-original', 'data-lazy-src']
+/** Where an image's source is: a lazy image's real one first, then `src`. */
+const IMAGE_SOURCES: readonly string[] = ['data-src', 'data-original', 'data-lazy-src', 'src']
 const MONEY = /^(?:[$€£¥₹]|USD|EUR|GBP)\s?\d[\d.,\s]*$|^\d[\d.,\s]*\s?(?:[$€£¥₹]|USD|EUR|GBP|元)$/
 
 /** What one detection reads of each element once, and the work it has done. */
@@ -90,7 +93,8 @@ class Reading {
   constructor(private readonly budget = WORK_BUDGET) {}
   private readonly classes = new Map<Element, string[]>()
   private readonly classSets = new Map<Element, Set<string>>()
-  private readonly signatures = new Map<Element, string>()
+  private readonly signatures = new Map<Element, number>()
+  private readonly signatureIds = new Map<string, number>()
   private readonly navigation = new Map<Element, boolean>()
   private readonly parsed = new Map<string, { tag: string; classes: string[]; id: string | null }>()
 
@@ -104,7 +108,7 @@ class Reading {
     if (classes === undefined) {
       classes = []
       for (const name of (el.getAttribute('class') ?? '').split(/\s+/)) {
-        if (SIMPLE_NAME.test(name) && !classes.includes(name)) classes.push(name)
+        if (name.length <= MAX_CLASS_CHARS && SIMPLE_NAME.test(name) && !classes.includes(name)) classes.push(name)
         if (classes.length >= MAX_CLASSES) break
       }
       this.classes.set(el, classes)
@@ -112,10 +116,15 @@ class Reading {
     return classes
   }
 
-  /** An element's tag and classes, sorted: what groups it with its like. */
-  signature(el: Element): string {
+  /** An element's tag and classes, sorted, as a short number: what groups it with its like, a key however long its classes. */
+  signature(el: Element): number {
     let signature = this.signatures.get(el)
-    if (signature === undefined) this.signatures.set(el, signature = [el.tagName.toLowerCase(), ...[...this.classesOf(el)].sort()].join('.'))
+    if (signature === undefined) {
+      const text = [el.tagName.toLowerCase(), ...[...this.classesOf(el)].sort()].join('.')
+      signature = this.signatureIds.get(text)
+      if (signature === undefined) this.signatureIds.set(text, signature = this.signatureIds.size)
+      this.signatures.set(el, signature)
+    }
     return signature
   }
 
@@ -205,7 +214,7 @@ export function detectLists(html: string, limit = 3): ListCandidate[] {
     }
     for (const parent of all) {
       if (parent.children.length < 2 || reading.inNavigation(parent)) continue
-      const above = `${parent.parentElement === null ? '' : reading.signature(parent.parentElement)} > ${reading.signature(parent)} > `
+      const above = `${parent.parentElement === null ? '' : reading.signature(parent.parentElement)}>${reading.signature(parent)}>`
       const here = new Map<string, number>()
       for (const child of Array.from(parent.children)) {
         if (NOT_CONTENT.has(child.tagName) || NOT_ITEM.has(child.tagName) || reading.inNavigation(child)) continue
@@ -341,18 +350,24 @@ function scoreList(reading: Reading, all: Element[]): number | null {
 
 /**
  * An item's text for scoring, read from at most SCORE_NODES of its nodes and
- * counted as work: its words with single spaces, scripts and styles left out,
+ * SCORE_CHARS of its text, and counted as work: its words with single spaces, scripts and styles left out,
  * and the links inside it.
  */
 function boundedText(reading: Reading, item: Element): { text: string; links: number } {
   const words: string[] = []
   let links = 0
   let nodes = 0
+  let chars = 0
   const walk = (node: Node): void => {
     for (const child of Array.from(node.childNodes)) {
-      if (++nodes > SCORE_NODES) return
+      if (++nodes > SCORE_NODES || chars >= SCORE_CHARS) return
       reading.work++
-      if (child.nodeType === 3) words.push(child.nodeValue ?? '')
+      if (child.nodeType === 3) {
+        const text = (child.nodeValue ?? '').slice(0, SCORE_CHARS - chars)
+        chars += text.length
+        reading.work += text.length / 10
+        words.push(text)
+      }
       else if (child.nodeType === 1) {
         const tag = (child as Element).tagName
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'NOSCRIPT') continue
@@ -436,10 +451,12 @@ function fieldsFor(reading: Reading, all: Element[], descendants: Element[][]): 
     const holders = held.filter((h) => h.i < SAMPLE)
     const el = holders[0]!.el
     if (el.tagName === 'IMG') {
-      // The source that differs between items and is no placeholder: a lazy image's real one, also when some have loaded.
+      // The source every item has, that differs between them and is no `data:` placeholder: a lazy image's real one before
+      // `src`, which holds a placeholder (a data: URI or a URL) on the images not yet loaded.
       const present = IMAGE_SOURCES.filter((name) => holders.some((h) => (h.el.getAttribute(name) ?? '') !== ''))
-      const real = (name: string) => holders.every((h) => !(h.el.getAttribute(name) ?? '').startsWith('data:'))
-      const attribute = present.find((name) => real(name) && varies(holders.map((h) => h.el.getAttribute(name)))) ?? present.find((name) => varies(holders.map((h) => h.el.getAttribute(name)))) ?? present[0]
+      const values = (name: string) => holders.map((h) => h.el.getAttribute(name))
+      const whole = (name: string) => values(name).every((value) => value !== null && value !== '' && !value.startsWith('data:'))
+      const attribute = present.find((name) => whole(name) && varies(values(name))) ?? present.find((name) => varies(values(name))) ?? present[0]
       const selector = attribute === undefined ? null : selectorWithin(reading, path, held, descendants, itemStep)
       if (selector !== null) add('image', { selector, attribute })
       continue
