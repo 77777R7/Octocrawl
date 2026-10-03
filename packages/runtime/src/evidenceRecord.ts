@@ -10,9 +10,11 @@
 import {
   EVIDENCE_SCHEMA_VERSION,
   declaredContact,
+  type ActionsResult,
   type CrawlMode,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
+  type EvidencePageActions,
   type EvidenceRecord,
   type EvidenceRequestHeader,
   type EvidenceRobotsDecision,
@@ -20,6 +22,7 @@ import {
   type FileDescription,
   type JsonValue,
   type Lane,
+  type PageActionType,
   type RobotsUnreachable,
   type ScreenshotEvidence,
   type StructuredExtractionResult,
@@ -90,7 +93,7 @@ export function toEvidenceRecord(
     fieldEvidence: output.json === undefined || output.json === null ? null : Object.fromEntries(
       output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null }]),
     ),
-    artifacts: evidence.artifacts.map(path => artifact(path, result.file, result.screenshot ?? undefined)),
+    artifacts: evidence.artifacts.map(path => artifact(path, result.file, result.screenshot ?? undefined, result.actions)),
     proxy: evidence.envProxy ?? null,
     identity: {
       userAgent,
@@ -99,7 +102,17 @@ export function toEvidenceRecord(
       device: requested ? declaredDevice(result) : null,
       requestHeaders: requested ? sentCustomHeaders(result) : null,
     },
+    pageActions: pageActions(result),
   }
+}
+
+/** The steps that ran on the page, from the lane's own `action` trace events; null when the request had none. */
+function pageActions(result: FetchResult): EvidencePageActions | null {
+  if (result.actions === undefined) return null
+  const steps = result.trace
+    .filter((event) => event.event === 'action')
+    .map((event) => ({ type: event.detail?.type as PageActionType, outcome: event.detail?.outcome === 'ok' ? 'ok' as const : 'failed' as const }))
+  return { steps, scriptRan: steps.some((step) => step.type === 'executeJavascript') }
 }
 
 /** The lanes whose identity events a result's own lane answers for: the browser lanes record theirs as `browser_local`. */
@@ -203,9 +216,13 @@ function observedUserAgent(result: FetchResult): string | null {
  * snapshot, saved as `<sha256 of its bytes>.html` (bench captureRawHtml),
  * whose size and type are not recorded; any other file is not known here.
  */
-function artifact(path: string, file: FileDescription | undefined, screenshot: ScreenshotEvidence | undefined): EvidenceArtifact {
+function artifact(path: string, file: FileDescription | undefined, screenshot: ScreenshotEvidence | undefined, actions?: ActionsResult): EvidenceArtifact {
   if (file !== undefined && file.path === path) return { kind: 'file', path, sha256: file.sha256, bytes: file.bytes, contentType: file.contentType }
-  if (screenshot !== undefined && screenshot.path === path) return { kind: 'screenshot', path, sha256: screenshot.sha256, bytes: screenshot.bytes, contentType: screenshot.contentType }
+  const shot = [...(screenshot === undefined ? [] : [screenshot]), ...(actions?.screenshots ?? [])].find((item) => item.path === path)
+  if (shot !== undefined) return { kind: 'screenshot', path, sha256: shot.sha256, bytes: shot.bytes, contentType: shot.contentType }
+  // A pdf step's file: no kind of v1 names a printed page, so it is listed with its hash and type.
+  const pdf = actions?.pdfs.find((item) => item.path === path)
+  if (pdf !== undefined) return { kind: null, path, sha256: pdf.sha256, bytes: pdf.bytes, contentType: pdf.contentType }
   const hash = /(?:^|[\\/])([0-9a-f]{64})\.html$/.exec(path)?.[1]
   return hash === undefined ? { kind: null, path, sha256: null, bytes: null, contentType: null } : { kind: 'snapshot', path, sha256: hash, bytes: null, contentType: null }
 }

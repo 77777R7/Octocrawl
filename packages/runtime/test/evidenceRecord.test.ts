@@ -62,6 +62,7 @@ describe('toEvidenceRecord', () => {
       artifacts: [],
       proxy: null,
       identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org', device: null, requestHeaders: [] },
+      pageActions: null,
     })
   })
 

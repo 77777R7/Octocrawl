@@ -1,4 +1,4 @@
-import { CONTENTFUL_STATUS, estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, estimateTokens, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -825,7 +825,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
         rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
         access: this.access,
       }), identity, headerGate)
-      if (file !== null) return file
+      if (file !== null) {
+        // A file has no page to run steps on: they are reported as not run, never skipped silently.
+        if (options.actions !== undefined && options.actions.length > 0) ran.actions = stepsNotRun(options.actions, `the URL answered a file (${file.evidence.contentType ?? 'unknown type'}), which has no page to run steps on`)
+        return file
+      }
       // waitFor: the caller's extra wait after load and stability. It counts
       // toward the scrape's deadline; when the deadline would end it, the
       // wait stops early enough to capture the page as it is then, and that
@@ -844,9 +848,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (adsBlocked > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'ads_blocked', detail: { count: adsBlocked, hosts: [...adHostsBlocked] } })
       // The request's actions: after load, stability and waitFor, before the
       // screenshot format and the DOM are read, so both show the page the
-      // steps left. A page a step moved to goes through robots.txt and the
-      // egress policy as the requested URL did.
+      // steps left. While they run and until the page is read, a navigation
+      // of the main frame goes through robots.txt and the egress policy as
+      // the requested URL did, before its request is sent: one W2L does not
+      // fetch is stopped there, and the page stays where it was.
+      const refusedNavigations: { url: string; reason: string }[] = []
       if (options.actions !== undefined && options.actions.length > 0) {
+        const mainFrame = page.mainFrame()
+        await page.route('**/*', async (route) => {
+          const request = route.request()
+          if (!request.isNavigationRequest() || request.frame() !== mainFrame) return route.fallback()
+          const reason = await this.refuseNavigation(request.url(), identity, execution, relaxedRoutes).catch((error: unknown) => `it could not be checked (${error instanceof Error ? error.message.slice(0, 120) : String(error)})`)
+          if (reason === null) return route.fallback()
+          refusedNavigations.push({ url: request.url(), reason })
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: request.url(), reason } })
+          // 204 No Content: the browser stays on the page it has (an aborted navigation would show its own error page instead).
+          return route.fulfill({ status: 204, body: '' })
+        })
         ran.actions = await runPageActions(options.actions, {
           page,
           execution,
@@ -856,18 +874,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           reserveMs: CAPTURE_RESERVE_MS,
           deviceScaleFactor: fingerprint.deviceScaleFactor,
           viewport: page.viewportSize() ?? window.viewport,
-          refuseNavigation: async (target) => {
-            if (!/^https?:/i.test(target)) return null
-            try {
-              await assertSafeUrl(target, this.networkPolicy)
-            } catch (error) {
-              return error instanceof Error ? error.message : 'the egress policy refuses it'
-            }
-            if (!identity.respectsRobots) return null
-            const lookup = await this.robotsCache.lookup(target, identity.userAgent, execution, relaxedRoutes === null ? undefined : (to) => relaxedRoutes.dispatcherFor(to))
-            const verdict = this.robotsCache.decision(lookup, target, identity.userAgent)
-            return verdict.decision === 'disallowed' ? `robots.txt (${verdict.robotsUrl}) disallows it${verdict.unreachable === undefined ? '' : ' (unreachable)'}` : null
-          },
+          takeRefusedNavigation: () => refusedNavigations.shift() ?? null,
         })
         throwIfExecutionStopped(execution)
       }
@@ -920,6 +927,19 @@ export class BrowserLocalSubject implements SubjectAdapter {
           await assertSafeUrl(finalUrl, this.networkPolicy)
         } catch (err) {
           return this.denied(url, start, trace, err)
+        }
+      }
+      if (ran.actions !== undefined) {
+        // A navigation stopped after the last step (a late script redirect) is the steps' too.
+        const late = refusedNavigations.shift()
+        const last = options.actions!.length - 1
+        if (late !== undefined && ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
+        // The page the steps left, reached through a redirect the guard does not see, is checked as a navigation to it would be.
+        const landed = finalUrl === url ? null : await this.refuseNavigation(finalUrl, identity, execution, relaxedRoutes)
+        if (landed !== null) {
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: finalUrl, reason: landed } })
+          if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `the steps left the page at ${finalUrl}, which W2L does not fetch (${landed}); it is not read` }
+          return this.notRead(url, start, trace, finalUrl)
         }
       }
       if (!steady || body === null) return this.keptNavigating(url, start, trace, documents, finalUrl, attemptCount)
@@ -1382,6 +1402,41 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
+  /** Why W2L would not fetch this URL as a navigation of the page (the egress policy, robots.txt under the page's identity), or null when it would. */
+  private async refuseNavigation(target: string, identity: { respectsRobots: boolean; userAgent: string }, execution: ExecutionContext, relaxedRoutes: EgressRoutes | null): Promise<string | null> {
+    if (!/^https?:/i.test(target)) return null
+    try {
+      await assertSafeUrl(target, this.networkPolicy)
+    } catch (error) {
+      return `the egress policy refuses it: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`
+    }
+    if (!identity.respectsRobots) return null
+    const lookup = await this.robotsCache.lookup(target, identity.userAgent, execution, relaxedRoutes === null ? undefined : (to) => relaxedRoutes.dispatcherFor(to))
+    const verdict = this.robotsCache.decision(lookup, target, identity.userAgent)
+    if (verdict.decision !== 'disallowed') return null
+    return verdict.unreachable === undefined ? `robots.txt (${verdict.robotsUrl}) disallows it` : `its robots.txt could not be read (${verdict.unreachable})`
+  }
+
+  /** A page the steps left at a URL W2L does not fetch: nothing of it is read, and the actions say why. */
+  private notRead(url: string, start: number, trace: TraceEvent[], finalUrl: string): FetchResult {
+    return {
+      requestedUrl: url,
+      status: 'failed',
+      failureReason: 'action_failed',
+      blockReason: null,
+      budgetExceeded: null,
+      lane: 'browser_local',
+      escalations: [],
+      markdown: null,
+      truncated: false,
+      truncatedAt: null,
+      compliance: null,
+      evidence: { finalUrl, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: null },
+      trace,
+    }
+  }
+
   private denied(
     url: string,
     start: number,
@@ -1530,4 +1585,9 @@ function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResu
     ...(failed ? { status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null } : {}),
     evidence: { ...result.evidence, artifacts: [...result.evidence.artifacts, ...ran.artifacts] },
   }
+}
+
+/** Steps that could not run on the page at all, reported as the first one failing. */
+function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
+  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [] }
 }

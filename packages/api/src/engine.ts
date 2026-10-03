@@ -760,12 +760,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
-        // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null.
+        // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null; what actions produced is stored once, on the result.
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),

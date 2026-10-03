@@ -57,7 +57,8 @@ describe('actions in the API', () => {
               asked.push(fetchOptions?.actions)
               const page = await http.fetch(url)
               const actions = fetchOptions?.actions === undefined ? undefined : ranActions(fetchOptions.actions, options.failAt)
-              return { ...page, lane: 'browser_local', ...(actions === undefined ? {} : { actions }), ...(actions?.failed === undefined ? {} : { status: 'failed', failureReason: 'action_failed' }) }
+              const steps = (fetchOptions?.actions ?? []).map((action, index) => ({ at: 0, lane: 'browser_local' as const, event: 'action', detail: { index, type: action.type, outcome: actions?.failed?.index === index ? 'failed' : 'ok' } }))
+              return { ...page, lane: 'browser_local', trace: [...page.trace, ...steps], ...(actions === undefined ? {} : { actions }), ...(actions?.failed === undefined ? {} : { status: 'failed', failureReason: 'action_failed' }) }
             },
           },
         },
@@ -80,6 +81,12 @@ describe('actions in the API', () => {
     expect(asked).toEqual([[{ type: 'click', selector: '#more' }, { type: 'screenshot' }, { type: 'scrape' }]])
     expect(res.body.channelsTried).toEqual(['browser_local'])
     expect(res.body.actions).toMatchObject({ screenshots: [{ sha256: 'a'.repeat(64) }], scrapes: [{ url: 'https://example.test/after' }], javascriptReturns: [{ type: 'number', value: 4 }] })
+    // The record says the page is the one the steps left.
+    expect(res.body.evidenceRecord.pageActions).toEqual({ steps: [{ type: 'click', outcome: 'ok' }, { type: 'screenshot', outcome: 'ok' }, { type: 'scrape', outcome: 'ok' }], scriptRan: false })
+    const scripted = await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, actions: [{ type: 'executeJavascript', script: 'document.body.innerHTML = "<p>Price $1</p>"' }] })
+    expect(scripted.body.evidenceRecord.pageActions).toEqual({ steps: [{ type: 'executeJavascript', outcome: 'ok' }], scriptRan: true })
+    const plain = await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, formats: ['markdown'] })
+    expect(plain.body.evidenceRecord.pageActions).toBeNull()
     const debug = await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, actions, debug: true })
     // The screenshots travel once: the audit's attempt copies leave the actions out.
     expect(JSON.stringify(debug.body.summary)).not.toContain('example.test/after')
@@ -119,6 +126,10 @@ describe('actions in the API', () => {
     expect(asked).toEqual([[{ type: 'scrape' }], [{ type: 'scrape' }]])
     const items = (await (await app.request(`/v1/batches/${started.body.taskId}/items`)).json()) as { items: Array<Record<string, any>> }
     expect(items.items.map((item) => item.actions?.scrapes?.length)).toEqual([1, 1])
+    // Stored once: the audit's attempt copies leave what the steps produced out.
+    const debug = (await (await app.request(`/v1/batches/${started.body.taskId}/items?debug=true`)).json()) as { items: Array<Record<string, any>> }
+    expect(debug.items[0]!.audit.summary.attempts).toHaveLength(1)
+    expect(JSON.stringify(debug.items.map((item) => item.audit))).not.toContain('example.test/after')
   })
 
   it('/fc maps a scrape\'s actions and answers Firecrawl\'s shape, screenshots as data URIs', async () => {

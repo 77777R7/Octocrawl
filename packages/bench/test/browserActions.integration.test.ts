@@ -13,15 +13,22 @@ import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 const PROSE = '<p>The harbour office keeps the tide table for every hour of the day, and this page lists the readings the office has published so far.</p>'
 let server: Server
 let base: string
+/** Every path the server was asked for, to show what was never requested. */
+const requested: string[] = []
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    requested.push(req.url ?? '')
     const html = (body: string) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<!doctype html><html><head><title>Fixture</title></head><body><main>${body}</main></body></html>`) }
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('User-agent: *\nDisallow: /private\n'); return }
     if (req.url === '/more') return html(`<h1>Readings</h1>${PROSE}<ul id="list"><li class="row">Reading 1</li></ul><button id="more" onclick="setTimeout(() => { for (let i = 2; i <= 4; i++) { const li = document.createElement('li'); li.className = 'row'; li.textContent = 'Reading ' + i; document.getElementById('list').appendChild(li) } }, 300)">Load more</button>`)
     if (req.url === '/form') return html(`<h1>Search</h1>${PROSE}<input id="q"><p id="out"></p><script>document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('out').textContent = 'You searched for ' + e.target.value })</script>`)
     if (req.url === '/scroll') return html(`<h1>Feed</h1>${PROSE}<div id="feed"></div><div style="height:3000px"></div><script>let n = 0; const add = () => { for (let i = 0; i < 5; i++) { const p = document.createElement('p'); p.className = 'item'; p.textContent = 'Item ' + (++n); document.getElementById('feed').appendChild(p) } }; add(); window.addEventListener('scroll', () => { if (n < 15) add() })</script>`)
     if (req.url === '/links') return html(`<h1>Links</h1>${PROSE}<a id="secret" href="/private/page">Private</a><a id="open" href="/more">Open</a>`)
+    if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
+    if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p>`)
+    if (req.url === '/echo-header') return html(`<h1>Header</h1>${PROSE}<p>X-Test: ${String(req.headers['x-test'] ?? 'none')}</p><button id="b" onclick="document.getElementById('out').textContent = 'The button was clicked.'">B</button><p id="out"></p>`)
+    if (req.url === '/data.csv') { res.writeHead(200, { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename=data.csv' }); res.end('a,b\n1,2\n'); return }
     if (req.url?.startsWith('/private')) return html(`<h1>Private page</h1>${PROSE}<p>Not for crawlers.</p>`)
     res.writeHead(404); res.end()
   })
@@ -95,12 +102,63 @@ describe('actions, real browser', () => {
     expect(steps(result).map((detail) => detail?.outcome)).toEqual(['ok', 'failed'])
   }, 60_000)
 
-  it('a step that leads to a page robots.txt disallows is refused, and that page is not read', async () => {
+  it('a step that leads to a page robots.txt disallows is stopped before the request goes out, and the page stays', async () => {
+    requested.length = 0
     const result = await run('/links', [{ type: 'click', selector: '#secret' }, { type: 'scrape' }])
     expect(result.actions?.failed).toMatchObject({ index: 0, code: 'navigation_refused' })
     expect(result.actions?.failed?.message).toContain('/private/page')
-    expect(JSON.stringify(result.actions?.scrapes)).not.toContain('Not for crawlers')
-    expect(result.markdown ?? '').not.toContain('Not for crawlers')
+    expect(requested).not.toContain('/private/page')
+    expect(result.status).toBe('failed')
+    expect(result.failureReason).toBe('action_failed')
+    expect(result.markdown).toContain('Links')
+    expect(result.trace.some((event) => event.event === 'ssrf_denied')).toBe(false)
+  }, 60_000)
+
+  it('a navigation a script starts later, not the step itself, is stopped as well, before its request goes out', async () => {
+    requested.length = 0
+    // The click sets a 700 ms timer; the redirect fires during the wait that follows.
+    const result = await run('/late', [{ type: 'click', selector: '#go' }, { type: 'wait', milliseconds: 1500 }])
+    expect(requested).not.toContain('/private/late')
+    expect(result.trace.filter((event) => event.event === 'navigation_refused').map((event) => event.detail?.url)).toEqual([`${base}/private/late`])
+    expect(result.actions?.failed).toMatchObject({ index: 1, code: 'navigation_refused' })
+    expect(result.evidence.finalUrl).toBe(`${base}/late`)
+    expect(result.markdown).toContain('Late')
+  }, 60_000)
+
+  it('a same-document URL change requests nothing and is not a refused navigation', async () => {
+    const result = await run('/spa', [{ type: 'click', selector: '#tab' }])
+    expect(result.status).toBe('success')
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('Second tab')
+  }, 60_000)
+
+  it('a step that hangs fails as deadline_exceeded within the deadline, keeping what the steps before it produced and the page', async () => {
+    const started = Date.now()
+    const result = await run('/more', [{ type: 'screenshot' }, { type: 'executeJavascript', script: 'await new Promise(() => {})' }, { type: 'scrape' }], 8_000)
+    expect(Date.now() - started).toBeLessThan(9_000)
+    expect(result.actions?.failed).toMatchObject({ index: 1, code: 'deadline_exceeded' })
+    expect(result.actions?.screenshots).toHaveLength(1)
+    expect(result.failureReason).toBe('action_failed')
+    expect(result.markdown).toContain('Reading 1')
+  }, 60_000)
+
+  it('a URL that answers a file runs no step, and says so', async () => {
+    const result = await run('/data.csv', [{ type: 'executeJavascript', script: 'return 1' }])
+    expect(result.actions?.failed).toMatchObject({ index: 0, code: 'action_error' })
+    expect(result.actions?.failed?.message).toContain('answered a file')
+    expect(result.failureReason).toBe('action_failed')
+  }, 60_000)
+
+  it('runs with custom headers, which reach the page as before', async () => {
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const result = await browser.fetch(`${base}/echo-header`, Date.now() + 45_000, undefined, undefined, { headers: { 'x-test': 'on' }, actions: [{ type: 'click', selector: '#b' }] })
+      expect(result.status).toBe('success')
+      expect(result.markdown).toContain('X-Test: on')
+      expect(result.markdown).toContain('The button was clicked.')
+    } finally {
+      await browser.teardown()
+    }
   }, 60_000)
 
   it('a page a step moves to that W2L fetches is read, and the trace says where it went', async () => {

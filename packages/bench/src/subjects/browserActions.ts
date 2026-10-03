@@ -3,8 +3,12 @@
  * stability and `waitFor`, and before the screenshot format and the DOM are
  * read, one at a time in the order given. Every step leaves an `action`
  * trace event with its index, type, outcome and time. A step that fails
- * stops the pipeline: `failed` names it, and the page stays as it stood
- * (unless the step led it somewhere W2L does not fetch, which is cleared).
+ * stops the pipeline: `failed` names it, and the page stays as it stood.
+ * Every step is bounded by the scrape's deadline less the time kept back
+ * to read the page, so a step that hangs fails as `deadline_exceeded` and
+ * what the steps before it produced is kept. A navigation of the page to a
+ * URL W2L does not fetch is stopped before its request goes out (the
+ * browser lane's guard) and fails the step that caused it.
  */
 
 import { createHash } from 'node:crypto'
@@ -36,8 +40,8 @@ export interface ActionRunContext {
   deviceScaleFactor: number
   /** The window the page is laid out in, to restore after a screenshot step that asked for another. */
   viewport: ScreenshotViewport
-  /** Why W2L would not fetch this URL (robots.txt, the egress policy), or null when it would. */
-  refuseNavigation: (url: string) => Promise<string | null>
+  /** A main-frame navigation the browser lane's guard stopped since the last call, or null; each is reported once. */
+  takeRefusedNavigation: () => { url: string; reason: string } | null
 }
 
 export interface ActionRun {
@@ -65,18 +69,12 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
     const started = performance.now()
     try {
       const detail = await runStep(action, ctx, result, artifacts)
-      // A step that moved the page goes through the checks every fetch does.
+      // A navigation the step started that the guard stopped: the request never went out, and the page stayed.
+      const refused = ctx.takeRefusedNavigation()
+      if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the page stayed where it was`)
       const now = withoutHash(page.url())
       const moved = now !== checkedUrl
-      if (moved) {
-        const refusal = await ctx.refuseNavigation(now)
-        if (refusal !== null) {
-          // The page W2L does not fetch is not read: the page is cleared.
-          await page.goto('about:blank').catch(() => {})
-          throw new StepFailure('navigation_refused', `the step led to ${now}, which W2L does not fetch: ${refusal}`)
-        }
-        checkedUrl = now
-      }
+      checkedUrl = now
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'ok', ms: Math.round(performance.now() - started), ...detail, ...(moved ? { navigatedTo: now } : {}) } })
     } catch (error) {
       if (execution.signal?.aborted) throw error
@@ -116,7 +114,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
     }
     case 'click': {
       const matches = page.locator(action.selector)
-      const count = await raceWithSignal(matches.count(), signal)
+      const count = await bounded(ctx, matches.count())
       if (count === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
       const targets = action.all === true ? count : 1
       for (let i = 0; i < targets; i++) {
@@ -126,29 +124,29 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       return { selector: action.selector, matched: count, clicked: targets }
     }
     case 'write':
-      await raceWithSignal(page.keyboard.type(action.text), signal)
+      await bounded(ctx, page.keyboard.type(action.text))
       return { characters: action.text.length }
     case 'press':
-      await raceWithSignal(page.keyboard.press(action.key), signal)
+      await bounded(ctx, page.keyboard.press(action.key))
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
       return { key: action.key }
     case 'scroll': {
       const sign = action.direction === 'down' ? 1 : -1
       if (action.selector !== undefined) {
         const target = page.locator(action.selector).first()
-        if (await raceWithSignal(page.locator(action.selector).count(), signal) === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
-        await raceWithSignal(target.evaluate((element, s) => { element.scrollBy(0, s * element.clientHeight) }, sign), signal)
+        if (await bounded(ctx, page.locator(action.selector).count()) === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
+        await bounded(ctx, target.evaluate((element, s) => { element.scrollBy(0, s * element.clientHeight) }, sign))
       } else {
-        await raceWithSignal(page.evaluate((s) => { window.scrollBy(0, s * window.innerHeight) }, sign), signal)
+        await bounded(ctx, page.evaluate((s) => { window.scrollBy(0, s * window.innerHeight) }, sign))
       }
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
-      return { direction: action.direction, ...(action.selector === undefined ? {} : { selector: action.selector }), scrollY: await page.evaluate(() => Math.round(window.scrollY)) }
+      return { direction: action.direction, ...(action.selector === undefined ? {} : { selector: action.selector }), scrollY: await bounded(ctx, page.evaluate(() => Math.round(window.scrollY))) }
     }
     case 'screenshot': {
       const viewport = action.viewport ?? ctx.viewport
-      if (action.viewport !== undefined) await page.setViewportSize(action.viewport)
+      if (action.viewport !== undefined) await bounded(ctx, page.setViewportSize(action.viewport))
       try {
-        const capture = await captureScreenshot(page, action, viewport, ctx.deviceScaleFactor, execution, ctx.trace, ctx.at)
+        const capture = await bounded(ctx, captureScreenshot(page, action, viewport, ctx.deviceScaleFactor, execution, ctx.trace, ctx.at))
         if (capture.screenshot === null) throw new StepFailure('action_error', capture.warning?.message ?? 'the screenshot could not be captured')
         result.screenshots.push(capture.screenshot)
         artifacts.push(...capture.artifacts)
@@ -158,7 +156,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       }
     }
     case 'scrape': {
-      const html = await raceWithSignal(page.content(), signal)
+      const html = await bounded(ctx, page.content())
       const url = page.url()
       result.scrapes.push({ url, html })
       return { url, characters: html.length }
@@ -168,9 +166,9 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       try {
         // A function body, as Firecrawl takes it (`return` gives the value), awaited. Evaluated through the
         // DevTools protocol, so the page's Content-Security-Policy does not stop it.
-        value = await raceWithSignal(page.evaluate(`(async () => {\n${action.script}\n})()`), signal)
+        value = await bounded(ctx, page.evaluate(`(async () => {\n${action.script}\n})()`))
       } catch (error) {
-        if (signal?.aborted) throw error
+        if (signal?.aborted || error instanceof StepFailure) throw error
         throw new StepFailure('script_error', message(error))
       }
       const type = value === null ? 'null' : typeof value
@@ -182,7 +180,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       const format = action.format ?? 'Letter'
       const landscape = action.landscape ?? false
       const scale = action.scale ?? 1
-      const buffer = await raceWithSignal(page.pdf({ format, landscape, scale, printBackground: true }), signal)
+      const buffer = await bounded(ctx, page.pdf({ format, landscape, scale, printBackground: true }))
       const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
       const sha256 = createHash('sha256').update(bytes).digest('hex')
       const files = await captureArtifact(bytes, sha256, 'pdf')
@@ -191,6 +189,27 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       result.pdfs.push(pdf)
       return { format, landscape, scale, bytes: pdf.bytes, sha256 }
     }
+  }
+}
+
+/**
+ * The operation, or `deadline_exceeded` when the time left for steps runs
+ * out first (the operation is left to the page; the page is read as it
+ * stands). A stopped fetch still rejects as stopped.
+ */
+async function bounded<T>(ctx: ActionRunContext, operation: Promise<T>): Promise<T> {
+  const left = timeLeft(ctx)
+  if (left <= 0) {
+    operation.catch(() => {})
+    throw new StepFailure('deadline_exceeded', 'the scrape\'s deadline came before the step could run')
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new StepFailure('deadline_exceeded', `the step did not finish within the ${Math.round(left)} ms left before the scrape's deadline`)), left) })
+  try {
+    return await raceWithSignal(Promise.race([operation, expired]), ctx.execution.signal)
+  } finally {
+    clearTimeout(timer)
+    operation.catch(() => {})
   }
 }
 

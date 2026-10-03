@@ -92,6 +92,13 @@
     "identity": {
       "description": "Who W2L said it was on the wire.",
       "$ref": "#/$defs/identity"
+    },
+    "pageActions": {
+      "description": "The request's actions that ran on the page before it was read, in order, with their outcome; null when the request had none. rawSha256 and outputSha256 are of the page as the steps left it, and scriptRan says when a script of the caller's ran in it, so its content may be the script's. Added to v1 with the interaction group: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "anyOf": [
+        { "$ref": "#/$defs/pageActions" },
+        { "type": "null" }
+      ]
     }
   },
   "allOf": [
@@ -274,6 +281,37 @@
             { "type": "array", "items": { "$ref": "#/$defs/requestHeader" } },
             { "type": "null" }
           ]
+        }
+      }
+    },
+    "pageActions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps", "scriptRan"],
+      "properties": {
+        "steps": {
+          "description": "The steps that ran, in the order given; a step that failed is the last.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/pageActionStep" }
+        },
+        "scriptRan": {
+          "description": "Whether an executeJavascript step ran in the page.",
+          "type": "boolean"
+        }
+      }
+    },
+    "pageActionStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "outcome"],
+      "properties": {
+        "type": {
+          "description": "The step's type.",
+          "enum": ["wait", "click", "write", "press", "scroll", "screenshot", "scrape", "executeJavascript", "pdf"]
+        },
+        "outcome": {
+          "description": "ok, or failed (the steps after it did not run).",
+          "enum": ["ok", "failed"]
         }
       }
     },
