@@ -11,7 +11,11 @@ export default {
       incoming.host = env.PRIMARY_HOST
       return Response.redirect(incoming.toString(), 301)
     }
-    const target = new URL(`${incoming.pathname}${incoming.search}`, env.ORIGIN_URL)
+    // Set the path on ORIGIN_URL rather than resolving it against ORIGIN_URL: a path starting with `//` would resolve
+    // as protocol-relative and send the request, PROXY_SECRET included, to another host.
+    const target = new URL(env.ORIGIN_URL)
+    target.pathname = incoming.pathname
+    target.search = incoming.search
     const headers = new Headers(request.headers)
     headers.delete('host')
     headers.set('x-forwarded-host', incoming.host)
