@@ -91,7 +91,7 @@ export interface MapSitemapSource {
 export interface MapRefused {
   /** The same URL again (merged into the link it repeats when that link was returned). */
   duplicate: number
-  /** A variant folded into a URL seen first (`/a/` after `/a`, the www twin, ...); `samples.collapsed` names both. */
+  /** A variant folded into a URL seen first (`/a/` after `/a`, the www twin, ...), or an http link replaced by its https variant; `samples.collapsed` names both, `into` being the URL returned. */
   collapsed: number
   hostDenied: number
   subtreeDenied: number
