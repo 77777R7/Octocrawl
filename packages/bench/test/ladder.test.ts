@@ -8,7 +8,7 @@ import {
   type IdentityBundle,
   type RobotsOverrideApplied,
 } from '@w2l/contracts'
-import { LadderRunner, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
+import { LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { loadSessionForHost, MemorySessionStore, sessionCoversHost, type SessionSnapshot } from '../src/routing/sessionStore.js'
 
@@ -1058,6 +1058,28 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(run.result.blockReason).toBe('login_wall')
     expect(http.calls).toEqual([])
     expect(run.ladderTrace.some((t) => t.event === 'ladder_session_rejected')).toBe(true)
+  })
+
+  it('a redirect to the site\'s login page under the saved login is login_wall, never the page\'s content', async () => {
+    const url = 'https://example.com/secure'
+    const landedOnLogin: FetchResult = { ...contentfulResult(url, 'browser_local_authed'), markdown: 'Login Page', evidence: { ...contentfulResult(url, 'browser_local_authed').evidence, finalUrl: 'https://example.com/login', redirectChain: [url, 'https://example.com/login'] } }
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [landedOnLogin])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.result.status).toBe('blocked')
+    expect(run.result.blockReason).toBe('login_wall')
+    expect(http.calls).toEqual([])
+    expect(run.ladderTrace.find((t) => t.event === 'ladder_session_rejected')?.detail).toMatchObject({ redirectedTo: 'https://example.com/login' })
+  })
+
+  it('reads a login page as a redirect to one only when the page asked for was not a login page', () => {
+    const at = (finalUrl: string): FetchResult => ({ ...contentfulResult('https://example.com/x', 'browser_local'), evidence: { ...contentfulResult('https://example.com/x', 'browser_local').evidence, finalUrl } })
+    expect(sessionRejection('https://example.com/account', at('https://example.com/users/sign_in?next=%2Faccount'))).not.toBeNull()
+    expect(sessionRejection('https://example.com/account', at('https://example.com/account'))).toBeNull()
+    expect(sessionRejection('https://example.com/account', at('https://example.com/authors/jane'))).toBeNull()
+    expect(sessionRejection('https://example.com/login', at('https://example.com/login?x=1'))).toBeNull()
   })
 
   it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {

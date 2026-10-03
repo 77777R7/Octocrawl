@@ -443,9 +443,10 @@ export class LadderRunner {
       // The site refused the saved login (expired, signed out): that is the
       // answer. A public rung after it would return the logged-out page as
       // if it were the page the caller asked for.
-      if (channel === sessionFirst && result.status === 'blocked' && result.blockReason === 'login_wall') {
-        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: result.blockReason } })
-        return finish(result, false)
+      const rejected = channel === sessionFirst ? sessionRejection(url, result) : null
+      if (rejected !== null) {
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...(rejected === result ? {} : { redirectedTo: rejected.evidence.finalUrl }) } })
+        return finish(rejected, false)
       }
 
       // Vendor attribution happens for every attempt, successful or not —
@@ -1044,4 +1045,28 @@ function safeHost(url: string): string {
   } catch {
     return url
   }
+}
+
+const LOGIN_PATH = /(?:^|[/_.-])(?:log[-_]?in|sign[-_]?in|signon|auth(?:enticate)?|sso)(?:$|[/_.?-])/i
+
+/**
+ * The result of a fetch with the user's saved login when the site refused
+ * that login, else null: a `login_wall` block, or a page that redirected
+ * from the one asked for to a login page (a path naming login, sign-in or
+ * auth that the requested path did not). The site's login page is not the
+ * page asked for, so it is never answered as its content.
+ */
+export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
+  if (result.status === 'blocked' && result.blockReason === 'login_wall') return result
+  if (!CONTENTFUL_STATUS.has(result.status)) return null
+  let requested: URL
+  let landed: URL
+  try {
+    requested = new URL(url)
+    landed = new URL(result.evidence.finalUrl)
+  } catch {
+    return null
+  }
+  if (landed.href === requested.href || LOGIN_PATH.test(requested.pathname) || !LOGIN_PATH.test(landed.pathname)) return null
+  return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }
