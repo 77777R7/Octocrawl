@@ -258,6 +258,30 @@ describe('MCP tools', () => {
     expect(bodies).toHaveLength(3)
   })
 
+  it('offers the cache options and forwards them for scrape, crawl and batch_scrape', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const options = { maxAge: 3_600_000, minAge: 0, storeInCache: false, lockdown: true }
+    await callTool(client, 'scrape', { url: 'https://example.com/', ...options })
+    await callTool(client, 'crawl', { url: 'https://example.com/', ...options, sitemap: 'skip' })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
+    expect(bodies).toEqual([
+      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', ...options, sitemap: 'skip', origin: SDK_ORIGIN },
+      { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
+    ])
+    for (const name of ['scrape', 'crawl', 'batch_scrape']) {
+      const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
+      expect(properties).toMatchObject({ maxAge: { type: 'integer', minimum: 0 }, minAge: { type: 'integer' }, storeInCache: { type: 'boolean' }, lockdown: { type: 'boolean' } })
+    }
+    // A contradiction is refused before any API call.
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', lockdown: true, maxAge: 0 })).rejects.toThrow(/lockdown answers from the cache alone/)
+    expect(bodies).toHaveLength(3)
+  })
+
   it('offers the screenshot format as a string, the full-page alias and an entry, and forwards it for scrape, crawl and batch_scrape', async () => {
     const bodies: unknown[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

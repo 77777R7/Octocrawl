@@ -50,6 +50,8 @@ export const FAILURE_REASON = [
    */
   'identity_compromised',
   'internal_error',
+  /** A cache-only request (`lockdown`) found no stored result for the page, so nothing was fetched. */
+  'cache_miss',
 ] as const
 
 export type FailureReason = (typeof FAILURE_REASON)[number]

@@ -42,7 +42,7 @@
     },
     "reason": {
       "description": "Why the status is what it is: the failure reason when status is failed, the block reason when blocked, the exhausted budget when budget_exceeded. Null for every other status.",
-      "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
+      "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
     },
     "lane": {
       "description": "The lane that produced the result: http (W2L's own HTTP client), browser_local (a local headless Chromium), browser_local_authed (the same with the user's session), browser_proxy (a browser through the operator's egress) or provider (a third-party browser service).",
@@ -97,7 +97,7 @@
   "allOf": [
     {
       "if": { "properties": { "status": { "const": "failed" } } },
-      "then": { "properties": { "reason": { "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error"] } } }
+      "then": { "properties": { "reason": { "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss"] } } }
     },
     {
       "if": { "properties": { "status": { "const": "blocked" } } },
@@ -263,6 +263,33 @@
         "contact": {
           "description": "The contact the research-mode User-Agent declares (W2L_CONTACT). Null when none is declared.",
           "type": ["string", "null"]
+        },
+        "device": {
+          "description": "The device the answering lane's identity declared: mobile for a request with mobile true, else desktop. Null when W2L sent no request for the page, in research mode (a bot declares no device), or when the lane recorded none (the provider lane). Added to v1 with the cache group: optional here so that earlier records stay valid; W2L writes it on every record.",
+          "enum": ["desktop", "mobile", null]
+        },
+        "requestHeaders": {
+          "description": "The caller's custom request headers (the headers option) the answering lane sent, names lower-cased and sorted, each with the SHA-256 of its value and never the value itself (a value may be a key; the scrape record keeps names only). Empty when it sent none; null when W2L sent no request for the page. Credentials, transport headers and the declared identity (User-Agent, client hints) are refused before any request, so none is listed. Added to v1 with the cache group: optional here so that earlier records stay valid; W2L writes it on every record.",
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/requestHeader" } },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "requestHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "valueSha256"],
+      "properties": {
+        "name": {
+          "description": "The header's name, lower-cased.",
+          "type": "string",
+          "minLength": 1
+        },
+        "valueSha256": {
+          "description": "SHA-256 (hex) of the UTF-8 bytes of the value as sent.",
+          "$ref": "#/$defs/sha256"
         }
       }
     }

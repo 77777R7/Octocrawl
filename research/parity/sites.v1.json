@@ -2225,6 +2225,205 @@
         {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "stoppedBy", "equals": null},
         {"item": "map-search.mcp-map-search-tools", "type": "field", "path": "status", "equals": "completed"}
       ]
+    },
+    {
+      "id": "CA01",
+      "batch": "cache",
+      "feature": "scrape-execution.cache-max-age",
+      "url": "https://books.toscrape.com/catalogue/page-2.html",
+      "request": {},
+      "compareRequest": {"maxAge": 3600000},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). A live scrape that looks nothing up (no cacheState), then the same URL with maxAge 1 h: the stored result answers, with the first fetch's Evidence Record, cachedAt equal to its fetchedAt, the same Markdown and no request made.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "metadata.cacheState", "present": false},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.status", "equals": "success"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.metadata.cacheState", "equals": "hit"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.metadata.cachedAt", "equalsPath": "evidenceRecord.fetchedAt"},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.evidenceRecord.fetchedAt", "equalsPath": "evidenceRecord.fetchedAt"},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.evidenceRecord.rawSha256", "equalsPath": "evidenceRecord.rawSha256"},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.evidenceRecord.outputSha256.markdown", "equalsPath": "evidenceRecord.outputSha256.markdown"},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.markdown", "equalsPath": "markdown"},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.usage.requestCount", "equals": 0},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.channelsTried", "equals": []},
+        {"item": "scrape-execution.cache-max-age", "type": "field", "path": "compare.scrapeId", "present": true},
+        {"item": "scrape-execution.cache-max-age", "type": "evidenceSchema", "path": "compare.evidenceRecord"}
+      ]
+    },
+    {
+      "id": "CA02",
+      "batch": "cache",
+      "feature": "scrape-execution.store-in-cache",
+      "url": "https://quotes.toscrape.com/page/3/",
+      "request": {"storeInCache": false},
+      "compareRequest": {"maxAge": 3600000, "storeInCache": false},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Neither request stores (no other case scrapes this URL), so the lookup of the second finds nothing: cacheState miss and a live fetch.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.store-in-cache", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "metadata.cacheState", "present": false},
+        {"item": "scrape-execution.store-in-cache", "type": "field", "path": "compare.status", "equals": "success"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.metadata.cacheState", "equals": "miss"},
+        {"item": "scrape-execution.store-in-cache", "type": "field", "path": "compare.metadata.cachedAt", "present": false},
+        {"item": "scrape-execution.store-in-cache", "type": "field", "path": "compare.usage.requestCount", "min": 1}
+      ]
+    },
+    {
+      "id": "CA03",
+      "batch": "cache",
+      "feature": "scrape-execution.cache-min-age",
+      "url": "https://books.toscrape.com/catalogue/page-3.html",
+      "request": {},
+      "compareDelayMs": 3000,
+      "compareRequest": {"minAge": 2000},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Stored by the first scrape; 3 s later minAge 2 s (no maxAge: any age from 2 s on) reuses it.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.metadata.cacheState", "equals": "hit"},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.metadata.cachedAt", "equalsPath": "evidenceRecord.fetchedAt"},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.usage.requestCount", "equals": 0}
+      ]
+    },
+    {
+      "id": "CA04",
+      "batch": "cache",
+      "feature": "scrape-execution.cache-min-age",
+      "url": "https://books.toscrape.com/catalogue/page-4.html",
+      "request": {},
+      "compareRequest": {"minAge": 600000},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Stored by the first scrape seconds earlier; minAge 10 min finds nothing old enough, so the page is fetched live (miss).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.status", "equals": "success"},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.metadata.cacheState", "equals": "miss"},
+        {"item": "scrape-execution.cache-min-age", "type": "field", "path": "compare.usage.requestCount", "min": 1}
+      ]
+    },
+    {
+      "id": "CA05",
+      "batch": "cache",
+      "feature": "scrape-execution.lockdown-cache-only",
+      "url": "https://quotes.toscrape.com/tag/humor/page/2/",
+      "request": {"lockdown": true},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). A URL no case ever fetches or stores. lockdown answers failed / cache_miss with nothing requested: no final URL, no response, no robots.txt decision, requestCount 0; the record stays schema-valid.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "status", "equals": "failed"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "failureReason", "equals": "cache_miss"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "metadata.cacheState", "equals": "miss"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "evidenceRecord.finalUrl", "equals": null},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "evidenceRecord.httpStatus", "equals": null},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "evidenceRecord.robotsDecision", "equals": null},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "usage.requestCount", "equals": 0},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "channelsTried", "equals": []},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "agentHints.0", "includes": "lockdown"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "evidenceSchema"}
+      ]
+    },
+    {
+      "id": "CA06",
+      "batch": "cache",
+      "feature": "scrape-execution.lockdown-cache-only",
+      "url": "https://books.toscrape.com/catalogue/page-5.html",
+      "request": {},
+      "compareRequest": {"lockdown": true},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Stored by the first scrape; lockdown then answers from the cache without a request.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "compare.status", "equals": "success"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "compare.metadata.cacheState", "equals": "hit"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "compare.metadata.cachedAt", "equalsPath": "evidenceRecord.fetchedAt"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "compare.usage.requestCount", "equals": 0}
+      ]
+    },
+    {
+      "id": "CA07",
+      "batch": "cache",
+      "endpoint": "fc-scrape",
+      "feature": "scrape-formats.metadata-cache-state",
+      "url": "https://books.toscrape.com/catalogue/page-6.html",
+      "request": {},
+      "compareRequest": {"maxAge": 3600000},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). /fc: an omitted maxAge reuses nothing and data.metadata carries no cacheState; maxAge 1 h then answers from the cache with data.metadata.cacheState hit and cachedAt.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "success", "equals": true},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "data.metadata.cacheState", "present": false},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.httpStatus", "equals": 200},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.success", "equals": true},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.data.metadata.cacheState", "equals": "hit"},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.data.metadata.cachedAt", "present": true},
+        {"item": "scrape-formats.metadata-cache-state", "type": "field", "path": "compare.data.markdown", "equalsPath": "data.markdown"}
+      ]
+    },
+    {
+      "id": "CA08",
+      "batch": "cache",
+      "endpoint": "fc-scrape",
+      "feature": "scrape-execution.lockdown-cache-only",
+      "url": "https://quotes.toscrape.com/tag/humor/page/3/",
+      "request": {"lockdown": true},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). /fc lockdown on a URL no case fetches or stores: HTTP 404 with code SCRAPE_LOCKDOWN_CACHE_MISS, as Firecrawl answers it.",
+      "checks": [
+        {"item": "scrape-execution.lockdown-cache-only", "type": "apiStatus", "equals": 404},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "success", "equals": false},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "code", "equals": "SCRAPE_LOCKDOWN_CACHE_MISS"}
+      ]
+    },
+    {
+      "id": "CA09",
+      "batch": "cache",
+      "endpoint": "batch",
+      "feature": "scrape-execution.cache-max-age",
+      "urls": ["https://books.toscrape.com/catalogue/page-2.html", "https://books.toscrape.com/catalogue/page-3.html", "https://books.toscrape.com/catalogue/page-7.html"],
+      "request": {"maxAge": 3600000, "storeInCache": false},
+      "pollMs": 1000,
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Run after CA01 and CA03, which stored pages 2 and 3: a batch with maxAge 1 h answers them from the cache (cached true, hit, no fetch) and fetches page 7 live (miss; storeInCache false keeps page 7 unstored, so a re-run sees the same).",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "scrape-execution.cache-max-age", "type": "itemCount", "equals": 3},
+        {"item": "scrape-execution.cache-max-age", "type": "eachItem", "urlPattern": "page-[23]\\.html$", "minItems": 2, "check": {"type": "field", "path": "cacheState", "equals": "hit"}},
+        {"item": "scrape-execution.cache-max-age", "type": "eachItem", "urlPattern": "page-[23]\\.html$", "minItems": 2, "check": {"type": "field", "path": "cached", "equals": true}},
+        {"item": "scrape-execution.cache-max-age", "type": "eachItem", "urlPattern": "page-[23]\\.html$", "minItems": 2, "check": {"type": "field", "path": "cachedAt", "equalsPath": "evidenceRecord.fetchedAt"}},
+        {"item": "scrape-formats.metadata-cache-state", "type": "eachItem", "urlPattern": "page-7\\.html$", "check": {"type": "field", "path": "cacheState", "equals": "miss"}},
+        {"item": "scrape-execution.cache-max-age", "type": "eachItem", "check": {"type": "field", "path": "status", "equals": "success"}},
+        {"item": "scrape-execution.cache-max-age", "type": "eachItem", "check": {"type": "evidenceSchema"}}
+      ]
+    },
+    {
+      "id": "CA10",
+      "batch": "cache",
+      "endpoint": "crawl",
+      "feature": "scrape-execution.lockdown-cache-only",
+      "url": "https://books.toscrape.com/catalogue/page-2.html",
+      "request": {"lockdown": true, "sitemap": "skip", "maxDepth": 0},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). Run after CA01, which stored page 2: a crawl in lockdown (sitemap skip, depth 0) answers its one page from the cache, cached true, counted in cachedPages.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "completed"},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "itemCount", "equals": 1},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "eachItem", "check": {"type": "field", "path": "cacheState", "equals": "hit"}},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "eachItem", "check": {"type": "field", "path": "cached", "equals": true}},
+        {"item": "scrape-execution.lockdown-cache-only", "type": "field", "path": "report.cachedPages", "equals": 1}
+      ]
+    },
+    {
+      "id": "CA11",
+      "batch": "cache",
+      "feature": "scrape-execution.custom-headers",
+      "url": "https://httpbin.org/headers",
+      "request": {"headers": {"accept-language": "de-DE", "x-research-run": "evidence"}, "mobile": true, "formats": ["markdown"]},
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). The P2 row \"custom headers, mobile viewport recorded in the Evidence Record\": httpbin echoes the headers it received, so the page shows they were sent; the record names the mobile device and both headers, sorted, each with the SHA-256 of its value (never the value).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-execution.custom-headers", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-execution.custom-headers", "type": "markdownIncludes", "text": "de-DE"},
+        {"item": "scrape-execution.custom-headers", "type": "markdownIncludes", "text": "evidence"},
+        {"item": "scrape-execution.mobile-emulation", "type": "field", "path": "evidenceRecord.identity.device", "equals": "mobile"},
+        {"item": "scrape-execution.custom-headers", "type": "field", "path": "evidenceRecord.identity.requestHeaders", "equals": [{"name": "accept-language", "valueSha256": "4f429ced49de5975fdfd9fa2e649772597ff8c78bcff9e49a652c89e266af9c5"}, {"name": "x-research-run", "valueSha256": "ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e"}]},
+        {"item": "scrape-execution.custom-headers", "type": "evidenceSchema"}
+      ]
     }
   ]
 }

@@ -334,9 +334,14 @@ export class CrawlOrchestrator {
                 outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt), links: [] }
               }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
-              frontier.setCrawlDelay(item.host, outcome.crawlDelayMs ?? null)
-              // The politeness delay this request waited for is part of its record.
-              result = { ...result, trace: [{ at: 0, lane: result.lane, event: 'crawl_delay', detail: delay }, ...result.trace] }
+              if (outcome.cached === true) {
+                // A stored result the cache answered with: nothing was requested, so the host's Crawl-delay stays as it was and no delay is on the record.
+                cachedPage = true
+              } else {
+                frontier.setCrawlDelay(item.host, outcome.crawlDelayMs ?? null)
+                // The politeness delay this request waited for is part of its record.
+                result = { ...result, trace: [{ at: 0, lane: result.lane, event: 'crawl_delay', detail: delay }, ...result.trace] }
+              }
             }
             if (item.depth === 0 && CONTENTFUL_STATUS.has(result.status)) frontier.followSeedRedirect(result.evidence.finalUrl)
             const latestTask = await this.store.getTask(runningTask.id)
