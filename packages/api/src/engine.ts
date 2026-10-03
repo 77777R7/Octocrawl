@@ -132,7 +132,6 @@ export interface CrawlStatusPage {
   ahead: number | null
 }
 
-/** The crawl's state does not allow the request (HTTP 409 `conflict`). */
 /** What a handoff tells its caller while it waits, and what ends it. */
 export interface HandoffHooks {
   /** A page shows a check the person has to pass. */
@@ -147,6 +146,7 @@ export class HandoffUnavailableError extends Error {
   override readonly name = 'HandoffUnavailableError'
 }
 
+/** The crawl's state does not allow the request (HTTP 409 `conflict`). */
 export class CrawlStateError extends Error {
   override readonly name = 'CrawlStateError'
 }
