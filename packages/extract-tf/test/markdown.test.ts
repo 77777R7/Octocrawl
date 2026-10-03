@@ -79,6 +79,59 @@ describe('htmlToMarkdown', () => {
     expect(md).toBe('|  | 2023 | 2024 |\n| --- | --- | --- |\n| Exports | 12 | 14 |')
   })
 
+  it('expands colspan and rowspan into the grid, the spanned slots empty', () => {
+    const md = htmlToMarkdown(
+      '<table><tr><th rowspan="2">Region</th><th colspan="2">Quarter</th></tr><tr><th>Q1</th><th>Q2</th></tr>' +
+        '<tr><td rowspan="2">North</td><td>1</td><td>2</td></tr><tr><td>3</td></tr></table>',
+    )
+    expect(md).toBe('| Region | Quarter |  |\n| --- | --- | --- |\n|  | Q1 | Q2 |\n| North | 1 | 2 |\n|  | 3 |  |')
+  })
+
+  const delimiterRows = (md: string) => md.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line))
+
+  it('caps spans as browsers do (colspan 1000, rowspan 65534)', () => {
+    // A ~1 KB page whose spans, uncapped, would pad its grid to 12 million characters.
+    const html = `<table><tr>${'<td colspan="1000000"></td>'.repeat(4)}</tr>${'<tr><td>y</td></tr>'.repeat(40)}</table>`
+    const md = htmlToMarkdown(html)
+    expect(delimiterRows(md)).toEqual([`| ${Array(4000).fill('---').join(' | ')} |`])
+    expect(md.length).toBeLessThan(600_000)
+    const tall = htmlToMarkdown('<table><tr><td rowspan="1000000">a</td><td>b</td></tr><tr><td>c</td></tr><tr><td>d</td></tr></table>')
+    expect(tall).toBe('| a | b |\n| --- | --- |\n|  | c |\n|  | d |')
+  })
+
+  it('writes a table whose padded grid would be too large as its rows of cells, still one GFM table', () => {
+    // ~380 KB of HTML: one wide empty row over 20,000 one-cell rows pads to 60 million characters.
+    const html = `<table><tr><td colspan="1000"></td></tr>${'<tr><td>y</td></tr>'.repeat(20_000)}</table><table><tr><td>k</td><td>v</td></tr><tr><td>1</td><td>2</td></tr></table>`
+    const started = Date.now()
+    const md = htmlToMarkdown(html)
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(md.length).toBeLessThan(2 * html.length)
+    expect(delimiterRows(md)).toHaveLength(2)
+    expect(md.startsWith('|  |\n| --- |\n| y |\n| y |\n')).toBe(true)
+    expect(md.split('\n').filter((line) => line === '| y |')).toHaveLength(20_000)
+    expect(md.endsWith('\n\n| k | v |\n| --- | --- |\n| 1 | 2 |')).toBe(true)
+    // Rowspans over many rows, each spanning cell a thousand columns wide.
+    const tall = `<table><tr>${'<td rowspan="65534" colspan="1000">a</td>'.repeat(20)}</tr>${'<tr><td>y</td></tr>'.repeat(2_000)}</table>`
+    const tallStarted = Date.now()
+    expect(htmlToMarkdown(tall).length).toBeLessThan(2 * tall.length)
+    expect(Date.now() - tallStarted).toBeLessThan(5_000)
+  })
+
+  it('writes a table of 200,000 rows', () => {
+    const md = htmlToMarkdown(`<table>${'<tr><td>y</td></tr>'.repeat(200_000)}</table>`)
+    expect(md.split('\n')).toHaveLength(200_001)
+  })
+
+  it('shares one padding budget among a page\'s tables', () => {
+    // Each table pads to just under the per-table limit; together they pass the page's.
+    const near = `<table><tr><td colspan="1000">w</td></tr>${'<tr><td>y</td></tr>'.repeat(499)}</table>`
+    const md = htmlToMarkdown(near.repeat(6))
+    const delimiters = delimiterRows(md)
+    expect(delimiters).toHaveLength(6)
+    expect(delimiters.filter((line) => line.length > 1000)).toHaveLength(4)
+    expect(md.length).toBeLessThan(4 * 1000 * 500 * 3 + 6 * near.length)
+  })
+
   it('keeps required facts after extract-tf on the article fixture', () => {
     const html = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>

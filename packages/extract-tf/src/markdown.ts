@@ -114,6 +114,8 @@ interface Context {
   layout: boolean
   /** `data:` image URIs are written as targets instead of being dropped (MarkdownOptions.dataUriImages 'keep'). */
   keepDataUriImages: boolean
+  /** What the GFM grids of this page's tables may still add as empty cells (MAX_PAGE_TABLE_PADDING). */
+  tablePadding: { left: number }
 }
 
 /** Never content, or hidden by the page's CSS: skipped together with everything inside. */
@@ -161,19 +163,41 @@ function cellText(cell: Element, ctx: Context): string {
   return inline.finish().text.replace(/\n/g, ' ')
 }
 
-function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][]): string[][] {
-  const out: (string | undefined)[][] = []
-  const vertical: { col: number; left: number }[] = []
+/** The span limits browsers apply (HTML: colspan at most 1000, rowspan at most 65534). */
+const MAX_COLSPAN = 1000
+const MAX_ROWSPAN = 65534
+/**
+ * The most empty cells the grid of one table, and of all a page's tables
+ * together, may add for spans and short rows (each is written as ` | `).
+ * Padding is what lets a small page make a huge one: one wide row over many
+ * one-cell rows pads every row to its width. A table past either is written
+ * as its rows of cells, unpadded.
+ */
+export const MAX_TABLE_PADDING = 500_000
+export const MAX_PAGE_TABLE_PADDING = 2_000_000
+
+type GridCell = { value: string; colspan: number; rowspan: number }
+
+/**
+ * The cells placed on the table's grid, a spanned cell's value in its first
+ * slot and the others empty, every row padded to the widest; null once the
+ * grid would add more than `maxPadding` empty cells.
+ */
+function expandGrid(rows: GridCell[][], maxPadding: number): string[][] | null {
+  const out: string[][] = []
+  // Column → the rowspans still covering it, oldest first.
+  const vertical = new Map<number, { left: number }[]>()
+  let slots = 0
+  let cells = 0
   for (const htmlRow of rows) {
-    const row: (string | undefined)[] = []
+    const row: string[] = []
     let cursor = 0
     const fillOccupied = () => {
-      for (;;) {
-        const span = vertical.find((s) => s.col === cursor)
-        if (!span) break
+      for (let spans = vertical.get(cursor); spans !== undefined; spans = vertical.get(cursor)) {
         row[cursor] = ''
+        if (--spans[0]!.left === 0) spans.shift()
+        if (spans.length === 0) vertical.delete(cursor)
         cursor++
-        if (--span.left === 0) vertical.splice(vertical.indexOf(span), 1)
       }
     }
     for (const cell of htmlRow) {
@@ -183,14 +207,25 @@ function expandGrid(rows: { value: string; colspan: number; rowspan: number }[][
       const rs = Math.max(1, cell.rowspan)
       if (cs > 1) for (let x = 1; x < cs; x++) row[++cursor] = ''
       if (rs > 1) {
-        for (let w = 0; w < cs; w++) vertical.push({ col: cursor - cs + 1 + w, left: rs - 1 })
+        for (let w = 0; w < cs; w++) {
+          const col = cursor - cs + 1 + w
+          const spans = vertical.get(col)
+          if (spans) spans.push({ left: rs - 1 })
+          else vertical.set(col, [{ left: rs - 1 }])
+        }
       }
       cursor++
+      if (slots + cursor - ++cells > maxPadding) return null
     }
     fillOccupied()
+    slots += cursor
+    if (slots - cells > maxPadding) return null
     out.push(row)
   }
-  const width = Math.max(0, ...out.map((r) => r.length))
+  // A loop, not Math.max(...rows): a table of 200,000 rows would overflow the call stack.
+  let width = 0
+  for (const r of out) width = Math.max(width, r.length)
+  if (width * out.length - cells > maxPadding) return null
   return out.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''))
 }
 
@@ -206,12 +241,25 @@ function tableToGfm(table: Element, ctx: Context): string {
   const rows = ownRows(table).map((tr) =>
     Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr).map((cell) => ({
       value: normalizeCell(cellText(cell, ctx)),
-      colspan: Number(cell.getAttribute('colspan') ?? 1) || 1,
-      rowspan: Number(cell.getAttribute('rowspan') ?? 1) || 1,
+      colspan: Math.min(Number(cell.getAttribute('colspan') ?? 1) || 1, MAX_COLSPAN),
+      rowspan: Math.min(Number(cell.getAttribute('rowspan') ?? 1) || 1, MAX_ROWSPAN),
     })),
   )
   if (rows.every((row) => row.length === 0)) return ''
-  const grid = expandGrid(rows)
+  const budget = ctx.tablePadding
+  const grid = expandGrid(rows, Math.min(MAX_TABLE_PADDING, budget.left))
+  // Too large to pad: each row's own cells, in order and unpadded (GFM fills
+  // a short body row and drops cells past the header's width when rendering;
+  // the text keeps them), so it stays one table of the Markdown.
+  if (grid === null) {
+    const lines = caption ? [caption] : []
+    const header = rows[0]!.length > 0 ? rows[0]!.map((cell) => cell.value) : ['']
+    lines.push(`| ${header.join(' | ')} |`)
+    lines.push(`| ${header.map(() => '---').join(' | ')} |`)
+    for (const row of rows.slice(1)) lines.push(`| ${row.map((cell) => cell.value).join(' | ')} |`)
+    return lines.join('\n')
+  }
+  budget.left -= grid.length * grid[0]!.length - rows.reduce((n, row) => n + row.length, 0)
   // An empty corner cell stays empty: GFM allows it, and any text put there
   // would not be on the page.
   const header = grid[0]!
@@ -740,7 +788,7 @@ export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): str
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep' })
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING } })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()
