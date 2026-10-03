@@ -289,6 +289,13 @@ export interface ApiEngineOptions {
   mapMaxLimit?: number
   /** The largest map `timeout` this engine takes. Default MAX_MAP_TIMEOUT_MS (300 000) locally, HOSTED_MAP_MAX_TIMEOUT_MS (60 000) on a hosted engine. */
   mapMaxTimeoutMs?: number
+  /**
+   * Whether the engine, as it opens, resumes the batches and crawls of its
+   * task root that no process finished, and re-offers finished jobs'
+   * webhooks. Default true: the API server. A one-off command (`w2l scrape`)
+   * passes false, so it neither runs nor waits for earlier jobs.
+   */
+  resumeOnStart?: boolean
 }
 
 
@@ -819,7 +826,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   // A crawl paused by shutdown or left running by a crash resumes the same
   // way, with the options stored at its start; one stored before they were
   // kept stays as it is rather than run with guessed limits.
-  for (const name of existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
+  for (const name of options.resumeOnStart !== false && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
