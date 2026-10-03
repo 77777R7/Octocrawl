@@ -268,10 +268,10 @@ const STEADY_TEXT_GAP_MS = 300
  */
 async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; items: string | null }> {
   await documentLoaded(ctx)
-  const html = await bounded(ctx, ctx.page.content())
-  const url = ctx.page.url()
   const read = () => bounded(ctx, ctx.page.evaluate((selector) => {
-    const refs = (root: Element) => [root, ...Array.from(root.querySelectorAll('[href], [src]'))].map((element) => element.getAttribute('href') ?? element.getAttribute('src') ?? '').filter((ref) => ref !== '')
+    // A link or source by its path: a query that changes on every load (a search id, a tracking token) does not make a record new.
+    const path = (ref: string) => { try { return new URL(ref, location.href).pathname } catch { return ref } }
+    const refs = (root: Element) => [root, ...Array.from(root.querySelectorAll('[href], [src]'))].map((element) => element.getAttribute('href') ?? element.getAttribute('src') ?? '').filter((ref) => ref !== '').map(path)
     return {
       text: document.body?.innerText ?? '',
       refs: document.body === null ? [] : refs(document.body),
@@ -281,6 +281,9 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
   const first = await read()
   await abortableSleep(Math.min(STEADY_TEXT_GAP_MS, Math.max(0, timeLeft(ctx))), ctx.execution.signal)
   const second = await read()
+  // The HTML is the page as it stands after both reads: what the state below describes, not what was there a moment before.
+  const html = await bounded(ctx, ctx.page.content())
+  const url = ctx.page.url()
   // Word by word: a row whose price ticks keeps its name.
   const steady = (a: string, b: string) => { const before = new Set(a.split(/\s+/)); return b.split(/\s+/).filter((word) => before.has(word)).join(' ') }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
@@ -426,6 +429,8 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   const seenStates = new Set<string>()
   const seenItems = new Set<string>()
   let lastState: string | null = null
+  let lastListed: string | null = null
+  let loadsAtClick = ctx.loadedDocuments().length
   let alreadyRead = 0
   let pages = 0
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
@@ -434,15 +439,19 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   try {
     for (;;) {
       let { html, url, state, items: listed } = await pageState(ctx, action.itemSelector)
-      // Next clicked and the page unchanged: on a slow network its page may be on the way, and gets COME_BACK_WAIT_MS to arrive.
-      if (state === lastState) {
+      // Next clicked and the page unchanged, or showing the records it showed before under a URL changed within the page (an app
+      // that changes the URL first and loads its rows after, keeping the old ones meanwhile): its page may be on the way, and gets
+      // COME_BACK_WAIT_MS. A new document with the same records (a first page under two URLs) has arrived, and is not waited for.
+      const unchanged = () => state === lastState || (listed !== null && listed === lastListed && ctx.loadedDocuments().length === loadsAtClick)
+      if (unchanged()) {
         const until = comeBackUntil(ctx)
-        while (state === lastState && Date.now() < until) {
+        while (unchanged() && Date.now() < until) {
           await abortableSleep(250, ctx.execution.signal)
           ;({ html, url, state, items: listed } = await pageState(ctx, action.itemSelector))
         }
       }
       lastState = state
+      lastListed = listed
       // The same URL showing what it showed before: Next led back or did nothing, and the list is over.
       if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
       seenStates.add(state)
@@ -464,6 +473,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
       if (pages >= max) { stoppedBy = 'max'; break }
       if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+      loadsAtClick = ctx.loadedDocuments().length
       await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
       await afterRound(ctx, waitMs)
       // The next page goes through the same checks as any page a step reaches, before it is read.
