@@ -258,13 +258,13 @@ function tableCells(table: Element, cell: (el: Element) => string): { caption: s
 
 /**
  * The most characters a table's rows may hold once its spans are repeated
- * into every slot they cover, and the most all of a page's tables may hold
- * together; past either, a table is given as `omitted: 'too_large'` with no
- * rows, so a small page cannot make a huge CSV or response. A cell counts
- * what its CSV field and its JSON string cost: its text, each `"` three
- * more times (`""` in CSV, escaped again in JSON), each `\` once more and
- * each control character five more (`\u00XX` in JSON), plus three for the
- * separators and quotes.
+ * into every slot they cover and every row is padded to the widest, and the
+ * most all of a page's tables may hold together; past either, a table is
+ * given as `omitted: 'too_large'` with no rows, so a small page cannot make a
+ * huge CSV or response. A cell counts what its CSV field and its JSON string
+ * cost: its text, each `"` three more times (`""` in CSV, escaped again in
+ * JSON), each `\` once more and each control character five more (`\u00XX`
+ * in JSON), plus three for the separators and quotes.
  */
 export const MAX_TABLE_CHARS = 2_000_000
 export const MAX_PAGE_TABLE_CHARS = 5_000_000
@@ -293,17 +293,33 @@ function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedT
   if (rows.every((row) => row.length === 0)) return null
   // What the repeated spans would hold, before any of it is built (a span past the last row adds nothing).
   let chars = 0
-  rows.forEach((row, r) => { for (const cell of row) chars += cellCost(cell.value) * cell.colspan * Math.min(cell.rowspan, rows.length - r) })
+  let spanSlots = 0
+  let cellCount = 0
+  rows.forEach((row, r) => {
+    for (const cell of row) {
+      const slots = cell.colspan * Math.min(cell.rowspan, rows.length - r)
+      chars += cellCost(cell.value) * slots
+      spanSlots += slots
+      cellCount++
+    }
+  })
   const budget = ctx.tableBudget
-  if (chars > MAX_TABLE_CHARS || (budget !== undefined && chars > budget.left)) return { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
-  if (budget !== undefined) budget.left -= chars
+  const limit = Math.min(MAX_TABLE_CHARS, budget?.left ?? Infinity)
+  const omitted: ExtractedTable = { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
+  if (chars > limit) return omitted
+  // Every slot past the spans pads a row to the widest and costs cellCost('') = 3:
+  // the grid may hold (limit - chars) / 3 of them, and expandGrid stops building
+  // once it would hold more.
+  const grid = expandGrid(rows, spanSlots - cellCount + Math.floor((limit - chars) / 3), 'repeat')
+  if (grid === null) return omitted
+  if (budget !== undefined) budget.left -= chars + 3 * (grid.length * grid[0]!.length - spanSlots)
   let headerRows = 0
   for (const tr of ownRows(table)) {
     const cells = ownCells(tr)
     if (cells.length === 0 || !(tr.parentElement?.localName === 'thead' || cells.every((el) => el.localName === 'th'))) break
     headerRows++
   }
-  return { tableIndex, caption: caption === '' ? null : caption, headerRows, rows: expandGrid(rows, Infinity, 'repeat')! }
+  return { tableIndex, caption: caption === '' ? null : caption, headerRows, rows: grid }
 }
 
 function plainCell(cell: Element, ctx: Context): string {
@@ -870,7 +886,7 @@ export interface ExtractedTable {
   headerRows: number
   /** Every row padded to the table's width; a spanned cell's value fills each slot it covers. Empty when the table is omitted. */
   rows: string[][]
-  /** Present when the table's repeated cells would exceed MAX_TABLE_CHARS, or what the page's tables have left of MAX_PAGE_TABLE_CHARS: its rows are not given. */
+  /** Present when the table's repeated and padded cells would exceed MAX_TABLE_CHARS, or what the page's tables have left of MAX_PAGE_TABLE_CHARS: its rows are not given. */
   omitted?: 'too_large'
 }
 
