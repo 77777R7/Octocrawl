@@ -37,6 +37,8 @@ describe('waitlist entries', () => {
       { useCase: 'x'.repeat(201) }, { trigger: 'popup' }, { trigger: undefined }, { ref: 'https://evil.example/path' }, { phone: '123' },
     ]) expect([change, parseWaitlistEntry({ ...valid, ...change })]).toEqual([change, null])
     expect(parseWaitlistEntry({ ...valid, useCase: '表'.repeat(200) })).not.toBeNull()
+    expect(parseWaitlistEntry({ ...valid, useCase: 'two\n  lines' })).toMatchObject({ useCase: 'two lines' })
+    expect(parseWaitlistEntry({ ...valid, useCase: 'bad\u0000byte' })).toBeNull()
     expect(parseWaitlistEntry({ ...valid, website: 'https://spam.example' })).toBe('spam')
   })
 })
@@ -103,8 +105,9 @@ describe('Firestore waitlist', () => {
     expect(commits[0].update.name).toMatch(/\/waitlist\/[a-f0-9]{64}$/)
     expect(commits[0].update.name).not.toContain('ada')
     expect(commits[1].update.fields.role).toEqual({ stringValue: 'student' })
-    expect(commits[1].updateMask.fieldPaths).not.toContain('createdAt')
-    expect(commits[1].updateTransforms).toEqual([{ fieldPath: 'createdAt', minimum: { timestampValue: '2026-10-04T08:00:00.000Z' } }])
+    expect(commits[1].updateMask.fieldPaths).not.toContain('createdAtMs')
+    // Firestore's minimum transform accepts numbers only; a timestamp operand would fail or overwrite.
+    expect(commits[1].updateTransforms).toEqual([{ fieldPath: 'createdAtMs', minimum: { integerValue: String(Date.parse('2026-10-04T08:00:00Z')) } }])
     expect(Object.keys(commits[0].update.fields).sort()).toEqual(['email', 'needs', 'ref', 'role', 'trigger', 'updatedAt', 'useCase'])
   })
 

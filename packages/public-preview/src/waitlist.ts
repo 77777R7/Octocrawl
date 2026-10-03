@@ -50,13 +50,16 @@ export function parseWaitlistEntry(body: unknown): WaitlistEntry | 'spam' | null
   const needs = value.needs ?? []
   if (!Array.isArray(needs) || needs.some(need => !WAITLIST_NEEDS.includes(need as WaitlistNeed))) return null
   const rawUseCase = value.useCase ?? ''
-  if (typeof rawUseCase !== 'string' || [...rawUseCase.trim()].length > WAITLIST_USE_CASE_CHARS) return null
+  if (typeof rawUseCase !== 'string') return null
+  // Line breaks and tabs from the text box become spaces; any other control character is refused.
+  const useCase = rawUseCase.replace(/\s+/g, ' ').trim()
+  if ([...useCase].length > WAITLIST_USE_CASE_CHARS || /[\u0000-\u001f\u007f]/.test(useCase)) return null
   if (!WAITLIST_TRIGGERS.includes(value.trigger as WaitlistTrigger)) return null
   const ref = value.ref === undefined || value.ref === '' ? null : value.ref
   if (ref !== null && (typeof ref !== 'string' || ref.length > 253 || !HOST.test(ref))) return null
   return {
     email, role: role as WaitlistRole | null, needs: [...new Set(needs as WaitlistNeed[])],
-    useCase: rawUseCase.trim() || null, trigger: value.trigger as WaitlistTrigger, ref: ref as string | null,
+    useCase: useCase || null, trigger: value.trigger as WaitlistTrigger, ref: ref as string | null,
   }
 }
 
@@ -84,15 +87,15 @@ export class FirestoreWaitlist implements WaitlistStore {
       needs: { arrayValue: { values: entry.needs.map(need => ({ stringValue: need })) } },
       trigger: { stringValue: entry.trigger }, ref: text(entry.ref), updatedAt: { timestampValue: now.toISOString() },
     }
-    // One atomic write: replace the answers, and keep the first sign-up date (`minimum` sets it only when absent or
-    // later).
+    // One atomic write: replace the answers, and keep the first sign-up time. Firestore's `minimum` transform takes
+    // numbers only, so that time is epoch milliseconds; it sets the field when absent and otherwise keeps the smaller.
     const response = await this.fetcher(`https://firestore.googleapis.com/v1/${this.resourceBase}:commit`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ writes: [{
         update: { name: this.documentName(entry.email), fields },
         updateMask: { fieldPaths: Object.keys(fields) },
-        updateTransforms: [{ fieldPath: 'createdAt', minimum: { timestampValue: now.toISOString() } }],
+        updateTransforms: [{ fieldPath: 'createdAtMs', minimum: { integerValue: String(now.getTime()) } }],
       }] }),
       signal,
     })

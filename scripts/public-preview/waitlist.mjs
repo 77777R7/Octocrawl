@@ -30,7 +30,7 @@ for (let pageToken = ''; ;) {
     entries.push({
       name: doc.name, email: value(f.email), role: value(f.role), trigger: value(f.trigger), ref: value(f.ref),
       needs: (f.needs?.arrayValue?.values ?? []).map(v => v.stringValue), useCase: value(f.useCase),
-      createdAt: value(f.createdAt), updatedAt: value(f.updatedAt),
+      createdAt: f.createdAtMs?.integerValue ? new Date(Number(f.createdAtMs.integerValue)).toISOString() : null, updatedAt: value(f.updatedAt),
     })
   }
   if (!page.nextPageToken) break
@@ -58,7 +58,8 @@ if (args[0] === '--delete') {
     ['referrer', entries.map(entry => entry.ref ?? '(none)')],
   ]) console.log(`\n${title}\n${count(values).map(([key, n]) => `  ${String(n).padStart(4)}  ${key}`).join('\n')}`)
   if (args[0] === '--emails') {
-    const csv = text => `"${String(text ?? '').replaceAll('"', '""')}"`
+    // A leading = + - @ would run as a formula in a spreadsheet; a leading apostrophe keeps it text.
+    const csv = text => `"${String(text ?? '').replace(/^[=+\-@]/, "'$&").replaceAll('"', '""')}"`
     console.log(`\nemail,role,needs,useCase,trigger,ref,createdAt`)
     for (const entry of entries) console.log([entry.email, entry.role, entry.needs.join(' '), entry.useCase, entry.trigger, entry.ref, entry.createdAt].map(csv).join(','))
   }

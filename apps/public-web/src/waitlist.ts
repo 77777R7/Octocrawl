@@ -55,7 +55,8 @@ export function mountWaitlist(): { open(trigger: WaitlistTrigger): void } {
   const query = new URLSearchParams(location.search)
   if (query.get('from') === 'limits') {
     query.delete('from')
-    history.replaceState(null, '', `${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`)
+    const rest = query.toString()
+    history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
     open('limits')
   }
   return { open }
