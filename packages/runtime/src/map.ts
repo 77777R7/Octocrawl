@@ -199,7 +199,8 @@ export class MapRunner {
       const preferHttps = async (): Promise<void> => {
         const renamed = new Map<string, string>()
         for (const [link, variant] of httpsVariants) {
-          if (!origins.has(new URL(variant).origin) || cancelled() || Date.now() >= deadlineAt) continue
+          // A search read the http URL; the https one must match it too.
+          if (!origins.has(new URL(variant).origin) || !matches(variant, link.title) || cancelled() || Date.now() >= deadlineAt) continue
           let verdict: MapRobotsVerdict
           try { verdict = await this.sources.robotsVerdict(variant, scope) } catch (error) { if (cancelled()) throw error; continue }
           if (verdict !== 'allowed' && verdict !== 'no_robots') continue

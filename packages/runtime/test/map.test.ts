@@ -299,6 +299,9 @@ describe('MapRunner', () => {
     ], robots: [] } })
     expect(robotsAsked).toEqual(expect.arrayContaining([`${SITE}/docs/a`, `${SITE}/docs/b`, `${SITE}/docs/locked`]))
     expect(map).toMatchObject({ status: 'completed', warnings: [] })
+    // A search the http URL matches and the https one does not keeps the http link.
+    const searched = await new MapRunner(sources(startPage([link(`${HTTP}/docs/a`), link(`${SITE}/docs/a`)]), fakeSitemap([]).source).wired).run({ id: 'm-https-search', url: START, search: 'http://site.test/docs/a' })
+    expect(searched.links.map((l) => l.url)).toEqual([`${HTTP}/docs/a`])
     // Without folding, both variants are links of their own.
     const apart = await new MapRunner(sources(startPage([link(`${HTTP}/docs/a`), link(`${SITE}/docs/a`)]), fakeSitemap([]).source).wired).run({ id: 'm-https-apart', url: START, deduplicateSimilarURLs: false })
     expect(apart.links.map((l) => l.url)).toEqual([START, `${HTTP}/docs/a`, `${SITE}/docs/a`])
