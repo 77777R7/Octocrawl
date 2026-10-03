@@ -216,7 +216,7 @@ export function pageMarkup(): string {
       <div class="band">
         <div class="frame faq-grid">
           <div class="faq-intro">
-            <pre class="glyph-cloud is-side" aria-hidden="true">${glyphCloud(70, 34, 5)}</pre>
+            <pre class="glyph-cloud is-side" data-cols="70" data-rows="34" data-seed="5" aria-hidden="true">${glyphCloud(70, 34, 5)}</pre>
             <p class="section-kicker"><span class="kicker-square"></span> FAQ</p>
             <h2 id="faq-title">Questions,<br />answered <em>plainly.</em></h2>
           </div>

@@ -30,19 +30,24 @@ export function glyphBand(cols = 240): string {
   }))
 }
 
+/** The glyph cloud's marks, lightest to heaviest. */
+export const CLOUD_GLYPHS = ' ·:+×#'
+
+/** One cell of the glyph cloud: its distance from the centre (1 at the box's edge midpoints) and its ink, 0 to just
+ * under 1, which picks the mark from CLOUD_GLYPHS. */
+export function cloudCell(x: number, y: number, cols: number, rows: number, seed: number): { d: number, ink: number } {
+  const dx = (x / cols - 0.5) * 2, dy = (y / rows - 0.5) * 2
+  const d = Math.sqrt(dx * dx + dy * dy)
+  const ring = Math.min(1, Math.max(0, (d - 0.38) / 0.35)) * Math.max(0, 1 - Math.max(0, d - 1) / 0.3)
+  return { d, ink: Math.max(0, Math.min(0.999, noise(x, y * 2, seed) * ring * 1.35 + (hash(x, y, seed + 3) - 0.5) * 0.12)) }
+}
+
 /** A ring of glyph cloud that leaves its centre clear for a heading. */
 export function glyphCloud(cols: number, rows: number, seed: number): string {
-  const glyphs = ' ·:+×#'
   const lines: string[] = []
   for (let y = 0; y < rows; y++) {
     let line = ''
-    for (let x = 0; x < cols; x++) {
-      const dx = (x / cols - 0.5) * 2, dy = (y / rows - 0.5) * 2
-      const d = Math.sqrt(dx * dx + dy * dy)
-      const ring = Math.min(1, Math.max(0, (d - 0.38) / 0.35)) * Math.max(0, 1 - Math.max(0, d - 1) / 0.3)
-      const v = Math.max(0, Math.min(0.999, noise(x, y * 2, seed) * ring * 1.35 + (hash(x, y, seed + 3) - 0.5) * 0.12))
-      line += glyphs[Math.floor(v * glyphs.length)]
-    }
+    for (let x = 0; x < cols; x++) line += CLOUD_GLYPHS[Math.floor(cloudCell(x, y, cols, rows, seed).ink * CLOUD_GLYPHS.length)]
     lines.push(line)
   }
   return trimmed(lines)
