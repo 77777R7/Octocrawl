@@ -331,6 +331,13 @@ export class SqliteTaskStore implements TaskStore {
     return Object.fromEntries(rows.map((row) => [row.status, row.count]))
   }
 
+  async countBlockReasons(taskId: string): Promise<Record<string, number>> {
+    const rows = this.db
+      .prepare(`SELECT json_extract(result_json, '$.blockReason') AS reason, COUNT(*) AS count FROM steps WHERE task_id = ? AND status = 'blocked' AND result_json IS NOT NULL GROUP BY reason`)
+      .all(taskId) as Array<{ reason: string | null; count: number }>
+    return Object.fromEntries(rows.filter((row) => row.reason !== null).map((row) => [row.reason, row.count]))
+  }
+
   async listStepsPage(taskId: string, query: StepPageQuery) {
     const cursor = query.cursor === undefined ? null : decodeStepCursor(query.cursor)
     const errorStatuses = ['failed', 'blocked', 'cancelled', 'budget_exceeded']

@@ -8,7 +8,7 @@
 import type { AgentHints, JobWebhookStatus, RequestAttribution } from './api.js'
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
-import type { Evidence, FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
+import type { Evidence, FetchResult, FetchWarning, HandoffRequest, LadderRunAudit, TraceEvent } from './result.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
@@ -263,6 +263,13 @@ export interface CrawlPage {
   warning?: string
   /** What to change about the request next time (a login wall, a robots.txt rule, a cut), as on a scrape response; absent when nothing applies. */
   agentHints?: AgentHints
+  /**
+   * A batch item stopped at a check W2L does not pass (a captcha, a
+   * challenge, a login wall), on a server that can hand it to a person in
+   * their own Chrome (`POST /v1/batches/:id/handoff`): why, and how. Absent
+   * otherwise.
+   */
+  handoff?: HandoffRequest
   /** Present when the task asked for the `html` format, as on a scrape result; null when the page has none. */
   html?: string | null
   /** Present when the task asked for the `rawHtml` format, as on a scrape result; null when the page has none. */

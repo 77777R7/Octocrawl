@@ -19,6 +19,8 @@ import type {
   BatchErrorsResponse,
   BatchStartRequest,
   BatchStatusResponse,
+  BatchHandoffRequest,
+  BatchHandoffResponse,
   CompactScrapeResponse,
   FetchResult,
   MapRecord,
@@ -476,6 +478,20 @@ export class W2L {
     const items: CrawlPage[] = []
     for await (const item of this.listBatchItems(taskId, { limit: 50 }, wait)) items.push(item)
     return { taskId, report, items }
+  }
+
+  /**
+   * Hands a finished batch's items that a check stopped (a captcha, a
+   * challenge, a login wall) to the person in their own Chrome, on a local
+   * server: each opens in a new tab, they get through it, and W2L reads the
+   * page there. Answers when every item is read or given up, so it waits for
+   * the person: `waitMs` is how long, per page (default 10 minutes). On
+   * Node the SDK waits for the answer as long as that takes (no 300 s limit
+   * on the response headers); `request.signal` ends the wait.
+   */
+  async handOffBatch(id: string, body: BatchHandoffRequest = {}, request: RequestOptions = {}): Promise<BatchHandoffResponse> {
+    // undici reads a headers timeout of 0 as none: the answer comes when the person is done with every page.
+    return this.post<BatchHandoffResponse>(`/v1/batches/${encodeURIComponent(id)}/handoff`, body, 200, request, 0)
   }
 
   async cancelBatch(id: string, request: RequestOptions = {}): Promise<BatchStatusResponse> {

@@ -595,6 +595,53 @@ export interface BatchStatusResponse extends CrawlReport {
   maxConcurrency: number
   /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
   invalidURLs?: readonly string[]
+  /** Items stopped at a check a person can get through in their own Chrome (`POST /v1/batches/:id/handoff`); present on a server that offers the handoff. */
+  waitingForPerson?: number
+}
+
+/**
+ * The checks a batch item can be handed to a person for, and the routing
+ * reason each is handed over as: a captcha, a bot check or challenge, a
+ * login wall. A rate limit or a region block is not something a person gets
+ * through in a browser.
+ */
+export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_gate' | 'login_required'>> = {
+  captcha: 'captcha_required',
+  cloudflare_challenge: 'bot_gate',
+  bot_detected_generic: 'bot_gate',
+  login_wall: 'login_required',
+}
+
+/** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
+export interface BatchHandoffRequest {
+  waitMs?: number
+}
+
+export const MAX_HANDOFF_WAIT_MS = 1_800_000
+
+export function parseBatchHandoffRequest(body: unknown): BatchHandoffRequest {
+  if (body === undefined || body === null) return {}
+  if (typeof body !== 'object' || Array.isArray(body)) throw new RequestError('body must be a JSON object')
+  const rec = body as Record<string, unknown>
+  for (const key of Object.keys(rec)) if (key !== 'waitMs') throw new RequestError(`unsupported handoff option: ${key}`)
+  if (rec.waitMs === undefined) return {}
+  if (typeof rec.waitMs !== 'number' || !Number.isInteger(rec.waitMs) || rec.waitMs < 10_000 || rec.waitMs > MAX_HANDOFF_WAIT_MS) throw new RequestError(`waitMs must be an integer from 10000 to ${MAX_HANDOFF_WAIT_MS}`)
+  return { waitMs: rec.waitMs }
+}
+
+/**
+ * What a handoff did: each item it handed over, in order, and whether the
+ * person got it through. An item that was through is read in their browser
+ * and its result replaces the stopped one (`status`, the item's new one); an
+ * item that was not (they did not get through in time, closed its tab, or it
+ * ended off its site) keeps its stopped result, with `reason` saying why.
+ */
+export interface BatchHandoffResponse {
+  id: string
+  handedOff: number
+  through: number
+  notThrough: number
+  items: Array<{ id: string; url: string; through: boolean; status: string; reason?: string }>
 }
 
 /** The step statuses `GET /v1/batches/:id/errors` lists: the same ones `/v1/crawl/:id/errors` does. */

@@ -22,6 +22,12 @@ describe('flags', () => {
     }
   })
 
+  it('takes --handoff on a batch alone', () => {
+    expect(parseCommandLine('batch', ['https://example.com/', '--handoff']).cli).toEqual({ handoff: true })
+    expect(() => parseCommandLine('scrape', ['https://example.com/', '--handoff'])).toThrow('unknown flag --handoff')
+    expect(usage('batch')).toContain('--handoff')
+  })
+
   it('reads booleans, integers, lists, repeated patterns, formats, parsers and headers into the API body', () => {
     const line = parseCommandLine('crawl', [
       'https://example.com/', '--max-pages', '5', '--no-only-main-content', '--mobile', '--fast-mode=false',

@@ -20,6 +20,7 @@ import {
   OriginScheduler,
   prepareHttpIdentity,
   RobotsOriginCache,
+  pageFromUserBrowser,
   type Channel,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -47,6 +48,11 @@ import {
   type BatchErrorsQuery,
   type BatchErrorsResponse,
   type BatchStatusResponse,
+  type BatchHandoffRequest,
+  type BatchHandoffResponse,
+  HANDOFF_REASONS,
+  CONTENTFUL_STATUS,
+  stepStatusFromResult,
   type ParsedBatchStartRequest,
   BATCH_ERRORS_MAX_LIMIT,
   RequestError,
@@ -97,6 +103,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
+import { HandoffNotThrough, openUserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -123,6 +130,20 @@ export interface CrawlStatusPage {
   counts: Partial<Record<StepStatus, number>>
   /** Pages the crawl will still record, when this process runs it; null when it does not. */
   ahead: number | null
+}
+
+/** What a handoff tells its caller while it waits, and what ends it. */
+export interface HandoffHooks {
+  /** A page shows a check the person has to pass. */
+  onWaiting?: (url: string, check: string) => void
+  /** A page shows no check: it is read once the person clicks on it. */
+  onConfirm?: (url: string) => void
+  signal?: AbortSignal
+}
+
+/** A handoff this server does not offer (a hosted server, or one not serving its person's machine), or Chrome could not be reached: the message says why. */
+export class HandoffUnavailableError extends Error {
+  override readonly name = 'HandoffUnavailableError'
 }
 
 /** The crawl's state does not allow the request (HTTP 409 `conflict`). */
@@ -206,6 +227,17 @@ export interface ApiEngine {
    * CrawlStateError when it is completed, cancelled, running or a batch.
    */
   resumeCrawl(taskId: string): Promise<CrawlAccepted | null>
+  /**
+   * Hand a finished batch's items that a check stopped (a captcha, a
+   * challenge, a login wall) to the person, in their own Chrome: each is
+   * opened there in turn, read once they are through, and its result
+   * replaces the stopped one. Null when there is no such batch; a
+   * CrawlStateError while it runs; a HandoffUnavailableError on a server
+   * that does not offer it, or when Chrome cannot be reached.
+   */
+  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: HandoffHooks): Promise<BatchHandoffResponse | null>
+  /** End every handoff now, closing the tabs they have open, and wait until they have; close() does this first. No handoff starts after. */
+  endHandoffs(): Promise<void>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -271,6 +303,13 @@ export interface ApiEngineOptions {
    * not browse with the operator's accounts.
    */
   sessionsFile?: string | null
+  /**
+   * The person's own Chrome, where a batch item a check stopped can be
+   * handed to them (`handOffBatch`): present on an engine that runs on their
+   * machine and answers them alone. Absent: no handoff is offered. A hosted
+   * engine never offers one, whatever is passed.
+   */
+  userChrome?: UserChromeOptions | null
   /**
    * The receivers a job `webhook` may name beyond https: with
    * `allowHttpLoopback` (the default off a hosted engine) a plain-http
@@ -344,6 +383,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const shutdownController = new AbortController()
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
+  const userChrome: UserChromeOptions | null = options.hosted === true ? null : options.userChrome ?? null
+  /** The batches being handed to the person now: one handoff of a batch at a time. */
+  const handoffs = new Set<string>()
+  /** Ends every handoff when the engine closes, gracefully or not: a handoff waits on a person, not on work that will finish. */
+  const handoffClosing = new AbortController()
+  const handoffRuns = new Set<Promise<unknown>>()
   const savedLogins: SessionStore | null = options.hosted === true || (options.sessionsFile ?? null) === null ? null : readOnlySessions(new FileSessionStore(options.sessionsFile!))
   /** The saved logins a run of `mode` may use: mode `authed` alone. */
   const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
@@ -656,6 +701,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
+      const waitingForPerson = userChrome === null || handoffUnread(task) !== null ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -664,6 +710,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // The cap in force: the batch's own, never above this service's worker count.
         maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
+        ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(webhook === undefined ? {} : { webhook }),
       }
     } finally { await store.close() }
@@ -730,9 +777,82 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && handoffUnread(task) === null)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
+      }
+    } finally {
+      await store.close()
+    }
+  }
+
+  /** handOffBatch's work: see ApiEngine.handOffBatch. */
+  async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
+    if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+    const store = SqliteTaskStore.open(join(taskRoot, taskId))
+    try {
+      const task = await store.getTask(taskId)
+      if (task === null || task.batch === undefined) return null
+      if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
+      const unread = handoffUnread(task)
+      if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
+      handoffs.add(taskId)
+      try {
+        const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
+        const items: BatchHandoffResponse['items'] = []
+        if (waiting.length > 0) {
+          const selection = task.batch
+          const formats = selection.formats ?? ['markdown']
+          const fetchOpts = fetchOptions(selection, selection.formats)
+          // The caller going away, or this engine shutting down, ends the handoff.
+          const signal = AbortSignal.any([...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+          let chrome
+          try { chrome = await openUserChrome(userChrome, signal) }
+          catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
+          try {
+            for (const step of waiting) {
+              try {
+                // A caller that went away hands nothing more over: each item left keeps its stopped result.
+                if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
+                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
+                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
+                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
+                if (!CONTENTFUL_STATUS.has(result.status)) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
+                  continue
+                }
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
+                const stored: FetchResult = {
+                  ...result,
+                  markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
+                  links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
+                  ...(json === undefined ? {} : { json }),
+                }
+                // An engine shutting down writes nothing more.
+                if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'W2L shut down before the page was stored' })
+                  continue
+                }
+                // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
+                const { audit: _stoppedAudit, ...kept } = step
+                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                items.push({ id: step.id, url: step.url, through: true, status: stored.status })
+              } catch (error) {
+                if (!(error instanceof HandoffNotThrough)) throw error
+                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
+              }
+            }
+          } finally {
+            chrome.close()
+          }
+        }
+        const through = items.filter((item) => item.through).length
+        return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
+      } finally {
+        handoffs.delete(taskId)
       }
     } finally {
       await store.close()
@@ -1339,6 +1459,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
+    async endHandoffs() {
+      handoffClosing.abort(new DOMException('service shutdown', 'ShutdownError'))
+      await Promise.all([...handoffRuns].map((run) => run.catch(() => {})))
+    },
+
+    handOffBatch(taskId, req, hooks = {}) {
+      const run = handOff(taskId, req, hooks)
+      handoffRuns.add(run)
+      void run.catch(() => {}).finally(() => handoffRuns.delete(run))
+      return run
+    },
+
     async runFirecrawlMonitor(triggerKey, context) {
       initializeFirecrawlMonitor(monitorStore)
       return this.runMonitor(FIRECRAWL_MONITOR_ID, triggerKey, context)
@@ -1432,6 +1564,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (options.cancelActive) {
         shutdownController.abort(new DOMException('service shutdown', 'ShutdownError'))
       }
+      // A handoff ends now and closes the tab it had open in the person's Chrome before the engine is gone.
+      await this.endHandoffs()
       // A relaunch an append scheduled while a run was finishing is a new entry: wait until nothing is in flight.
       while (inflight.size > 0) await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))
@@ -1752,6 +1886,45 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
   return [...new Set([host, ...(twin === null ? [] : [twin]), ...allowlistedDomains, ...(scope.allowSubdomains ? [`*.${apex}`] : [])])]
 }
 
+/**
+ * What a batch asked for that a page read in the person's Chrome cannot give,
+ * or null: steps on the page (`actions`) and a screenshot are W2L's browser's
+ * to take, so such a batch's stopped items are not handed over.
+ */
+function handoffUnread(task: Task): string | null {
+  const options = task.batch === undefined ? undefined : fetchOptions(task.batch, task.batch.formats)
+  if (options?.actions !== undefined && options.actions.length > 0) return 'page actions'
+  if (options?.screenshot !== undefined) return 'a screenshot'
+  return null
+}
+
+/** Whether a step was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */
+function handoffNeeded(step: StepRecord): boolean {
+  return step.status === 'blocked' && step.result !== null && step.result.blockReason !== null && HANDOFF_REASONS[step.result.blockReason] !== undefined
+}
+
+/** How a step a check stopped is handed to the person. */
+function handoffRequestOf(step: StepRecord): { reason: string; liveViewUrl: null; rationale: string } {
+  const blockReason = step.result!.blockReason!
+  return {
+    reason: HANDOFF_REASONS[blockReason]!,
+    liveViewUrl: null,
+    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or w2l batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
+  }
+}
+
+/** Every step of a task, or its error steps, in the order recorded. */
+async function stepsOf(store: SqliteTaskStore, taskId: string, kind: StepPageQuery['kind']): Promise<StepRecord[]> {
+  const steps: StepRecord[] = []
+  let cursor: string | undefined
+  for (;;) {
+    const page = await store.listStepsPage(taskId, { cursor, limit: BATCH_ERRORS_MAX_LIMIT, kind })
+    steps.push(...page.steps)
+    if (!page.hasMore || page.nextCursor === null) return steps
+    cursor = page.nextCursor
+  }
+}
+
 /** Why a crawl cannot be resumed now, or null when it can. */
 function resumeRefusal(task: Task, running: boolean): string | null {
   if (task.batch !== undefined) return `task ${task.id} is a batch; a batch resumes when the service starts`
@@ -1795,8 +1968,9 @@ function compactPage(step: StepRecord, task: Task): CrawlPage {
   return { ...page, trace: [] }
 }
 
-function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): CrawlPage {
+function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handoffOffered = false): CrawlPage {
   const result = step.result
+  const handoff = handoffOffered && handoffNeeded(step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
   const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
@@ -1811,6 +1985,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     ...askedHtmlFormats(task, result),
     ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings, warning: warningOf(result.warnings) }),
     ...(agentHints.length === 0 ? {} : { agentHints }),
+    ...(handoff === null ? {} : { handoff }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),

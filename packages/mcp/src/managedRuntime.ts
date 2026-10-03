@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createApp, createApiEngine } from '@w2l/api'
+import { createApp, createApiEngine, type UserChromeOptions } from '@w2l/api'
 import type { NetworkPolicy } from '@w2l/contracts'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
@@ -22,6 +22,8 @@ export interface ManagedRuntimeOptions {
   hosted?: boolean
   /** The user's saved logins, read by mode `authed` (ApiEngineOptions.sessionsFile); never on the hosted host. */
   sessionsFile?: string | null
+  /** The person's own Chrome, for handing them a page a check stopped (ApiEngineOptions.userChrome); never on the hosted host. */
+  userChrome?: UserChromeOptions | null
   monitorPollMs?: number
   deliveryPollMs?: number
   /** Local single-user service only: tool errors keep an internal error's own message. */
@@ -30,7 +32,7 @@ export interface ManagedRuntimeOptions {
 
 /** The REST API stays in-process; both MCP transports share these durable workers. */
 export function createManagedRuntime(options: ManagedRuntimeOptions) {
-  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,hosted:options.hosted,sessionsFile:options.sessionsFile,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
+  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,hosted:options.hosted,sessionsFile:options.sessionsFile,userChrome:options.userChrome,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
   const api = createApp(engine, {exposeInternalErrors:options.exposeInternalErrors})
   const client = new W2L({baseUrl:'http://w2l.internal',fetch:async(input,init)=>api.fetch(new Request(input,init))})
   const deliveryStore = DeliveryStore.open(join(options.taskRoot,'section-b-control.sqlite'))

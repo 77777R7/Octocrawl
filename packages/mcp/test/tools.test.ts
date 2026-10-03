@@ -9,7 +9,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -441,6 +441,19 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'get_batch_errors', { id: 'batch-1', limit: 1001 })).rejects.toThrow('limit must be an integer between 1 and 1000')
     await expect(callTool(client, 'get_batch_errors', {})).rejects.toThrow('id is required')
     expect(calls).toHaveLength(2)
+  })
+
+  it('hands a batch\'s stopped items to the person through the API, with how long to wait for them', async () => {
+    const calls: Array<{ line: string; body: unknown }> = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      calls.push({ line: `${init?.method ?? 'GET'} ${String(input)}`, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return json({ id: 'batch-1', handedOff: 1, through: 1, notThrough: 0, items: [{ id: 's1', url: 'https://example.com/a', through: true, status: 'success' }] })
+    }) as typeof fetch })
+    expect(await callTool(client, 'hand_off_batch', { id: 'batch-1', waitMs: 60_000 })).toMatchObject({ through: 1 })
+    expect(calls).toEqual([{ line: 'POST http://127.0.0.1:8787/v1/batches/batch-1/handoff', body: { waitMs: 60_000 } }])
+    await expect(callTool(client, 'hand_off_batch', { id: 'batch-1', waitMs: 5 })).rejects.toThrow('waitMs must be an integer from 10000 to 1800000')
+    await expect(callTool(client, 'hand_off_batch', {})).rejects.toThrow('id is required')
+    expect(calls).toHaveLength(1)
   })
 
   it('declares and forwards idempotencyKey on crawl and batch_scrape, and appendToId on batch_scrape', async () => {
