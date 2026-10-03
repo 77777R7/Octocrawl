@@ -123,7 +123,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
     expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
-      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, screenshot, attributes)')
+      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'summary' }] })).toThrow('unsupported format: summary')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
@@ -256,7 +256,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href' }], prompt: 'x' }] })).toThrow('unsupported attributes format option: prompt')
     expect(() => parseScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [{ selector: 'a', attribute: 'href', all: true }] }] })).toThrow('unsupported attributes selector option: all')
     expect(() => parseScrapeRequest({ url, formats: [attributes, attributes] })).toThrow('formats must contain at most one attributes entry')
-    expect(() => parseScrapeRequest({ url, formats: [{ type: 'images' }] })).toThrow('formats entries must be markdown, links, json, html, rawHtml, images, screenshot, a json schema request, an attributes request or a screenshot request')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'images' }] })).toThrow('formats entries must be markdown, links, json, html, rawHtml, images, tables, screenshot, a json schema request, an attributes request or a screenshot request')
     // The lanes' own switches are not request fields: the formats ask for the images and attributes.
     expect(() => parseScrapeRequest({ url, includeImages: true })).toThrow('unsupported parameter: includeImages')
     expect(() => parseScrapeRequest({ url, attributes: [] })).toThrow('unsupported parameter: attributes')

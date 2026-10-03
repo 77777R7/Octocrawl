@@ -730,7 +730,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, attributes: _attributes, screenshot, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
@@ -1471,7 +1471,7 @@ function deliveryQuery<T extends DeliveryQuery>(query: T): Omit<T, 'jobId'> {
 /**
  * What a request or stored task asks each lane to capture. Its timeout is the
  * deadline; passed on, it lets the lanes' waits run to it. `html`, `rawHtml`,
- * `images`, an `attributes` entry and a `screenshot` entry among its formats
+ * `images`, `tables`, an `attributes` entry and a `screenshot` entry among its formats
  * ask the lanes to carry them on the result.
  */
 function fetchOptions(options: PageOptions | undefined, formats: readonly ScrapeFormat[] = []): FetchOptions {
@@ -1482,6 +1482,7 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
     ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
     ...(options?.maxFileBytes === undefined ? {} : { maxFileBytes: options.maxFileBytes }),
+    ...(options?.parsers === undefined ? {} : { parsers: options.parsers }),
     ...(options?.includeTags === undefined ? {} : { includeTags: options.includeTags }),
     ...(options?.excludeTags === undefined ? {} : { excludeTags: options.excludeTags }),
     ...(options?.headers === undefined ? {} : { headers: options.headers }),
@@ -1492,6 +1493,7 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(formats.includes('html') ? { includeHtml: true } : {}),
     ...(formats.includes('rawHtml') ? { includeRawHtml: true } : {}),
     ...(formats.includes('images') ? { includeImages: true } : {}),
+    ...(formats.includes('tables') ? { includeTables: true } : {}),
     ...(attributes === undefined ? {} : { attributes: attributes.selectors }),
     ...(screenshot === undefined ? {} : { screenshot }),
   }
@@ -1709,17 +1711,20 @@ function linksRequested(task: Task): boolean {
 /**
  * `html` and `rawHtml` of a batch item or crawl page, each present when the
  * task's formats asked for it: what the stored result carries, null when it
- * carries none (a file, a page that was not read as content); `images` and
- * `attributes` likewise, present when asked for and the page carries them;
+ * carries none (a file, a page that was not read as content); `images`,
+ * `tables` and `attributes` likewise, present when asked for and the page carries them;
  * `screenshot` when asked for and the page has a result (null when the
  * browser lane rendered no page or could not capture it).
  */
-function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPage, 'html' | 'rawHtml' | 'images' | 'attributes' | 'screenshot'> {
+function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPage, 'html' | 'rawHtml' | 'images' | 'tables' | 'pages' | 'attributes' | 'screenshot'> {
   const formats = (task.batch ?? task.crawl)?.formats ?? []
   return {
     ...(formats.includes('html') ? { html: result?.html ?? null } : {}),
     ...(formats.includes('rawHtml') ? { rawHtml: result?.rawHtml ?? null } : {}),
     ...(formats.includes('images') && result?.images !== undefined ? { images: result.images } : {}),
+    ...(formats.includes('tables') && result?.tables !== undefined ? { tables: result.tables } : {}),
+    // A PDF's pages are on the result only when the task's pdf parser asked for them.
+    ...(result?.pages === undefined ? {} : { pages: result.pages }),
     ...(hasFormat(formats, 'attributes') && result?.attributes !== undefined ? { attributes: result.attributes } : {}),
     ...(hasFormat(formats, 'screenshot') && result !== null ? { screenshot: result.screenshot ?? null } : {}),
   }

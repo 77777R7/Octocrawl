@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { estimateTokens, type FetchResult, type FileDescription, type FilePdfText, type Lane, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, type FetchResult, type FileDescription, type FilePdfText, type Lane, type PdfPageMarkdown, type PdfParser, type TraceEvent } from '@w2l/contracts'
 import { decodeFileText, FILE_EXTENSIONS, PDF_TEXT_DEFAULTS, pdfToMarkdown, TEXT_FILE_KINDS, type FileDecision } from '@w2l/extract-tf'
 import type { FileStore } from '../fileStore.js'
 
@@ -38,6 +38,8 @@ export interface FileContext {
   trace: TraceEvent[]
   /** Milliseconds since the fetch started, for trace events. */
   at: () => number
+  /** The request's `parsers` (FetchOptions.parsers): absent reads a PDF with the defaults, `[]` reads none, a `pdf` entry sets the options. */
+  parsers?: readonly PdfParser[]
 }
 
 export interface FileContent extends Pick<FetchResult, 'status' | 'failureReason' | 'markdown'> {
@@ -49,6 +51,8 @@ export interface FileContent extends Pick<FetchResult, 'status' | 'failureReason
   deadlineExceeded: boolean
   /** Monotonic milliseconds spent turning the bytes into text. */
   textMs: number
+  /** A PDF's pages, when the `pdf` parser asked for them (`pages: true`) and its text was read. */
+  pages?: readonly PdfPageMarkdown[]
 }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -89,7 +93,7 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
   const path = context.store === null ? null : await context.store.save(bytes, hash, FILE_EXTENSIONS[kind])
   trace.push({ at: at(), lane, event: path === null ? 'file_not_saved' : 'file_saved', detail: { kind, detectedBy: response.decision.detectedBy, contentType: response.contentType, bytes: bytes.byteLength, sha256: hash, ...(path === null ? { reason: 'no file store is configured' } : { path }) } })
   const file: FileDescription = { ...described(response), bytes: bytes.byteLength, sha256: hash, path }
-  const content = (status: FileContent['status'], failureReason: FileContent['failureReason'], markdown: string | null, over: Partial<FileDescription> = {}, extra: { deadlineExceeded?: boolean; textMs?: number } = {}): FileContent => ({
+  const content = (status: FileContent['status'], failureReason: FileContent['failureReason'], markdown: string | null, over: Partial<FileDescription> = {}, extra: { deadlineExceeded?: boolean; textMs?: number; pages?: readonly PdfPageMarkdown[] } = {}): FileContent => ({
     status,
     failureReason,
     markdown,
@@ -99,15 +103,26 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
     contentTokens: markdown === null ? 0 : estimateTokens(markdown),
     deadlineExceeded: extra.deadlineExceeded ?? false,
     textMs: extra.textMs ?? 0,
+    ...(extra.pages === undefined ? {} : { pages: extra.pages }),
   })
 
   if (bytes.byteLength === 0) return content('empty_verified', null, null)
 
   if (kind === 'pdf') {
+    const parser = context.parsers?.find((entry) => entry.type === 'pdf')
+    // `parsers: []` asks for no PDF text: the file is kept as received, like a spreadsheet.
+    if (context.parsers !== undefined && parser === undefined) {
+      trace.push({ at: at(), lane, event: 'pdf_not_parsed', detail: { reason: 'parsers' } })
+      return content('success', null, null, { warnings: [{ code: 'pdf_not_parsed', message: 'The request\'s parsers name no pdf entry, so no text was read; the bytes are saved as received.' }] })
+    }
     const left = context.deadlineAt === undefined ? Infinity : context.deadlineAt - PDF_DEADLINE_RESERVE_MS - Date.now()
     const deadlineBound = left < PDF_TEXT_DEFAULTS.timeBudgetMs
     const started = performance.now()
-    const text = await pdfToMarkdown(bytes, { timeBudgetMs: Math.max(0, Math.min(PDF_TEXT_DEFAULTS.timeBudgetMs, left)) })
+    const text = await pdfToMarkdown(bytes, {
+      timeBudgetMs: Math.max(0, Math.min(PDF_TEXT_DEFAULTS.timeBudgetMs, left)),
+      ...(parser?.maxPages === undefined ? {} : { maxPages: parser.maxPages }),
+      ...(parser?.pageMarkers === undefined ? {} : { pageMarkers: parser.pageMarkers }),
+    })
     const textMs = performance.now() - started
     if (!text.ok) {
       trace.push({ at: at(), lane, event: 'pdf_text', detail: { ms: Math.round(textMs), error: text.error.code } })
@@ -130,8 +145,10 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
     if (!text.pages.some(page => page.text !== '')) {
       return content('failed', outOfTime && text.pages.length === 0 ? 'timeout' : 'empty_unverified', null, { pdf }, { deadlineExceeded: outOfTime && deadlineBound, textMs })
     }
-    const stopped = outOfTime || codes.has('page_cap') || codes.has('page_error')
-    return content(stopped ? 'partial' : 'success', null, text.markdown, { pdf, markdownFrom: 'pdf_text' }, { deadlineExceeded: outOfTime && deadlineBound, textMs })
+    // A cut the request asked for (its own maxPages) is the answer asked for; the default cap's cut is not.
+    const stopped = outOfTime || (codes.has('page_cap') && parser?.maxPages === undefined) || codes.has('page_error')
+    const pages = parser?.pages === true ? text.pages.map((page) => ({ pageNumber: page.number, markdown: page.text })) : undefined
+    return content(stopped ? 'partial' : 'success', null, text.markdown, { pdf, markdownFrom: 'pdf_text' }, { deadlineExceeded: outOfTime && deadlineBound, textMs, ...(pages === undefined ? {} : { pages }) })
   }
 
   if (TEXT_FILE_KINDS.has(kind)) {

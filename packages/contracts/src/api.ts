@@ -8,7 +8,7 @@
 import { BROWSER_FINGERPRINT, browserFingerprintFor, type CrawlMode, type RobotsOverride } from './compliance.js'
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport, SitemapMode } from './crawl.js'
 import { SITEMAP_MODES } from './crawl.js'
-import type { FetchOptions } from './execution.js'
+import { MAX_PDF_PAGES, type FetchOptions, type PdfParser } from './execution.js'
 import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
@@ -251,7 +251,7 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'attributes' | 'screenshot')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'tables' | 'attributes' | 'screenshot')[]
   markdown?: string | null
   /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
   html?: string | null
@@ -260,6 +260,10 @@ export interface CompactScrapeResponse {
   links?: readonly string[]
   /** Present when `images` was asked for and the page was read as content: every image URL of the whole document, as on the full response. */
   images?: readonly string[]
+  /** Present when `tables` was asked for and the page was read as content: its data tables, as on the full response. */
+  tables?: FetchResult['tables']
+  /** Present when a `pdf` parser entry asked for `pages` and a PDF's text was read, as on the full response. */
+  pages?: FetchResult['pages']
   /** Present when an `attributes` entry was asked for and the page was read as content, as on the full response. */
   attributes?: FetchResult['attributes']
   /** Present when a `screenshot` entry was asked for, as on the full response: the capture, or null when the browser lane rendered no page or could not capture it. */
@@ -788,7 +792,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
@@ -1186,7 +1190,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
 }
 
 /** The formats a request names as strings; `attributes` carries its selectors and is named as an object. */
-const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'screenshot']
+const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'tables', 'screenshot']
 const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes']
 /** Firecrawl v1's spelling of a full-page screenshot: `{ type: 'screenshot', fullPage: true }`. */
 const SCREENSHOT_FULL_PAGE_ALIAS = 'screenshot@fullPage'
@@ -1202,7 +1206,7 @@ const ATTRIBUTE_NAME = /^[A-Za-z_][A-Za-z0-9_:.-]*$/
 const ATTRIBUTES_SELECTORS_MESSAGE = 'attributes format requires selectors: an array of 1 to 50 {selector, attribute} entries'
 const SCREENSHOT_VIEWPORT_MESSAGE = `screenshot viewport must be {width, height} with integers within ${MIN_SCREENSHOT_VIEWPORT.width}..${BROWSER_FINGERPRINT.screen.width} by ${MIN_SCREENSHOT_VIEWPORT.height}..${BROWSER_FINGERPRINT.screen.height}`
 const SCREENSHOT_ENTRIES_MESSAGE = 'formats must contain at most one screenshot entry'
-const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, html, rawHtml, images, screenshot, a json schema request, an attributes request or a screenshot request'
+const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, html, rawHtml, images, tables, screenshot, a json schema request, an attributes request or a screenshot request'
 
 /**
  * The selectors of an attributes format: 1 to 50 `{ selector, attribute }`
@@ -1483,6 +1487,46 @@ function checkMobileMode(mode: ApiCrawlMode | undefined, mobile: boolean | undef
   if (mode === 'research' && mobile === true) throw new RequestError('mobile is not available in research mode: the research identity declares a bot, not a device')
 }
 
+const PDF_PARSER_KEYS = ['type', 'mode', 'maxPages', 'pages', 'pageMarkers'] as const
+
+/**
+ * `parsers` (Firecrawl's): an array of at most one `pdf` entry, the string
+ * `pdf` or `{ type: "pdf", mode, maxPages, pages, pageMarkers }`; `[]` reads
+ * no PDF. W2L reads a PDF's text layer: `mode` is `fast` or `auto`, and
+ * `ocr` and the `image` parser are refused by name, as nothing would run them.
+ */
+function readParsers(value: unknown): readonly PdfParser[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new RequestError('parsers must be an array of "pdf" or { type: "pdf", ... } entries')
+  const parsers: PdfParser[] = []
+  value.forEach((entry: unknown, index) => {
+    const name = `parsers[${index}]`
+    const type = typeof entry === 'string' ? entry : entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>).type : undefined
+    if (type === 'image') throw new RequestError(`${name} is refused: W2L reads no image as a document (no OCR)`, 'unsupported_parameter', { parameters: [name] })
+    if (type !== 'pdf') throw new RequestError(`${name} must be "pdf" or { type: "pdf", mode, maxPages, pages, pageMarkers }`)
+    if (parsers.length > 0) throw new RequestError('parsers must contain at most one pdf entry')
+    if (typeof entry === 'string') { parsers.push({ type: 'pdf' }); return }
+    const rec = entry as Record<string, unknown>
+    rejectUnknownKeys(rec, PDF_PARSER_KEYS, name)
+    if (rec.mode === 'ocr') throw new RequestError(`${name}.mode "ocr" is refused: W2L reads a PDF's text layer and runs no OCR`, 'unsupported_parameter', { parameters: [`${name}.mode`] })
+    if (rec.mode !== undefined && rec.mode !== 'fast' && rec.mode !== 'auto') throw new RequestError(`${name}.mode must be "fast" or "auto"`)
+    const maxPages = rec.maxPages
+    if (maxPages !== undefined && (typeof maxPages !== 'number' || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_PDF_PAGES)) {
+      throw new RequestError(`${name}.maxPages must be an integer from 1 to ${MAX_PDF_PAGES}`)
+    }
+    const pages = readBoolean(rec.pages, `${name}.pages`)
+    const pageMarkers = readBoolean(rec.pageMarkers, `${name}.pageMarkers`)
+    parsers.push({
+      type: 'pdf',
+      ...(rec.mode === undefined ? {} : { mode: rec.mode as 'fast' | 'auto' }),
+      ...(maxPages === undefined ? {} : { maxPages: maxPages as number }),
+      ...(pages === undefined ? {} : { pages }),
+      ...(pageMarkers === undefined ? {} : { pageMarkers }),
+    })
+  })
+  return parsers
+}
+
 /**
  * The cache options: `maxAge` and `minAge` from 0 to MAX_CACHE_AGE_MS with
  * `minAge` at most `maxAge`, `storeInCache` and `lockdown`; a `lockdown`
@@ -1521,6 +1565,7 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
   const fastMode = readBoolean(rec.fastMode, 'fastMode')
   const blockAds = readBoolean(rec.blockAds, 'blockAds')
   const removeBase64Images = readBoolean(rec.removeBase64Images, 'removeBase64Images')
+  const parsers = readParsers(rec.parsers)
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -1534,6 +1579,7 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
     ...(fastMode === undefined ? {} : { fastMode }),
     ...(blockAds === undefined ? {} : { blockAds }),
     ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
+    ...(parsers === undefined ? {} : { parsers }),
     ...readCacheOptions(rec, mode),
   }
 }

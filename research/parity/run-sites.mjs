@@ -142,8 +142,14 @@
 //   scrape      case.compareDelayMs waits that long before case.compareRequest is sent (an age for minAge).
 //   fc-scrape   case.compareRequest scrapes the same URL again through /fc into doc.compare, after
 //               case.compareDelayMs when set, as on scrape.
+// Added for the researcher data group (P2, 2026-10-03):
+//   checks      tablesConsistent: doc.tables (the tables format) has one entry per GFM table of
+//               doc.markdown, tableIndex 0..n-1 in order, every row `columns` cells wide, and each
+//               csvSha256 the SHA-256 of its csv; spec.min is the fewest tables expected.
+//               field excludes: a string value that does not contain spec.excludes.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
@@ -635,6 +641,7 @@ function check(doc, spec, response) {
       if ('notIn' in spec) return { pass: !spec.notIn.includes(actual), actual }
       if ('present' in spec) return { pass: (actual !== undefined && actual !== null && actual !== '') === spec.present, actual: actual === undefined ? 'undefined' : typeof actual }
       if ('includes' in spec) return { pass: typeof actual === 'string' && actual.includes(spec.includes), actual }
+      if ('excludes' in spec) return { pass: typeof actual === 'string' && !actual.includes(spec.excludes), actual: typeof actual === 'string' ? `${actual.length} chars` : actual }
       if ('equalsEnv' in spec) return { pass: actual === spec.equalsEnv.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] ?? ''), actual }
       if ('equalsPath' in spec) return { pass: actual !== undefined && actual === get(doc, spec.equalsPath), actual: `${actual} vs ${get(doc, spec.equalsPath)}` }
       if ('abovePath' in spec) return { pass: typeof actual === 'number' && typeof get(doc, spec.abovePath) === 'number' && actual > get(doc, spec.abovePath), actual: `${actual} vs ${get(doc, spec.abovePath)}` }
@@ -721,6 +728,20 @@ function check(doc, spec, response) {
       const next = /^<!-- page \d+ -->$/m.exec(rest)
       const pass = collapse(next === null ? rest : rest.slice(0, next.index)).includes(collapse(spec.text))
       return { pass, actual: pass ? undefined : collapse(text).includes(collapse(spec.text)) ? 'on another page' : 'absent' }
+    }
+    case 'tablesConsistent': {
+      const tables = Array.isArray(doc.tables) ? doc.tables : null
+      if (tables === null) return { pass: false, actual: 'no tables' }
+      const gfm = markdown.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line)).length
+      const problems = []
+      if (tables.length !== gfm) problems.push(`${tables.length} tables, ${gfm} GFM tables`)
+      if (tables.length < (spec.min ?? 1)) problems.push(`fewer than ${spec.min ?? 1}`)
+      tables.forEach((table, i) => {
+        if (table.tableIndex !== i) problems.push(`tableIndex ${table.tableIndex} at ${i}`)
+        if (!table.rows.every((row) => row.length === table.columns)) problems.push(`table ${i}: a row is not ${table.columns} wide`)
+        if (createHash('sha256').update(table.csv, 'utf8').digest('hex') !== table.csvSha256) problems.push(`table ${i}: csvSha256`)
+      })
+      return { pass: problems.length === 0, actual: problems.length === 0 ? `${tables.length} tables (${tables.map((table) => `${table.rows.length}x${table.columns}`).join(', ')})` : problems.slice(0, 3).join('; ') }
     }
     case 'markdownIncludes':
       return { pass: markdown.includes(spec.text), actual: markdown.length === 0 ? 'no markdown' : undefined }
