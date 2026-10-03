@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -577,6 +577,10 @@ export class ProviderSubject implements SubjectAdapter {
 
     // The images and attributes formats read the page the vendor returned, like links.
     const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
+    // The tables format reads what the Markdown was written from, with the same options.
+    const tables = tablesFormat(wholePageAsked(options)
+      ? { html: res.body, options: { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
+      : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, res.finalUrl, options, trace, 'provider', wallMs)
     return {
       ...base,
       status: 'success',
@@ -601,6 +605,7 @@ export class ProviderSubject implements SubjectAdapter {
       },
       ...htmlFormats(res.body, res.body, extracted.mainHtml, options),
       ...extra,
+      ...tables,
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
     }
   }

@@ -345,6 +345,21 @@ export interface FetchResult {
    */
   images?: readonly string[]
   /**
+   * The `tables` format: every data table of the content the Markdown was
+   * written from (the main content, the whole page with `onlyMainContent:
+   * false`, or the `includeTags` selection), one entry per GFM table of the
+   * Markdown, in its order. Present only when asked for
+   * (`FetchOptions.includeTables`), on a contentful page: absent for a file
+   * and for a page that was not read as content. `[]` for a page without one.
+   */
+  tables?: readonly PageTable[]
+  /**
+   * A PDF's pages, each as the Markdown has it (without its marker), when a
+   * `pdf` parser entry asked for them (`pages: true`) and the text layer was
+   * read; absent otherwise.
+   */
+  pages?: readonly PdfPageMarkdown[]
+  /**
    * The `attributes` format: one entry per selector of the request, in its
    * order, with the attribute's values as written in the HTML. Present only
    * when asked for (`FetchOptions.attributes`), on a contentful page, like
@@ -387,4 +402,34 @@ export interface FetchResult {
   evidence: Evidence
   usage: ResourceUsage
   trace: readonly TraceEvent[]
+}
+
+/**
+ * One data table of a page (the `tables` format). `tableIndex` counts the
+ * data tables from 0 in document order: table N is the Nth GFM table of the
+ * Markdown made from the same request. Cells are plain text: a link is its
+ * text, an image its alt text, whitespace collapsed, nothing escaped; a cell
+ * that spans rows or columns gives its value to every slot it covers, so
+ * every row has `columns` cells and none is shifted.
+ */
+export interface PageTable {
+  tableIndex: number
+  /** The table's `<caption>` as plain text; null when it has none (a title written above the table is not one). */
+  caption: string | null
+  /** The final URL of the page the table was read from (`evidence.finalUrl`). */
+  sourceUrl: string
+  /** Leading rows in `<thead>` or made of `<th>` cells alone; 0 when none. */
+  headerRows: number
+  columns: number
+  rows: readonly (readonly string[])[]
+  /** The rows as RFC 4180 CSV: CRLF line ends, a field quoted when it holds a comma, a quote or a line break, quotes doubled. */
+  csv: string
+  /** SHA-256 (hex) of the UTF-8 bytes of `csv`. */
+  csvSha256: string
+}
+
+/** One page of a PDF's text (`pages`): its number in the document, from 1, and its Markdown. */
+export interface PdfPageMarkdown {
+  pageNumber: number
+  markdown: string
 }

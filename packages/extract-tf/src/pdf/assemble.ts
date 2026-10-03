@@ -128,9 +128,11 @@ const escapeMarker = (line: string) => (line.startsWith('<!--') ? `\\${line}` : 
  * The Markdown: for each page, a marker line `<!-- page N -->`, a blank line
  * and the page's paragraphs (lines joined by newlines, paragraphs by blank
  * lines); pages are separated by a blank line and the document ends with a
- * newline. A page without text is its marker alone.
+ * newline. A page without text is its marker alone. Without markers
+ * (`markers` false) the pages' text alone, separated by a blank line; a
+ * page without text adds nothing, and each page's offsets still locate it.
  */
-export function markdownOf(pages: PageLines[], removed: Map<number, string[]> | null): { markdown: string; pages: PdfPage[] } {
+export function markdownOf(pages: PageLines[], removed: Map<number, string[]> | null, markers = true): { markdown: string; pages: PdfPage[] } {
   const vocabulary = vocabularyOf(pages)
   let markdown = ''
   const out: PdfPage[] = []
@@ -138,9 +140,11 @@ export function markdownOf(pages: PageLines[], removed: Map<number, string[]> | 
     const text = page.paragraphs
       .map((paragraph) => joinHyphenated(paragraph.map((line) => line.text), vocabulary).map(escapeMarker).join('\n'))
       .join('\n\n')
-    if (markdown !== '') markdown += '\n\n'
-    markdown += `<!-- page ${page.number} -->`
-    if (text !== '') markdown += '\n\n'
+    if (markers) {
+      if (markdown !== '') markdown += '\n\n'
+      markdown += `<!-- page ${page.number} -->`
+      if (text !== '') markdown += '\n\n'
+    } else if (text !== '' && markdown !== '') markdown += '\n\n'
     const start = markdown.length
     markdown += text
     out.push({ number: page.number, label: page.label, text, start, end: markdown.length, ...(removed ? { removedLines: removed.get(page.number) ?? [] } : {}) })

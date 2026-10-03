@@ -16,6 +16,9 @@ import {
   wrapScrape,
 } from '../src/index.js'
 
+/** What /fc adds to every scrape: a PDF's text without page markers unless asked, as on Firecrawl. */
+const FC_PDF = { parsers: [{ type: 'pdf', pageMarkers: false }] }
+
 function page(partial: Partial<FetchResult> & Pick<FetchResult, 'status' | 'requestedUrl'>): FetchResult {
   return {
     failureReason: null,
@@ -90,6 +93,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('maps the supported Firecrawl fields onto the native request', () => {
     expect(parseFirecrawlScrapeRequest({ url: 'https://example.com/', formats: ['markdown', 'links'], onlyMainContent: true, origin: 'js-sdk@1.29.3' })).toEqual({
       url: 'https://example.com/',
+      ...FC_PDF,
       formats: ['markdown', 'links'],
       onlyMainContent: true,
       origin: 'js-sdk@1.29.3',
@@ -128,7 +132,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('maps html, rawHtml, includeTags and excludeTags for scrape and for a crawl\'s scrapeOptions', () => {
     const url = 'https://example.com/'
     expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['article'], excludeTags: ['.ad'] }))
-      .toEqual({ url, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['article'], excludeTags: ['.ad'] })
+      .toEqual({ url, ...FC_PDF, formats: ['markdown', 'html', 'rawHtml'], includeTags: ['article'], excludeTags: ['.ad'] })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['html'], includeTags: ['main'], excludeTags: ['nav'] } }))
       .toMatchObject({ formats: ['html'], includeTags: ['main'], excludeTags: ['nav'] })
     expect(() => parseFirecrawlScrapeRequest({ url, excludeTags: 'nav' })).toThrow('excludeTags must be an array of at most 100 CSS selectors')
@@ -146,11 +150,11 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
     // removeBase64Images is mapped with its value: true is W2L's default, false keeps the data: images.
-    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, removeBase64Images: true })
+    expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, ...FC_PDF, removeBase64Images: true })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toMatchObject({ url, removeBase64Images: false })
     expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: 'no' })).toThrow('removeBase64Images must be a boolean')
     // The cache options keep their Firecrawl names and the native rules.
-    expect(parseFirecrawlScrapeRequest({ url, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })).toEqual({ url, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })
+    expect(parseFirecrawlScrapeRequest({ url, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })).toEqual({ url, ...FC_PDF, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })
     expect(parseFirecrawlCrawlRequest({ url, sitemap: 'skip', scrapeOptions: { maxAge: 1000, lockdown: true } })).toMatchObject({ url, maxAge: 1000, lockdown: true })
     expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { lockdown: true } })).toThrow(/set sitemap to "skip"/)
   })
@@ -158,7 +162,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('maps the images format and an attributes entry for scrape and a crawl\'s scrapeOptions, and serves both on data when the result carries them', () => {
     const url = 'https://example.com/'
     const attributes = { type: 'attributes', selectors: [{ selector: 'span.titleline > a', attribute: 'href' }] }
-    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'images', attributes] })).toEqual({ url, formats: ['markdown', 'images', attributes] })
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'images', attributes] })).toEqual({ url, ...FC_PDF, formats: ['markdown', 'images', attributes] })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['images', 'images'] } })).toMatchObject({ formats: ['images'] })
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', { type: 'json', schema: {} }] })).toThrow('unsupported format: json (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
     expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'attributes', selectors: [] }] })).toThrow('attributes format requires selectors')
@@ -173,8 +177,8 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
 
   it('maps the screenshot format in its three spellings for scrape and a crawl\'s scrapeOptions, and serves data.screenshot as a data URI', () => {
     const url = 'https://example.com/'
-    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toEqual({ url, formats: ['markdown', 'screenshot'] })
-    expect(parseFirecrawlScrapeRequest({ url, formats: ['screenshot@fullPage'] })).toEqual({ url, formats: [{ type: 'screenshot', fullPage: true }] })
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'screenshot'] })).toEqual({ url, ...FC_PDF, formats: ['markdown', 'screenshot'] })
+    expect(parseFirecrawlScrapeRequest({ url, formats: ['screenshot@fullPage'] })).toEqual({ url, ...FC_PDF, formats: [{ type: 'screenshot', fullPage: true }] })
     const entry = { type: 'screenshot', fullPage: true, quality: 60, viewport: { width: 800, height: 600 } }
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { formats: ['markdown', entry] } })).toMatchObject({ formats: ['markdown', entry] })
     expect(() => parseFirecrawlScrapeRequest({ url, formats: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
@@ -481,7 +485,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('maps headers, mobile, skipTlsVerification, fastMode and blockAds for scrape and for a crawl\'s scrapeOptions, with the native refusals', () => {
     const url = 'https://example.com/'
     const options = { headers: { 'X-Test': 'w2l' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
-    expect(parseFirecrawlScrapeRequest({ url, ...options })).toEqual({ url, ...options, headers: { 'x-test': 'w2l' } })
+    expect(parseFirecrawlScrapeRequest({ url, ...options })).toEqual({ url, ...FC_PDF, ...options, headers: { 'x-test': 'w2l' } })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: options })).toMatchObject({ ...options, headers: { 'x-test': 'w2l' } })
     expect(() => parseFirecrawlScrapeRequest({ url, headers: { 'User-Agent': 'curl/8' } })).toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
     expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { headers: { Cookie: 'sid=1' } } })).toThrow('headers.cookie is refused')

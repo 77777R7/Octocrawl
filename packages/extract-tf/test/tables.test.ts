@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest'
+import { htmlToMarkdown, htmlToTables } from '../src/index.js'
+
+const gfmTables = (markdown: string): number => markdown.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line)).length
+
+describe('htmlToTables', () => {
+  it('gives each data table the Markdown writes as a GFM table, in its order, as plain cells', () => {
+    const html = '<main>' +
+      '<table><tr><td><a href="/">Home</a></td><td><a href="/b">B</a></td></tr></table>' + // one row: a bar of links, not data
+      '<table><caption>Table 1: <b>Sales</b>, 2025</caption>' +
+      '<thead><tr><th>Region</th><th colspan="2">Quarter</th></tr><tr><th></th><th>Q1</th><th>Q2</th></tr></thead>' +
+      '<tbody><tr><td rowspan="2">North</td><td><a href="https://x.example/q1">1,200</a></td><td>a|b "c"</td></tr>' +
+      '<tr><td>1 300</td><td><img src="/i.png" alt="up"> rising</td></tr></tbody></table>' +
+      '<table><tr><td>Station</td><td>Height</td></tr><tr><td>Pier<table><tr><td>inner</td></tr><tr><td>cell</td></tr></table></td><td>4.2</td></tr></table>' +
+      '</main>'
+    const tables = htmlToTables(html, { baseUrl: 'https://x.example/' })
+    expect(tables).toHaveLength(gfmTables(htmlToMarkdown(html, { baseUrl: 'https://x.example/' })))
+    expect(tables).toEqual([
+      {
+        tableIndex: 0, caption: 'Table 1: Sales, 2025', headerRows: 2,
+        rows: [['Region', 'Quarter', 'Quarter'], ['', 'Q1', 'Q2'], ['North', '1,200', 'a|b "c"'], ['North', '1 300', 'up rising']],
+      },
+      { tableIndex: 1, caption: null, headerRows: 0, rows: [['Station', 'Height'], ['Pier inner cell', '4.2']] },
+    ])
+  })
+
+  it('finds the data tables inside a layout table, as the Markdown does', () => {
+    const story = (n: number) => `<tr><td>${n}.</td><td>Story ${n}</td></tr>`
+    const html = `<table><tr><td>Header</td></tr><tr><td><table>${story(1)}${story(2)}${story(3)}</table></td></tr><tr><td>Footer</td></tr></table>`
+    const tables = htmlToTables(html)
+    expect(gfmTables(htmlToMarkdown(html))).toBe(1)
+    expect(tables.map((table) => table.rows)).toEqual([[['1.', 'Story 1'], ['2.', 'Story 2'], ['3.', 'Story 3']]])
+  })
+
+  it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {
+    const html = '<table class="ads"><tr><td>a</td></tr><tr><td>b</td></tr></table><table><tr></tr><tr></tr></table><table><tr><td>x</td></tr><tr><td>y</td></tr></table>'
+    expect(htmlToTables(html, { exclude: ['.ads'] }).map((table) => [table.tableIndex, table.rows])).toEqual([[0, [['x'], ['y']]]])
+    expect(htmlToTables('')).toEqual([])
+  })
+})
