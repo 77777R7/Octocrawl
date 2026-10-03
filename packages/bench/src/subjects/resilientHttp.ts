@@ -15,6 +15,7 @@ import {
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
+import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from '../contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
@@ -395,18 +396,41 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const bodyReadBeforeFinal = bodyReadMs
     // A response whose body was not read to the end: failed, nothing saved,
     // with the response's status and type kept as what the server answered.
-    const unread = (reason: 'body_too_large' | 'timeout' | 'connection_error', file?: FileDescription): FetchResult => {
+    const unread = (reason: 'body_too_large' | 'timeout' | 'connection_error' | 'unsupported_content_encoding' | 'decompressed_too_large' | 'parse_error', file?: FileDescription, contentEncoding?: string): FetchResult => {
       const denied = timedDenied(reason)
       return {
         ...denied,
-        evidence: { ...denied.evidence, finalUrl: out.finalUrl, httpStatus: out.status, redirectChain, contentType, ...(fetchedAt === null ? {} : { fetchedAt }), ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}) },
+        evidence: { ...denied.evidence, finalUrl: out.finalUrl, httpStatus: out.status, redirectChain, contentType, ...(contentEncoding === undefined ? {} : { contentEncoding }), ...(fetchedAt === null ? {} : { fetchedAt }), ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}) },
         usage: { ...denied.usage, requestCount: out.requestCount, attemptCount: out.attemptCount },
         ...(file === undefined ? {} : { file }),
       }
     }
+    // The final body is read unless its type is one W2L does not download; it is
+    // decoded by its Content-Encoding whether or not the coding was asked for
+    // (W2L sends no Accept-Encoding), under the decompressed cap.
+    const contentEncoding = out.kind === 'ok' && classifyContentType(contentType) !== 'unsupported' ? contentEncodingLabel(out.headers?.get('content-encoding')) : undefined
+    let wire: Uint8Array
     let bytes: Uint8Array
-    try { bytes = await out.bodyBytes() }
-    catch (error) {
+    // Set when the body was read but did not decode: there is no body to hash.
+    let undecoded = false
+    try {
+      wire = await out.bodyBytes()
+      const decodeStart = performance.now()
+      try {
+        bytes = (await decodeContentEncoding(wire, out.headers?.get('content-encoding'), this.networkPolicy.maxDecompressedBytes)).bytes
+      } catch (error) {
+        // An answer without content keeps the status the server gave, without its body.
+        const failure = decodeFailure(error)
+        if (contentful || failure === null) throw error
+        trace.push({ at: Date.now() - start, lane: 'http', event: failure.event, detail: failure.detail })
+        bytes = new Uint8Array()
+        undecoded = true
+      } finally {
+        bodyReadMs += Math.max(0, performance.now() - decodeStart)
+      }
+      // A file is held to its cap as decoded: that is what is saved.
+      if (contentful && classifyContentType(contentType) !== 'page' && bytes.byteLength > maxFileBytes) throw new BodyTooLargeError(maxFileBytes)
+    } catch (error) {
       if (signal?.aborted) return timedDenied('timeout', out.retryAt)
       if (error instanceof BodyTooLargeError) {
         const declared = classifyContentType(contentType)
@@ -416,6 +440,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
         const file = typeof declared === 'object' ? fileTooLarge({ contentType, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes, decision: { kind: declared.kind, detectedBy: 'content_type' } }, { lane: 'http', trace, at }) : undefined
         if (file === undefined) trace.push({ at: at(), lane: 'http', event: 'file_too_large', detail: { kind: null, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes } })
         return unread('body_too_large', file)
+      }
+      // A coding W2L does not decode, or bytes that do not decode, are never read as the page.
+      const failure = decodeFailure(error)
+      if (failure !== null) {
+        trace.push({ at: Date.now() - start, lane: 'http', event: failure.event, detail: failure.detail })
+        return unread(failure.reason, undefined, contentEncoding)
       }
       // A body that stalls or breaks off after the headers is a transport
       // failure like one before them, not an internal error.
@@ -428,7 +458,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const file = contentful ? detectFile(contentType, bytes, responseFileName(out.finalUrl, out.headers?.get('content-disposition') ?? null)) : null
     // A web page is read as text and hashed as such; a file's hash is of its bytes (see below).
     const body = file === null ? new TextDecoder().decode(bytes) : ''
-    const rawBodySha256 = file === null ? sha256Utf8(body) : null
+    const rawBodySha256 = file === null && !undecoded ? sha256Utf8(body) : null
     const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
 
     const base = {
@@ -451,10 +481,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
         vary: out.headers?.get('vary') ?? null,
         setsCookie: out.headers?.get('set-cookie') != null,
         ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}),
+        ...(contentEncoding === undefined ? {} : { contentEncoding }),
       },
       usage: {
         wallMs,
-        bytesWire: file === null ? Buffer.byteLength(body) : bytes.byteLength,
+        bytesWire: wire.byteLength,
         bytesDecompressed: file === null ? Buffer.byteLength(body) : bytes.byteLength,
         requestCount: out.requestCount,
         attemptCount: out.attemptCount,
@@ -813,6 +844,14 @@ function declaredContactHint(finalUrl: string, status: number | null, declaredCo
   try { host = new URL(finalUrl).hostname.toLowerCase() } catch { return null }
   if (host !== 'sec.gov' && !host.endsWith('.sec.gov')) return null
   return { host, status, hint: 'SEC.gov asks automated clients to declare a contact in the User-Agent: use mode "research" with W2L_CONTACT set, for example W2L_CONTACT="Jane Doe jane@example.org".' }
+}
+
+/** The failure reason and trace event for a body that was not decoded; null for any other error. */
+function decodeFailure(error: unknown): { reason: 'unsupported_content_encoding' | 'decompressed_too_large' | 'parse_error'; event: string; detail: Record<string, unknown> } | null {
+  if (error instanceof UnsupportedContentEncodingError) return { reason: 'unsupported_content_encoding', event: 'unsupported_content_encoding', detail: { contentEncoding: error.contentEncoding, coding: error.coding } }
+  if (error instanceof DecompressedTooLargeError) return { reason: 'decompressed_too_large', event: 'decompressed_too_large', detail: { contentEncoding: error.contentEncoding, maxBytes: error.maxBytes } }
+  if (error instanceof ContentDecodingError) return { reason: 'parse_error', event: 'content_decoding_failed', detail: { contentEncoding: error.contentEncoding, coding: error.coding, code: error.code } }
+  return null
 }
 
 /** How a body read that failed after the response headers is reported; null for anything else. */

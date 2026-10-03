@@ -9,8 +9,9 @@
  * pacing, the policy's redirect limit and its 10 MiB wire cap. The file's own
  * URL is judged by its host's robots.txt under the same identity before it is
  * requested, and an unreachable robots.txt refuses it as it would a page.
- * A gzip body (`.gz`, or the magic number) is inflated under the policy's
- * decompression cap. A `<sitemapindex>` is followed one level, its children in
+ * A Content-Encoding (gzip, deflate or br) is undone whether or not it was
+ * asked for, then a gzip file (`.gz`, or the magic number) is inflated, both
+ * under the policy's decompression cap. A `<sitemapindex>` is followed one level, its children in
  * listed order; at most `maxFiles` files are read and the load stops once
  * `maxUrls` entries are in hand. Every file read, refused or unreadable is on
  * the record the crawl keeps; none of these fetches has a compliance record.
@@ -23,8 +24,9 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import type { CrawlMode, ExecutionContext, IdentityDevice, NetworkPolicy, SitemapEntry, SitemapFileRecord, SitemapLoadRequest, SitemapLoadResult, SitemapSource } from '@w2l/contracts'
-import { createExecutionScope, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
+import { createExecutionScope, isGzipBytes, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
 import { request } from 'undici'
+import { ContentDecodingError, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from './contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, readCappedBody, SsrfDeniedError } from './egress.js'
 import { EgressRoute } from './egressRoute.js'
 import { prepareHttpIdentity } from './httpIdentity.js'
@@ -182,9 +184,22 @@ export class HttpSitemapSource implements SitemapSource {
       const bytes = response.bytes!
       record.bytes = bytes.byteLength
       record.sha256 = createHash('sha256').update(bytes).digest('hex')
+      let decoded: Uint8Array
+      let gzipFile: boolean
+      try {
+        const content = await decodeContentEncoding(bytes, response.contentEncoding, this.policy.maxDecompressedBytes)
+        decoded = content.bytes
+        // A `.gz` served with Content-Encoding: gzip is often the file itself, already undone: then only the magic number says it is still gzip.
+        gzipFile = content.codings.length > 0 ? isGzipBytes(decoded) : looksGzipped(response.finalUrl, decoded)
+      } catch (error) {
+        if (error instanceof UnsupportedContentEncodingError) return unreadable('unsupported_content_encoding')
+        if (error instanceof DecompressedTooLargeError) return unreadable('decompressed_too_large')
+        if (error instanceof ContentDecodingError) return unreadable('content_decoding_failed')
+        throw error
+      }
       let text: string
       try {
-        text = new TextDecoder().decode(looksGzipped(response.finalUrl, bytes) ? gunzipSync(bytes, { maxOutputLength: this.policy.maxDecompressedBytes }) : bytes)
+        text = new TextDecoder().decode(gzipFile ? gunzipSync(decoded, { maxOutputLength: this.policy.maxDecompressedBytes }) : decoded)
       } catch (error) {
         return unreadable((error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE' ? 'decompressed_too_large' : 'gzip_error')
       }
@@ -216,7 +231,7 @@ export class HttpSitemapSource implements SitemapSource {
   }
 
   /** One file's request, redirects followed within the policy's limit, each hop checked and paced; the body read within the wire cap. */
-  private async fetch(url: string, headers: Record<string, string>, scope: ExecutionContext): Promise<{ kind: 'ok' | 'redirect_limit'; finalUrl: string; status: number; contentType: string | null; bytes: Uint8Array | null }> {
+  private async fetch(url: string, headers: Record<string, string>, scope: ExecutionContext): Promise<{ kind: 'ok' | 'redirect_limit'; finalUrl: string; status: number; contentType: string | null; contentEncoding?: string | null; bytes: Uint8Array | null }> {
     let current = url
     for (let hop = 0; ; hop++) {
       await raceWithSignal(this.route.assertUrl(current), scope.signal)
@@ -227,7 +242,8 @@ export class HttpSitemapSource implements SitemapSource {
         const response = await request(current, {
           dispatcher: this.route.dispatcherFor(current),
           method: 'GET',
-          headers,
+          // A copy per hop: undici's ProxyAgent writes `host` into the object it is given, so a reused one sends the first hop's Host to every later one.
+          headers: { ...headers },
           headersTimeout: HEADERS_TIMEOUT_MS,
           bodyTimeout: BODY_TIMEOUT_MS,
           signal: scope.signal,
@@ -251,7 +267,7 @@ export class HttpSitemapSource implements SitemapSource {
         const declared = Number(header('content-length'))
         if (Number.isFinite(declared) && declared > this.policy.maxBodyBytes) { discard(response.body); throw new BodyTooLargeError(this.policy.maxBodyBytes, declared) }
         const bytes = await readCappedBody(response.body, this.policy.maxBodyBytes)
-        return { kind: 'ok', finalUrl: current, status: response.statusCode, contentType, bytes }
+        return { kind: 'ok', finalUrl: current, status: response.statusCode, contentType, contentEncoding: header('content-encoding'), bytes }
       } finally {
         permit.release()
       }
