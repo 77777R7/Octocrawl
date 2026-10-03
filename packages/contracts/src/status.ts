@@ -52,6 +52,11 @@ export const FAILURE_REASON = [
   'internal_error',
   /** A cache-only request (`lockdown`) found no stored result for the page, so nothing was fetched. */
   'cache_miss',
+  /**
+   * A step of the request's `actions` failed (`actions.failed` names it): the
+   * steps after it did not run, and the result keeps the page as it stood.
+   */
+  'action_failed',
 ] as const
 
 export type FailureReason = (typeof FAILURE_REASON)[number]

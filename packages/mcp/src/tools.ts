@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -110,6 +110,35 @@ const ROBOTS_OVERRIDE_PROPERTIES = {
   reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
   recordedBy: { type: 'string', minLength: 1, maxLength: 200, description: 'Who recorded the decision.' },
 } as const
+/** `actions`: steps the local browser runs on the page before it is read (scrape and batch_scrape). */
+const ACTIONS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: MAX_ACTIONS,
+  description: `Steps the local browser runs on the page after it loads and before it is read, in order (Firecrawl's actions): wait {milliseconds | selector}, click {selector, all?}, write {text} (into the focused element: click it first), press {key}, scroll {direction up|down, selector?}, screenshot {fullPage?, quality?, viewport?}, scrape (the HTML at that point), executeJavascript {script} (a function body; return gives the value) and pdf {format?, landscape?, scale?}. At most ${MAX_ACTIONS}. The result's actions holds what they produced; a step that fails stops the rest, and the result is failed with action_failed, actions.failed naming the step, the page as it stood. A step that leads to a page robots.txt or the egress policy refuses fails with navigation_refused. Not with fastMode or the cache options.`,
+  items: {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['wait', 'click', 'write', 'press', 'scroll', 'screenshot', 'scrape', 'executeJavascript', 'pdf'] },
+      milliseconds: { type: 'integer', minimum: 1, maximum: 60000 },
+      selector: { type: 'string' },
+      all: { type: 'boolean' },
+      text: { type: 'string' },
+      key: { type: 'string' },
+      direction: { type: 'string', enum: ['up', 'down'] },
+      fullPage: { type: 'boolean' },
+      quality: { type: 'integer', minimum: 1, maximum: 100 },
+      viewport: { type: 'object', properties: { width: { type: 'integer' }, height: { type: 'integer' } }, required: ['width', 'height'], additionalProperties: false },
+      script: { type: 'string' },
+      format: { type: 'string', enum: [...PDF_PAPER_FORMATS] },
+      landscape: { type: 'boolean' },
+      scale: { type: 'number', minimum: 0.1, maximum: 2 },
+    },
+    required: ['type'],
+    additionalProperties: false,
+  },
+} as const
+
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
   description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API refuses this field.',
@@ -165,6 +194,7 @@ export const TOOLS = [
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
         ...PAGE_OPTION_PROPERTIES,
+        actions: ACTIONS_SCHEMA,
         robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
         ...INTEGRATION_PROPERTY,
       },
@@ -334,6 +364,7 @@ export const TOOLS = [
         formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: FORMAT_ITEMS },
         includeLinks: { type: 'boolean' },
         ...PAGE_OPTION_PROPERTIES,
+        actions: ACTIONS_SCHEMA,
         robotsOverrides: {
           type: 'array', maxItems: 1000,
           description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
@@ -413,6 +444,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...executionOptions(req),
       ...cacheOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
+      ...(req.actions === undefined ? {} : { actions: req.actions }),
       ...integrationOf(req),
     }, request)
   }
@@ -483,7 +515,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)

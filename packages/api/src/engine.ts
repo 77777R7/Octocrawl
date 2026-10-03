@@ -375,6 +375,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const cachePlanFor = (url: string, mode: 'standard' | 'research' | 'authed', page: PageOptions, formats: readonly ScrapeFormat[] | undefined, channels: readonly Channel[], robotsOverride?: RobotsOverride): CachePlan | null => {
     if (mode === 'authed') return null
+    // A page after actions is that run's page alone (the parser refuses the cache options with them).
+    if (page.actions !== undefined) return null
     const lookup = cacheLookupRequested(page)
     const customHeaders = page.headers !== undefined && Object.keys(page.headers).length > 0
     const store = customHeaders ? page.storeInCache === true : page.storeInCache !== false
@@ -466,6 +468,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
+    // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
+    if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run W2L locally to use them')
   }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
@@ -567,6 +571,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (kept.length === 0) throw new RequestError('screenshot requires the browser lane, which this deployment does not offer')
       const dropped = selected.filter(channel => !BROWSER_RUNGS.has(channel.id)).map(name)
       if (dropped.length > 0) filtered.push({ reason: 'screenshot', dropped })
+      selected = kept
+    }
+    // Steps run in a browser: the local browser rungs alone take them.
+    if (page.actions !== undefined && page.actions.length > 0) {
+      if (page.fastMode === true) throw new RequestError('actions require the browser lane, which fastMode declines')
+      const kept = selected.filter(channel => BROWSER_RUNGS.has(channel.id))
+      if (kept.length === 0) throw new RequestError('actions require the browser lane, which this deployment does not offer')
+      const dropped = selected.filter(channel => !BROWSER_RUNGS.has(channel.id)).map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'actions', dropped })
       selected = kept
     }
     if (page.fastMode === true) {
@@ -1518,6 +1531,7 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(formats.includes('tables') ? { includeTables: true } : {}),
     ...(attributes === undefined ? {} : { attributes: attributes.selectors }),
     ...(screenshot === undefined ? {} : { screenshot }),
+    ...(options?.actions === undefined ? {} : { actions: options.actions }),
   }
 }
 
@@ -1778,6 +1792,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.file === undefined ? {} : { file: result.file }),
+    ...(result?.actions === undefined ? {} : { actions: result.actions }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,

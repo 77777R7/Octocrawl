@@ -277,6 +277,8 @@ export interface CrawlPage {
   attributes?: FetchResult['attributes']
   /** Present when the task asked for the `screenshot` format and the page rendered, as on a scrape result: the capture, or null when the browser lane could not capture it. */
   screenshot?: FetchResult['screenshot']
+  /** Present when the batch ran `actions` on the page: what the steps produced, and the step that failed if one did. */
+  actions?: FetchResult['actions']
   /** Absolute outbound links; present when the task requested links. */
   links?: readonly string[]
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */

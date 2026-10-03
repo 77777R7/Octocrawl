@@ -15,7 +15,7 @@ export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane
 
 /** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance. */
 export function lowContentYieldHint(browserTried: boolean): string {
-  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet`
+  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction`
 }
 
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */

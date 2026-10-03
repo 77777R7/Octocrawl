@@ -141,7 +141,10 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'summary'] })).toThrow('unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
-    expect(() => parseFirecrawlScrapeRequest({ url, actions: [], proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: actions, proxy')
+    expect(() => parseFirecrawlScrapeRequest({ url, location: {}, proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: location, proxy')
+    // A scrape maps actions to the native option, which checks them; a crawl's scrapeOptions.actions is refused by name (below).
+    expect(parseFirecrawlScrapeRequest({ url, actions: [{ type: 'click', selector: '#more' }, { type: 'scrape' }] }).actions).toEqual([{ type: 'click', selector: '#more' }, { type: 'scrape' }])
+    expect(() => parseFirecrawlScrapeRequest({ url, actions: [{ type: 'hover' }] })).toThrow('actions[0].type must be one of')
     expect(() => parseFirecrawlScrapeRequest({ url, waitFor: 60_001 })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
     expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['summary'], location: {}, waitFor: 1 } }))
       .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: summary')

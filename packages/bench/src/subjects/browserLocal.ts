@@ -1,4 +1,4 @@
-import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -24,6 +24,7 @@ import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -314,11 +315,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // tls_unverified warning.
     const robots: { overrideWarning: FetchWarning | null } = { overrideWarning: null }
     const tlsWarning: FetchWarning | null = options.skipTlsVerification === true ? tlsUnverifiedWarning(new URL(url).hostname) : null
+    // Set when the request's actions ran on the page: every result of this fetch then carries what they produced.
+    const ran: { actions?: ActionRun } = {}
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       return {
-        ...result,
+        ...withActions(result, ran.actions),
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
@@ -342,7 +345,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       cooldownWaitMs = permit.cooldownWaitMs
       if (permit.limitedByConcurrency) concurrencyWaitMs = permit.concurrencyWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) }, ran)
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -361,7 +364,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void, ran: { actions?: ActionRun } = {}): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -839,6 +842,35 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
       if (adsBlocked > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'ads_blocked', detail: { count: adsBlocked, hosts: [...adHostsBlocked] } })
+      // The request's actions: after load, stability and waitFor, before the
+      // screenshot format and the DOM are read, so both show the page the
+      // steps left. A page a step moved to goes through robots.txt and the
+      // egress policy as the requested URL did.
+      if (options.actions !== undefined && options.actions.length > 0) {
+        ran.actions = await runPageActions(options.actions, {
+          page,
+          execution,
+          trace,
+          at: () => Date.now() - start,
+          settle: async (maxMs) => { if (maxMs > 0) await settle(maxMs) },
+          reserveMs: CAPTURE_RESERVE_MS,
+          deviceScaleFactor: fingerprint.deviceScaleFactor,
+          viewport: page.viewportSize() ?? window.viewport,
+          refuseNavigation: async (target) => {
+            if (!/^https?:/i.test(target)) return null
+            try {
+              await assertSafeUrl(target, this.networkPolicy)
+            } catch (error) {
+              return error instanceof Error ? error.message : 'the egress policy refuses it'
+            }
+            if (!identity.respectsRobots) return null
+            const lookup = await this.robotsCache.lookup(target, identity.userAgent, execution, relaxedRoutes === null ? undefined : (to) => relaxedRoutes.dispatcherFor(to))
+            const verdict = this.robotsCache.decision(lookup, target, identity.userAgent)
+            return verdict.decision === 'disallowed' ? `robots.txt (${verdict.robotsUrl}) disallows it${verdict.unreachable === undefined ? '' : ' (unreachable)'}` : null
+          },
+        })
+        throwIfExecutionStopped(execution)
+      }
       // The screenshot format: the page as it stands after load, stability
       // and waitFor, before the DOM is read below, so the image and the
       // capture show the same page. It goes on whatever the rendered page
@@ -1479,5 +1511,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.browser = null
     this.browserPromise = null
     await this.robotsCache.teardown()
+  }
+}
+
+/**
+ * A result of a fetch that ran the request's actions: what they produced,
+ * and their files among the evidence's artifacts. When a step failed, a page
+ * read as content is `failed` with `action_failed`, its content kept as the
+ * page stood: it is not the page the steps were to reach. A page that was
+ * not content anyway (blocked, failed) keeps its own verdict.
+ */
+function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResult {
+  if (ran === undefined) return result
+  const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)
+  return {
+    ...result,
+    actions: ran.result,
+    ...(failed ? { status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null } : {}),
+    evidence: { ...result.evidence, artifacts: [...result.evidence.artifacts, ...ran.artifacts] },
   }
 }

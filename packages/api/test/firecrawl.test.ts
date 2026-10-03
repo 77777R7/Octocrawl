@@ -77,7 +77,7 @@ describe('Firecrawl /scrape /crawl shim', () => {
         details: { parameters: ['proxy'], formats: ['summary'] },
       },
     })
-    expect(await post('/fc/v1/scrape', { url, actions: [{ type: 'wait', milliseconds: 500 }] })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('actions') } })
+    expect(await post('/fc/v1/crawl', { url, scrapeOptions: { actions: [{ type: 'wait', milliseconds: 500 }] } })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('scrapeOptions.actions') } })
     // webhook is mapped onto the native option now; a key inside it W2L does not know is still refused by name.
     expect(await post('/fc/v1/crawl', { url, webhook: { url: 'https://example.com/hook', retries: 3 } })).toMatchObject({ status: 400, body: { success: false, error: 'unknown webhook option: retries', code: 'invalid_request' } })
   })

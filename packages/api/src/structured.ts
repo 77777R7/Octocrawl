@@ -948,10 +948,12 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, ...rest } = result
+      // What the actions produced travels once too, on the response.
+      const { actions: _kept, ...whole } = result
       return {
         ...attempt,
-        result: { ...(debug ? result : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
+        result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
       }
     }),
   }
@@ -1142,6 +1144,8 @@ export function compactScrapeResponse(
     ...(hasFormat(formats, 'attributes') && next.attributes !== undefined ? { attributes: next.attributes } : {}),
     // Asked for: the capture, or null when the browser lane rendered no page or could not capture it.
     ...(hasFormat(formats, 'screenshot') ? { screenshot: next.screenshot ?? null } : {}),
+    // What the request's actions produced, and the step that failed if one did.
+    ...(next.actions === undefined ? {} : { actions: next.actions }),
     ...(next.document === undefined ? {} : { document: next.document === null ? null : {
       title: next.document.title,
       pageType: next.document.pageType,
