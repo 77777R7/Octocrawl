@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer, type AddressInfo } from 'node:net'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { COMMANDS, flagName, optionKeys, parseCommandLine, runCli, usage } from '../src/index.js'
+import { COMMANDS, EVIDENCE_COLUMNS, flagName, optionKeys, parseCommandLine, runCli, usage } from '../src/index.js'
 
 describe('flags', () => {
   it('names every API option in kebab case', () => {
@@ -100,8 +101,44 @@ describe('w2l against a local site', () => {
     const written = await cli(['scrape', `${origin}/tides/a`, '--formats', 'markdown,tables', '--out', dir])
     expect(written.code).toBe(0)
     const files = (await readdir(dir)).sort()
-    expect(files).toEqual(['0001-127.0.0.1-' + new URL(origin).port + '-tides-a.md', '0001-127.0.0.1-' + new URL(origin).port + '-tides-a.table-0.csv', 'results.jsonl'].sort())
+    expect(files).toEqual(['0001-127.0.0.1-' + new URL(origin).port + '-tides-a.md', '0001-127.0.0.1-' + new URL(origin).port + '-tides-a.table-0.csv', 'results.csv', 'results.jsonl'].sort())
     expect(await readFile(join(dir, files.find((file) => file.endsWith('.csv'))!), 'utf8')).toBe('Station,Height\r\n"North, ""outer""",4.2\r\n')
+  })
+
+  it('writes results.csv with one row of evidence per page, a failed page kept, hashes matching the files', async () => {
+    const dir = join(root, 'out-batch')
+    const unreachable = 'http://127.0.0.1:1/gone'
+    const written = await cli(['batch', `${origin}/tides/a`, unreachable, '--out', dir])
+    expect(written.code).toBe(0)
+    expect(written.err).toMatch(/wrote 2 results \(results.jsonl, results.csv\), 1 Markdown files/)
+    const lines = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
+    expect(lines.at(-1)).toBe('')
+    expect(lines[0]).toBe(EVIDENCE_COLUMNS.join(','))
+    expect(lines[0]).toBe('url,status,reason,final_url,fetched_at,http_status,lane,robots_decision,raw_sha256,markdown_sha256,extractor,source_commit,cache_state,cached_at,markdown_file')
+    const rows = lines.slice(1, -1).map((line) => Object.fromEntries(line.split(',').map((value, i) => [EVIDENCE_COLUMNS[i], value])))
+    expect(rows).toHaveLength(2)
+    const items = (await readFile(join(dir, 'results.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    const ok = rows.find((row) => row.url === `${origin}/tides/a`)!
+    const record = items.find((item) => item.url === `${origin}/tides/a`).evidenceRecord
+    expect(ok).toMatchObject({ status: 'success', reason: '', final_url: record.finalUrl, fetched_at: record.fetchedAt, http_status: '200', lane: 'http', robots_decision: 'allowed', raw_sha256: record.rawSha256, extractor: record.extractor.version, cache_state: '' })
+    expect(ok.markdown_sha256).toBe(createHash('sha256').update(await readFile(join(dir, ok.markdown_file!))).digest('hex'))
+    // The page W2L could not read stays in the file, with its reason; what was not observed is empty, not 0.
+    const failed = rows.find((row) => row.url === unreachable)!
+    expect(failed.status).toBe('failed')
+    expect(failed.reason).not.toBe('')
+    expect(failed).toMatchObject({ http_status: '', raw_sha256: '', markdown_sha256: '', markdown_file: '' })
+  })
+
+  it('gives a scrape\'s cache outcome in results.csv, read from the response metadata', async () => {
+    const row = async (dir: string) => {
+      expect((await cli(['scrape', `${origin}/tides/cached`, '--max-age', '600000', '--out', dir])).code).toBe(0)
+      const [header, line] = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
+      return Object.fromEntries(line!.split(',').map((value, i) => [header!.split(',')[i], value]))
+    }
+    const first = await row(join(root, 'out-cache-1'))
+    const second = await row(join(root, 'out-cache-2'))
+    expect(first).toMatchObject({ status: 'success', cache_state: 'miss', cached_at: '' })
+    expect(second).toMatchObject({ status: 'success', cache_state: 'hit', cached_at: first.fetched_at, fetched_at: first.fetched_at })
   })
 
   it('refuses what the API refuses, with the API\'s message, before fetching', async () => {

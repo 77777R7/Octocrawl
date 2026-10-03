@@ -17,6 +17,7 @@ import {
   RequestError,
   type CrawlPage,
   type CrawlReport,
+  type EvidenceRecord,
   type PageTable,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
@@ -131,7 +132,13 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
 }
 
 /** A page as `--out` writes it: a crawl page or batch item (`url`), or a scrape response (`requestedUrl`). */
-type Page = { url?: string; requestedUrl?: string; markdown?: string | null; tables?: readonly PageTable[] }
+type Page = {
+  url?: string; requestedUrl?: string; markdown?: string | null; tables?: readonly PageTable[]
+  status?: string; lane?: string | null; failureReason?: string | null; blockReason?: string | null; budgetExceeded?: string | null
+  cacheState?: string; cachedAt?: string; evidenceRecord?: EvidenceRecord | null
+  /** A scrape response gives the cache outcome here, not at the top level. */
+  metadata?: object | null
+}
 
 /** Wait for a crawl or batch to end, then answer with its report and every page it recorded. */
 async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo): Promise<number> {
@@ -168,8 +175,10 @@ async function settled(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: strin
 
 /**
  * `--out <dir>`: `results.jsonl` (one page per line, as answered),
- * `report.json` for a job, and per page `<n>-<slug>.md` with its Markdown and
- * `<n>-<slug>.table-<i>.csv` per table it carries (an omitted table has none).
+ * `results.csv` (one row per page, its evidence in EVIDENCE_COLUMNS, failed
+ * pages included), `report.json` for a job, and per page `<n>-<slug>.md` with
+ * its Markdown and `<n>-<slug>.table-<i>.csv` per table it carries (an omitted
+ * table has none).
  */
 async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport | null, io: CliIo): Promise<void> {
   await mkdir(dir, { recursive: true })
@@ -177,16 +186,59 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
   if (report !== null) await writeFile(join(dir, 'report.json'), JSON.stringify(report, null, 2))
   let markdowns = 0
   let tables = 0
+  const rows: string[] = [EVIDENCE_COLUMNS.join(',')]
   for (const [n, page] of pages.entries()) {
     const stem = `${String(n + 1).padStart(4, '0')}-${slug(page.url ?? page.requestedUrl ?? '')}`
-    if (typeof page.markdown === 'string') { await writeFile(join(dir, `${stem}.md`), page.markdown); markdowns++ }
+    const markdownFile = typeof page.markdown === 'string' ? `${stem}.md` : null
+    if (markdownFile !== null) { await writeFile(join(dir, markdownFile), page.markdown!); markdowns++ }
+    rows.push(evidenceRow(page, markdownFile).map(csvField).join(','))
     for (const table of page.tables ?? []) {
       if (table.omitted !== undefined) continue
       await writeFile(join(dir, `${stem}.table-${table.tableIndex}.csv`), table.csv)
       tables++
     }
   }
-  io.stderr(`w2l: wrote ${pages.length} results, ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
+  await writeFile(join(dir, 'results.csv'), rows.map((row) => `${row}\r\n`).join(''))
+  io.stderr(`w2l: wrote ${pages.length} results (results.jsonl, results.csv), ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
+}
+
+/**
+ * The columns of `results.csv`, in order: those of the Python client's
+ * `to_pandas(include_markdown=False)` (python/src/w2l/frame.py), then the
+ * Markdown file written beside it. A value W2L did not observe is empty, never 0.
+ */
+export const EVIDENCE_COLUMNS = [
+  'url', 'status', 'reason', 'final_url', 'fetched_at', 'http_status', 'lane', 'robots_decision',
+  'raw_sha256', 'markdown_sha256', 'extractor', 'source_commit', 'cache_state', 'cached_at', 'markdown_file',
+] as const
+
+function evidenceRow(page: Page, markdownFile: string | null): Array<string | number | null | undefined> {
+  const record = page.evidenceRecord ?? null
+  const metadata = (page.metadata ?? {}) as { cacheState?: string; cachedAt?: string }
+  return [
+    page.url ?? page.requestedUrl,
+    page.status,
+    record !== null ? record.reason : (page.failureReason || page.blockReason || page.budgetExceeded),
+    record?.finalUrl,
+    record?.fetchedAt,
+    record?.httpStatus,
+    record !== null ? record.lane : page.lane,
+    record?.robotsDecision?.decision,
+    record?.rawSha256,
+    record?.outputSha256.markdown,
+    record?.extractor.version,
+    record?.extractor.commit,
+    page.cacheState ?? metadata.cacheState,
+    page.cachedAt ?? metadata.cachedAt,
+    markdownFile,
+  ]
+}
+
+/** RFC 4180: a field with a comma, quote or line break is quoted, its quotes doubled; null is empty. */
+function csvField(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  const text = String(value)
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
 /** A file-name stem from a URL: host and path, letters, digits, dots and dashes only, at most 80 characters. */

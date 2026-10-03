@@ -1,0 +1,12 @@
+# Ten public data-centre sources from the seed user's list (research/coos-pilot/coos-links.csv).
+# Lines starting with # are ignored by `w2l batch --urls-file`.
+https://docs.equinix.com/colocation/availability/
+https://datacenters.google/efficiency/
+https://datacenters.atmeta.com/all-locations/
+https://sustainability.aboutamazon.com/products-services/aws-cloud
+https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf
+https://assets.sttelemediagdc.com/sttgdc/global_en/public/2024-08/STT_GDC_Sustainability-Linked_Financing_Framework_2024.pdf
+https://delivery-p112322-e1154416.adobeaemcloud.com/adobe/assets/deliver/urn:aaid:aem:39ee2b33-ca04-460f-a97b-1e92ef62ec05/Equinix-Inc_2025_Data-Summary.pdf
+https://www.ironmountain.com/data-centers/colocation
+https://www.sec.gov/Archives/edgar/data/1878848/000187884826000015/iren-20251231.htm
+https://investors.gds-services.com/news-releases/news-release-details/gds-releases-2024-esg-report
