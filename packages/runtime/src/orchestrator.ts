@@ -760,8 +760,8 @@ function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchRe
 // `screenshot`, which a page carries only when it was read as content (a
 // crawl with the format answers `screenshot: null` for a duplicate).
 function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot: _screenshot, list: _list, warnings: priorWarnings, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
-  // The records went with the page's other formats; the warning about their count goes too.
-  const warnings = priorWarnings?.filter((warning) => warning.code !== 'list_truncated')
+  // The records went with the page's other formats; the warnings about them go too.
+  const warnings = priorWarnings?.filter((warning) => warning.code !== 'list_truncated' && warning.code !== 'list_not_detected')
   return {
     ...prior,
     requestedUrl: url,

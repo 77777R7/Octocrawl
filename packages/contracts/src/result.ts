@@ -1,7 +1,7 @@
 import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from './status.js'
 import type { ComplianceRecord } from './compliance.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
-import type { StructuredExtractionResult } from './structured.js'
+import type { ListField, StructuredExtractionResult } from './structured.js'
 import type { FileDescription } from './file.js'
 import type { ActionsResult } from './actions.js'
 
@@ -446,8 +446,15 @@ export interface ListRecord {
 
 /** The `list` format: the records of the page, or of every page a paginate step read. */
 export interface ListExtraction {
-  itemSelector: string
+  /** The items' selector: as asked, or the one W2L found (`detected`); null when it found no list on the page (a `list_not_detected` warning). */
+  itemSelector: string | null
   fields: string[]
+  /**
+   * Present when W2L chose the itemSelector or the fields: the fields as a
+   * request names them, to send back as they are or changed, and the other
+   * lists it found on the page, best first.
+   */
+  detected?: ListDetection
   records: ListRecord[]
   /** Pages the records were read from. */
   pages: number
@@ -459,6 +466,11 @@ export interface ListExtraction {
   csv: string
   /** SHA-256 (hex) of the UTF-8 bytes of `csv`. */
   csvSha256: string
+}
+
+export interface ListDetection {
+  fields: ListField[]
+  alternatives: Array<{ itemSelector: string; count: number }>
 }
 
 export interface PageTable {

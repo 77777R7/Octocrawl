@@ -10,7 +10,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { ListExtraction, ListFormatRequest, ListRecord } from '@w2l/contracts'
+import type { ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec } from '@w2l/contracts'
+import { detectFields, detectLists } from './detectList.js'
 import { parse, qsa } from './dom.js'
 import { documentBaseUrl } from './links.js'
 import { namedBy } from './selectors.js'
@@ -27,7 +28,7 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['href', 'src', 'data-src', 
  * (1 when one page is read). At most `budget.records` records and
  * `budget.chars` characters of values; `cut` says when the page had more.
  */
-export function extractListRecords(html: string, url: string, spec: ListFormatRequest, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }): ListRecord[] & { cut?: boolean; itemText?: string } {
+export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }): ListRecord[] & { cut?: boolean; itemText?: string } {
   const doc = parse(html)
   const document = doc.document
   // Links resolve as the page resolves them: against its <base href> when it has one.
@@ -63,14 +64,42 @@ export function extractListRecords(html: string, url: string, spec: ListFormatRe
   return records
 }
 
-/** The list of one or more pages' records: CSV with the fields, then source_url, page and index. `truncated` when a limit cut it. */
-export function listExtraction(spec: ListFormatRequest, records: readonly ListRecord[], pages: number, truncated = false): ListExtraction {
-  const fields = spec.fields.map((field) => field.name)
+/**
+ * The list a request names, read on the page when it leaves the items or
+ * their fields to W2L: `detected` then says what was chosen (null `spec`
+ * when the page has no list). One page's choice is every page's: a paginate
+ * step's pages are read with what its first page gave.
+ */
+export function resolveListSpec(html: string, request: ListFormatRequest): { spec: ListSpec | null; detected?: ListDetection } {
+  if (request.itemSelector !== undefined && request.fields !== undefined) return { spec: { type: 'list', itemSelector: request.itemSelector, fields: request.fields } }
+  // A lane asks twice of one page (is it content, then its records): the second answer is the first.
+  if (lastResolved !== null && lastResolved.html === html && lastResolved.request === request) return lastResolved.resolved
+  const resolved = detectSpec(html, request)
+  lastResolved = { html, request, resolved }
+  return resolved
+}
+
+let lastResolved: { html: string; request: ListFormatRequest; resolved: { spec: ListSpec | null; detected?: ListDetection } } | null = null
+
+function detectSpec(html: string, request: ListFormatRequest): { spec: ListSpec | null; detected?: ListDetection } {
+  if (request.itemSelector !== undefined) {
+    const fields = detectFields(html, request.itemSelector) ?? []
+    return { spec: { type: 'list', itemSelector: request.itemSelector, fields }, detected: { fields, alternatives: [] } }
+  }
+  const [best, ...rest] = detectLists(html)
+  if (best === undefined) return { spec: null, detected: { fields: [], alternatives: [] } }
+  return { spec: { type: 'list', itemSelector: best.itemSelector, fields: best.fields }, detected: { fields: best.fields, alternatives: rest.map((list) => ({ itemSelector: list.itemSelector, count: list.count })) } }
+}
+
+/** The list of one or more pages' records: CSV with the fields, then source_url, page and index. `truncated` when a limit cut it. A null `spec`: no list was found. */
+export function listExtraction(spec: ListSpec | null, records: readonly ListRecord[], pages: number, truncated = false, detected?: ListDetection): ListExtraction {
+  const fields = (spec?.fields ?? []).map((field) => field.name)
   const rows = [[...fields, 'source_url', 'page', 'index'], ...records.map((record) => [...fields.map((name) => record.values[name] ?? ''), record.source.url, String(record.source.page), String(record.source.index)])]
   const csv = csvOf(rows)
   return {
-    itemSelector: spec.itemSelector,
+    itemSelector: spec?.itemSelector ?? null,
     fields,
+    ...(detected === undefined ? {} : { detected }),
     records: [...records],
     pages,
     incomplete: records.filter((record) => record.missing.length > 0).length,
@@ -92,7 +121,7 @@ const NOT_TEXT: ReadonlySet<string> = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'T
 const BLOCK: ReadonlySet<string> = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BR', 'DD', 'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TD', 'TH', 'TR', 'UL', 'OPTION', 'BUTTON', 'LABEL'])
 
 /** The element's text as a reader sees it: scripts and styles left out, blocks apart, whitespace collapsed; null when it has none. */
-function textOf(el: Element): string | null {
+export function textOf(el: Element): string | null {
   const parts: string[] = []
   const walk = (node: Node): void => {
     if (node.nodeType === 3) { parts.push(node.nodeValue ?? ''); return }

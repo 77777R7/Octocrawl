@@ -1,5 +1,5 @@
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
-import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
+import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -1610,15 +1610,18 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
   // The list format over a paginate step: the records of every page it read, in order, not of the last page alone; also when a
   // later step failed, since those pages were read. A page whose records repeat a page already merged is not counted twice.
   const paginated = list === undefined ? [] : ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index)
-  if (paginated.length > 0) {
-    const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
+  const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
+  // A paginate step that read no page (the deadline came first) leaves the list of the page as it stands.
+  if (pages.length > 0) {
     const records: ListRecord[] = []
     const seen = new Set<string>()
     let page = 0
     let cut = false
-    for (const scrape of pages) {
+    // Items and fields left to W2L are found on the first page and read on every page the same way.
+    const { spec, detected } = resolveListSpec(pages[0]!.html, list!)
+    for (const scrape of spec === null ? [] : pages) {
       const budget = { records: MAX_LIST_RECORDS - records.length, chars: MAX_LIST_VALUE_CHARS - records.reduce((sum, record) => sum + Object.values(record.values).reduce((n, value) => n + (value?.length ?? 0), 0), 0) }
-      const read = extractListRecords(scrape.html, scrape.url, list!, page + 1, budget)
+      const read = extractListRecords(scrape.html, scrape.url, spec!, page + 1, budget)
       // The items' whole text, not only the fields asked for: two pages agreeing on a stock field are still two pages.
       const key = read.itemText ?? JSON.stringify(read.map((record) => record.values))
       if (read.length > 0 && seen.has(key)) continue
@@ -1627,8 +1630,8 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
       records.push(...read)
       if (read.cut === true) { cut = true; break }
     }
-    const merged = listExtraction(list!, records, page, cut)
-    const valued = records.some((record) => record.missing.length < list!.fields.length)
+    const merged = listExtraction(spec, records, page, cut, detected)
+    const valued = spec !== null && records.some((record) => record.missing.length < spec.fields.length)
     const rescued = valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
     result = {
       ...result,

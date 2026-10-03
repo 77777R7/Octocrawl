@@ -463,7 +463,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const format = listFormat(formats ?? [])
     if (format === undefined) return
     const at = (formats ?? []).indexOf(format)
-    const named = [{ path: 'itemSelector', selector: format.itemSelector }, ...format.fields.flatMap((field, i) => field.selector === undefined ? [] : [{ path: `fields[${i}].selector`, selector: field.selector }])]
+    const named = [...(format.itemSelector === undefined ? [] : [{ path: 'itemSelector', selector: format.itemSelector }]), ...(format.fields ?? []).flatMap((field, i) => field.selector === undefined ? [] : [{ path: `fields[${i}].selector`, selector: field.selector }])]
     let parts = 0
     for (const { path, selector } of named) {
       const refusal = invalidSelector(selector)
