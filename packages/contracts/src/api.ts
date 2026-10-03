@@ -455,7 +455,7 @@ export interface MapRequest extends RequestAttribution {
   excludePaths?: readonly string[]
   regexOnFullURL?: boolean
   crawlEntireDomain?: boolean
-  /** Default true, as on a crawl; a returned http link gives way to its https variant when that comes too and its origin's robots.txt allows it. */
+  /** Default true, as on a crawl; a returned http link gives way to its https variant when that comes too, on an origin whose robots.txt the map read anyway and which allows it. */
   deduplicateSimilarURLs?: boolean
 }
 

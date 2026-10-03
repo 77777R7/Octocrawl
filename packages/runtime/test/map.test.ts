@@ -304,6 +304,15 @@ describe('MapRunner', () => {
     expect(apart.links.map((l) => l.url)).toEqual([START, `${HTTP}/docs/a`, `${SITE}/docs/a`])
   })
 
+  it('switches to https only on an origin whose robots.txt the map read anyway, so a later host keeps its slot under the cap', async () => {
+    const HTTP_START = 'http://site.test/docs/'
+    const { wired, robotsAsked } = sources(startPage([link('http://site.test/docs/a'), link('https://site.test/docs/a'), link('http://docs.site.test/x')]), fakeSitemap([]).source)
+    const map = await new MapRunner(wired).run({ id: 'm-https-slot', url: HTTP_START, includeSubdomains: true, maxRobotsHosts: 1 })
+    expect(map.links.map((l) => l.url)).toEqual([HTTP_START, 'http://site.test/docs/a', 'http://docs.site.test/x'])
+    expect(robotsAsked.some((url) => url.startsWith('https://'))).toBe(false)
+    expect(map).toMatchObject({ status: 'completed', warnings: [], refused: { robotsUnchecked: 0, collapsed: 1, samples: { collapsed: [{ url: 'https://site.test/docs/a', into: 'http://site.test/docs/a' }] } } })
+  })
+
   it('does not spend a robots.txt read past the host cap on an https variant, and keeps the http link without a warning', async () => {
     const { wired, robotsAsked } = sources(startPage([link('http://docs.site.test/docs/x'), link('https://docs.site.test/docs/x')]), fakeSitemap([]).source)
     const map = await new MapRunner(wired).run({ id: 'm-https-cap', url: START, includeSubdomains: true, maxRobotsHosts: 1 })

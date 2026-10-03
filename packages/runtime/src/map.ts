@@ -28,6 +28,7 @@ import {
   type ExecutionContext,
   type MapLink,
   type MapRefused,
+  type MapRobotsVerdict,
   type MapResponse,
   type MapSitemapSource,
   type MapSources,
@@ -182,20 +183,37 @@ export class MapRunner {
         if (!start && link.title === undefined && found.entry.title !== undefined && found.entry.title.length > 0) Object.assign(link, { title: found.entry.title, titleSource: 'sitemap' })
       }
 
+      /** Returned http links whose https variant was offered too, by the link: the https URL. See preferHttps. */
+      const httpsVariants = new Map<MapLink, string>()
+      const noteHttpsVariant = (link: MapLink, variant: string): void => {
+        if (!link.via.includes('start') && link.url.startsWith('http:') && variant === `https:${link.url.slice('http:'.length)}`) httpsVariants.set(link, variant)
+      }
       /**
-       * The https variant of a returned http link takes its place: the same page on
-       * the secure scheme, whichever was seen first. robots.txt is per scheme, so the
-       * https origin's own verdict must allow it, read only within the host cap and
-       * never counted against it; otherwise the http link stays. The start URL stays as given.
+       * After discovery, each returned http link whose https variant was offered too
+       * takes that URL: the same page on the secure scheme, whichever was seen first.
+       * robots.txt is per scheme, so the https origin's own verdict must allow it, and
+       * only an origin the map read robots.txt for anyway counts: the switch reads no
+       * further file, takes no slot of the host cap and cannot time the map out. The
+       * start URL stays as given. Collapsed samples are renamed to the URL returned.
        */
-      const preferHttps = async (link: MapLink, variant: string): Promise<boolean> => {
-        if (link.via.includes('start') || !link.url.startsWith('http:') || variant !== `https:${link.url.slice('http:'.length)}`) return false
-        if (!origins.has(new URL(variant).origin) && origins.size >= 1 + maxRobotsHosts) return false
-        const verdict = await verdictFor(variant)
-        if (verdict !== 'allowed' && verdict !== 'no_robots') return false
-        link.url = variant
-        link.robots = verdict
-        return true
+      const preferHttps = async (): Promise<void> => {
+        const renamed = new Map<string, string>()
+        for (const [link, variant] of httpsVariants) {
+          if (!origins.has(new URL(variant).origin) || cancelled() || Date.now() >= deadlineAt) continue
+          let verdict: MapRobotsVerdict
+          try { verdict = await this.sources.robotsVerdict(variant, scope) } catch (error) { if (cancelled()) throw error; continue }
+          if (verdict !== 'allowed' && verdict !== 'no_robots') continue
+          renamed.set(link.url, variant)
+          link.url = variant
+          link.robots = verdict
+        }
+        for (const entry of refused.samples.collapsed) {
+          const into = renamed.get(entry.into)
+          if (into === undefined) continue
+          // The https variant folded into the http link it now replaces: the http URL is the one folded.
+          if (entry.url === into) entry.url = entry.into
+          entry.into = into
+        }
       }
 
       /** A URL robots.txt keeps out: disallowed by a rule, or on a host whose robots.txt could not be read, which is counted apart for the warning. */
@@ -233,10 +251,9 @@ export class MapRunner {
                 refused.collapsed++
                 // The variant as it was offered (its query kept), so the sample names what was folded.
                 const variant = canonicalizeUrl(found.via === 'link' ? found.url : found.entry.url) ?? url
-                const replaced = existing?.url
-                if (existing !== undefined && variant !== null && await preferHttps(existing, variant)) sample(refused.samples.collapsed, { url: replaced!, into: variant })
+                if (existing !== undefined && variant !== null) noteHttpsVariant(existing, variant)
                 // Folded into the URL the map returns for it (the frontier keeps the first one seen).
-                else if (variant !== null) sample(refused.samples.collapsed, { url: variant, into: existing?.url ?? result.collapsedInto })
+                if (variant !== null) sample(refused.samples.collapsed, { url: variant, into: existing?.url ?? result.collapsedInto })
               }
               return false
             }
@@ -366,6 +383,8 @@ export class MapRunner {
           record.accepted = links.length - before
         }
       }
+
+      await preferHttps()
 
       // Status: a source that failed or a deadline that cut the run makes it partial, or failed with nothing found.
       const startFailed = startPage !== null && !READ_STATUSES.has(startPage.status)
