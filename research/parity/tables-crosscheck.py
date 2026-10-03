@@ -9,7 +9,8 @@ answering lane received it). For every W2L table, the pandas table of the
 same raw HTML with the most equal cells is its counterpart: pandas reads
 every <table> independently (colspan and rowspan repeated, as W2L does), so
 a shifted or dropped cell in W2L's rows shows up as a shape difference or as
-unequal cells. Cells are compared after NFKC, whitespace removal and
+unequal cells. pandas' lxml table reader is used before read_html's text
+parser, so cells stay strings as written. Cells are compared after NFKC, whitespace removal and
 lower-casing; the unequal ones are listed for review, since a footnote mark
 or a hidden element can differ without any misalignment. Prints one JSON
 object per table and a summary line per case.
@@ -22,7 +23,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-import pandas as pd
+import pandas.io.html as pdhtml
 
 
 def norm(value: str) -> str:
@@ -30,11 +31,15 @@ def norm(value: str) -> str:
 
 
 def pandas_tables(html: str) -> list[list[list[str]]]:
+    # pandas' own lxml table reader, the one read_html uses, before its text parser
+    # infers types: each table's header, body and footer rows as the cell text,
+    # colspan and rowspan repeated, so "1,200" and "4.20" stay as written.
+    parser = pdhtml._LxmlFrameParser(io.StringIO(html), re.compile(".+"), None, None, True, None)
     try:
-        frames = pd.read_html(io.StringIO(html), header=None, keep_default_na=False, converters={i: str for i in range(500)})
+        tables = parser.parse_tables()
     except ValueError:
         return []
-    return [[[("" if cell is None else str(cell)) for cell in row] for row in frame.itertuples(index=False)] for frame in frames]
+    return [[[("" if cell is None else str(cell)) for cell in row] for row in [*head, *body, *foot]] for head, body, foot in tables]
 
 
 def compare(ours: list[list[str]], theirs: list[list[str]]) -> tuple[int, int, list[tuple[int, int, str, str]]]:
