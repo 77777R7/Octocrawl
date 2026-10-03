@@ -89,7 +89,7 @@ describe('htmlToMarkdown', () => {
 
   const delimiterRows = (md: string) => md.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line))
 
-  it('caps spans as browsers do (colspan 1000, rowspan 65534)', () => {
+  it('caps colspan at 1000 as browsers do, and a rowspan past the last row adds no rows', () => {
     // A ~1 KB page whose spans, uncapped, would pad its grid to 12 million characters.
     const html = `<table><tr>${'<td colspan="1000000"></td>'.repeat(4)}</tr>${'<tr><td>y</td></tr>'.repeat(40)}</table>`
     const md = htmlToMarkdown(html)
