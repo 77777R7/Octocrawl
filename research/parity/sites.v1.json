@@ -2881,6 +2881,59 @@
         {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"},
         {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1}
       ]
+    },
+    {
+      "id": "AC19",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 60000, "actions": [{"type": "wait", "selector": ".quote"}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. The quotes are written by a script 10 s after load (delayInMilliseconds = 10000 in the page): the wait for .quote must outlast it.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-wait-selector", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-wait-selector", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": 10},
+        {"item": "action-wait-selector", "type": "markdownIncludes", "text": "Albert Einstein"}
+      ]
+    },
+    {
+      "id": "AC20",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "click", "selector": ".ecomerce-items-scroll-more"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second 'load more' list (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC21",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "click", "selector": "button.page-link[data-id=\"2\"]"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelector(\"button.page-link.active\").dataset.id"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second list paginated by AJAX buttons (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"}
+      ]
+    },
+    {
+      "id": "AC22",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second list that loads on scroll (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
     }
   ]
 }
