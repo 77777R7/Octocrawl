@@ -182,6 +182,22 @@ export class MapRunner {
         if (!start && link.title === undefined && found.entry.title !== undefined && found.entry.title.length > 0) Object.assign(link, { title: found.entry.title, titleSource: 'sitemap' })
       }
 
+      /**
+       * The https variant of a returned http link takes its place: the same page on
+       * the secure scheme, whichever was seen first. robots.txt is per scheme, so the
+       * https origin's own verdict must allow it, read only within the host cap and
+       * never counted against it; otherwise the http link stays. The start URL stays as given.
+       */
+      const preferHttps = async (link: MapLink, variant: string): Promise<boolean> => {
+        if (link.via.includes('start') || !link.url.startsWith('http:') || variant !== `https:${link.url.slice('http:'.length)}`) return false
+        if (!origins.has(new URL(variant).origin) && origins.size >= 1 + maxRobotsHosts) return false
+        const verdict = await verdictFor(variant)
+        if (verdict !== 'allowed' && verdict !== 'no_robots') return false
+        link.url = variant
+        link.robots = verdict
+        return true
+      }
+
       /** A URL robots.txt keeps out: disallowed by a rule, or on a host whose robots.txt could not be read, which is counted apart for the warning. */
       const refuseRobots = (canonicalUrl: string, verdict: 'disallowed' | { unreachable: string }): void => {
         refused.robots++
@@ -211,14 +227,17 @@ export class MapRunner {
                 refused.searchFiltered--
                 return admit(filtered, found)
               }
+              if (existing !== undefined) merge(existing, found)
               if (result.collapsedInto === undefined) refused.duplicate++
               else {
                 refused.collapsed++
                 // The variant as it was offered (its query kept), so the sample names what was folded.
                 const variant = canonicalizeUrl(found.via === 'link' ? found.url : found.entry.url) ?? url
-                if (variant !== null) sample(refused.samples.collapsed, { url: variant, into: result.collapsedInto })
+                const replaced = existing?.url
+                if (existing !== undefined && variant !== null && await preferHttps(existing, variant)) sample(refused.samples.collapsed, { url: replaced!, into: variant })
+                // Folded into the URL the map returns for it (the frontier keeps the first one seen).
+                else if (variant !== null) sample(refused.samples.collapsed, { url: variant, into: existing?.url ?? result.collapsedInto })
               }
-              if (existing !== undefined) merge(existing, found)
               return false
             }
             case 'host_denied': refused.hostDenied++; if (url !== null) sample(refused.samples.hostDenied, url); return false
