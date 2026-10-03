@@ -42,6 +42,16 @@ beforeAll(async () => {
     // A first page served at /alias and at /alias?page=1, whose Next from /alias goes to ?page=1 (the hockey site's case).
     if (url === '/alias' || url === '/alias?page=1') return html(`<h1>Alias 1</h1>${PROSE}<ul>${rows(1, 2)}</ul><a class="next" href="/alias?page=${url === '/alias' ? '1' : '2'}">Next</a>`)
     if (url === '/alias?page=2') return html(`<h1>Alias 2</h1>${PROSE}<ul>${rows(3, 4)}</ul>`)
+    // A second page that takes 2.5 s to answer, and arrives in pieces.
+    if (url === '/slow/1') return html(`<h1>Slow 1</h1>${PROSE}<ul>${rows(1, 2)}</ul><a class="next" href="/slow/2">Next</a>`)
+    if (url === '/slow/2') {
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.write(`<!doctype html><html><head><title>Fixture</title></head><body><main><h1>Slow 2</h1>${PROSE}`)
+        setTimeout(() => res.end(`<ul>${rows(3, 4)}</ul></main></body></html>`), 800)
+      }, 2500)
+      return
+    }
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -110,6 +120,12 @@ describe('list steps, real browser', () => {
     const result = await run('/alias', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }])
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, itemsRead: 4 })
     expect(result.actions?.scrapes.map((scrape) => scrape.url)).toEqual([`${base}/alias`, `${base}/alias?page=2`])
+  }, 60_000)
+
+  it('paginate waits for a slow next page, and reads it whole', async () => {
+    const result = await run('/slow/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'ul > li', waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, itemsRead: 4 })
+    expect(result.actions?.scrapes[1]?.html).toContain('Reading 4')
   }, 60_000)
 
   it('paginate with maxPages stops there and warns', async () => {

@@ -163,6 +163,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       for (let i = 0; i < targets; i++) {
         await raceWithSignal(matches.nth(i).click({ timeout: stepTimeout(ctx) }), signal)
       }
+      await documentLoaded(ctx)
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
       return { selector: action.selector, matched: count, clicked: targets }
     }
@@ -171,6 +172,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       return { characters: action.text.length }
     case 'press':
       await bounded(ctx, page.keyboard.press(action.key))
+      await documentLoaded(ctx)
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
       return { key: action.key }
     case 'scroll': {
@@ -244,6 +246,19 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
   }
 }
 
+/** How long paginate waits for the page Next asked for when the page has not changed yet. */
+const NEXT_PAGE_WAIT_MS = 10_000
+
+/** The page as it stands: its HTML, URL, and a state (URL and text) that says whether it is one already read. */
+async function pageState(ctx: ActionRunContext): Promise<{ html: string; url: string; state: string; textHash: string }> {
+  await documentLoaded(ctx)
+  const html = await bounded(ctx, ctx.page.content())
+  const url = ctx.page.url()
+  const text = await bounded(ctx, ctx.page.evaluate(() => document.body?.innerText ?? ''))
+  const textHash = createHash('sha256').update(text).digest('hex')
+  return { html, url, state: `${withoutHash(url)}\u0000${textHash}`, textHash }
+}
+
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
 const QUIET_ROUNDS_TO_END = 2
 
@@ -260,11 +275,25 @@ async function measure(ctx: ActionRunContext, itemSelector: string | undefined, 
 
 const grew = (before: Measure, after: Measure): boolean => after.height > before.height || (after.items !== null && before.items !== null && after.items > before.items)
 
-/** Wait for what a round loads: the pause asked for, then the page's quiet, within the time left. */
+/** Wait for what a round loads: the pause asked for, a document still loading (a Next that navigated), then the page's quiet, within the time left. */
 async function afterRound(ctx: ActionRunContext, waitMs: number): Promise<void> {
   const pause = Math.min(waitMs, Math.max(0, timeLeft(ctx)))
   if (pause > 0) await abortableSleep(pause, ctx.execution.signal)
+  await documentLoaded(ctx)
   await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, Math.max(0, timeLeft(ctx))))
+}
+
+/**
+ * A document the page is still loading, parsed: a step that navigated is
+ * read from the page it reached, never from the part of it that had
+ * arrived (a slow page read half way has no Next, and a list would seem to
+ * end there). Within the time left; past it, the step fails as
+ * `deadline_exceeded`.
+ */
+async function documentLoaded(ctx: ActionRunContext): Promise<void> {
+  const left = timeLeft(ctx)
+  if (left <= 0) return
+  await bounded(ctx, ctx.page.waitForLoadState('domcontentloaded', { timeout: Math.min(MAX_ACTION_WAIT_MS, left) }))
 }
 
 /** Whether a round of `waitMs` still fits before the time kept back to read the page. */
@@ -338,6 +367,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   const max = action.maxPages ?? LIST_DEFAULTS.maxPages
   const waitMs = action.waitMs ?? LIST_WAIT_MS.default
   const seenStates = new Set<string>()
+  let lastState: string | null = null
   const seenTexts = new Set<string>()
   let pages = 0
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
@@ -347,11 +377,17 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
     // The page as it stands. Its URL and text seen together before: Next led back or did nothing, and the list is over. Its text
     // alone seen before: the same page under another URL (a site's first page at both /list and /list?page=1), not read twice,
     // and its Next is followed on.
-    const html = await bounded(ctx, ctx.page.content())
-    const url = ctx.page.url()
-    const text = await bounded(ctx, ctx.page.evaluate(() => document.body?.innerText ?? ''))
-    const textHash = createHash('sha256').update(text).digest('hex')
-    const state = `${withoutHash(url)}\u0000${textHash}`
+    let { html, url, state, textHash } = await pageState(ctx)
+    // Next clicked and the page unchanged: on a slow network its page may be on the way. It gets until NEXT_PAGE_WAIT_MS to arrive.
+    if (state === lastState) {
+      const until = Date.now() + Math.min(NEXT_PAGE_WAIT_MS, Math.max(0, timeLeft(ctx)))
+      while (state === lastState && Date.now() < until) {
+        await abortableSleep(250, ctx.execution.signal)
+        await documentLoaded(ctx)
+        ;({ html, url, state, textHash } = await pageState(ctx))
+      }
+    }
+    lastState = state
     if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
     seenStates.add(state)
     if (!seenTexts.has(textHash)) {
