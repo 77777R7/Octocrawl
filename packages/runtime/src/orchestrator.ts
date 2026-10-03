@@ -759,7 +759,7 @@ function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchRe
 // the `html`, `rawHtml`, `images`, `tables` and `attributes` formats and the
 // `screenshot`, which a page carries only when it was read as content (a
 // crawl with the format answers `screenshot: null` for a duplicate).
-function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot: _screenshot, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
+function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot: _screenshot, list: _list, ...prior }: FetchResult, firstCanonicalUrl: string): FetchResult {
   return {
     ...prior,
     requestedUrl: url,

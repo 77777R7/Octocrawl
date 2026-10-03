@@ -722,6 +722,7 @@ describe('the list format', () => {
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }, { name: 'a' }] })).toThrow('formats[0].fields[1].name repeats a')
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', attribute: 'not an attr' }] })).toThrow('formats[0].fields[0].attribute must be an HTML attribute name')
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', regex: '.' }] })).toThrow('unsupported list field option: regex')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'page' }] })).toThrow('formats[0].fields[0].name page is the name of a column the list adds')
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }], limit: 3 })).toThrow('unsupported list format option: limit')
     expect(() => parseScrapeRequest({ url, formats: [{ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }] }, { type: 'list', itemSelector: 'p', fields: [{ name: 'b' }] }] })).toThrow('formats must contain at most one list entry')
   })

@@ -23,7 +23,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -499,7 +499,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = leadWarnings()
       return {
-        ...result,
+        ...withListCaveat(result),
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,

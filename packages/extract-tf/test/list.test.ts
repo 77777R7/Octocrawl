@@ -49,11 +49,34 @@ describe('extractListRecords', () => {
   })
 })
 
+describe('extractListRecords, as a reader sees the page', () => {
+  it('resolves links against the page\'s <base href>, as links does', () => {
+    const html = '<html><head><base href="https://cdn.example/shop/"></head><body><div class="c"><a href="p/1">One</a></div></body></html>'
+    expect(extractListRecords(html, 'https://site.example/list/page', { type: 'list', itemSelector: 'div.c', fields: [{ name: 'url', selector: 'a', attribute: 'href' }] })[0]!.values.url).toBe('https://cdn.example/shop/p/1')
+  })
+
+  it('reads text without scripts or styles, blocks kept apart, inline text kept whole', () => {
+    const html = '<div class="card"><h3>Kettle</h3><p>£19.<b>99</b></p><script>window.x={"sku":1}</script><style>.a{color:red}</style></div>'
+    expect(extractListRecords(html, 'https://x.test/', { type: 'list', itemSelector: 'div.card', fields: [{ name: 'all' }] })[0]!.values.all).toBe('Kettle £19.99')
+  })
+
+  it('stops at its limits and says it was cut', () => {
+    const html = `<ul>${'<li>x</li>'.repeat(30)}</ul>`
+    const spec: ListFormatRequest = { type: 'list', itemSelector: 'li', fields: [{ name: 't' }] }
+    const byCount = extractListRecords(html, 'https://x.test/', spec, 1, { records: 10, chars: 1_000 })
+    expect([byCount.length, byCount.cut]).toEqual([10, true])
+    const byChars = extractListRecords(html, 'https://x.test/', spec, 1, { records: 100, chars: 5 })
+    expect([byChars.length, byChars.cut]).toEqual([5, true])
+    expect(extractListRecords(html, 'https://x.test/', spec).cut).toBeUndefined()
+    expect(listExtraction(spec, byCount, 1, true).truncated).toBe(true)
+  })
+})
+
 describe('listExtraction', () => {
   it('writes RFC 4180 CSV with the fields, then source_url, page and index, and hashes it', () => {
     const records = extractListRecords(PAGE, 'https://shop.test/list', SPEC)
     const list = listExtraction(SPEC, records, 1)
-    expect(list).toMatchObject({ itemSelector: 'article.card', fields: ['name', 'url', 'price', 'image', 'stock'], pages: 1, incomplete: 2 })
+    expect(list).toMatchObject({ itemSelector: 'article.card', fields: ['name', 'url', 'price', 'image', 'stock'], pages: 1, incomplete: 2, truncated: false })
     expect(list.csv.split('\r\n').slice(0, 4)).toEqual([
       'name,url,price,image,stock,source_url,page,index',
       'Kettle,https://shop.test/p/1,£19.99,https://shop.test/img/1.png,In stock,https://shop.test/list,1,0',

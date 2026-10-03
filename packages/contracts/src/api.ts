@@ -1244,6 +1244,8 @@ function readListFormat(rec: Record<string, unknown>, name: string): ListFormatR
     if (typeof field.name !== 'string' || field.name.trim().length === 0 || field.name.length > 64) throw new RequestError(`${at}.name must be a name of 1 to 64 characters`)
     const fieldName = field.name.trim()
     if (names.has(fieldName)) throw new RequestError(`${at}.name repeats ${fieldName}: field names must be unique`)
+    // The CSV adds these columns after the fields: a field of the same name would be shadowed by one of them.
+    if (['source_url', 'page', 'index'].includes(fieldName)) throw new RequestError(`${at}.name ${fieldName} is the name of a column the list adds (source_url, page, index): choose another`)
     names.add(fieldName)
     if (field.attribute !== undefined && (typeof field.attribute !== 'string' || !LIST_ATTRIBUTE.test(field.attribute))) throw new RequestError(`${at}.attribute must be an HTML attribute name`)
     return {

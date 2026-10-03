@@ -1,5 +1,5 @@
 import type { AttributeExtraction, FetchOptions, FetchResult, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /**
@@ -76,8 +76,9 @@ export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'd
 export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list'> {
   const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction } = {}
   if (options.list !== undefined) {
-    const list = listExtraction(options.list, extractListRecords(raw, url, options.list), 1)
-    trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete } })
+    const records = extractListRecords(raw, url, options.list)
+    const list = listExtraction(options.list, records, 1, records.cut === true)
+    trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated } })
     out.list = list
   }
   if (options.includeImages === true) {
@@ -116,6 +117,12 @@ export function tableCsv(rows: readonly (readonly string[])[]): string {
   return rows.map((row) => row.map(field).join(',')).join('\r\n') + (rows.length > 0 ? '\r\n' : '')
 }
 
+/** A result whose list a limit cut, with the `list_truncated` warning that says so. */
+export function withListCaveat<T extends FetchResult>(result: T): T {
+  if (result.list?.truncated !== true || result.warnings?.some((warning) => warning.code === 'list_truncated')) return result
+  return { ...result, warnings: [...(result.warnings ?? []), { code: 'list_truncated', message: `The list stopped at ${result.list.records.length} records: the page had more than the list format carries (${MAX_LIST_RECORDS} records, ${MAX_LIST_VALUE_CHARS} characters of values).` }] }
+}
+
 /**
  * Whether the page holds records of the `list` format asked for: a page of
  * records is not empty though its extractor finds no article in it (a list
@@ -123,7 +130,8 @@ export function tableCsv(rows: readonly (readonly string[])[]): string {
  * `empty_unverified`, and its Markdown is the whole page.
  */
 export function listRecordsFound(raw: string, url: string, options: FetchOptions): boolean {
-  return options.list !== undefined && extractListRecords(raw, url, options.list).length > 0
+  // A record with a value read: elements that matched but hold nothing (a loading skeleton) are not content.
+  return options.list !== undefined && extractListRecords(raw, url, options.list).some((record) => record.missing.length < options.list!.fields.length)
 }
 
 /**

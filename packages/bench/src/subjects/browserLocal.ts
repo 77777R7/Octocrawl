@@ -1,5 +1,5 @@
-import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
-import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, responseFileName } from '@w2l/extract-tf'
+import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -28,7 +28,7 @@ import { runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
@@ -321,7 +321,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       return {
-        ...withActions(result, ran.actions, options.list),
+        ...withListCaveat(withActions(result, ran.actions, options.list)),
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
@@ -1605,17 +1605,33 @@ export class BrowserLocalSubject implements SubjectAdapter {
  */
 function withActions(result: FetchResult, ran: ActionRun | undefined, list?: ListFormatRequest): FetchResult {
   if (ran === undefined) return result
-  // The list format over a paginate step: the records of every page it read, in order, not of the last page alone.
+  // The list format over a paginate step: the records of every page it read, in order, not of the last page alone; also when a
+  // later step failed, since those pages were read. A page whose records repeat a page already merged is not counted twice.
   const paginated = list === undefined ? [] : ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index)
-  if (paginated.length > 0 && ran.result.failed === undefined) {
+  if (paginated.length > 0) {
     const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
-    const merged = listExtraction(list!, pages.flatMap((page, i) => extractListRecords(page.html, page.url, list!, i + 1)), pages.length)
-    const rescued = merged.records.length > 0 && result.status === 'failed' && result.failureReason === 'empty_unverified'
+    const records: ListRecord[] = []
+    const seen = new Set<string>()
+    let page = 0
+    let cut = false
+    for (const scrape of pages) {
+      const budget = { records: MAX_LIST_RECORDS - records.length, chars: MAX_LIST_VALUE_CHARS - records.reduce((sum, record) => sum + Object.values(record.values).reduce((n, value) => n + (value?.length ?? 0), 0), 0) }
+      const read = extractListRecords(scrape.html, scrape.url, list!, page + 1, budget)
+      const key = JSON.stringify(read.map((record) => record.values))
+      if (read.length > 0 && seen.has(key)) continue
+      seen.add(key)
+      page++
+      records.push(...read)
+      if (read.cut === true) { cut = true; break }
+    }
+    const merged = listExtraction(list!, records, page, cut)
+    const valued = records.some((record) => record.missing.length < list!.fields.length)
+    const rescued = valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
     result = {
       ...result,
       list: merged,
       ...(rescued ? { status: 'success' as const, failureReason: null } : {}),
-      trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.records.length, incomplete: merged.incomplete, pages: merged.pages } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.records.length, incomplete: merged.incomplete, pages: merged.pages, truncated: merged.truncated } }],
     }
   }
   const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)

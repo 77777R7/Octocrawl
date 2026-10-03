@@ -23,6 +23,11 @@ beforeAll(async () => {
     const url = req.url ?? ''
     if (url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (url === '/cards') return html(Array.from({ length: 12 }, (_, i) => card(i + 1)).join(''))
+    // A loading page: three empty card placeholders and nothing else.
+    if (url === '/skeleton') return html('<div class="card skeleton"></div>'.repeat(3) + '<div id="app"></div>')
+    // A paginator that answers every page past the last with the last one.
+    const clamp = /^\/clamp\/(\d+)$/.exec(url)
+    if (clamp !== null) { const n = Number(clamp[1]); const shown = Math.min(n, 2); return html(`${[1, 2].map((i) => card(shown * 10 + i)).join('')}<a class="next" href="/clamp/${n + 1}">Next</a>`) }
     const page = /^\/pages\/(\d)$/.exec(url)
     if (page !== null) { const n = Number(page[1]); return html(`${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}${n < 3 ? `<a class="next" href="/pages/${n + 1}">Next</a>` : ''}`) }
     res.writeHead(404); res.end()
@@ -54,6 +59,25 @@ describe('list format', () => {
     expect(listed.markdown).toContain('Item 12')
     // Without the list format the same page has no main content to the extractor.
     expect([plain.status, plain.failureReason]).toEqual(['failed', 'empty_unverified'])
+  }, 60_000)
+
+  it('elements that match but hold no value (a loading skeleton) do not make the page content', async () => {
+    const result = await browser('/skeleton', { list: LIST })
+    expect([result.status, result.failureReason]).toEqual(['failed', 'empty_unverified'])
+  }, 60_000)
+
+  it('the pages a paginate step read keep their records when a later step fails', async () => {
+    const result = await browser('/pages/1', { list: LIST, actions: [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'div.card', waitMs: 200 }, { type: 'click', selector: '#nope' }] })
+    expect(result.failureReason).toBe('action_failed')
+    expect(result.list).toMatchObject({ pages: 3 })
+    expect(result.list?.records.map((record) => record.source.page)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
+  }, 60_000)
+
+  it('pages whose records repeat a page already merged are not counted twice', async () => {
+    // Without itemSelector, paginate skips no page: the clamped pages reach the merge, which reads each list once.
+    const result = await browser('/clamp/1', { list: LIST, actions: [{ type: 'paginate', nextSelector: 'a.next', maxPages: 5, waitMs: 200 }] })
+    expect(result.list).toMatchObject({ pages: 2 })
+    expect(result.list?.records.map((record) => record.values.name)).toEqual(['Item 11', 'Item 12', 'Item 21', 'Item 22'])
   }, 60_000)
 
   it('the HTTP lane reads a list the same way', async () => {

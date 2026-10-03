@@ -453,6 +453,8 @@ export interface ListExtraction {
   pages: number
   /** Records with at least one field missing. */
   incomplete: number
+  /** True when a limit cut the list (10,000 records, 5,000,000 characters of values): the page had more records than these. */
+  truncated: boolean
   /** The records as RFC 4180 CSV: the fields, then source_url, page and index. */
   csv: string
   /** SHA-256 (hex) of the UTF-8 bytes of `csv`. */
