@@ -148,6 +148,20 @@ gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project
 
 That first deploy sets every variable. For a later release, deploy the new image with only `--update-env-vars=W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}`: `--set-env-vars` replaces all variables, and losing `W2L_PUBLIC_ORIGIN` makes every preview on the domain fail its origin check.
 
+The service routes traffic to tagged revisions, so a later `gcloud run deploy` creates a revision that serves nothing until traffic moves to it. Deploy without traffic, move all of it to the new revision under a new tag, and keep the previous tag as the rollback:
+
+```sh
+export W2L_REVISION_SUFFIX=landing   # names the revision w2l-public-preview-landing
+export W2L_TAG=r17landing            # one tag per release; the previous tag stays as the rollback
+gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
+gcloud run services update-traffic w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --to-revisions="w2l-public-preview-${W2L_REVISION_SUFFIX}=100" --update-tags="${W2L_TAG}=w2l-public-preview-${W2L_REVISION_SUFFIX}"
+gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='yaml(status.traffic)'
+```
+
+Confirm that the new revision has `percent: 100`, and that `https://octocrawl.dev/` serves the new build. To roll back, run `update-traffic` with `--to-tags=<previous tag>=100`.
+
 The `--allow-unauthenticated` flag is intentional for this limited, public trial. The Secret Manager grants are restricted to the dedicated runtime service account. Secret versions referenced as environment variables are resolved at instance startup; after rotating those secrets, deploy a new revision so every instance uses the new value. Verify the actual `/api/health` and preview behavior on the returned HTTPS URL before sharing it.
 
 The initial Cloud Run settings are:
