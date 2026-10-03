@@ -63,6 +63,11 @@ beforeAll(async () => {
     if (url === '/noop/2') return html(`<h1>Noop 2</h1>${PROSE}<ul>${rows(3, 4)}</ul><a class="next" href="#">Next</a>`)
     // A button hidden for 2.5 s while it loads 3 more rows, until 9.
     if (url === '/hiding') return html(`<h1>Hiding</h1>${PROSE}<ul id="list">${rows(1, 3)}</ul><button id="more" onclick="const b = this; b.style.display = 'none'; setTimeout(() => { const l = document.getElementById('list'); for (let i = 0; i < 3; i++) { const li = document.createElement('li'); li.className = 'row'; li.textContent = 'Reading ' + (l.children.length + 1); l.appendChild(li) } if (l.children.length < 9) b.style.display = '' }, 2500)">Load more</button>`)
+    // An image grid: items with no text; and a list of the same names on every page, at different prices.
+    const grid = /^\/grid\/(\d)$/.exec(url)
+    if (grid !== null) { const n = Number(grid[1]); return html(`<h1>Grid ${n}</h1>${PROSE}${Array.from({ length: 4 }, (_, i) => `<a class="tile" href="/item/${n}-${i}"><img src="/img/${n}-${i}.png" alt=""></a>`).join('')}${n < 3 ? `<a class="next" href="/grid/${n + 1}">Next</a>` : ''}`) }
+    const prices = /^\/prices\/(\d)$/.exec(url)
+    if (prices !== null) { const n = Number(prices[1]); return html(`<h1>Prices on day ${n}</h1>${PROSE}<ul>${['Apples', 'Pears'].map((name, i) => `<li><span class="name">${name}</span> ${n * 10 + i} cents</li>`).join('')}</ul>${n < 3 ? `<a class="next" href="/prices/${n + 1}">Next</a>` : ''}`) }
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -163,6 +168,19 @@ describe('list steps, real browser', () => {
   it('loadMore waits for a control hidden while it loads, and reads the whole list', async () => {
     const result = await run('/hiding', [{ type: 'loadMore', selector: '#more', itemSelector: 'li.row' }])
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2, items: 9 })
+  }, 60_000)
+
+  it('paginate reads pages whose items have no text, or the same text, when the pages differ', async () => {
+    const grid = await run('/grid/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'a.tile', waitMs: 200 }])
+    expect(grid.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 12 })
+    const prices = await run('/prices/1', [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'li .name', waitMs: 200 }])
+    expect(prices.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
+  }, 60_000)
+
+  it('paginate without itemSelector is not fooled by a ticking clock either', async () => {
+    const result = await run('/clock/1', [{ type: 'paginate', nextSelector: 'a.next', maxPages: 8, waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'repeat', rounds: 3 })
+    expect(result.warnings?.some((warning) => warning.code === 'list_not_exhausted') ?? false).toBe(false)
   }, 60_000)
 
   it('paginate with maxPages stops there and warns', async () => {

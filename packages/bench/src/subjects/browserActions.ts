@@ -252,22 +252,34 @@ const COME_BACK_WAIT_MS = 10_000
 /** Time a list round needs beyond its pause: the page's quiet (up to SETTLE_AFTER_STEP_MS) and the measures after it. */
 const ROUND_OVERHEAD_MS = SETTLE_AFTER_STEP_MS + 1_500
 
+/** How far apart the two reads of a page's text are, to tell its steady text from what changes by itself (a clock, a ticker). */
+const STEADY_TEXT_GAP_MS = 300
+
 /**
- * The page as it stands: its HTML, URL, and a fingerprint of what it lists:
- * the text of the items `itemSelector` matches when it names any (so a
- * clock or a rotating banner does not make a page read twice look new),
- * else the page's text.
+ * The page as it stands: its HTML and URL; `list`, a fingerprint of what it
+ * lists (the markup of the items `itemSelector` matches, image sources and
+ * links included, else the page's steady text); and `page`, a fingerprint of
+ * the page's steady text: the lines that read the same twice
+ * STEADY_TEXT_GAP_MS apart, so a clock or a rotating banner does not make a
+ * page read before look new.
  */
-async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; fingerprint: string }> {
+async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; list: string; page: string }> {
   await documentLoaded(ctx)
   const html = await bounded(ctx, ctx.page.content())
   const url = ctx.page.url()
-  const text = await bounded(ctx, ctx.page.evaluate((selector) => {
-    const items = selector === null ? [] : Array.from(document.querySelectorAll(selector))
-    return items.length > 0 ? items.map((item) => (item as HTMLElement).innerText).join('\u0000') : document.body?.innerText ?? ''
-  }, itemSelector ?? null))
-  const fingerprint = createHash('sha256').update(text).digest('hex')
-  return { html, url, state: `${withoutHash(url)}\u0000${fingerprint}`, fingerprint }
+  const read = () => bounded(ctx, ctx.page.evaluate((selector) => ({
+    text: document.body?.innerText ?? '',
+    items: selector === null ? [] : Array.from(document.querySelectorAll(selector)).map((item) => item.outerHTML),
+  }), itemSelector ?? null))
+  const first = await read()
+  await abortableSleep(Math.min(STEADY_TEXT_GAP_MS, Math.max(0, timeLeft(ctx))), ctx.execution.signal)
+  const second = await read()
+  const before = new Set(first.text.split('\n'))
+  const steady = second.text.split('\n').filter((line) => before.has(line)).join('\n')
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const page = hash(steady)
+  const list = second.items.length > 0 && second.items.join('\u0000') === first.items.join('\u0000') ? hash(second.items.join('\u0000')) : page
+  return { html, url, list: `${withoutHash(url)}\u0000${list}`, page }
 }
 
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
@@ -400,9 +412,9 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
 async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: ActionRunContext, index: number, result: ActionsResult, guard: () => Promise<void>): Promise<ListRun> {
   const max = action.maxPages ?? LIST_DEFAULTS.maxPages
   const waitMs = action.waitMs ?? LIST_WAIT_MS.default
-  const seenStates = new Set<string>()
-  const seenFingerprints = new Set<string>()
-  let lastState: string | null = null
+  const seenLists = new Set<string>()
+  const seenPages = new Set<string>()
+  let lastList: string | null = null
   let alreadyRead = 0
   let pages = 0
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
@@ -410,26 +422,27 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   let stoppedBy: ListStop
   try {
     for (;;) {
-      let { html, url, state, fingerprint } = await pageState(ctx, action.itemSelector)
+      let { html, url, list, page } = await pageState(ctx, action.itemSelector)
       // Next clicked and the page unchanged: on a slow network its page may be on the way, and gets COME_BACK_WAIT_MS to arrive.
-      if (state === lastState) {
+      if (list === lastList) {
         const until = comeBackUntil(ctx)
-        while (state === lastState && Date.now() < until) {
+        while (list === lastList && Date.now() < until) {
           await abortableSleep(250, ctx.execution.signal)
-          ;({ html, url, state, fingerprint } = await pageState(ctx, action.itemSelector))
+          ;({ html, url, list, page } = await pageState(ctx, action.itemSelector))
         }
       }
-      lastState = state
-      // Its URL and list seen together before: Next led back or did nothing, and the list is over.
-      if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
-      seenStates.add(state)
-      if (seenFingerprints.has(fingerprint)) {
-        // The same list under another URL: a site's first page at both /list and /list?page=1 is not read twice, and its Next is
-        // followed on. Twice in a row (a site that answers every page past the last with the last one) is the list's end.
+      lastList = list
+      // The same URL with the same list as before: Next led back or did nothing, and the list is over.
+      if (seenLists.has(list)) { stoppedBy = 'repeat'; break }
+      seenLists.add(list)
+      if (seenPages.has(page)) {
+        // A page read before under another URL (its steady text the same): a site's first page at both /list and
+        // /list?page=1 is not read twice, and its Next is followed on. Twice in a row (a site that answers every page past the
+        // last with the last one) is the list's end.
         if (++alreadyRead >= 2) { stoppedBy = 'repeat'; break }
       } else {
         alreadyRead = 0
-        seenFingerprints.add(fingerprint)
+        seenPages.add(page)
         result.scrapes.push({ url, html })
         pages++
         if (action.itemSelector !== undefined) {
