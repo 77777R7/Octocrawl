@@ -210,7 +210,7 @@ describe('toEvidenceRecord', () => {
       { at: 0, lane: 'browser_local' as const, event: 'action', detail: { index: 0, type: 'executeJavascript', outcome: 'ok' } },
       { at: 0, lane: 'browser_local' as const, event: 'action', detail: { index: 1, type: 'click', outcome: 'ok' } },
     ]
-    const actions = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 1, type: 'click' as const, code: 'navigation_refused' as const, message: 'm' } }
+    const actions = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists: [], failed: { index: 1, type: 'click' as const, code: 'navigation_refused' as const, message: 'm' } }
     expect(toEvidenceRecord({ ...base, trace, actions }, { mode: 'standard' }, {}).pageActions).toEqual({ steps: [{ type: 'executeJavascript', outcome: 'ok' }, { type: 'click', outcome: 'failed' }], scriptRan: true })
     expect(toEvidenceRecord({ ...base, trace }, { mode: 'standard' }, {}).pageActions).toBeNull()
   })

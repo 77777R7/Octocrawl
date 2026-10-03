@@ -667,7 +667,7 @@ describe('actions', () => {
   it('refuses a malformed step by its index before anything is fetched', () => {
     expect(() => parseScrapeRequest({ url, actions: [] })).toThrow('actions must be an array of 1 to 50 steps')
     expect(() => parseScrapeRequest({ url, actions: Array.from({ length: 51 }, () => ({ type: 'scrape' })) })).toThrow('1 to 50 steps')
-    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrape' }, { type: 'hover', selector: 'a' }] })).toThrow('actions[1].type must be one of wait, click, write, press, scroll, screenshot, scrape, executeJavascript, pdf')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrape' }, { type: 'hover', selector: 'a' }] })).toThrow('actions[1].type must be one of wait, click, write, press, scroll, screenshot, scrape, executeJavascript, pdf, scrollToEnd, loadMore, paginate')
     expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait' }] })).toThrow('actions[0]: wait takes milliseconds or a selector, one of them')
     expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 500, selector: 'a' }] })).toThrow('one of them')
     expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 60_001 }] })).toThrow('actions[0].milliseconds must be an integer number of milliseconds from 1 to 60000')
@@ -679,6 +679,25 @@ describe('actions', () => {
     expect(() => parseScrapeRequest({ url, actions: [{ type: 'pdf', scale: 3 }] })).toThrow('actions[0].scale must be a number from 0.1 to 2')
     expect(() => parseScrapeRequest({ url, actions: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
     expect(() => parseScrapeRequest({ url, mobile: true, actions: [{ type: 'screenshot', viewport: { width: 1280, height: 800 } }] })).toThrow('not within the declared mobile screen')
+  })
+
+  it('takes W2L\'s list steps, with their limits checked', () => {
+    expect(parseScrapeRequest({ url, actions: [
+      { type: 'scrollToEnd', itemSelector: '.item', maxScrolls: 30, waitMs: 500 },
+      { type: 'loadMore', selector: 'button.more', maxClicks: 5 },
+      { type: 'paginate', nextSelector: 'li.next a', itemSelector: '.quote', maxPages: 20 },
+      { type: 'scrollToEnd', selector: '#feed' },
+    ] }).actions).toEqual([
+      { type: 'scrollToEnd', itemSelector: '.item', maxScrolls: 30, waitMs: 500 },
+      { type: 'loadMore', selector: 'button.more', maxClicks: 5 },
+      { type: 'paginate', nextSelector: 'li.next a', itemSelector: '.quote', maxPages: 20 },
+      { type: 'scrollToEnd', selector: '#feed' },
+    ])
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'loadMore' }] })).toThrow('actions[0].selector must be a CSS selector')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'paginate', selector: 'a' }] })).toThrow('actions[0]: paginate takes no selector')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'paginate', nextSelector: 'a', maxPages: 101 }] })).toThrow('actions[0].maxPages must be an integer from 1 to 100')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrollToEnd', maxScrolls: 0 }] })).toThrow('actions[0].maxScrolls must be an integer from 1 to 200')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'loadMore', selector: 'b', waitMs: 50 }] })).toThrow('actions[0].waitMs must be an integer number of milliseconds from 100 to 10000')
   })
 
   it('a page after actions is never stored or answered from the cache', () => {

@@ -2934,6 +2934,120 @@
         {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
         {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
       ]
+    },
+    {
+      "id": "LS01",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://quotes.toscrape.com/scroll",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "scrollToEnd", "itemSelector": ".quote"}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). An infinite list of 100 quotes (10 pages of 10, loaded on scroll): scrollToEnd reaches the end by itself.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-scroll", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "end"},
+        {"item": "list-scroll", "type": "field", "path": "actions.lists.0.items", "equals": 100}
+      ]
+    },
+    {
+      "id": "LS02",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "paginate", "nextSelector": "li.next > a", "itemSelector": ".quote", "maxPages": 20}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). Ten script-rendered pages of 10 quotes; page 10 has no Next.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-paginate", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "end"},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.rounds", "equals": 10},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.itemsRead", "equals": 100},
+        {"item": "list-paginate", "type": "field", "path": "actions.scrapes.length", "equals": 10}
+      ]
+    },
+    {
+      "id": "LS03",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "paginate", "nextSelector": "li.next > a", "itemSelector": "article.product_pod"}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). A category of 32 books over 2 server-rendered pages (20 and 12), each Next a real navigation.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "end"},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.rounds", "equals": 2},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.itemsRead", "equals": 32}
+      ]
+    },
+    {
+      "id": "LS04",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/computers/laptops",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "loadMore", "selector": ".ecomerce-items-scroll-more", "itemSelector": ".thumbnail"}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). A product list with a More button; the whole list is in the page's data-items (117 laptops on 2026-10-03).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-load-more", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-load-more", "type": "field", "path": "actions.lists.0.stoppedBy", "in": ["end", "no_growth"]},
+        {"item": "list-load-more", "type": "field", "path": "actions.lists.0.items", "min": 100}
+      ]
+    },
+    {
+      "id": "LS05",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/computers/laptops",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "scrollToEnd", "itemSelector": ".thumbnail"}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). A product list that loads on scroll.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-scroll", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "end"},
+        {"item": "list-scroll", "type": "field", "path": "actions.lists.0.items", "min": 100}
+      ]
+    },
+    {
+      "id": "LS06",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/computers/laptops",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "paginate", "nextSelector": "button.next", "itemSelector": ".thumbnail", "maxPages": 40}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). A product list paginated by AJAX buttons, no navigation between pages.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-paginate", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.stoppedBy", "in": ["end", "repeat"]},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.itemsRead", "min": 100}
+      ]
+    },
+    {
+      "id": "LS07",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://www.scrapethissite.com/pages/forms/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "paginate", "nextSelector": "a[aria-label=\"Next\"]", "itemSelector": "tr.team", "maxPages": 30}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). Hockey teams, 25 per page over 24 pages (582 teams on 2026-10-03), each page a navigation to ?page_num=N.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-paginate", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.stoppedBy", "in": ["end", "repeat"]},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.rounds", "equals": 24},
+        {"item": "list-paginate", "type": "field", "path": "actions.lists.0.itemsRead", "min": 575}
+      ]
+    },
+    {
+      "id": "LS08",
+      "batch": "lists",
+      "feature": "interaction.list-steps",
+      "url": "https://quotes.toscrape.com/scroll",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 180000, "actions": [{"type": "scrollToEnd", "itemSelector": ".quote", "maxScrolls": 2}]},
+      "note": "Added 2026-10-03 for the interaction group I3 (list steps), frozen before the first run. onlyMainContent is false: on these list pages the extractor reads a list as no main content (the I2 record). The list of LS01 with a limit of 2 scrolls: stopped short and said so.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-not-exhausted", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "max"},
+        {"item": "list-not-exhausted", "type": "field", "path": "warning", "includes": "stopped before its end"}
+      ]
     }
   ]
 }
