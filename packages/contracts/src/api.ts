@@ -792,19 +792,19 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
-const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
+export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
+export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
-const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
+export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 /** The scope options a map takes under their crawl names; allowSubdomains is includeSubdomains on a map, and allowExternalLinks is not offered. */
-const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
+export const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
 /** What a map takes. No page option (headers, mobile, skipTlsVerification, formats, ...): a map has nothing to loosen. */
 export const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', 'search', 'sitemap', ...MAP_SCOPE_KEYS, 'includePaths', 'excludePaths', ...ATTRIBUTION_KEYS] as const
 

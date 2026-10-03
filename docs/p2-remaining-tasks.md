@@ -166,8 +166,8 @@ Howard 2026-10-03 确认：
 2. **T2.5 并入缓存组**：headers 和移动设备写进 Evidence Record。后来核实，这是 v1 内的新增改动，不升 schema 版本（见 T2.5）。
 3. **PDF 只做 3 项**：`llm-agentic.parse.pdf-pages` 跳过（需要文件上传，属于 Paused）。
 4. **1,000 URL 测试的门槛**：loopback 的 20 个主机名作为通过门槛，真实 20 域名的那次只作为参考记录。
+5. **许可证**（2026-10-03 确认）：`@w2l/cli` 和 `@w2l/mcp` 用 AGPL-3.0-only，内置引擎，一行 npx 即可使用；`@w2l/sdk` 和 Python 的 `w2l` 用 MIT。
 
-仍待决定（不阻塞 G2、G3）：
+仍待决定：
 
-- **`@w2l/mcp` 的许可证**（G4 前定）：它是 MIT，但依赖 AGPL 的 `@w2l/api`。选项一是改成 AGPL；选项二是保持 MIT，但只通过 HTTP 调用本地服务、不打包 api。
 - **Windows 验收**（G5 前定）：只用 CI 的 `windows-latest`，还是另外在一台真实 Windows 机器上跑一次。
