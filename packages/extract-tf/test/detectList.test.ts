@@ -133,6 +133,52 @@ describe('detectLists, on pages that would mislead it', () => {
     expect(Date.now() - started).toBeLessThan(5_000)
   }, 30_000)
 
+  it('a field the items past the first two hundred lack is missing from them too', () => {
+    const item = (i: number) => i < 200 ? `<li class="it"><h3>Item ${i}</h3><div class="m"><span>by author ${i}</span></div></li>` : `<li class="it"><h3>Item ${i}</h3><p class="ad"><span>Sponsored ${i}</span></p></li>`
+    const html = `<ul class="l">${Array.from({ length: 210 }, (_, i) => item(i)).join('')}</ul>`
+    const [best] = detectLists(html)
+    const records = extractListRecords(html, 'https://x.test/', { type: 'list', ...best! })
+    const author = best!.fields.find((field) => field.selector?.endsWith('span'))!.name
+    expect(records[0]!.values[author]).toBe('by author 0')
+    expect(records.slice(200).map((record) => record.values[author])).toEqual(Array(10).fill(null))
+  })
+
+  it('a lazy list some of whose images have loaded is read from data-src', () => {
+    const html = `<div class="grid">${Array.from({ length: 12 }, (_, i) => `<div class="card"><img class="lazyload" src="${i < 3 ? `/img/${i}.jpg` : 'data:image/gif;base64,R0lGOD'}" data-src="/img/${i}.jpg"><h3>Product ${i}</h3></div>`).join('')}</div>`
+    expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img.lazyload', attribute: 'data-src' })
+  })
+
+  it('items hidden by their own attribute (skeletons, a template) are kept out by the selector, not a reason to find no list', () => {
+    const cards = Array.from({ length: 10 }, (_, i) => `<div class="card"><h3>Product ${i}</h3><span class="price">$${i}.99</span></div>`).join('')
+    for (const html of [
+      `<main><div class="grid">${cards}${'<div class="card card--skeleton" aria-hidden="true"></div>'.repeat(2)}</div></main>`,
+      `<main><div class="grid"><div class="card" hidden><h3>Template</h3></div>${cards}</div></main>`,
+    ]) {
+      const [best] = detectLists(html)
+      expect(best).toMatchObject({ itemSelector: 'div.grid > div.card:not([hidden]):not([aria-hidden="true"])', count: 10 })
+      expect(extractListRecords(html, 'https://x.test/', { type: 'list', ...best! })).toHaveLength(10)
+    }
+  })
+
+  it('a list deep in a page is named in bounded time', () => {
+    const items = (n: number) => Array.from({ length: n }, (_, i) => `<li class="it">item number ${i} text</li>`).join('')
+    const html = `<body>${'<div class="w">'.repeat(4000)}<div class="a b"><ul class="l">${items(10_000)}</ul></div><div class="a c"><ul class="l">${items(10_000)}</ul></div>${'</div>'.repeat(4000)}</body>`
+    const started = Date.now()
+    detectLists(html)
+    // 17 s when every climb walked every item's ancestors.
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 60_000)
+
+  it('items with large text-free subtrees are scored in bounded time', () => {
+    const tree = (depth: number): string => depth === 0 ? '<b></b>' : `<a>${tree(depth - 1)}${tree(depth - 1)}</a>`
+    let html = tree(18)
+    for (let k = 59; k >= 0; k--) html = `<div class="p${k}"><div class="g${k}">xx ${html}</div><div class="g${k}">yy</div><div class="g${k}">zz</div></div>`
+    const started = Date.now()
+    detectLists(`<body>${html}</body>`)
+    // 3.7 MB: 9.6 s when every group read its items' whole text, 2 s with the text read bounded.
+    expect(Date.now() - started).toBeLessThan(6_000)
+  }, 60_000)
+
   it('items with thousands of distinct parts are read in bounded time', () => {
     const item = (i: number) => `<div class="it">${Array.from({ length: 8000 }, (_, k) => `<span class="c${k}">v${i}_${k}</span>`).join('')}</div>`
     const html = `<main><div class="list">${[1, 2, 3, 4, 5].map(item).join('')}</div></main>`
