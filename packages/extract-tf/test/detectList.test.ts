@@ -6,20 +6,29 @@ import { parse } from '../src/dom.js'
 /**
  * Detection on a hostile page costs a bounded multiple of reading the page:
  * measured against parsing the same HTML on the same machine, not against a
- * wall clock that a loaded CI runner stretches. Measured on these pages, the
- * detector costs 1 to 4 parses; before each bound it cost 13 (text-free
- * subtrees) to over 100 (a list deep in a page).
+ * wall clock that a loaded CI runner stretches, each the faster of two runs
+ * so a pause elsewhere in the run does not count. Measured on these pages,
+ * the detector costs 1 to 4 parses alone and up to 10 while the whole suite
+ * runs; before each bound it cost 13 (text-free subtrees) to over 100 (a
+ * list deep in a page).
  */
-const MAX_PARSES = 8
+const MAX_PARSES = 12
 function expectBounded(html: string, maxParses = MAX_PARSES): ReturnType<typeof detectLists> {
   // Warm: the first run of the detector's code is not what is measured.
   detectLists('<ul class="w"><li>one item</li><li>two items</li><li>three items</li></ul>')
-  const parsing = Date.now()
-  parse(html).close()
-  const parsed = Math.max(Date.now() - parsing, 20)
-  const started = Date.now()
-  const found = detectLists(html)
-  expect((Date.now() - started) / parsed).toBeLessThan(maxParses)
+  const time = (run: () => void): number => {
+    let best = Infinity
+    for (let i = 0; i < 2; i++) {
+      const started = Date.now()
+      run()
+      best = Math.min(best, Date.now() - started)
+    }
+    return best
+  }
+  const parsed = Math.max(time(() => parse(html).close()), 20)
+  let found: ReturnType<typeof detectLists> = []
+  const detected = time(() => { found = detectLists(html) })
+  expect(detected / parsed).toBeLessThan(maxParses)
   return found
 }
 
@@ -218,7 +227,7 @@ describe('detectLists, on pages that would mislead it', () => {
     let html = tree(18)
     for (let k = 59; k >= 0; k--) html = `<div class="p${k}"><div class="g${k}">xx ${html}</div><div class="g${k}">yy</div><div class="g${k}">zz</div></div>`
     // 3.7 MB: 9.6 s when every group read its items' whole text, 2 s with the text read bounded.
-    expectBounded(`<body>${html}</body>`)
+    expectBounded(`<body>${html}</body>`, 8)
   }, 60_000)
 
   it('items with thousands of distinct parts are read in bounded time', () => {
