@@ -69,6 +69,8 @@ npm run crawl -- https://example.com --max-pages 20
 
 Exit codes: 0 for a page read as content or a completed job, 1 for anything else W2L answered, 2 for a refused command line, 130 when interrupted. The task root, where tasks, saved files and the page cache live, is `--task-root`, else `W2L_TASK_ROOT`, else `.w2l/cli`, apart from the API's `.w2l/api`; never point a command at the task root of a running API server, which could run the same job twice. A command never resumes the task root's earlier jobs, as the API does when it starts. The earlier in-process ladder tool is `w2l-ladder` (and `w2l-fetch`) in `@w2l/bench`.
 
+For researchers, two guides walk through a real run: [From a URL list to a CSV with evidence](docs/guides/url-list-to-csv.md) (the command line and the Python client, every evidence column, and why failed rows stay) and [Citing web data in a paper](docs/guides/citing-web-data.md) (a methods section, a reference with its access date and hash, and personal data).
+
 For local MCP use, one background service runs the API, Monitor scheduler,
 delivery worker and MCP endpoint. On macOS, install it as a LaunchAgent and
 connect Codex to its loopback URL:
