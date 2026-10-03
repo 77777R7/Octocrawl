@@ -26,7 +26,7 @@ const SITEMAP_PATHS = Array.from({ length: 40 }, (_, i) => `/news/2026/10/articl
 const SITEMAP = (origin: string) => `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${SITEMAP_PATHS.map(path => `<url><loc>${origin}${path}</loc></url>`).join('')}</urlset>`
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 
-const BODIES: Record<string, { type: string; encoding?: string; body: (origin: string) => Buffer }> = {
+const BODIES: Record<string, { status?: number; type: string; encoding?: string; location?: string; body: (origin: string) => Buffer }> = {
   '/gzip': { type: 'text/html; charset=utf-8', encoding: 'gzip', body: () => gzipSync(PAGE) },
   '/x-gzip': { type: 'text/html; charset=utf-8', encoding: 'X-Gzip', body: () => gzipSync(PAGE) },
   '/deflate': { type: 'text/html; charset=utf-8', encoding: 'deflate', body: () => deflateSync(PAGE) },
@@ -40,6 +40,17 @@ const BODIES: Record<string, { type: string; encoding?: string; body: (origin: s
   '/bomb': { type: 'text/html; charset=utf-8', encoding: 'gzip', body: () => gzipSync(Buffer.alloc(512 * 1024, 0x41)) },
   '/data.csv': { type: 'text/csv; charset=utf-8', encoding: 'gzip', body: () => gzipSync(CSV) },
   '/sitemap.xml': { type: 'application/xml', encoding: 'br', body: origin => brotliCompressSync(SITEMAP(origin)) },
+  // A gzip file served with Content-Encoding: gzip arrives as the XML itself.
+  '/more.xml.gz': { type: 'application/x-gzip', encoding: 'gzip', body: origin => gzipSync(SITEMAP(`${origin}/more`)) },
+  // Answers without content: nothing to decode, whatever the header says.
+  '/empty': { type: 'text/html; charset=utf-8', encoding: 'gzip', body: () => Buffer.alloc(0) },
+  '/not-modified': { status: 304, type: 'text/html; charset=utf-8', encoding: 'gzip', body: () => Buffer.alloc(0) },
+  // A redirect's body is drained, never decoded: neither its coding nor its size is the page's.
+  '/moved-empty': { status: 301, type: 'text/html', encoding: 'gzip', location: '/gzip', body: () => Buffer.alloc(0) },
+  '/moved-zstd': { status: 301, type: 'text/html', encoding: 'zstd', location: '/gzip', body: () => Buffer.from('moved') },
+  '/moved-to-image': { status: 301, type: 'text/html', encoding: 'gzip', location: '/photo.png', body: () => gzipSync('<a href="/photo.png">moved</a>') },
+  '/photo.png': { type: 'image/png', body: () => Buffer.from('89504e470d0a1a0a', 'hex') },
+  '/missing': { status: 404, type: 'text/html; charset=utf-8', encoding: 'zstd', body: () => Buffer.from('not found') },
 }
 
 let server: Server
@@ -51,12 +62,12 @@ const policy: NetworkPolicy = { ...localNetworkPolicy(), perHostMinDelayMs: 1, m
 beforeAll(async () => {
   server = createServer((req, res) => {
     requests.push({ path: req.url, headers: req.headers })
-    if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`); return }
+    if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\nSitemap: ${origin}/more.xml.gz\n`); return }
     const entry = BODIES[req.url ?? '']
     if (entry === undefined) { res.writeHead(404).end(); return }
     // Encoded whatever the request asked for, as www.python.org does.
     const body = entry.body(origin)
-    res.writeHead(200, { 'content-type': entry.type, 'content-length': String(body.length), ...(entry.encoding === undefined ? {} : { 'content-encoding': entry.encoding }) }).end(body)
+    res.writeHead(entry.status ?? 200, { 'content-type': entry.type, 'content-length': String(body.length), ...(entry.encoding === undefined ? {} : { 'content-encoding': entry.encoding }), ...(entry.location === undefined ? {} : { location: entry.location }) }).end(body)
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -133,6 +144,36 @@ describe('content codings on the HTTP lane', () => {
     expect(bomb.trace.find(event => event.event === 'decompressed_too_large')?.detail).toEqual({ contentEncoding: 'gzip', maxBytes: 256 * 1024 })
   })
 
+  it('reads an empty body under a coding header as empty, and a 304 as unchanged', async () => {
+    const empty = await http.fetch(`${origin}/empty`)
+    expect(empty.failureReason).not.toBe('parse_error')
+    expect(empty.evidence).toMatchObject({ httpStatus: 200, contentEncoding: 'gzip' })
+    expect(empty.usage.bytesWire).toBe(0)
+    const unchanged = await http.fetch(`${origin}/not-modified`, undefined, undefined, { etag: '"v1"' })
+    expect(unchanged.failureReason).not.toBe('parse_error')
+    expect(unchanged.evidence.httpStatus).toBe(304)
+  })
+
+  it('follows a redirect whatever its body\'s coding, and records only the final response\'s', async () => {
+    for (const path of ['/moved-empty', '/moved-zstd']) {
+      const out = await http.fetch(`${origin}${path}`)
+      expect(out.status, path).toBe('success')
+      expect(out.evidence, path).toMatchObject({ finalUrl: `${origin}/gzip`, contentEncoding: 'gzip' })
+    }
+    const image = await http.fetch(`${origin}/moved-to-image`)
+    expect(image).toMatchObject({ status: 'failed', failureReason: 'unsupported_content_type' })
+    expect(image.evidence.finalUrl).toBe(`${origin}/photo.png`)
+    expect(image.evidence.contentEncoding).toBeUndefined()
+    expect(image.usage.bytesWire).toBe(0)
+  })
+
+  it('keeps the status of an error page whose body does not decode', async () => {
+    const out = await http.fetch(`${origin}/missing`)
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+    expect(out.evidence).toMatchObject({ httpStatus: 404, contentEncoding: 'zstd' })
+    expect(out.trace.find(event => event.event === 'unsupported_content_encoding')?.detail).toEqual({ contentEncoding: 'zstd', coding: 'zstd' })
+  })
+
   it('saves a gzip-encoded file as its decoded bytes', async () => {
     const out = await http.fetch(`${origin}/data.csv`)
     expect(out).toMatchObject({ status: 'success', markdown: CSV })
@@ -144,12 +185,12 @@ describe('content codings on the HTTP lane', () => {
 })
 
 describe('content codings on the sitemap reader', () => {
-  it('decodes a br sitemap it did not ask for', async () => {
+  it('decodes a br sitemap it did not ask for, and a .gz file whose gzip the coding already undid', async () => {
     const source = new HttpSitemapSource({ networkPolicy: policy })
     try {
-      const loaded = await source.load({ seedUrl: `${origin}/`, maxUrls: 50, maxFiles: 5 })
-      expect(loaded.files.map(file => [file.url.replace(origin, ''), file.kind, file.entries, file.error])).toEqual([['/sitemap.xml', 'urlset', 40, null]])
-      expect(loaded.urls.map(entry => entry.url)).toEqual(SITEMAP_PATHS.map(path => `${origin}${path}`))
+      const loaded = await source.load({ seedUrl: `${origin}/`, maxUrls: 100, maxFiles: 5 })
+      expect(loaded.files.map(file => [file.url.replace(origin, ''), file.kind, file.entries, file.error])).toEqual([['/sitemap.xml', 'urlset', 40, null], ['/more.xml.gz', 'urlset', 40, null]])
+      expect(loaded.urls.map(entry => entry.url)).toEqual([...SITEMAP_PATHS.map(path => `${origin}${path}`), ...SITEMAP_PATHS.map(path => `${origin}/more${path}`)])
     } finally {
       await source.close()
     }

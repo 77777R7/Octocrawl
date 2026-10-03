@@ -62,12 +62,14 @@ export function contentEncodingLabel(header: string | null | undefined): string 
 
 /**
  * The body with every coding its header names undone, at most `maxBytes`
- * after each step. Throws UnsupportedContentEncodingError before decoding
+ * after each step; an empty body is returned as it is. Throws UnsupportedContentEncodingError before decoding
  * anything when one coding is unknown, DecompressedTooLargeError over the cap,
  * and ContentDecodingError for bytes the coding rejects.
  */
 export async function decodeContentEncoding(bytes: Uint8Array, header: string | null | undefined, maxBytes: number): Promise<{ bytes: Uint8Array; codings: string[] }> {
   const codings = contentCodings(header)
+  // An empty body (a 304, a 204, a redirect) has nothing to decode, whatever its header says.
+  if (bytes.byteLength === 0) return { bytes, codings }
   const label = contentEncodingLabel(header)
   const unknown = codings.find(coding => !Object.hasOwn(DECODERS, coding))
   if (unknown !== undefined) throw new UnsupportedContentEncodingError(label, unknown)

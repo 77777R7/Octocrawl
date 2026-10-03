@@ -24,7 +24,7 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import type { CrawlMode, ExecutionContext, IdentityDevice, NetworkPolicy, SitemapEntry, SitemapFileRecord, SitemapLoadRequest, SitemapLoadResult, SitemapSource } from '@w2l/contracts'
-import { createExecutionScope, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
+import { createExecutionScope, isGzipBytes, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
 import { request } from 'undici'
 import { ContentDecodingError, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from './contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, readCappedBody, SsrfDeniedError } from './egress.js'
@@ -185,8 +185,12 @@ export class HttpSitemapSource implements SitemapSource {
       record.bytes = bytes.byteLength
       record.sha256 = createHash('sha256').update(bytes).digest('hex')
       let decoded: Uint8Array
+      let gzipFile: boolean
       try {
-        decoded = (await decodeContentEncoding(bytes, response.contentEncoding, this.policy.maxDecompressedBytes)).bytes
+        const content = await decodeContentEncoding(bytes, response.contentEncoding, this.policy.maxDecompressedBytes)
+        decoded = content.bytes
+        // A `.gz` served with Content-Encoding: gzip is often the file itself, already undone: then only the magic number says it is still gzip.
+        gzipFile = content.codings.length > 0 ? isGzipBytes(decoded) : looksGzipped(response.finalUrl, decoded)
       } catch (error) {
         if (error instanceof UnsupportedContentEncodingError) return unreadable('unsupported_content_encoding')
         if (error instanceof DecompressedTooLargeError) return unreadable('decompressed_too_large')
@@ -195,7 +199,7 @@ export class HttpSitemapSource implements SitemapSource {
       }
       let text: string
       try {
-        text = new TextDecoder().decode(looksGzipped(response.finalUrl, decoded) ? gunzipSync(decoded, { maxOutputLength: this.policy.maxDecompressedBytes }) : decoded)
+        text = new TextDecoder().decode(gzipFile ? gunzipSync(decoded, { maxOutputLength: this.policy.maxDecompressedBytes }) : decoded)
       } catch (error) {
         return unreadable((error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE' ? 'decompressed_too_large' : 'gzip_error')
       }
