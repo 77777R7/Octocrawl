@@ -36,6 +36,8 @@ export const FAILURE_REASON = [
   'body_too_large',
   'decompressed_too_large',
   'unsupported_content_type',
+  /** The response's Content-Encoding names a coding W2L does not decode (it decodes gzip, deflate and br); the trace names it. */
+  'unsupported_content_encoding',
   'parse_error',
   'loop_detected',
   'policy_denied',

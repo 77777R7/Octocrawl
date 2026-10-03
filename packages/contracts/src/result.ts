@@ -116,6 +116,15 @@ export interface Evidence {
   contentType: string | null
   /** sha256 of the raw response body. Null only when no body was read. */
   rawBodySha256: string | null
+  /**
+   * The `content-encoding` of the response `httpStatus` is from, as the HTTP
+   * lane received it (lower-cased codings in applied order, `x-gzip` read as
+   * `gzip`), or `identity` when it had none. The lane decodes gzip, deflate
+   * and br, so the body behind `rawBodySha256` is the decoded one; any other
+   * coding fails with `unsupported_content_encoding`. Absent when no response
+   * body was read, and in lanes that do not report it (browser, provider).
+   */
+  contentEncoding?: string
   /** Relative artifact paths (raw body, screenshot, DOM snapshot). */
   artifacts: readonly string[]
   /**

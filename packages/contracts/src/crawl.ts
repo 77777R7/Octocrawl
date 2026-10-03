@@ -68,7 +68,8 @@ export type SitemapSourceKind = 'robots' | 'guess'
  * What one sitemap file turned out to be: a `<sitemapindex>`, a `<urlset>`, a
  * 4xx (`absent`), a 2xx body that is neither (`not_sitemap`), a file that
  * could not be read (`unreadable`: too large, over the decompression cap, a
- * 5xx, a transport failure; `error` says which) or one its host's robots.txt
+ * Content-Encoding W2L does not decode or bytes that do not decode as theirs,
+ * a 5xx, a transport failure; `error` says which) or one its host's robots.txt
  * disallows for the crawl's identity (`refused`, never requested).
  */
 export type SitemapFileKind = 'index' | 'urlset' | 'absent' | 'not_sitemap' | 'unreadable' | 'refused'

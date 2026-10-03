@@ -127,6 +127,14 @@ export interface EvidenceRecord {
   robotsDecision: EvidenceRobotsDecision | null
   /** `evidence.rawBodySha256`: the body W2L read (see the schema for what each lane reads). */
   rawSha256: string | null
+  /**
+   * The Content-Encoding the body was read from, as the HTTP lane received it
+   * (lower-cased codings in applied order, `x-gzip` read as `gzip`), or
+   * `identity` when it had none: what was decoded before `rawSha256` was
+   * taken. Null when no body was read, and in the browser and provider lanes.
+   * Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  contentEncoding: string | null
   outputSha256: EvidenceOutputSha256
   extractor: EvidenceExtractor
   /** JSON Pointer into `json.data` → where that value was read; null when JSON was not requested. */
@@ -144,7 +152,7 @@ const keysOf = <T>() => <const K extends readonly (keyof T)[]>(keys: K & EveryKe
 
 /** Field order of the record and of each nested object, as in the schema file. */
 export const EVIDENCE_RECORD_KEYS = {
-  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity']),
+  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity']),
   redirectChain: keysOf<EvidenceRedirectChain>()(['urls', 'complete']),
   robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
@@ -159,5 +167,6 @@ export const EVIDENCE_RECORD_KEYS = {
  * that records written before them stay valid, though W2L always writes them.
  */
 export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
+  record: ['contentEncoding'],
   artifact: ['bytes', 'contentType'],
 }

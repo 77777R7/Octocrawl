@@ -15,6 +15,7 @@ import {
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
+import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from '../contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
@@ -52,7 +53,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `wire.onWithheld` says so); `routes` are the request's own routes when it
    * relaxed certificate verification, else the subject's.
    */
-  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number, read: BodyRead) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -79,6 +80,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.route = new EgressRoute(this.networkPolicy, this.egress, this.localPreviewProxy)
     this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
+    const maxDecompressedBytes = this.networkPolicy.maxDecompressedBytes
     this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
@@ -112,9 +114,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
         const declared = declaredLength(header('content-length'))
         if (declared !== null && declared > cap) { discard(response.body); throw new BodyTooLargeError(cap, declared) }
         const bodyStart = performance.now()
-        const buf = await readCappedBody(response.body, cap)
-        onBodyRead?.(Math.max(0, performance.now() - bodyStart))
-        return buf
+        const wire = await readCappedBody(response.body, cap)
+        // Decoded by the header whether or not the coding was asked for (W2L sends no Accept-Encoding), under the decompressed cap.
+        try {
+          const decoded = (await decodeContentEncoding(wire, header('content-encoding'), maxDecompressedBytes)).bytes
+          // A file is held to its cap as decoded: that is what would be saved.
+          if (kind !== 'page' && decoded.byteLength > cap) throw new BodyTooLargeError(cap)
+          return decoded
+        } finally {
+          onBodyRead?.(Math.max(0, performance.now() - bodyStart), { wireBytes: wire.byteLength, contentEncoding: contentEncodingLabel(header('content-encoding')) })
+        }
       })()
       return {
         status: response.statusCode,
@@ -193,6 +202,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     let transportMs = 0
     let retryWaitMs = 0
     let bodyReadMs = 0
+    // The final body's wire size and coding, once it was read.
+    const read: { body: BodyRead | null } = { body: null }
     let parseMs = 0
     let extractMs = 0
     let formatMs = 0
@@ -328,7 +339,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
     const transportStart = performance.now()
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
-    const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
+    const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, (ms, body) => { bodyReadMs += ms; read.body = body }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
@@ -395,11 +406,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const bodyReadBeforeFinal = bodyReadMs
     // A response whose body was not read to the end: failed, nothing saved,
     // with the response's status and type kept as what the server answered.
-    const unread = (reason: 'body_too_large' | 'timeout' | 'connection_error', file?: FileDescription): FetchResult => {
+    const unread = (reason: 'body_too_large' | 'timeout' | 'connection_error' | 'unsupported_content_encoding' | 'decompressed_too_large' | 'parse_error', file?: FileDescription, contentEncoding?: string): FetchResult => {
       const denied = timedDenied(reason)
       return {
         ...denied,
-        evidence: { ...denied.evidence, finalUrl: out.finalUrl, httpStatus: out.status, redirectChain, contentType, ...(fetchedAt === null ? {} : { fetchedAt }), ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}) },
+        evidence: { ...denied.evidence, finalUrl: out.finalUrl, httpStatus: out.status, redirectChain, contentType, ...(contentEncoding === undefined ? {} : { contentEncoding }), ...(fetchedAt === null ? {} : { fetchedAt }), ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}) },
         usage: { ...denied.usage, requestCount: out.requestCount, attemptCount: out.attemptCount },
         ...(file === undefined ? {} : { file }),
       }
@@ -416,6 +427,19 @@ export class ResilientHttpSubject implements SubjectAdapter {
         const file = typeof declared === 'object' ? fileTooLarge({ contentType, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes, decision: { kind: declared.kind, detectedBy: 'content_type' } }, { lane: 'http', trace, at }) : undefined
         if (file === undefined) trace.push({ at: at(), lane: 'http', event: 'file_too_large', detail: { kind: null, declaredBytes: error.declaredBytes, maxBytes: error.maxBytes } })
         return unread('body_too_large', file)
+      }
+      // A coding W2L does not decode, or bytes that do not decode, are never read as the page.
+      if (error instanceof UnsupportedContentEncodingError) {
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'unsupported_content_encoding', detail: { contentEncoding: error.contentEncoding, coding: error.coding } })
+        return unread('unsupported_content_encoding', undefined, error.contentEncoding)
+      }
+      if (error instanceof DecompressedTooLargeError) {
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'decompressed_too_large', detail: { contentEncoding: error.contentEncoding, maxBytes: error.maxBytes } })
+        return unread('decompressed_too_large', undefined, error.contentEncoding)
+      }
+      if (error instanceof ContentDecodingError) {
+        trace.push({ at: Date.now() - start, lane: 'http', event: 'content_decoding_failed', detail: { contentEncoding: error.contentEncoding, coding: error.coding, code: error.code } })
+        return unread('parse_error', undefined, error.contentEncoding)
       }
       // A body that stalls or breaks off after the headers is a transport
       // failure like one before them, not an internal error.
@@ -451,10 +475,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
         vary: out.headers?.get('vary') ?? null,
         setsCookie: out.headers?.get('set-cookie') != null,
         ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}),
+        ...(read.body === null ? {} : { contentEncoding: read.body.contentEncoding }),
       },
       usage: {
         wallMs,
-        bytesWire: file === null ? Buffer.byteLength(body) : bytes.byteLength,
+        bytesWire: read.body?.wireBytes ?? (file === null ? Buffer.byteLength(body) : bytes.byteLength),
         bytesDecompressed: file === null ? Buffer.byteLength(body) : bytes.byteLength,
         requestCount: out.requestCount,
         attemptCount: out.attemptCount,
@@ -807,6 +832,12 @@ function declaredContactHint(finalUrl: string, status: number | null, declaredCo
   try { host = new URL(finalUrl).hostname.toLowerCase() } catch { return null }
   if (host !== 'sec.gov' && !host.endsWith('.sec.gov')) return null
   return { host, status, hint: 'SEC.gov asks automated clients to declare a contact in the User-Agent: use mode "research" with W2L_CONTACT set, for example W2L_CONTACT="Jane Doe jane@example.org".' }
+}
+
+/** The final body as it came off the wire: its size before decoding and its coding (contentEncodingLabel). */
+interface BodyRead {
+  wireBytes: number
+  contentEncoding: string
 }
 
 /** How a body read that failed after the response headers is reported; null for anything else. */

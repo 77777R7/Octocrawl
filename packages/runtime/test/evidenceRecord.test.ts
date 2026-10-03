@@ -42,7 +42,7 @@ describe('toEvidenceRecord', () => {
 
   it('reads an HTTP-lane result: every hop, the robots decision and identity from its trace', () => {
     const ua = researchUserAgent('Jane Doe jane@example.org')
-    const record = toEvidenceRecord(result({}, httpTrace(ua)), { mode: 'research' }, { markdown: '# Page' }, { sourceCommit: null })
+    const record = toEvidenceRecord(result({ evidence: { ...result().evidence, contentEncoding: 'gzip' } }, httpTrace(ua)), { mode: 'research' }, { markdown: '# Page' }, { sourceCommit: null })
     expect(record).toEqual({
       schemaVersion: 'w2l.evidence/1',
       requestedUrl: url,
@@ -55,6 +55,7 @@ describe('toEvidenceRecord', () => {
       lane: 'http',
       robotsDecision: { decision: 'allowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, unreachable: null, crawlDelayMs: 2000, userOverride: false },
       rawSha256: RAW,
+      contentEncoding: 'gzip',
       outputSha256: { markdown: sha256Utf8('# Page'), json: null },
       extractor: { name: 'extract-tf', version: EXTRACTOR_VERSION, commit: null },
       fieldEvidence: null,
@@ -70,6 +71,8 @@ describe('toEvidenceRecord', () => {
     expect(record.robotsDecision).toMatchObject({ decision: 'allowed', robotsSha256: ROBOTS, crawlDelayMs: null })
     expect(record.identity).toEqual({ userAgent: 'Mozilla/5.0 Chrome/140', mode: 'standard', contact: null })
     expect(record.outputSha256).toEqual({ markdown: null, json: null })
+    // The browser lane does not report the coding Chromium decoded: unknown.
+    expect(record.contentEncoding).toBeNull()
   })
 
   it('says a browser chain is complete when the lane observed every hop', () => {
