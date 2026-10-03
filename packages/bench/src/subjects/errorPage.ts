@@ -98,9 +98,10 @@ export function tablesFormat(source: { html: string; options: MarkdownOptions },
   if (options.includeTables !== true) return {}
   const tables: PageTable[] = htmlToTables(source.html, source.options).map((table) => {
     const csv = tableCsv(table.rows)
-    return { tableIndex: table.tableIndex, caption: table.caption, sourceUrl, headerRows: table.headerRows, columns: table.rows[0]?.length ?? 0, rows: table.rows, csv, csvSha256: sha256Utf8(csv) }
+    return { tableIndex: table.tableIndex, caption: table.caption, sourceUrl, headerRows: table.headerRows, columns: table.rows[0]?.length ?? 0, rows: table.rows, csv, csvSha256: sha256Utf8(csv), ...(table.omitted === undefined ? {} : { omitted: table.omitted }) }
   })
-  trace.push({ at, lane, event: 'tables_extracted', detail: { count: tables.length, rows: tables.map((table) => table.rows.length), columns: tables.map((table) => table.columns) } })
+  const omitted = tables.filter((table) => table.omitted !== undefined).map((table) => table.tableIndex)
+  trace.push({ at, lane, event: 'tables_extracted', detail: { count: tables.length, rows: tables.map((table) => table.rows.length), columns: tables.map((table) => table.columns), ...(omitted.length === 0 ? {} : { omitted }) } })
   return { tables }
 }
 

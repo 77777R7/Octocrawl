@@ -222,6 +222,16 @@ function tableCells(table: Element, cell: (el: Element) => string): { caption: s
   return { caption: captionEl ? cell(captionEl) : null, rows }
 }
 
+/** The span limits browsers apply (HTML: colspan at most 1000, rowspan at most 65534). */
+const MAX_COLSPAN = 1000
+const MAX_ROWSPAN = 65534
+/**
+ * The most characters a table's rows may hold once its spans are repeated
+ * into every slot they cover; a larger table is given as `omitted:
+ * 'too_large'` with no rows, so a small page cannot make a huge CSV.
+ */
+export const MAX_TABLE_CHARS = 2_000_000
+
 /**
  * One data table as data: its caption and cells as plain text (a link is its
  * text, an image its alt text, whitespace collapsed, no Markdown escaping),
@@ -230,8 +240,14 @@ function tableCells(table: Element, cell: (el: Element) => string): { caption: s
  * has no cells, as the GFM table is then empty.
  */
 function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedTable | null {
-  const { caption, rows } = tableCells(table, (el) => plainCell(el, ctx))
+  const cells = tableCells(table, (el) => plainCell(el, ctx))
+  const rows = cells.rows.map((row) => row.map((cell) => ({ ...cell, colspan: Math.min(cell.colspan, MAX_COLSPAN), rowspan: Math.min(cell.rowspan, MAX_ROWSPAN) })))
+  const caption = cells.caption
   if (rows.every((row) => row.length === 0)) return null
+  // What the repeated spans would hold, before any of it is built (a span past the last row adds nothing).
+  let chars = 0
+  rows.forEach((row, r) => { for (const cell of row) chars += (cell.value.length + 1) * cell.colspan * Math.min(cell.rowspan, rows.length - r) })
+  if (chars > MAX_TABLE_CHARS) return { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
   let headerRows = 0
   for (const tr of ownRows(table)) {
     const cells = ownCells(tr)
@@ -790,8 +806,10 @@ export interface ExtractedTable {
   caption: string | null
   /** Leading rows in `<thead>` or made of `<th>` cells alone. */
   headerRows: number
-  /** Every row padded to the table's width; a spanned cell's value fills each slot it covers. */
+  /** Every row padded to the table's width; a spanned cell's value fills each slot it covers. Empty when the table is omitted. */
   rows: string[][]
+  /** Present when the table's repeated cells would exceed MAX_TABLE_CHARS: its rows are not given. */
+  omitted?: 'too_large'
 }
 
 /** The data tables of the HTML, from the same walk htmlToMarkdown makes with the same options. */

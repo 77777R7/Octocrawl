@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, htmlToTables } from '../src/index.js'
+import { MAX_TABLE_CHARS } from '../src/markdown.js'
 
 const gfmTables = (markdown: string): number => markdown.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line)).length
 
@@ -30,6 +31,21 @@ describe('htmlToTables', () => {
     const tables = htmlToTables(html)
     expect(gfmTables(htmlToMarkdown(html))).toBe(1)
     expect(tables.map((table) => table.rows)).toEqual([[['1.', 'Story 1'], ['2.', 'Story 2'], ['3.', 'Story 3']]])
+  })
+
+  it('caps spans as browsers do and omits a table too large to give, keeping the index of the next', () => {
+    // 4 KB of HTML whose span, repeated, would be 4 * 10^9 characters (3 * 10^6 once capped at 1000 columns): omitted.
+    const hostile = `<table><tr><td colspan="1000000">${'x'.repeat(3000)}</td></tr><tr><td>y</td></tr></table>`
+    const capped = '<table><tr><td colspan="5000">wide</td></tr><tr><td>a</td></tr></table>'
+    const next = '<table><tr><td>k</td><td>v</td></tr><tr><td>1</td><td>2</td></tr></table>'
+    const started = Date.now()
+    const tables = htmlToTables(hostile + capped + next)
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(3001 * 1000).toBeGreaterThan(MAX_TABLE_CHARS)
+    expect(tables[0]).toEqual({ tableIndex: 0, caption: null, headerRows: 0, rows: [], omitted: 'too_large' })
+    expect(tables[1]!.rows[0]).toHaveLength(1000)
+    expect(tables[1]!.rows[0]!.every((cell) => cell === 'wide')).toBe(true)
+    expect(tables[2]).toMatchObject({ tableIndex: 2, rows: [['k', 'v'], ['1', '2']] })
   })
 
   it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {

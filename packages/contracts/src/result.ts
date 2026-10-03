@@ -426,6 +426,12 @@ export interface PageTable {
   csv: string
   /** SHA-256 (hex) of the UTF-8 bytes of `csv`. */
   csvSha256: string
+  /**
+   * Present when the table is too large to give: its cells, each spanned
+   * value repeated, would exceed 2,000,000 characters. `rows` is then empty,
+   * `csv` is `''` and `columns` 0; the table keeps its `tableIndex`.
+   */
+  omitted?: 'too_large'
 }
 
 /** One page of a PDF's text (`pages`): its number in the document, from 1, and its Markdown. */
