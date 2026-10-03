@@ -135,6 +135,8 @@ type Page = {
   url?: string; requestedUrl?: string; markdown?: string | null; tables?: readonly PageTable[]
   status?: string; lane?: string | null; failureReason?: string | null; blockReason?: string | null; budgetExceeded?: string | null
   cacheState?: string; cachedAt?: string; evidenceRecord?: EvidenceRecord | null
+  /** A scrape response gives the cache outcome here, not at the top level. */
+  metadata?: object | null
 }
 
 /** Wait for a crawl or batch to end, then answer with its report and every page it recorded. */
@@ -211,6 +213,7 @@ export const EVIDENCE_COLUMNS = [
 
 function evidenceRow(page: Page, markdownFile: string | null): Array<string | number | null | undefined> {
   const record = page.evidenceRecord ?? null
+  const metadata = (page.metadata ?? {}) as { cacheState?: string; cachedAt?: string }
   return [
     page.url ?? page.requestedUrl,
     page.status,
@@ -224,8 +227,8 @@ function evidenceRow(page: Page, markdownFile: string | null): Array<string | nu
     record?.outputSha256.markdown,
     record?.extractor.version,
     record?.extractor.commit,
-    page.cacheState,
-    page.cachedAt,
+    page.cacheState ?? metadata.cacheState,
+    page.cachedAt ?? metadata.cachedAt,
     markdownFile,
   ]
 }

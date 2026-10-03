@@ -129,6 +129,18 @@ describe('w2l against a local site', () => {
     expect(failed).toMatchObject({ http_status: '', raw_sha256: '', markdown_sha256: '', markdown_file: '' })
   })
 
+  it('gives a scrape\'s cache outcome in results.csv, read from the response metadata', async () => {
+    const row = async (dir: string) => {
+      expect((await cli(['scrape', `${origin}/tides/cached`, '--max-age', '600000', '--out', dir])).code).toBe(0)
+      const [header, line] = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
+      return Object.fromEntries(line!.split(',').map((value, i) => [header!.split(',')[i], value]))
+    }
+    const first = await row(join(root, 'out-cache-1'))
+    const second = await row(join(root, 'out-cache-2'))
+    expect(first).toMatchObject({ status: 'success', cache_state: 'miss', cached_at: '' })
+    expect(second).toMatchObject({ status: 'success', cache_state: 'hit', cached_at: first.fetched_at, fetched_at: first.fetched_at })
+  })
+
   it('refuses what the API refuses, with the API\'s message, before fetching', async () => {
     const refused = await cli(['scrape', `${origin}/tides/a`, '--max-age', '-1'])
     expect(refused.code).toBe(2)

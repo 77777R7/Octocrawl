@@ -25,7 +25,7 @@ Every Evidence Record has the same fields (schema `w2l.evidence/1`, in [packages
 | Which page? | `finalUrl` (after redirects); `requestedUrl` and `redirectChain` for how it got there | `https://datacenters.google/efficiency/`, no redirect |
 | When? | `fetchedAt`, UTC | `2026-10-03T06:31:24.334Z` |
 | Did it work? | `status`, `reason`, `httpStatus` | `success`, `null`, `200` |
-| What exactly was received? | `rawSha256`; `contentEncoding` | `1c12744d…`, `identity` (not compressed) |
+| What was read, before extraction? | `rawSha256` (a file's bytes; the HTML text on the `http` lane; the rendered HTML on a browser lane); `contentEncoding` | `1c12744d…`, `identity` (not compressed) |
 | What did you analyse? | `outputSha256.markdown`; each table's `csvSha256` | `3235ac0f…`; `cf379cfd…` for table 0 |
 | How was it turned into text? | `extractor.version`, `extractor.commit`; `lane` | `extract-tf/6`, `8356314…`, `http` |
 | Were you allowed to read it? | `robotsDecision.decision`; `robotsDecision.userOverride` | `no_robots` (no robots.txt was found), `false` |
@@ -40,7 +40,7 @@ When a result came from W2L's cache (`cache_state` `hit`), its Evidence Record i
 
 Say what you collected, how, when, what failed, and where the evidence is. A paragraph built from the example run:
 
-> We collected 10 public web sources on data-centre capacity and efficiency (operator web pages and two PDF reports) on 3 October 2026 at 06:31 UTC, using W2L (commit 8356314; https://github.com/77777R7/w2l). W2L requested each URL over HTTP, rendering it in a headless Chromium browser when the plain response did not yield the page's content (1 of 10), followed robots.txt, and identified itself with a standard browser User-Agent through a local HTTP proxy. HTML pages were converted to Markdown with the extract-tf/6 extractor and PDF text with pdf-text/1; HTML tables were exported as one CSV file per table. Six of the 10 sources were read. Four were not: two because robots.txt disallowed them (in one case because robots.txt could not be retrieved, which counts as a disallow), one because the site rate-limited the request (HTTP 429), and one because the server refused it (HTTP 403). We report all 10 in the supplementary table, with the time of access, the HTTP status and SHA-256 hashes of the content as received and as analysed. The full W2L evidence records and the analysed files are deposited at [repository and DOI].
+> We collected 10 public web sources on data-centre capacity and efficiency (operator web pages and two PDF reports) on 3 October 2026 at 06:31 UTC, using W2L (commit 8356314; https://github.com/77777R7/w2l). W2L requested each URL over HTTP, rendering it in a headless Chromium browser when the plain response did not yield the page's content (1 of 10), followed robots.txt, and identified itself with a standard browser User-Agent through a local HTTP proxy. HTML pages were converted to Markdown with the extract-tf/6 extractor and PDF text with pdf-text/1; HTML tables were exported as one CSV file per table. Six of the 10 sources were read. Four were not: two because robots.txt disallowed them (in one case because robots.txt could not be retrieved, which counts as a disallow), one because the site rate-limited the request (HTTP 429), and one because the server refused it (HTTP 403). We report all 10 in the supplementary table, with the time of access, the HTTP status and SHA-256 hashes of each page as read and of the text analysed. The full W2L evidence records and the analysed files are deposited at [repository and DOI].
 
 Adapt it, but keep three things in it:
 
@@ -72,7 +72,7 @@ BibTeX (biblatex):
 
 The title is the page's own `<title>`, in `metadata.title` in `results.jsonl`.
 
-Which hash should you cite? Cite `markdown_sha256` (or a table's `csvSha256`) for what you analysed. `raw_sha256` identifies the page exactly as received, but many sites change their HTML on every request: Google's page, read three times within four minutes, had three different `raw_sha256` values and identical Markdown. For a PDF or another file the two are stable, and `raw_sha256` identifies the document itself.
+Which hash should you cite? Cite `markdown_sha256` (or a table's `csvSha256`) for what you analysed. `raw_sha256` identifies the page as W2L read it (for a browser-rendered page, the HTML after rendering), but many sites change their HTML on every request: Google's page, read three times within four minutes, had three different `raw_sha256` values and identical Markdown. For a PDF or another file the two are stable, and `raw_sha256` identifies the document itself.
 
 A web page can change or disappear after you read it. The hash proves which version you used only if you keep that version (section 1). If the page matters to your argument, consider also submitting it to a public web archive and citing the archived copy alongside it.
 

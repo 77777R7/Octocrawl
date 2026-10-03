@@ -79,6 +79,12 @@ frame = result.to_pandas(include_markdown=False)
 frame.to_csv("data-centre-evidence.csv", index=False)
 ```
 
+Save it as `batch.py` in the checkout and run it with the virtual environment's Python:
+
+```bash
+.venv/bin/python batch.py
+```
+
 This printed `completed 6 4`: six URLs read, four not. The client reads the server address from `W2L_API_URL` (default `http://127.0.0.1:8787`). If your shell has a proxy, also set `NO_PROXY=127.0.0.1` so the client reaches the local server directly.
 
 `to_pandas()` returns one row per URL, failed ones included, with the same columns as `results.csv` except `markdown_file`. Leave out `include_markdown=False` to get the page text as a `markdown` column. The tables are in `result.items[i]["tables"]`, each with its `csv`.
@@ -110,7 +116,7 @@ These are the rows the command line wrote, shortened. Hashes are cut to 8 charac
 | `http_status` | The server's HTTP status. Empty when no request was made. |
 | `lane` | How the page was read: `http` (a plain request) or `browser_local` (a local headless Chromium, used when the page needs scripts to render). |
 | `robots_decision` | What the site's robots.txt said about this URL: `allowed`, `disallowed`, or `no_robots` when the site has none. |
-| `raw_sha256` | SHA-256 of the page exactly as received: the HTML text, or the bytes of a file such as a PDF. |
+| `raw_sha256` | SHA-256 of the page as W2L read it, before extraction: the bytes of a file such as a PDF; the HTML text on the `http` lane (decompressed, as UTF-8); the HTML after rendering on a browser lane, as in the AWS row. |
 | `markdown_sha256` | SHA-256 of the Markdown W2L delivered, the text in the `.md` file. |
 | `extractor` | The program and version that turned the page into text: `extract-tf/6` for HTML, `pdf-text/1` for PDF text. |
 | `source_commit` | The W2L commit that ran, when `W2L_SOURCE_COMMIT` was set. |
@@ -136,7 +142,7 @@ When you report your data, report these counts too: here, 6 of 10 sources read, 
 
 ## 6. Tables
 
-`--formats markdown,tables` wrote 107 table files: 72 from Google's efficiency page, 33 from Equinix's availability page and 2 from the AWS page. Each is a plain CSV of one HTML table, as plain text: a cell that spans rows or columns gives its value to every slot it covers, so no row is shifted. The same tables are in `results.jsonl` under each result's `tables`, with `tableIndex`, `caption` (empty when the table has no `<caption>`), `sourceUrl` (the page's final URL) and `csvSha256` (the SHA-256 of the CSV file), so every table can be traced back to its row in `results.csv`. The two PDFs gave no tables: a PDF's tables, if any, are in its Markdown as text.
+`--formats markdown,tables` wrote 107 table files: 72 from Google's efficiency page, 33 from Equinix's availability page and 2 from the AWS page. Each is a plain CSV of one HTML table, as plain text: a cell that spans rows or columns gives its value to every slot it covers, so no row is shifted. The same tables are in `results.jsonl` under each result's `tables`, with `tableIndex`, `caption` (`null` when the table has no `<caption>`), `sourceUrl` (the page's final URL) and `csvSha256` (the SHA-256 of the CSV file), so every table can be traced back to its row in `results.csv`. The two PDFs gave no tables: a PDF's tables, if any, are in its Markdown as text.
 
 ## 7. Check a hash
 
