@@ -25,6 +25,7 @@ export function parse(html: string): DomDoc {
   } else if (root.tagName !== 'HTML') {
     document = rooted(document as unknown as Document) as unknown as typeof document
   }
+  unwrapStrayHeads(document as unknown as Document)
   return {
     document: document as unknown as Document,
     close: () => {},
@@ -76,6 +77,23 @@ function rooted(parsed: Document): Document {
   }
   for (const node of Array.from(parsed.childNodes)) place(node)
   return document as unknown as Document
+}
+
+/**
+ * A browser ignores a <head> tag inside the body; linkedom makes it an
+ * element, and since `<head/>` is an open tag (a slash closes only void
+ * elements) everything after it up to its parent's end went inside it, where
+ * the Markdown skips it. Each such element is replaced by its children.
+ * The document's own head, a child of <html> or the root itself, stays.
+ */
+function unwrapStrayHeads(document: Document): void {
+  const root = document.documentElement
+  for (const head of Array.from(document.querySelectorAll('head'))) {
+    const parent = head.parentNode
+    if (!parent || head === root || (parent === root && root.tagName === 'HTML')) continue
+    while (head.firstChild) parent.insertBefore(head.firstChild, head)
+    parent.removeChild(head)
+  }
 }
 
 /** All elements matching a CSS selector, in document order. */
