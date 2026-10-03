@@ -60,6 +60,9 @@ const MAX_FIELD_PATHS = 48
 /** The classes of an element read: a class attribute of thousands is read as its first ones, and a class name longer than MAX_CLASS_CHARS not at all. */
 const MAX_CLASSES = 8
 const MAX_CLASS_CHARS = 64
+/** A tag name longer than this is named by no selector: it stands for any such tag, read once. */
+const MAX_TAG_CHARS = 64
+const LONG_TAG = '#LONG'
 /** The classes an item's own selector step names. */
 const ITEM_STEP_CLASSES = 3
 /** The work (an element-step test, an element walked) naming the groups may cost; a candidate's fields may cost as much again, and FIELD_WORK_PER_ELEMENT for each element of its items. */
@@ -92,6 +95,8 @@ class Reading {
   work = 0
   constructor(private readonly budget = WORK_BUDGET) {}
   private readonly classes = new Map<Element, string[]>()
+  private readonly tags = new Map<Element, string>()
+  private readonly lowerTags = new Map<Element, string>()
   private readonly classSets = new Map<Element, Set<string>>()
   private readonly signatures = new Map<Element, number>()
   private readonly signatureIds = new Map<string, number>()
@@ -100,6 +105,24 @@ class Reading {
 
   get spent(): boolean {
     return this.work > this.budget
+  }
+
+  /** An element's tag name as the DOM gives it (upper case for HTML), read once: the DOM makes a new copy on every read. LONG_TAG past MAX_TAG_CHARS. */
+  tag(el: Element): string {
+    let tag = this.tags.get(el)
+    if (tag === undefined) {
+      tag = el.tagName
+      if (tag.length > MAX_TAG_CHARS) tag = LONG_TAG
+      this.tags.set(el, tag)
+    }
+    return tag
+  }
+
+  /** The tag name in lower case, as a selector names it. */
+  lower(el: Element): string {
+    let tag = this.lowerTags.get(el)
+    if (tag === undefined) this.lowerTags.set(el, tag = this.tag(el).toLowerCase())
+    return tag
   }
 
   /** An element's classes W2L can name, in the order written, at most MAX_CLASSES. */
@@ -120,7 +143,7 @@ class Reading {
   signature(el: Element): number {
     let signature = this.signatures.get(el)
     if (signature === undefined) {
-      const text = [el.tagName.toLowerCase(), ...[...this.classesOf(el)].sort()].join('.')
+      const text = [this.lower(el), ...[...this.classesOf(el)].sort()].join('.')
       signature = this.signatureIds.get(text)
       if (signature === undefined) this.signatureIds.set(text, signature = this.signatureIds.size)
       this.signatures.set(el, signature)
@@ -131,14 +154,14 @@ class Reading {
   /** One selector step: the id when `useId` and usable; else the tag and up to `classes` classes as written. */
   step(el: Element, classes: number, useId = false): string {
     if (useId && el.id !== '' && SIMPLE_NAME.test(el.id)) return `#${el.id}`
-    return [el.tagName.toLowerCase(), ...this.classesOf(el).slice(0, classes)].join('.')
+    return [this.lower(el), ...this.classesOf(el).slice(0, classes)].join('.')
   }
 
   /** Whether an element is in a site's navigation, or hidden, itself or by an ancestor below <body>. */
   inNavigation(el: Element): boolean {
     const chain: Element[] = []
     let answer = false
-    for (let up: Element | null = el; up !== null && up.tagName !== 'BODY' && up.tagName !== 'HTML'; up = up.parentElement) {
+    for (let up: Element | null = el; up !== null && this.tag(up) !== 'BODY' && this.tag(up) !== 'HTML'; up = up.parentElement) {
       const known = this.navigation.get(up)
       if (known !== undefined) { answer = known; break }
       chain.push(up)
@@ -158,7 +181,7 @@ class Reading {
       this.parsed.set(step, parts = step.startsWith('#') ? { tag: '', classes: [], id: step.slice(1) } : { tag: tag!, classes, id: null })
     }
     if (parts.id !== null) return el.id === parts.id
-    if (el.tagName.toLowerCase() !== parts.tag) return false
+    if (this.lower(el) !== parts.tag) return false
     if (parts.classes.length === 0) return true
     let own = this.classSets.get(el)
     if (own === undefined) this.classSets.set(el, own = new Set((el.getAttribute('class') ?? '').split(/\s+/)))
@@ -207,7 +230,7 @@ export function detectLists(html: string, limit = 3): ListCandidate[] {
     const all = [root, ...qsa(root, '*')]
     const byTag = new Map<string, Element[]>()
     for (const el of all) {
-      const tag = el.tagName.toLowerCase()
+      const tag = reading.lower(el)
       const same = byTag.get(tag)
       if (same === undefined) byTag.set(tag, [el])
       else same.push(el)
@@ -217,7 +240,8 @@ export function detectLists(html: string, limit = 3): ListCandidate[] {
       const above = `${parent.parentElement === null ? '' : reading.signature(parent.parentElement)}>${reading.signature(parent)}>`
       const here = new Map<string, number>()
       for (const child of Array.from(parent.children)) {
-        if (NOT_CONTENT.has(child.tagName) || NOT_ITEM.has(child.tagName) || reading.inNavigation(child)) continue
+        const tag = reading.tag(child)
+        if (tag === LONG_TAG || NOT_CONTENT.has(tag) || NOT_ITEM.has(tag) || reading.inNavigation(child)) continue
         const key = above + reading.signature(child)
         let group = groups.get(key)
         if (group === undefined) groups.set(key, group = { items: [], repeats: false, parents: new Set<Element>() })
@@ -276,13 +300,13 @@ function selectorFor(reading: Reading, byTag: Map<string, Element[]>, byStep: Ma
   const itemStep = reading.step(items[0]!, ITEM_STEP_CLASSES)
   // The elements the items' own step names, read once for every group that shares it.
   let among = byStep.get(itemStep)
-  if (among === undefined) byStep.set(itemStep, among = (byTag.get(items[0]!.tagName.toLowerCase()) ?? []).filter((el) => reading.fits(el, itemStep)))
+  if (among === undefined) byStep.set(itemStep, among = (byTag.get(reading.lower(items[0]!)) ?? []).filter((el) => reading.fits(el, itemStep)))
   let closest: { selector: string; items: Element[]; nested: number } | null = null
   // Classes first: an id is often generated, and differs on the next page.
   for (const useId of parents.size === 1 ? [false, true] : [false]) {
     const steps = [itemStep]
     let up: Element | null = items[0]!.parentElement
-    for (let depth = 0; depth < MAX_CLIMB && up !== null && up.tagName !== 'HTML' && !reading.spent; depth++, up = up.parentElement) {
+    for (let depth = 0; depth < MAX_CLIMB && up !== null && reading.tag(up) !== 'HTML' && !reading.spent; depth++, up = up.parentElement) {
       steps.unshift(reading.step(up, 1, useId))
       const selector = steps.join(' > ')
       if (selector.length > MAX_SELECTOR_CHARS) break
@@ -319,7 +343,7 @@ function innerPaths(reading: Reading, item: Element): Map<string, Element> {
     for (const child of Array.from(el.children)) {
       if (paths.size >= MAX_PATHS) return
       reading.work++
-      if (NOT_CONTENT.has(child.tagName) || !NAMEABLE_TAG.test(child.tagName.toLowerCase())) continue
+      if (NOT_CONTENT.has(reading.tag(child)) || !NAMEABLE_TAG.test(reading.lower(child))) continue
       const key = path === '' ? reading.step(child, 1) : `${path} > ${reading.step(child, 1)}`
       if (!paths.has(key)) paths.set(key, child)
       if (depth < MAX_DEPTH) walk(child, key, depth + 1)
@@ -342,8 +366,8 @@ function scoreList(reading: Reading, all: Element[]): number | null {
   const avgPaths = paths.reduce((sum, set) => sum + set.size, 0) / items.length
   const similarity = avgPaths === 0 ? 0.5 : Math.min(1, common.length / avgPaths)
   let inMenu = false
-  for (let up: Element | null = items[0]!; up !== null && up.tagName !== 'BODY' && !inMenu; up = up.parentElement) inMenu = menuKind(up, reading) === 'menu'
-  const linkOnly = items.every((item, i) => texts[i]!.length < 30 && read[i]!.links === (item.tagName === 'A' ? 0 : 1) && paths[i]!.size <= 2)
+  for (let up: Element | null = items[0]!; up !== null && reading.tag(up) !== 'BODY' && !inMenu; up = up.parentElement) inMenu = menuKind(up, reading) === 'menu'
+  const linkOnly = items.every((item, i) => texts[i]!.length < 30 && read[i]!.links === (reading.tag(item) === 'A' ? 0 : 1) && paths[i]!.size <= 2)
   const penalty = inMenu ? 0.15 : linkOnly ? 0.3 : 1
   return Math.sqrt(all.length) * Math.log1p(avgText) * (0.5 + similarity) * penalty
 }
@@ -359,7 +383,8 @@ function boundedText(reading: Reading, item: Element): { text: string; links: nu
   let nodes = 0
   let chars = 0
   const walk = (node: Node): void => {
-    for (const child of Array.from(node.childNodes)) {
+    // Sibling by sibling: a node of a million children is not copied to read its first ones.
+    for (let child = node.firstChild; child !== null; child = child.nextSibling) {
       if (++nodes > SCORE_NODES || chars >= SCORE_CHARS) return
       reading.work++
       if (child.nodeType === 3) {
@@ -369,7 +394,7 @@ function boundedText(reading: Reading, item: Element): { text: string; links: nu
         words.push(text)
       }
       else if (child.nodeType === 1) {
-        const tag = (child as Element).tagName
+        const tag = reading.tag(child as Element)
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'NOSCRIPT') continue
         if (tag === 'A') links++
         walk(child)
@@ -391,8 +416,8 @@ function selfHidden(el: Element): boolean {
  * <details>), or a menu by its class (a menu, a dropdown, tabs, pagination).
  */
 function menuKind(el: Element, reading: Reading): 'navigation' | 'menu' | null {
-  if (NAVIGATION_TAGS.has(el.tagName) || MENU_ROLES.has(el.getAttribute('role') ?? '')) return 'navigation'
-  if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || (el.tagName === 'DETAILS' && !el.hasAttribute('open'))) return 'navigation'
+  if (NAVIGATION_TAGS.has(reading.tag(el)) || MENU_ROLES.has(el.getAttribute('role') ?? '')) return 'navigation'
+  if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || (reading.tag(el) === 'DETAILS' && !el.hasAttribute('open'))) return 'navigation'
   return reading.classesOf(el).some((name) => MENU_CLASS.test(name)) ? 'menu' : null
 }
 
@@ -450,18 +475,19 @@ function fieldsFor(reading: Reading, all: Element[], descendants: Element[][]): 
     const held = everywhere(path)
     const holders = held.filter((h) => h.i < SAMPLE)
     const el = holders[0]!.el
-    if (el.tagName === 'IMG') {
-      // The source every item has, that differs between them and is no `data:` placeholder: a lazy image's real one before
-      // `src`, which holds a placeholder (a data: URI or a URL) on the images not yet loaded.
+    if (reading.tag(el) === 'IMG') {
+      // The source most items hold a real value in (not empty, not a data: placeholder), among those that differ between
+      // items; on a tie a lazy image's own attribute before `src`, which holds a URL placeholder on the images not yet loaded.
       const present = IMAGE_SOURCES.filter((name) => holders.some((h) => (h.el.getAttribute(name) ?? '') !== ''))
       const values = (name: string) => holders.map((h) => h.el.getAttribute(name))
-      const whole = (name: string) => values(name).every((value) => value !== null && value !== '' && !value.startsWith('data:'))
-      const attribute = present.find((name) => whole(name) && varies(values(name))) ?? present.find((name) => varies(values(name))) ?? present[0]
+      const real = (name: string) => values(name).filter((value) => value !== null && value !== '' && !value.startsWith('data:')).length
+      const varying = present.filter((name) => varies(values(name)))
+      const attribute = varying.reduce<string | undefined>((best, name) => best === undefined || real(name) > real(best) ? name : best, undefined) ?? present[0]
       const selector = attribute === undefined ? null : selectorWithin(reading, path, held, descendants, itemStep)
       if (selector !== null) add('image', { selector, attribute })
       continue
     }
-    if (el.tagName === 'A' && holders.some((h) => (h.el.getAttribute('href') ?? '') !== '')) {
+    if (reading.tag(el) === 'A' && holders.some((h) => (h.el.getAttribute('href') ?? '') !== '')) {
       const selector = selectorWithin(reading, path, held, descendants, itemStep)
       if (selector === null) continue
       const label = nameFrom(reading, el, holders, 'title', path)

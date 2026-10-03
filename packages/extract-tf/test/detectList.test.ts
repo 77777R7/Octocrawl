@@ -153,6 +153,19 @@ describe('detectLists, on pages that would mislead it', () => {
     expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img', attribute: 'data-src' })
   })
 
+  it('a list whose loader has moved most data-src into src is read from src', () => {
+    const html = `<div class="grid">${Array.from({ length: 10 }, (_, i) => `<div class="card">${i < 8 ? `<img src="/i/${i}.jpg">` : `<img data-src="/i/${i}.jpg">`}<h3>Product ${i}</h3></div>`).join('')}</div>`
+    expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img', attribute: 'src' })
+  })
+
+  it('a parent tag name of millions of characters is read in bounded time', () => {
+    const tag = `x-${'a'.repeat(1_000_000)}`
+    const started = Date.now()
+    detectLists(`<body><${tag}>${'<i>x</i>'.repeat(80_000)}</${tag}></body>`)
+    // 14 s when every read of the tag copied it.
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 60_000)
+
   it('a parent class name of millions of characters is read in bounded time', () => {
     const html = `<body><div class="${'a'.repeat(2_000_000)}">${'<i>x</i>'.repeat(80_000)}</div></body>`
     const started = Date.now()
