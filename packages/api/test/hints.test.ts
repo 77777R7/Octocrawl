@@ -44,6 +44,9 @@ describe('agent hints', () => {
   it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
     const wall = result({ status: 'blocked', blockReason: 'login_wall', markdown: null })
     expect(hints(wall)).toEqual(['the page asks for a login; W2L does not create accounts; use mode authed with your own session'])
+    // The saved login was used and refused: the fix is a fresh import, not mode authed.
+    const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
+    expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run w2l login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
         'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route',

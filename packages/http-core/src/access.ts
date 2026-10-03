@@ -45,6 +45,11 @@ export interface AccessSessionCookie {
   value: string
   domain: string
   path: string
+  /** Seconds since the epoch; absent for a session cookie. */
+  expires?: number
+  httpOnly?: boolean
+  secure?: boolean
+  sameSite?: 'Strict' | 'Lax' | 'None'
 }
 
 export interface AccessSessionConfig {

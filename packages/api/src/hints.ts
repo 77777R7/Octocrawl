@@ -46,7 +46,7 @@ export interface HintedAttempt {
 }
 
 /** The run a hint is read from: the lanes tried, the result, and the summary's attempts when the run has them (a stored step's audit, a scrape's ladder run). */
-export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & { result: HintedResult; summary?: { attempts: readonly HintedAttempt[] } }
+export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<LadderRunAudit, 'ladderTrace'>> & { result: HintedResult; summary?: { attempts: readonly HintedAttempt[] } }
 
 /** The most hints one result carries; the table's order decides which stay. */
 export const MAX_AGENT_HINTS = 5
@@ -148,7 +148,11 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
     hints.push('lockdown answers from stored results only and none of this page fits the request (same options, within maxAge and minAge); send it without lockdown to fetch the page')
   }
   if (result.status === 'blocked' && result.blockReason === 'login_wall') {
-    hints.push('the page asks for a login; W2L does not create accounts; use mode authed with your own session')
+    // A saved login was used and the site refused it: it expired or was signed out.
+    const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
+    hints.push(rejected === undefined
+      ? 'the page asks for a login; W2L does not create accounts; use mode authed with your own session'
+      : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run w2l login import ${String(rejected.detail?.domain ?? host)}`)
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
     hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route`)

@@ -31,7 +31,7 @@ import {
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
-import type { SessionSnapshot, SessionStore } from './sessionStore.js'
+import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One channel: a lane implementation the ladder can try. */
 export interface Channel {
@@ -344,7 +344,7 @@ export class LadderRunner {
         session !== undefined && session !== null
           ? session
           : this.sessionStore !== null
-            ? await raceWithSignal(this.sessionStore.load(safeHost(url)), execution.signal)
+            ? await raceWithSignal(loadSessionForHost(this.sessionStore, safeHost(url)), execution.signal)
             : null
     }
     if (effectiveSession !== null) {
@@ -372,6 +372,19 @@ export class LadderRunner {
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
+
+    // A saved login for this host goes first: many sites answer a logged-out
+    // visitor with a 200 (a login form, a public variant of the page), which
+    // the public rungs would take as the answer and the session would never
+    // be used. Only a local session moves its rung; a vendor's resume
+    // material stays with its provider rung.
+    const sessionFirst = effectiveSession !== null && effectiveSession.vendor === 'browser_local_authed' && sessionCoversHost(effectiveSession.domain, safeHost(url))
+      ? ordered.find((c) => c.id === 'authed_session') ?? null
+      : null
+    if (sessionFirst !== null) {
+      ordered = [sessionFirst, ...ordered.filter((c) => c !== sessionFirst)]
+      ladderTrace.push({ at: 0, event: 'ladder_session_first', channel: sessionFirst.id, detail: { domain: effectiveSession!.domain } })
+    }
 
     // waitFor needs a rung that runs scripts and waits before capture; the
     // HTTP rung cannot. Such rungs are skipped, and when none is left the
@@ -427,6 +440,14 @@ export class LadderRunner {
       }
       last = result
       if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
+      // The site refused the saved login (expired, signed out): that is the
+      // answer. A public rung after it would return the logged-out page as
+      // if it were the page the caller asked for.
+      const rejected = channel === sessionFirst ? sessionRejection(url, result) : null
+      if (rejected !== null) {
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...(rejected === result ? {} : { redirectedTo: rejected.evidence.finalUrl }) } })
+        return finish(rejected, false)
+      }
 
       // Vendor attribution happens for every attempt, successful or not —
       // a vendor's win IS its history. The outcome is judged on the
@@ -1024,4 +1045,30 @@ function safeHost(url: string): string {
   } catch {
     return url
   }
+}
+
+/** A path segment that is a login endpoint (`/login`, `/users/sign_in`, `/ap/signin`, `/login.php`, `/authwall`), not a slug that mentions one. */
+const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
+const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
+
+/**
+ * The result of a fetch with the user's saved login when the site refused
+ * that login, else null: a `login_wall` block, or a page that redirected
+ * from the one asked for to a login page (a path segment that is a login
+ * endpoint, which the requested path did not have). The site's login page is not the
+ * page asked for, so it is never answered as its content.
+ */
+export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
+  if (result.status === 'blocked' && result.blockReason === 'login_wall') return result
+  if (!CONTENTFUL_STATUS.has(result.status)) return null
+  let requested: URL
+  let landed: URL
+  try {
+    requested = new URL(url)
+    landed = new URL(result.evidence.finalUrl)
+  } catch {
+    return null
+  }
+  if (landed.href === requested.href || isLoginPath(requested.pathname) || !isLoginPath(landed.pathname)) return null
+  return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }

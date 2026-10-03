@@ -8,9 +8,9 @@ import {
   type IdentityBundle,
   type RobotsOverrideApplied,
 } from '@w2l/contracts'
-import { LadderRunner, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
+import { LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
-import { MemorySessionStore, type SessionSnapshot } from '../src/routing/sessionStore.js'
+import { loadSessionForHost, MemorySessionStore, sessionCoversHost, type SessionSnapshot } from '../src/routing/sessionStore.js'
 
 const COHERENT = identityBundleFrom(modeIdentity('standard'))
 
@@ -1021,5 +1021,99 @@ describe('LadderRunner — a recorded robots override', () => {
     expect(escalated.channelsTried).toEqual(['http', 'provider'])
     expect(escalated.result).toMatchObject({ status: 'success', lane: 'provider' })
     expect(escalated.result.warnings).toBeUndefined()
+  })
+})
+
+describe('LadderRunner — a saved login goes first', () => {
+  const saved = (domain: string): SessionSnapshot => ({
+    domain,
+    attestedBy: 'test',
+    attestedAt: '2026-10-03T00:00:00.000Z',
+    vendor: 'browser_local_authed',
+    cookies: [{ name: 'sid', value: 'secret', domain: `.${domain}`, path: '/' }],
+  })
+
+  it('tries the authed rung before the public rungs, which would take a logged-out 200 as the answer', async () => {
+    const url = 'https://www.example.com/account'
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const authed = channel('authed_session', [contentfulResult(url, 'browser_local_authed')])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, browser, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.channelsTried).toEqual(['authed_session'])
+    expect(run.result.lane).toBe('browser_local_authed')
+    expect(run.ladderTrace.some((t) => t.event === 'ladder_session_first' && t.detail?.domain === 'example.com')).toBe(true)
+  })
+
+  it('ends at the authed rung when the site refuses the saved login, instead of answering with the logged-out page', async () => {
+    const url = 'https://example.com/account'
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [{ ...blockedResult(url, 'login_wall'), lane: 'browser_local_authed' }])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.channelsTried).toEqual(['authed_session'])
+    expect(run.result.status).toBe('blocked')
+    expect(run.result.blockReason).toBe('login_wall')
+    expect(http.calls).toEqual([])
+    expect(run.ladderTrace.some((t) => t.event === 'ladder_session_rejected')).toBe(true)
+  })
+
+  it('a redirect to the site\'s login page under the saved login is login_wall, never the page\'s content', async () => {
+    const url = 'https://example.com/secure'
+    const landedOnLogin: FetchResult = { ...contentfulResult(url, 'browser_local_authed'), markdown: 'Login Page', evidence: { ...contentfulResult(url, 'browser_local_authed').evidence, finalUrl: 'https://example.com/login', redirectChain: [url, 'https://example.com/login'] } }
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [landedOnLogin])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.result.status).toBe('blocked')
+    expect(run.result.blockReason).toBe('login_wall')
+    expect(http.calls).toEqual([])
+    expect(run.ladderTrace.find((t) => t.event === 'ladder_session_rejected')?.detail).toMatchObject({ redirectedTo: 'https://example.com/login' })
+  })
+
+  it('reads a login page as a redirect to one only when the page asked for was not a login page', () => {
+    const at = (finalUrl: string): FetchResult => ({ ...contentfulResult('https://example.com/x', 'browser_local'), evidence: { ...contentfulResult('https://example.com/x', 'browser_local').evidence, finalUrl } })
+    expect(sessionRejection('https://example.com/account', at('https://example.com/users/sign_in?next=%2Faccount'))).not.toBeNull()
+    expect(sessionRejection('https://example.com/account', at('https://example.com/account'))).toBeNull()
+    expect(sessionRejection('https://example.com/account', at('https://example.com/authors/jane'))).toBeNull()
+    expect(sessionRejection('https://example.com/login', at('https://example.com/login?x=1'))).toBeNull()
+    // A slug that mentions a login word is a page, not a login endpoint.
+    expect(sessionRejection('https://github.com/acme/old-name', at('https://github.com/acme/auth-service'))).toBeNull()
+    expect(sessionRejection('https://example.com/q/123', at('https://example.com/questions/123/jwt-auth-in-express'))).toBeNull()
+    expect(sessionRejection('https://example.com/settings', at('https://example.com/settings/auth'))).toBeNull()
+    expect(sessionRejection('https://example.com/p/1', at('https://example.com/blog/how-to-login'))).toBeNull()
+    expect(sessionRejection('https://example.com/docs/single-sign-on', at('https://example.com/docs/sso'))).toBeNull()
+    expect(sessionRejection('https://www.amazon.com/gp/css/order-history', at('https://www.amazon.com/ap/signin?openid=x'))).not.toBeNull()
+    expect(sessionRejection('https://www.linkedin.com/in/x', at('https://www.linkedin.com/authwall?trk=x'))).not.toBeNull()
+    expect(sessionRejection('https://example.com/admin', at('https://example.com/login.php'))).not.toBeNull()
+  })
+
+  it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {
+    const url = 'https://other.org/p'
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [])
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.channelsTried).toEqual(['http'])
+
+    const standardUrl = 'https://example.com/p'
+    const http2 = channel('http', [contentfulResult(standardUrl, 'http')])
+    const run2 = await new LadderRunner([http2, channel('authed_session', [])], { mode: 'standard' }, null, null, store).run(standardUrl)
+    expect(run2.channelsTried).toEqual(['http'])
+    expect(run2.ladderTrace.some((t) => t.event === 'ladder_session_loaded')).toBe(false)
+  })
+
+  it('a session saved for a parent domain covers its subdomains, not a lookalike host', async () => {
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    expect((await loadSessionForHost(store, 'shop.www.example.com'))?.domain).toBe('example.com')
+    expect(await loadSessionForHost(store, 'notexample.com')).toBeNull()
+    expect(sessionCoversHost('example.com', 'www.example.com')).toBe(true)
+    expect(sessionCoversHost('.example.com', 'example.com')).toBe(true)
+    expect(sessionCoversHost('example.com', 'badexample.com')).toBe(false)
   })
 })

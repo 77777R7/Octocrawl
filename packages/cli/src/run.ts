@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -21,6 +21,7 @@ import {
   type PageTable,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
+import { login } from './login.js'
 
 export const CLI_VERSION = '0.3.0'
 
@@ -41,6 +42,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   if (name === '--version') { io.stdout(CLI_VERSION); return 0 }
   if (name === 'serve') return serve(rest, io)
+  if (name === 'login') return login(rest, io)
   if (!(COMMANDS as readonly string[]).includes(name)) {
     io.stderr(`w2l: unknown command ${name}\n\n${usage(null)}`)
     return 2
@@ -58,6 +60,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       taskRoot,
       networkPolicy: listen.networkPolicy,
       allowRobotsOverride: listen.allowRobotsOverride,
+      sessionsFile: defaultSessionsFile(io.env),
       webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
       workerCount: listen.workerCount,
       resumeOnStart: false,
