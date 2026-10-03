@@ -337,24 +337,31 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
 async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: ActionRunContext, index: number, result: ActionsResult, guard: () => Promise<void>): Promise<ListRun> {
   const max = action.maxPages ?? LIST_DEFAULTS.maxPages
   const waitMs = action.waitMs ?? LIST_WAIT_MS.default
-  const seen = new Set<string>()
+  const seenStates = new Set<string>()
+  const seenTexts = new Set<string>()
   let pages = 0
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
   let items: number | null = null
   let stoppedBy: ListStop
   for (;;) {
-    // The page as it stands, unless it is one already read (a next control that leads back, or one that did nothing).
+    // The page as it stands. Its URL and text seen together before: Next led back or did nothing, and the list is over. Its text
+    // alone seen before: the same page under another URL (a site's first page at both /list and /list?page=1), not read twice,
+    // and its Next is followed on.
     const html = await bounded(ctx, ctx.page.content())
     const url = ctx.page.url()
     const text = await bounded(ctx, ctx.page.evaluate(() => document.body?.innerText ?? ''))
-    const fingerprint = createHash('sha256').update(`${withoutHash(url)}\u0000${text}`).digest('hex')
-    if (seen.has(fingerprint)) { stoppedBy = 'repeat'; break }
-    seen.add(fingerprint)
-    result.scrapes.push({ url, html })
-    pages++
-    if (action.itemSelector !== undefined) {
-      items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
-      itemsRead = (itemsRead ?? 0) + items
+    const textHash = createHash('sha256').update(text).digest('hex')
+    const state = `${withoutHash(url)}\u0000${textHash}`
+    if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
+    seenStates.add(state)
+    if (!seenTexts.has(textHash)) {
+      seenTexts.add(textHash)
+      result.scrapes.push({ url, html })
+      pages++
+      if (action.itemSelector !== undefined) {
+        items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+        itemsRead = (itemsRead ?? 0) + items
+      }
     }
     if (pages >= max) { stoppedBy = 'max'; break }
     if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
