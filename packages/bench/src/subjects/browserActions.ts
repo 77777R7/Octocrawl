@@ -42,6 +42,10 @@ export interface ActionRunContext {
   viewport: ScreenshotViewport
   /** A main-frame navigation the browser lane's guard stopped since the last call, or null; each is reported once. */
   takeRefusedNavigation: () => { url: string; reason: string } | null
+  /** Why W2L would not fetch the URL a step left the page at (reached through a redirect the guard does not see), or null. */
+  refuseLanded: (url: string) => Promise<string | null>
+  /** Documents the main frame has loaded so far; a URL changed within the page (pushState) loads none. */
+  documentLoads: () => number
 }
 
 export interface ActionRun {
@@ -67,6 +71,8 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
+    const loads = ctx.documentLoads()
+    const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, artifacts: artifacts.length }
     try {
       const detail = await runStep(action, ctx, result, artifacts)
       // A navigation the step started that the guard stopped: the request never went out, and the page stayed.
@@ -74,6 +80,18 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
       if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the page stayed where it was`)
       const now = withoutHash(page.url())
       const moved = now !== checkedUrl
+      if (moved && ctx.documentLoads() !== loads) {
+        // A redirect after the navigation the guard let through: the page is somewhere W2L does not fetch, and what the step read of it is dropped.
+        const landed = await ctx.refuseLanded(now)
+        if (landed !== null) {
+          result.screenshots.length = before.screenshots
+          result.scrapes.length = before.scrapes
+          result.javascriptReturns.length = before.javascriptReturns
+          result.pdfs.length = before.pdfs
+          artifacts.length = before.artifacts
+          throw new StepFailure('navigation_refused', `the step left the page at ${now}, which W2L does not fetch (${landed}); it is not read`)
+        }
+      }
       checkedUrl = now
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'ok', ms: Math.round(performance.now() - started), ...detail, ...(moved ? { navigatedTo: now } : {}) } })
     } catch (error) {

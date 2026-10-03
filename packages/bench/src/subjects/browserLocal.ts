@@ -386,6 +386,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // matches, removed before the context closes.
     let requestRoute: ((route: Route) => Promise<void>) | null = null
     const routeMatch = '**/*'
+    // The navigation guard and popup closer of a request's actions, removed before the context closes (a managed profile's outlives the fetch).
+    let actionsRoute: ((route: Route) => Promise<void>) | null = null
+    let popupCloser: ((opened: Page) => void) | null = null
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -853,18 +856,35 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // the requested URL did, before its request is sent: one W2L does not
       // fetch is stopped there, and the page stays where it was.
       const refusedNavigations: { url: string; reason: string }[] = []
+      // The URL the page was on before the first step: a redirect of the requested URL is the fetch's, not the steps'.
+      const beforeSteps = page.url()
+      const loadsBeforeSteps = documents.loads
+      // A URL the caller recorded a robots override for is fetched as the requested URL was.
+      const overriddenUrl = options.robotsOverride === undefined ? null : url
       if (options.actions !== undefined && options.actions.length > 0) {
-        const mainFrame = page.mainFrame()
-        await page.route('**/*', async (route) => {
+        const own = page
+        // On the context, so a window a step opens is guarded as the page is; such a window is closed at once.
+        actionsRoute = async (route) => {
           const request = route.request()
-          if (!request.isNavigationRequest() || request.frame() !== mainFrame) return route.fallback()
-          const reason = await this.refuseNavigation(request.url(), identity, execution, relaxedRoutes).catch((error: unknown) => `it could not be checked (${error instanceof Error ? error.message.slice(0, 120) : String(error)})`)
+          if (!request.isNavigationRequest()) return route.fallback()
+          // A new window's first navigation comes before its frame exists (Playwright throws for it): it is a main frame's.
+          let frame: ReturnType<typeof request.frame> | null = null
+          try { frame = request.frame() } catch { frame = null }
+          if (frame !== null && frame !== frame.page().mainFrame()) return route.fallback()
+          const reason = await this.refuseNavigation(request.url(), identity, execution, relaxedRoutes, overriddenUrl).catch((error: unknown) => `it could not be checked (${error instanceof Error ? error.message.slice(0, 120) : String(error)})`)
           if (reason === null) return route.fallback()
           refusedNavigations.push({ url: request.url(), reason })
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: request.url(), reason } })
           // 204 No Content: the browser stays on the page it has (an aborted navigation would show its own error page instead).
           return route.fulfill({ status: 204, body: '' })
-        })
+        }
+        await context.route(routeMatch, actionsRoute)
+        popupCloser = (opened) => {
+          if (opened === own) return
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'popup_closed', detail: { url: opened.url() } })
+          void opened.close().catch(() => {})
+        }
+        context.on('page', popupCloser)
         ran.actions = await runPageActions(options.actions, {
           page,
           execution,
@@ -875,6 +895,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           deviceScaleFactor: fingerprint.deviceScaleFactor,
           viewport: page.viewportSize() ?? window.viewport,
           takeRefusedNavigation: () => refusedNavigations.shift() ?? null,
+          refuseLanded: (landed) => this.refuseNavigation(landed, identity, execution, relaxedRoutes, overriddenUrl),
+          documentLoads: () => documents.loads,
         })
         throwIfExecutionStopped(execution)
       }
@@ -935,7 +957,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         const last = options.actions!.length - 1
         if (late !== undefined && ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
         // The page the steps left, reached through a redirect the guard does not see, is checked as a navigation to it would be.
-        const landed = finalUrl === url ? null : await this.refuseNavigation(finalUrl, identity, execution, relaxedRoutes)
+        // Only a document the steps loaded: a URL changed within the page (pushState) requested nothing.
+        const landed = documents.loads === loadsBeforeSteps || withoutFragment(finalUrl) === withoutFragment(beforeSteps) ? null : await this.refuseNavigation(finalUrl, identity, execution, relaxedRoutes, overriddenUrl)
         if (landed !== null) {
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: finalUrl, reason: landed } })
           if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `the steps left the page at ${finalUrl}, which W2L does not fetch (${landed}); it is not read` }
@@ -1248,6 +1271,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // of a page that keeps navigating paused in the handler, and a close
       // that waited for it would not end (the refresh-loop case).
       if (context !== undefined && requestRoute !== null) await context.unroute(routeMatch, requestRoute).catch(() => {})
+      if (context !== undefined && actionsRoute !== null) await context.unroute(routeMatch, actionsRoute).catch(() => {})
+      if (context !== undefined && popupCloser !== null) context.off('page', popupCloser)
       if (context !== this.managedContext && context !== undefined) await closeWithin(context.close(), PAGE_CLOSE_MS)
       await relaxedRoutes?.close()
     }
@@ -1403,14 +1428,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
   }
 
   /** Why W2L would not fetch this URL as a navigation of the page (the egress policy, robots.txt under the page's identity), or null when it would. */
-  private async refuseNavigation(target: string, identity: { respectsRobots: boolean; userAgent: string }, execution: ExecutionContext, relaxedRoutes: EgressRoutes | null): Promise<string | null> {
+  private async refuseNavigation(target: string, identity: { respectsRobots: boolean; userAgent: string }, execution: ExecutionContext, relaxedRoutes: EgressRoutes | null, overridden: string | null = null): Promise<string | null> {
     if (!/^https?:/i.test(target)) return null
     try {
       await assertSafeUrl(target, this.networkPolicy)
     } catch (error) {
       return `the egress policy refuses it: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`
     }
-    if (!identity.respectsRobots) return null
+    if (!identity.respectsRobots || target === overridden) return null
     const lookup = await this.robotsCache.lookup(target, identity.userAgent, execution, relaxedRoutes === null ? undefined : (to) => relaxedRoutes.dispatcherFor(to))
     const verdict = this.robotsCache.decision(lookup, target, identity.userAgent)
     if (verdict.decision !== 'disallowed') return null
@@ -1590,4 +1615,9 @@ function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResu
 /** Steps that could not run on the page at all, reported as the first one failing. */
 function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
   return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [] }
+}
+
+function withoutFragment(url: string): string {
+  const at = url.indexOf('#')
+  return at === -1 ? url : url.slice(0, at)
 }

@@ -25,6 +25,10 @@ beforeAll(async () => {
     if (req.url === '/form') return html(`<h1>Search</h1>${PROSE}<input id="q"><p id="out"></p><script>document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('out').textContent = 'You searched for ' + e.target.value })</script>`)
     if (req.url === '/scroll') return html(`<h1>Feed</h1>${PROSE}<div id="feed"></div><div style="height:3000px"></div><script>let n = 0; const add = () => { for (let i = 0; i < 5; i++) { const p = document.createElement('p'); p.className = 'item'; p.textContent = 'Item ' + (++n); document.getElementById('feed').appendChild(p) } }; add(); window.addEventListener('scroll', () => { if (n < 15) add() })</script>`)
     if (req.url === '/links') return html(`<h1>Links</h1>${PROSE}<a id="secret" href="/private/page">Private</a><a id="open" href="/more">Open</a>`)
+    if (req.url === '/go') { res.writeHead(302, { location: '/private/x' }); res.end(); return }
+    if (req.url === '/hop') { res.writeHead(302, { location: '/private/hop' }); res.end(); return }
+    if (req.url === '/redirecting') return html(`<h1>Redirecting</h1>${PROSE}<a id="go" href="/go">Go</a><a id="pop" target="_blank" href="/private/popup">Pop</a><a id="popok" target="_blank" href="/more">Pop ok</a>`)
+    if (req.url === '/private/x') return html(`<h1>Private x</h1>${PROSE}<p>Not for crawlers.</p><a id="back" href="/more">Back</a>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
     if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p>`)
     if (req.url === '/echo-header') return html(`<h1>Header</h1>${PROSE}<p>X-Test: ${String(req.headers['x-test'] ?? 'none')}</p><button id="b" onclick="document.getElementById('out').textContent = 'The button was clicked.'">B</button><p id="out"></p>`)
@@ -123,6 +127,32 @@ describe('actions, real browser', () => {
     expect(result.actions?.failed).toMatchObject({ index: 1, code: 'navigation_refused' })
     expect(result.evidence.finalUrl).toBe(`${base}/late`)
     expect(result.markdown).toContain('Late')
+  }, 60_000)
+
+  it('a step whose navigation a server redirects to a disallowed page fails there, and the steps after it never read that page', async () => {
+    const result = await run('/redirecting', [{ type: 'click', selector: '#go' }, { type: 'scrape' }, { type: 'click', selector: '#back' }])
+    expect(result.actions?.failed).toMatchObject({ index: 0, code: 'navigation_refused' })
+    expect(result.actions?.failed?.message).toContain('/private/x')
+    expect(result.actions?.scrapes).toEqual([])
+    expect(result.markdown ?? '').not.toContain('Not for crawlers')
+    expect(result.status).toBe('failed')
+  }, 60_000)
+
+  it('a redirect of the requested URL itself is the fetch\'s, not the steps\'', async () => {
+    const result = await run('/hop', [{ type: 'wait', milliseconds: 10 }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.trace.some((event) => event.event === 'navigation_refused')).toBe(false)
+  }, 60_000)
+
+  it('a window a step opens is guarded too, and closed', async () => {
+    requested.length = 0
+    const result = await run('/redirecting', [{ type: 'click', selector: '#pop' }, { type: 'wait', milliseconds: 800 }])
+    expect(requested).not.toContain('/private/popup')
+    expect(result.actions?.failed).toMatchObject({ code: 'navigation_refused' })
+    const allowed = await run('/redirecting', [{ type: 'click', selector: '#popok' }, { type: 'wait', milliseconds: 500 }])
+    expect(allowed.actions?.failed).toBeUndefined()
+    expect(allowed.trace.some((event) => event.event === 'popup_closed')).toBe(true)
+    expect(allowed.markdown).toContain('Redirecting')
   }, 60_000)
 
   it('a same-document URL change requests nothing and is not a refused navigation', async () => {

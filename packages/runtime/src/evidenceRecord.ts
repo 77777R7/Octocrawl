@@ -109,10 +109,13 @@ export function toEvidenceRecord(
 /** The steps that ran on the page, from the lane's own `action` trace events; null when the request had none. */
 function pageActions(result: FetchResult): EvidencePageActions | null {
   if (result.actions === undefined) return null
-  const steps = result.trace
+  const ran = result.trace
     .filter((event) => event.event === 'action')
     .map((event) => ({ type: event.detail?.type as PageActionType, outcome: event.detail?.outcome === 'ok' ? 'ok' as const : 'failed' as const }))
-  return { steps, scriptRan: steps.some((step) => step.type === 'executeJavascript') }
+  // The result's own verdict on the steps wins: a navigation stopped after a step's event was written fails that step.
+  const failed = result.actions.failed
+  const steps = failed === undefined ? ran : [...ran.slice(0, failed.index), { type: failed.type, outcome: 'failed' as const }]
+  return { steps, scriptRan: ran.some((step) => step.type === 'executeJavascript') }
 }
 
 /** The lanes whose identity events a result's own lane answers for: the browser lanes record theirs as `browser_local`. */
