@@ -58,6 +58,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       networkPolicy: listen.networkPolicy,
       allowRobotsOverride: listen.allowRobotsOverride,
       webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
+      workerCount: listen.workerCount,
       resumeOnStart: false,
     })
     try {

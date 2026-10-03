@@ -36,6 +36,13 @@ export interface ListenConfig {
    * none, whoever holds a token.
    */
   allowRobotsOverride: boolean
+  /**
+   * Pages the engine fetches at once across a crawl or batch
+   * (`W2L_WORKER_COUNT`, 1 to 64, default 4): a batch's or crawl's own
+   * `maxConcurrency` may lower it, never raise it, and the per-host ceiling
+   * (`W2L_PER_HOST_CONCURRENCY`) still holds for each host.
+   */
+  workerCount: number
   /** Startup lines about the environment proxy, printed once. */
   notices: readonly string[]
   /**
@@ -61,6 +68,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const port = parsePort(argv, env)
   const tokens = readTokens(argv, env)
   const rateLimit = parseRateLimit(argv, env)
+  const workerCount = parseWorkerCount(env)
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -69,6 +77,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       mode: 'hosted',
       host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '0.0.0.0',
       port,
+      workerCount,
       tokens,
       // Hosted SSRF guarantees depend on direct, DNS-pinned connections.
       networkPolicy: withOperatorContact(tunedPolicy(hostedNetworkPolicy(), env), env),
@@ -87,6 +96,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mode: 'local',
     host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '127.0.0.1',
     port,
+    workerCount,
     tokens,
     networkPolicy,
     defaultMaxPages: null,
@@ -131,6 +141,16 @@ function parseRateLimit(argv: readonly string[], env: NodeJS.ProcessEnv): { perM
     throw new Error(`${flag === undefined ? 'W2L_RATE_LIMIT_PER_MINUTE' : '--rate-limit-per-minute'} must be an integer between 1 and ${MAX_RATE_LIMIT_PER_MINUTE}`)
   }
   return { perMinute }
+}
+
+export const MAX_WORKER_COUNT = 64
+
+function parseWorkerCount(env: NodeJS.ProcessEnv): number {
+  const raw = (env['W2L_WORKER_COUNT'] ?? '').trim()
+  if (raw === '') return 4
+  const count = Number(raw)
+  if (!/^\d+$/.test(raw) || count < 1 || count > MAX_WORKER_COUNT) throw new Error(`W2L_WORKER_COUNT must be an integer from 1 to ${MAX_WORKER_COUNT}`)
+  return count
 }
 
 function tunedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv): NetworkPolicy {

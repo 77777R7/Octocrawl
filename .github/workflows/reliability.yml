@@ -18,6 +18,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
+      - name: A batch of 1,000 URLs over 20 hosts survives kill -9 (0 lost, 0 duplicated)
+        run: npm run verify:batch-crash-1000
       - name: Check for orphaned Chromium processes
         run: |
           if pgrep -af '[m]s-playwright|[c]hromium_headless_shell|[c]hrome-headless-shell' >/tmp/w2l-chromium-processes.txt; then
