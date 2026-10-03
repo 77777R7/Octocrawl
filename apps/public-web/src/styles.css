@@ -1080,3 +1080,32 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .site-header .brand-mark, .site-header .brand:hover .brand-mark, .site-header .brand:focus-visible .brand-mark { animation: none; }
 }
+
+/* Hosted early-access form (src/waitlistMarkup.ts): a dark band above the footer, copy beside the form. */
+.waitlist-band { color: #d8e5f6; background: var(--navy); border-bottom: 1px solid rgba(216, 229, 246, .12); }
+.waitlist { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px 56px; padding: 64px 0; scroll-margin-top: 24px; }
+.waitlist-copy h2 { margin: 16px 0 0; color: #fff; font-size: clamp(28px, 3vw, 38px); line-height: 1.15; letter-spacing: -.045em; }
+.waitlist-copy p:not(.section-kicker) { margin: 16px 0 0; color: #b7c8e6; font-size: 15px; line-height: 1.6; }
+.waitlist-band .section-kicker { color: #8fb6e3; }
+.waitlist-form { display: grid; gap: 18px; }
+.waitlist-field { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; color: #eef6ff; font-size: 14px; font-weight: 650; }
+.waitlist-field small { color: #8fa4c7; font-size: 12px; font-weight: 500; }
+.waitlist-field legend { padding: 0; margin-bottom: 8px; }
+.waitlist-field input:not([type="checkbox"]), .waitlist-field select, .waitlist-field textarea { width: 100%; padding: 11px 12px; border: 1px solid rgba(216, 229, 246, .22); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .05); font-family: inherit; font-size: 15px; line-height: 1.4; }
+.waitlist-field textarea { resize: vertical; }
+.waitlist-field select option { color: var(--text); }
+.waitlist-field :is(input, select, textarea):focus-visible { outline: 2px solid #fa935f; outline-offset: 1px; }
+.waitlist-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.waitlist-check { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid rgba(216, 229, 246, .22); border-radius: 999px; color: #d8e5f6; font-size: 13px; font-weight: 500; cursor: pointer; }
+.waitlist-check:has(input:checked) { border-color: var(--orange); background: rgba(251, 123, 76, .12); color: #fff; }
+.waitlist-check input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--orange); }
+.waitlist-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.waitlist-submit { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; }
+.waitlist-submit .cta-primary { border: 0; cursor: pointer; }
+.waitlist-submit .cta-primary:disabled { opacity: .6; cursor: progress; transform: none; }
+.waitlist-status { margin: 0; color: #b7c8e6; font-size: 14px; }
+.waitlist-status.is-error { color: #ffb08f; }
+.waitlist-note { margin: 0; color: #8fa4c7; font-size: 12.5px; line-height: 1.5; }
+.waitlist-note a { color: #d8e5f6; }
+.waitlist-done { margin: 0; padding: 18px 20px; border: 1px solid rgba(251, 123, 76, .5); border-radius: 12px; color: #fff; font-size: 16px; font-weight: 650; }
+@media (max-width: 860px) { .waitlist { grid-template-columns: 1fr; padding: 48px 0; } }

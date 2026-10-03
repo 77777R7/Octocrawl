@@ -4,6 +4,7 @@ import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
+import { mountWaitlist } from './waitlist'
 import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -119,6 +120,14 @@ const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label'
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
+const waitlist = mountWaitlist()
+/** After the daily previews run out: a link to the hosted early-access form. */
+function waitlistLink(className: string): HTMLAnchorElement {
+  const link = textElement('a', 'Get early access to hosted ↓', className)
+  link.href = '#waitlist'
+  link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
+  return link
+}
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
 const formatLabel = document.querySelector<HTMLElement>('#format-label')!
 const formatPanel = document.querySelector<HTMLElement>('#format-panel')!
@@ -369,6 +378,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
   docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/w2l' : '/docs/limits/'
   actions.append(json, docs)
+  if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
   panel.append(actions)
   return panel
 }
@@ -950,17 +960,20 @@ function renderDetail(run: Run): void {
  * prerendered "3 free previews a day" in place: the page never guesses a number. */
 async function refreshQuota(): Promise<void> {
   let text = QUOTA_NOTE
+  let usedUp = false
   try {
     const response = await fetch('/api/quota', { credentials: 'same-origin' })
     const quota = response.ok ? await response.json() as { enabled?: boolean; state?: QuotaDecision; limit?: number; remaining?: number } : null
     if (quota?.enabled === false) text = 'Previews are paused right now'
     else if (quota?.enabled === true && typeof quota.remaining === 'number' && typeof quota.limit === 'number') {
+      usedUp = quota.state === 'global_limited' || quota.state === 'visitor_limited'
       text = quota.state === 'global_limited' ? 'Today’s public previews are used up · resets 00:00 UTC'
         : quota.state === 'visitor_limited' ? 'No previews left today · resets 00:00 UTC'
           : `${quota.remaining} of ${quota.limit} free previews left today`
     }
   } catch { /* An unreadable count shows the static note, never an older number. */ }
   quotaNote.textContent = text
+  if (usedUp) quotaNote.append(' · ', waitlistLink('url-help-link'))
 }
 type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 void refreshQuota()

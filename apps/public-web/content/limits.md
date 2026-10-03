@@ -63,3 +63,5 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 | Persistent Monitor or Batch | Local service and configured storage | Local MCP workflow | Durable task results; local only | Not deployed to the anonymous Cloud Run preview. |
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
+
+Need runs that keep going while your computer is off, or more previews a day? [Get early access to hosted Octocrawl](/?from=limits#waitlist).
