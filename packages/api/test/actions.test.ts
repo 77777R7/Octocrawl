@@ -18,6 +18,7 @@ function ranActions(actions: readonly PageAction[] | undefined, failAt?: number)
     scrapes: [{ url: 'https://example.test/after', html: '<p>after</p>' }],
     javascriptReturns: [{ type: 'number', value: 4 }],
     pdfs: [],
+    lists: [],
     ...(failAt === undefined ? {} : { failed: { index: failAt, type: 'click', code: 'selector_not_found', message: 'no element matched #nope' } }),
   } as ActionsResult
 }

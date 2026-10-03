@@ -1603,8 +1603,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
 function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResult {
   if (ran === undefined) return result
   const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)
+  // A list step that stopped before its list's end (its round limit, or the deadline) says so: what was read is not the whole list.
+  const short = ran.result.lists.filter((list) => list.stoppedBy === 'max' || list.stoppedBy === 'deadline')
+  const warnings = short.length === 0 ? result.warnings : [...(result.warnings ?? []), {
+    code: 'list_not_exhausted',
+    message: `The list ${short.map((list) => `of step ${list.index} (${list.type})`).join(' and ')} stopped before its end (${short.map((list) => list.stoppedBy === 'max' ? `its limit of ${list.rounds} ${list.type === 'paginate' ? 'pages' : 'rounds'}` : 'the deadline').join('; ')}): more items may follow.`,
+  }]
   return {
     ...result,
+    ...(warnings === undefined ? {} : { warnings }),
     actions: ran.result,
     ...(failed ? { status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null } : {}),
     evidence: { ...result.evidence, artifacts: [...result.evidence.artifacts, ...ran.artifacts] },
@@ -1613,5 +1620,5 @@ function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResu
 
 /** Steps that could not run on the page at all, reported as the first one failing. */
 function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
-  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0 }
+  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0 }
 }

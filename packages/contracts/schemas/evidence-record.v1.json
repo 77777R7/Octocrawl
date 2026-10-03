@@ -307,7 +307,7 @@
       "properties": {
         "type": {
           "description": "The step's type.",
-          "enum": ["wait", "click", "write", "press", "scroll", "screenshot", "scrape", "executeJavascript", "pdf"]
+          "enum": ["wait", "click", "write", "press", "scroll", "screenshot", "scrape", "executeJavascript", "pdf", "scrollToEnd", "loadMore", "paginate"]
         },
         "outcome": {
           "description": "ok, or failed (the steps after it did not run).",

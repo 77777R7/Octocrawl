@@ -15,7 +15,7 @@ import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
-import { MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
+import { LIST_WAIT_MS, MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, MAX_LIST_PAGES, MAX_LIST_ROUNDS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -1605,6 +1605,9 @@ const ACTION_KEYS: Readonly<Record<PageAction['type'], readonly string[]>> = {
   scrape: [],
   executeJavascript: ['script'],
   pdf: ['format', 'landscape', 'scale'],
+  scrollToEnd: ['selector', 'itemSelector', 'maxScrolls', 'waitMs'],
+  loadMore: ['selector', 'itemSelector', 'maxClicks', 'waitMs'],
+  paginate: ['nextSelector', 'itemSelector', 'maxPages', 'waitMs'],
 }
 
 /** `actions`: 1 to MAX_ACTIONS steps, each Firecrawl's shape, checked before anything is fetched. */
@@ -1660,6 +1663,30 @@ function readAction(value: unknown, name: string): PageAction {
     case 'executeJavascript':
       if (typeof rec.script !== 'string' || rec.script.trim().length === 0 || rec.script.length > MAX_ACTION_SCRIPT_CHARS) throw new RequestError(`${name}.script must be a script of 1 to ${MAX_ACTION_SCRIPT_CHARS} characters`)
       return { type, script: rec.script }
+    case 'scrollToEnd':
+    case 'loadMore':
+    case 'paginate': {
+      const count = (key: string, max: number): number | undefined => {
+        const value = rec[key]
+        if (value === undefined) return undefined
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) throw new RequestError(`${name}.${key} must be an integer from 1 to ${max}`)
+        return value
+      }
+      const waitMs = readMilliseconds(rec.waitMs, `${name}.waitMs`, LIST_WAIT_MS.min, LIST_WAIT_MS.max)
+      const itemSelector = selector('itemSelector', false)
+      const common = { ...(itemSelector === undefined ? {} : { itemSelector }), ...(waitMs === undefined ? {} : { waitMs }) }
+      if (type === 'scrollToEnd') {
+        const within = selector('selector', false)
+        const maxScrolls = count('maxScrolls', MAX_LIST_ROUNDS)
+        return { type, ...(within === undefined ? {} : { selector: within }), ...common, ...(maxScrolls === undefined ? {} : { maxScrolls }) }
+      }
+      if (type === 'loadMore') {
+        const maxClicks = count('maxClicks', MAX_LIST_ROUNDS)
+        return { type, selector: selector('selector', true)!, ...common, ...(maxClicks === undefined ? {} : { maxClicks }) }
+      }
+      const maxPages = count('maxPages', MAX_LIST_PAGES)
+      return { type: 'paginate', nextSelector: selector('nextSelector', true)!, ...common, ...(maxPages === undefined ? {} : { maxPages }) }
+    }
     default: {
       // pdf
       if (rec.format !== undefined && !(PDF_PAPER_FORMATS as readonly unknown[]).includes(rec.format)) throw new RequestError(`${name}.format must be one of ${PDF_PAPER_FORMATS.join(', ')}`)
