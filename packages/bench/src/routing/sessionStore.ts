@@ -58,6 +58,28 @@ export interface SessionStore {
   save(snapshot: SessionSnapshot): Promise<void>
 }
 
+/**
+ * Whether a session saved for `domain` applies to `host`: the domain itself
+ * or a subdomain of it, as a cookie for `.example.com` reaches
+ * `www.example.com`. The cookies still carry their own scope; this only
+ * decides which saved session a host may use.
+ */
+export function sessionCoversHost(domain: string, host: string): boolean {
+  const d = domain.toLowerCase().replace(/^\./, '')
+  const h = host.toLowerCase()
+  return h === d || h.endsWith(`.${d}`)
+}
+
+/** The session for `host`: the one saved for the host itself, else the nearest parent domain's. */
+export async function loadSessionForHost(store: SessionStore, host: string): Promise<SessionSnapshot | null> {
+  const labels = host.toLowerCase().split('.')
+  for (let i = 0; i <= labels.length - 2; i++) {
+    const session = await store.load(labels.slice(i).join('.'))
+    if (session !== null) return session
+  }
+  return null
+}
+
 /** The credential-free fact a record can carry. */
 export function sessionFingerprint(snapshot: SessionSnapshot): string {
   return sha256Hex(
@@ -97,15 +119,29 @@ export class FileSessionStore implements SessionStore {
   }
 
   async save(snapshot: SessionSnapshot): Promise<void> {
-    let all: SessionSnapshot[] = []
+    await this.write([...(await this.list()).filter((s) => s.domain !== snapshot.domain), snapshot])
+  }
+
+  /** Every saved session; none when the file does not exist yet. */
+  async list(): Promise<SessionSnapshot[]> {
     try {
-      const raw = await readFile(this.file, 'utf8')
-      const parsed = JSON.parse(raw) as { sessions?: SessionSnapshot[] }
-      all = parsed.sessions ?? []
+      const parsed = JSON.parse(await readFile(this.file, 'utf8')) as { sessions?: SessionSnapshot[] }
+      return parsed.sessions ?? []
     } catch {
-      // First save: no file yet.
+      return []
     }
-    all = [...all.filter((s) => s.domain !== snapshot.domain), snapshot]
+  }
+
+  /** Forget the session saved for `domain`. False when there was none. */
+  async remove(domain: string): Promise<boolean> {
+    const all = await this.list()
+    const kept = all.filter((s) => s.domain !== domain)
+    if (kept.length === all.length) return false
+    await this.write(kept)
+    return true
+  }
+
+  private async write(all: readonly SessionSnapshot[]): Promise<void> {
     const tmp = `${this.file}.tmp`
     await mkdir(dirname(this.file), { recursive: true })
     await writeFile(tmp, JSON.stringify({ sessions: all }, null, 2), { mode: 0o600 })

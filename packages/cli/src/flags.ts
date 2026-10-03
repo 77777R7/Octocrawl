@@ -206,6 +206,7 @@ export function usage(command: Command | null): string {
       '  batch <url>...        many pages (--urls-file <file>)',
       '  map <url>             list a site\'s URLs without fetching each page',
       '  serve                 run the local API (--port, --host, --hosted, --token)',
+      '  login import <site>   save your login to a site from the Chrome you use, for --mode authed (w2l login --help)',
       '',
       'Every option of the REST API is a flag under its kebab-case name: maxAge is --max-age.',
       'w2l <command> --help lists them. A command\'s task root is --task-root, else W2L_TASK_ROOT,',

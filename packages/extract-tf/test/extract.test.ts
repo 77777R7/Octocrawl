@@ -531,6 +531,20 @@ describe('extractTf selection and whole page', () => {
     expect(extractTf.extract(chrome, { blockAds: false }).mainHtml).toContain('Promo box')
   })
 
+  it('reads a document without <html> as it reads it with one', () => {
+    const page = '<head><title>Kiln log</title></head><body><article><h1>Kiln log</h1>' +
+      '<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>' +
+      '<table><tr><td>Firing</td><td>Peak</td></tr><tr><td>1</td><td>1240</td></tr></table></article></body>'
+    const bare = extractTf.extract(`<!doctype html>${page}`)
+    const full = extractTf.extract(`<!doctype html><html>${page}</html>`)
+    expect(bare.title).toBe('Kiln log')
+    expect(bare.mainHtml).toContain('The kiln reached 1240 degrees')
+    expect(htmlToMarkdown(bare.mainHtml)).toContain('| Firing | Peak |')
+    expect({ ...bare, timings: undefined }).toEqual({ ...full, timings: undefined })
+    expect(extractTf.extract('<!doctype html><body><p>Only a body here, with a sentence long enough to be read as content.</p></body>').mainHtml)
+      .toContain('Only a body here')
+  })
+
   it('keeps the main content after a <head> tag in the body', () => {
     const html = '<!doctype html><html><head><title>Kiln log</title></head><body><article><h1>Kiln log</h1><head/>' +
       '<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>' +

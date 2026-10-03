@@ -94,4 +94,9 @@ describe('htmlToTables', () => {
     expect(htmlToTables(html, { exclude: ['.ads'] }).map((table) => [table.tableIndex, table.rows])).toEqual([[0, [['x'], ['y']]]])
     expect(htmlToTables('')).toEqual([])
   })
+
+  it('finds the table of a whole document that has no <html> or <body>', () => {
+    const html = '<!doctype html><table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>'
+    expect(htmlToTables(html).map((table) => table.rows)).toEqual([[['a', 'b'], ['c', 'd']]])
+  })
 })

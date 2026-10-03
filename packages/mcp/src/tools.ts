@@ -227,7 +227,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         url: { type: 'string' },
-        mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
+        mode: { type: 'string', enum: ['standard', 'research'], description: 'authed is not offered: a crawl follows every link, and a sign-out link would end the user\'s session in Chrome too; send the pages as a batch in mode authed.' },
         maxPages: { type: ['number', 'null'] },
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },

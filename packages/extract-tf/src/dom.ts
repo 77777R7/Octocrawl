@@ -19,14 +19,64 @@ export function parse(html: string): DomDoc {
   // documentElement is null; its head/body getters then THROW on access.
   // Real crawls hit empty 200 bodies constantly (the empty-body fixture),
   // so normalize to a minimal empty document instead.
-  if ((document as unknown as { documentElement: unknown }).documentElement == null) {
+  const root = (document as unknown as { documentElement: Element | null }).documentElement
+  if (root == null) {
     ;({ document } = parseHTML('<html><head></head><body></body></html>'))
+  } else if (root.tagName !== 'HTML') {
+    document = rooted(document as unknown as Document) as unknown as typeof document
   }
   unwrapStrayHeads(document as unknown as Document)
   return {
     document: document as unknown as Document,
     close: () => {},
   }
+}
+
+/** Elements a browser puts in <head> when they come before any content. */
+const HEAD_ELEMENTS = new Set(['BASE', 'LINK', 'META', 'NOSCRIPT', 'SCRIPT', 'STYLE', 'TEMPLATE', 'TITLE'])
+
+/**
+ * A document without <html> rebuilt as <html><head><body>, as a browser
+ * builds it. linkedom has no implied elements: it makes the first top-level
+ * element the documentElement, leaves the elements after it as its siblings,
+ * and its `body` getter inserts an empty <head> and <body> into that element.
+ * `<!doctype html><table>…` then had an empty body and a table as its root,
+ * and `<!doctype html><head>…</head><body>…</body>` lost its body.
+ */
+function rooted(parsed: Document): Document {
+  const { document } = parseHTML('<!doctype html><html><head></head><body></body></html>')
+  const html = document.documentElement
+  const head = document.head
+  const body = document.body
+  let inBody = false
+  const copyAttributes = (from: Element, to: Element): void => {
+    for (const { name, value } of Array.from(from.attributes)) if (!to.hasAttribute(name)) to.setAttribute(name, value)
+  }
+  const place = (node: Node): void => {
+    if (node.nodeType === 1) {
+      const el = node as Element
+      if (el.tagName === 'HTML' || el.tagName === 'HEAD' || el.tagName === 'BODY') {
+        copyAttributes(el, el.tagName === 'HTML' ? html : el.tagName === 'HEAD' ? head : body)
+        if (el.tagName === 'BODY') inBody = true
+        for (const child of Array.from(el.childNodes)) place(child)
+        return
+      }
+      if (!inBody && HEAD_ELEMENTS.has(el.tagName)) {
+        head.appendChild(document.importNode(el, true))
+        return
+      }
+      inBody = true
+      body.appendChild(document.importNode(el, true))
+    } else if (node.nodeType === 3) {
+      if (!inBody && (node.textContent ?? '').trim() === '') return
+      inBody = true
+      body.appendChild(document.importNode(node, true))
+    } else if (node.nodeType === 8) {
+      ;(inBody ? body : head).appendChild(document.importNode(node, true))
+    }
+  }
+  for (const node of Array.from(parsed.childNodes)) place(node)
+  return document as unknown as Document
 }
 
 /**

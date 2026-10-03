@@ -625,8 +625,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // way the origin expects.
       const userCookies = this.accessConfig?.session?.cookies ?? []
       if (userCookies.length > 0) {
+        // The cookie's own attributes go with it: Chromium refuses a
+        // `__Secure-` or `__Host-` cookie without `secure`, and many logins
+        // are carried by one.
         await context.addCookies(
-          userCookies.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path })),
+          userCookies.map((c) => ({
+            name: c.name, value: c.value, domain: c.domain, path: c.path,
+            ...(c.expires === undefined || c.expires < 0 ? {} : { expires: c.expires }),
+            ...(c.httpOnly === undefined ? {} : { httpOnly: c.httpOnly }),
+            ...(c.secure === undefined ? {} : { secure: c.secure }),
+            ...(c.sameSite === undefined ? {} : { sameSite: c.sameSite }),
+          })),
         )
         trace.push({
           at: Date.now() - start,

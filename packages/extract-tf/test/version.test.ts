@@ -48,6 +48,8 @@ ${Array.from({ length: 6 }, (_, i) => `<tr><td><a href="kilns/${i + 1}">Kiln ${i
 ${Array.from({ length: 6 }, (_, i) => `<tr><td>Kiln ${i + 7}</td><td>${30 - i}</td><td><b>Cobalt</b> and <em>ash</em> glaze, batch ${i + 1}</td></tr>`).join('\n')}
 </table></div>
 <div id="colophon">Survey office, 2026</div></body></html>`],
+  // A page that leaves out <html> and <body>, as HTML allows: its content elements are all top-level.
+  ['https://open.fixture.test/datasets/kilns', `<!doctype html><meta charset="utf-8"><title>Kiln datasets</title><h1>Kiln datasets</h1><p>Each dataset lists the firings recorded by the harbour office, updated every quarter.</p><table><tr><th>Dataset</th><th>Rows</th><th>Updated</th></tr><tr><td><a href="firings.csv">Firings</a></td><td>12,480</td><td>2026-09-30</td></tr><tr><td><a href="glazes.csv">Glazes</a></td><td>3,112</td><td>2026-08-31</td></tr></table><p>Open data office</p>`],
   // A template that writes a second <head/> into the body: a browser ignores the tag.
   ['https://notes.fixture.test/kilns/firing-12', `<!doctype html><html><head><title>Firing 12</title></head><body>
 <nav><a href="/">Notes</a></nav>
@@ -69,6 +71,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/7', digest: '5ca3d1fd96b2cb7ad7d343a77535a71a4981c9654a8b52473d45d32532d9bd06' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/8', digest: '14c8bba35aa88e2e25347c20ffb59e23f3357d916aa5ee543df6d603e140d430' })
   })
 })
