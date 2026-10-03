@@ -31,8 +31,10 @@ export interface UserBrowserRead {
   fetchedAt: string
   /** From opening the page to reading it, the person's time included. */
   wallMs: number
-  /** The check the page showed before the person was through, as W2L's gate read it; null when it showed none. */
+  /** The check the page showed before the person was through, as W2L's gate read it (decisive markers, or the document's status and headers); null when it showed none. */
   sawGate: string | null
+  /** How the person acted in the tab, as Chrome counts a user's act: `user_activation` (a click or key press on the page) or `gesture_navigation` (a navigation they made). */
+  act: string
   /** Which browser: `chrome` and its version, as it reported them. */
   browser: string
 }
@@ -46,7 +48,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
     ...robotsOf(prior),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
-    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, waitedMs: wallMs } },
+    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs } },
   ]
   const base = {
     requestedUrl: read.requestedUrl,

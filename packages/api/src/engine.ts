@@ -133,6 +133,15 @@ export interface CrawlStatusPage {
 }
 
 /** The crawl's state does not allow the request (HTTP 409 `conflict`). */
+/** What a handoff tells its caller while it waits, and what ends it. */
+export interface HandoffHooks {
+  /** A page shows a check the person has to pass. */
+  onWaiting?: (url: string, check: string) => void
+  /** A page shows no check: it is read once the person clicks on it. */
+  onConfirm?: (url: string) => void
+  signal?: AbortSignal
+}
+
 /** A handoff this server does not offer (a hosted server, or one not serving its person's machine), or Chrome could not be reached: the message says why. */
 export class HandoffUnavailableError extends Error {
   override readonly name = 'HandoffUnavailableError'
@@ -226,7 +235,7 @@ export interface ApiEngine {
    * CrawlStateError while it runs; a HandoffUnavailableError on a server
    * that does not offer it, or when Chrome cannot be reached.
    */
-  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: { onWaiting?: (url: string, check: string) => void; signal?: AbortSignal }): Promise<BatchHandoffResponse | null>
+  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: HandoffHooks): Promise<BatchHandoffResponse | null>
   /** End every handoff now, closing the tabs they have open, and wait until they have; close() does this first. No handoff starts after. */
   endHandoffs(): Promise<void>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
@@ -778,7 +787,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
-  async function handOff(taskId: string, req: BatchHandoffRequest, hooks: { onWaiting?: (url: string, check: string) => void; signal?: AbortSignal }): Promise<BatchHandoffResponse | null> {
+  async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
     if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
     if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
@@ -808,7 +817,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
               try {
                 // A caller that went away hands nothing more over: each item left keeps its stopped result.
                 if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
-                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), signal })
+                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
                 const result = pageFromUserBrowser(read, step.result!, fetchOpts)
                 // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
                 if (!CONTENTFUL_STATUS.has(result.status)) {

@@ -47,6 +47,10 @@ beforeAll(async () => {
     }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
     if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
+    // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
+    if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
+    if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
+    if (req.url === '/meta2') { res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'meta=1; path=/' }); res.end(`<!doctype html><html><body>${ARTICLE}</body></html>`); return }
     // A bot check that only its header says (a vendor's), never passed here.
     if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
     // A sign-in, then a one-time code, then the page.
@@ -184,7 +188,8 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
 
   it('a search box with the focus, a hidden sign-in box, or a challenge reloading by itself does not stop a page from being through', async () => {
     const engine = engineFor(join(root, 'tasks-5'))
-    const stop = person(chrome, { '/search': async (page) => { await page.click('#pass') } })
+    // The challenge reloads into the page by itself; the person then clicks on the page to have it read.
+    const stop = person(chrome, { '/search': async (page) => { await page.click('#pass') }, '/jsc': async (page) => { await page.waitForSelector('article', { timeout: 20_000 }); await page.mouse.click(10, 10) } })
     try {
       const taskId = await batchOf(engine, ['/search', '/jsc'])
       const done = await engine.handOffBatch(taskId, { waitMs: 20_000 })
@@ -205,13 +210,26 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       const item = (await itemsOf(engine, first))[0]!
       expect(item.markdown).toContain('Your orders')
       expect(item.evidence?.finalUrl).toBe(`${base}/orders`)
-      // The person is signed in now: a page their Chrome shows them with nothing for them to do is their session's, and not read.
+      // The person is signed in now: a page their Chrome shows them clear, that they do not click on, is their session's, and not read.
       const second = await batchOf(engine, ['/orders'])
-      const done = await engine.handOffBatch(second, {})
-      expect(done).toMatchObject({ through: 0, items: [{ reason: expect.stringContaining('showed no check in your Chrome') }] })
+      const done = await engine.handOffBatch(second, { waitMs: 6_000 })
+      expect(done).toMatchObject({ through: 0, items: [{ reason: expect.stringContaining('you did not click on it to have it read') }] })
       expect((await itemsOf(engine, second))[0]).toMatchObject({ status: 'blocked' })
     } finally {
       stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a check that passes by itself in the browser, with nobody at it, is not read', async () => {
+    const engine = engineFor(join(root, 'tasks-9'))
+    try {
+      const taskId = await batchOf(engine, ['/auto', '/meta'])
+      expect((await itemsOf(engine, taskId)).map((item) => item.status)).toEqual(['blocked', 'blocked'])
+      const done = await engine.handOffBatch(taskId, { waitMs: 6_000 })
+      expect(done).toMatchObject({ through: 0, notThrough: 2 })
+      expect(done!.items.every((item) => item.reason?.includes('you did not click on it to have it read'))).toBe(true)
+    } finally {
       await engine.close()
     }
   }, 120_000)
