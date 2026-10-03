@@ -48,6 +48,8 @@ ${Array.from({ length: 6 }, (_, i) => `<tr><td><a href="kilns/${i + 1}">Kiln ${i
 ${Array.from({ length: 6 }, (_, i) => `<tr><td>Kiln ${i + 7}</td><td>${30 - i}</td><td><b>Cobalt</b> and <em>ash</em> glaze, batch ${i + 1}</td></tr>`).join('\n')}
 </table></div>
 <div id="colophon">Survey office, 2026</div></body></html>`],
+  // A page that leaves out <html> and <body>, as HTML allows: its content elements are all top-level.
+  ['https://open.fixture.test/datasets/kilns', `<!doctype html><meta charset="utf-8"><title>Kiln datasets</title><h1>Kiln datasets</h1><p>Each dataset lists the firings recorded by the harbour office, updated every quarter.</p><table><tr><th>Dataset</th><th>Rows</th><th>Updated</th></tr><tr><td><a href="firings.csv">Firings</a></td><td>12,480</td><td>2026-09-30</td></tr><tr><td><a href="glazes.csv">Glazes</a></td><td>3,112</td><td>2026-08-31</td></tr></table><p>Open data office</p>`],
 ]
 
 function monitorMarkdown([url, html]: [string, string]): string {
@@ -62,6 +64,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/6', digest: '5eb81e8b610d65444070f71452ceaac60c95314cf618940e8dde96ebf0890221' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/7', digest: '27eb331c6277628f5fbe85cb0c6b4804368e4b2c37b38be7cfd3a3032c45083b' })
   })
 })
