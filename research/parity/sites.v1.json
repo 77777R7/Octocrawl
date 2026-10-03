@@ -2414,14 +2414,14 @@
       "feature": "scrape-execution.custom-headers",
       "url": "https://httpbin.org/headers",
       "request": {"headers": {"accept-language": "de-DE", "x-research-run": "evidence"}, "mobile": true, "formats": ["markdown"]},
-      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). The P2 row \"custom headers, mobile viewport recorded in the Evidence Record\": httpbin echoes the headers it received, so the page shows they were sent; the record names the mobile device and both headers, sorted.",
+      "note": "Added 2026-10-03 for the cache group (P2; the audit's M3 cache features). The P2 row \"custom headers, mobile viewport recorded in the Evidence Record\": httpbin echoes the headers it received, so the page shows they were sent; the record names the mobile device and both headers, sorted, each with the SHA-256 of its value (never the value).",
       "checks": [
         {"item": "FS", "type": "apiStatus", "equals": 200},
         {"item": "scrape-execution.custom-headers", "type": "field", "path": "status", "equals": "success"},
         {"item": "scrape-execution.custom-headers", "type": "markdownIncludes", "text": "de-DE"},
         {"item": "scrape-execution.custom-headers", "type": "markdownIncludes", "text": "evidence"},
         {"item": "scrape-execution.mobile-emulation", "type": "field", "path": "evidenceRecord.identity.device", "equals": "mobile"},
-        {"item": "scrape-execution.custom-headers", "type": "field", "path": "evidenceRecord.identity.requestHeaders", "equals": [{"name": "accept-language", "value": "de-DE"},{"name": "x-research-run", "value": "evidence"}]},
+        {"item": "scrape-execution.custom-headers", "type": "field", "path": "evidenceRecord.identity.requestHeaders", "equals": [{"name": "accept-language", "valueSha256": "4f429ced49de5975fdfd9fa2e649772597ff8c78bcff9e49a652c89e266af9c5"}, {"name": "x-research-run", "valueSha256": "ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e"}]},
         {"item": "scrape-execution.custom-headers", "type": "evidenceSchema"}
       ]
     }

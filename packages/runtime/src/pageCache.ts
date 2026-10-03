@@ -3,7 +3,7 @@
  * `lockdown`), in `<taskRoot>/page-cache.sqlite` beside the task
  * directories, as the idempotency index is.
  *
- * One row per key: the latest successful result of a page fetched under one
+ * One row per key: the most recently fetched successful result of a page under one
  * set of options, whole (its evidence, trace and formats), so a reuse
  * delivers the original fetch's Evidence Record unchanged. Only a `success`
  * with a recorded `fetchedAt` is stored: a partial, failed or blocked page is
@@ -75,9 +75,10 @@ export class PageCache {
   }
 
   /**
-   * Store `result` as the latest of `key`, replacing any earlier one, when it
-   * is a `success` with a parseable `evidence.fetchedAt`; the cache's own
-   * trace events are left out. True when it was stored.
+   * Store `result` as the latest of `key` when it is a `success` with a
+   * parseable `evidence.fetchedAt`, replacing a stored result fetched no
+   * later (a slower, older fetch never replaces a newer one); the cache's
+   * own trace events are left out. True when it was offered for storage.
    */
   store(key: string, result: FetchResult): boolean {
     if (result.status !== 'success') return false
@@ -85,7 +86,8 @@ export class PageCache {
     if (!Number.isFinite(fetchedAtMs)) return false
     const stored: FetchResult = { ...result, trace: result.trace.filter((event) => !CACHE_TRACE_EVENTS.has(event.event)) }
     this.db.prepare(`INSERT INTO entries (key, url, fetched_at_ms, stored_at, result_json) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET url = excluded.url, fetched_at_ms = excluded.fetched_at_ms, stored_at = excluded.stored_at, result_json = excluded.result_json`)
+      ON CONFLICT(key) DO UPDATE SET url = excluded.url, fetched_at_ms = excluded.fetched_at_ms, stored_at = excluded.stored_at, result_json = excluded.result_json
+      WHERE excluded.fetched_at_ms >= entries.fetched_at_ms`)
       .run(key, result.requestedUrl, fetchedAtMs, new Date(this.now()).toISOString(), JSON.stringify(stored))
     return true
   }

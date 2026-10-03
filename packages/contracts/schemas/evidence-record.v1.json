@@ -265,7 +265,7 @@
           "enum": ["desktop", "mobile", null]
         },
         "requestHeaders": {
-          "description": "The caller's custom request headers (the headers option) the answering lane sent, names lower-cased and sorted, with their values. Empty when it sent none; null when W2L sent no request for the page. Credentials, transport headers and the declared identity (User-Agent, client hints) are refused before any request, so none is listed. Added to v1 with the cache group: optional here so that earlier records stay valid; W2L writes it on every record.",
+          "description": "The caller's custom request headers (the headers option) the answering lane sent, names lower-cased and sorted, each with the SHA-256 of its value and never the value itself (a value may be a key; the scrape record keeps names only). Empty when it sent none; null when W2L sent no request for the page. Credentials, transport headers and the declared identity (User-Agent, client hints) are refused before any request, so none is listed. Added to v1 with the cache group: optional here so that earlier records stay valid; W2L writes it on every record.",
           "anyOf": [
             { "type": "array", "items": { "$ref": "#/$defs/requestHeader" } },
             { "type": "null" }
@@ -276,16 +276,16 @@
     "requestHeader": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "value"],
+      "required": ["name", "valueSha256"],
       "properties": {
         "name": {
           "description": "The header's name, lower-cased.",
           "type": "string",
           "minLength": 1
         },
-        "value": {
-          "description": "The header's value as sent.",
-          "type": "string"
+        "valueSha256": {
+          "description": "SHA-256 (hex) of the UTF-8 bytes of the value as sent.",
+          "$ref": "#/$defs/sha256"
         }
       }
     }

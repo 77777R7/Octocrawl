@@ -194,6 +194,48 @@ describe('page cache: scrape', () => {
   })
 })
 
+describe('page cache: what a reuse may and may not carry', () => {
+  it('reuses only a result the same build extracted, so a hit\'s Evidence Record names the build that produced it', async () => {
+    const saved = process.env.W2L_SOURCE_COMMIT
+    try {
+      process.env.W2L_SOURCE_COMMIT = 'aaaaaaa'
+      const first = await scrape({ url: `${origin}/built`, maxAge: HOUR })
+      expect(first.evidenceRecord.extractor.commit).toBe('aaaaaaa')
+      expect((await scrape({ url: `${origin}/built`, maxAge: HOUR })).evidenceRecord.extractor.commit).toBe('aaaaaaa')
+      process.env.W2L_SOURCE_COMMIT = 'bbbbbbb'
+      const upgraded = await scrape({ url: `${origin}/built`, maxAge: HOUR })
+      expect(upgraded.metadata.cacheState).toBe('miss')
+      expect(upgraded.evidenceRecord.extractor.commit).toBe('bbbbbbb')
+      expect(hits.get('/built')).toBe(2)
+    } finally {
+      if (saved === undefined) delete process.env.W2L_SOURCE_COMMIT
+      else process.env.W2L_SOURCE_COMMIT = saved
+    }
+  })
+
+  it('reports no network timing of the original fetch on a hit', async () => {
+    const first = await scrape({ url: `${origin}/timed` })
+    expect(first.usage.timings).toHaveProperty('requestMs')
+    const hit = await scrape({ url: `${origin}/timed`, maxAge: HOUR })
+    expect(hit.metadata.cacheState).toBe('hit')
+    expect(Object.keys(hit.usage.timings ?? {}).sort()).toEqual(expect.arrayContaining(['totalMs']))
+    for (const key of ['requestMs', 'transportMs', 'robotsMs', 'bodyReadMs', 'queueMs']) expect(hit.usage.timings ?? {}).not.toHaveProperty(key)
+  })
+
+  it('keeps custom header values out of the cache unless asked, and out of the Evidence Record always', async () => {
+    const headers = { 'x-api-key': 'S3CRET-VALUE' }
+    const plain = await scrape({ url: `${origin}/keyed`, headers, formats: ['markdown'], debug: false })
+    expect(JSON.stringify(plain)).not.toContain('S3CRET-VALUE')
+    expect(plain.evidenceRecord.identity.requestHeaders).toEqual([{ name: 'x-api-key', valueSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }])
+    expect((await scrape({ url: `${origin}/keyed`, headers, maxAge: HOUR })).metadata.cacheState).toBe('miss')
+    expect(readFileSync(join(taskRoot, 'page-cache.sqlite')).includes('S3CRET-VALUE')).toBe(false)
+    // Asked for: stored, and reused for the same headers only.
+    await scrape({ url: `${origin}/keyed`, headers, storeInCache: true })
+    expect((await scrape({ url: `${origin}/keyed`, headers, maxAge: HOUR })).metadata.cacheState).toBe('hit')
+    expect((await scrape({ url: `${origin}/keyed`, headers: { 'x-api-key': 'OTHER' }, maxAge: HOUR })).metadata.cacheState).toBe('miss')
+  })
+})
+
 describe('page cache: /fc', () => {
   it('maps maxAge and reports cacheState and cachedAt in data.metadata; a lockdown miss is 404 SCRAPE_LOCKDOWN_CACHE_MISS', async () => {
     const url = `${origin}/fc-cached`

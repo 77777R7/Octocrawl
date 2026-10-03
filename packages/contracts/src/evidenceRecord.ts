@@ -117,18 +117,18 @@ export interface EvidenceIdentity {
   device: 'desktop' | 'mobile' | null
   /**
    * The caller's custom headers (`headers`) the answering lane sent, names
-   * lower-cased and sorted, with their values; empty when it sent none; null
-   * when W2L sent no request for the page. Credentials and identity headers
-   * are refused before a request, so none is listed. Added to v1
-   * (EVIDENCE_RECORD_ADDED_KEYS).
+   * lower-cased and sorted, each with the SHA-256 of its value, never the
+   * value: a value may be a key the caller would not publish with the data,
+   * as the scrape record keeps names only. Empty when it sent none; null when
+   * W2L sent no request for the page. Added to v1 (EVIDENCE_RECORD_ADDED_KEYS).
    */
   requestHeaders: readonly EvidenceRequestHeader[] | null
 }
 
-/** One custom request header as sent. */
+/** One custom request header as sent: its name and the SHA-256 (hex) of its value's UTF-8 bytes. */
 export interface EvidenceRequestHeader {
   name: string
-  value: string
+  valueSha256: string
 }
 
 export interface EvidenceRecord {
@@ -173,7 +173,7 @@ export const EVIDENCE_RECORD_KEYS = {
   fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
   artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256', 'bytes', 'contentType']),
   identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact', 'device', 'requestHeaders']),
-  requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'value']),
+  requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
 } as const
 
 /**

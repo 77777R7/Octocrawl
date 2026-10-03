@@ -332,6 +332,7 @@ describe('@w2l/runtime public surface', () => {
       'requestFingerprint',
       'runConfiguredMonitor',
       'runFirecrawlMonitor',
+      'sourceCommitFromEnv',
       'systemClock',
       'toEvidenceRecord',
       'untriedAudit',

@@ -72,7 +72,7 @@ describe('toEvidenceRecord', () => {
     ])
     expect(toEvidenceRecord(httpMobile, { mode: 'standard' }, {}).identity).toEqual({
       userAgent: mobileUa, mode: 'standard', contact: null, device: 'mobile',
-      requestHeaders: [{ name: 'accept-language', value: 'de' }, { name: 'x-trace', value: 't1' }],
+      requestHeaders: [{ name: 'accept-language', valueSha256: sha256Utf8('de') }, { name: 'x-trace', valueSha256: sha256Utf8('t1') }],
     })
     // An http attempt escalated to the browser: the browser lane answered, so its declaration and headers are the record's.
     const escalated = result({ lane: 'browser_local', compliance: compliance() }, [
