@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, htmlToTables } from '../src/index.js'
-import { MAX_TABLE_CHARS } from '../src/markdown.js'
+import { MAX_PAGE_TABLE_CHARS, MAX_TABLE_CHARS } from '../src/markdown.js'
 
 const gfmTables = (markdown: string): number => markdown.split('\n').filter((line) => /^\| (---( \| ---)*) \|$/.test(line)).length
 
@@ -46,6 +46,19 @@ describe('htmlToTables', () => {
     expect(tables[1]!.rows[0]).toHaveLength(1000)
     expect(tables[1]!.rows[0]!.every((cell) => cell === 'wide')).toBe(true)
     expect(tables[2]).toMatchObject({ tableIndex: 2, rows: [['k', 'v'], ['1', '2']] })
+  })
+
+  it('shares one budget among a page\'s tables, so many tables just under the cap cannot add up to a huge response', () => {
+    const near = `<table><tr><td colspan="1000">${'x'.repeat(1990)}</td></tr><tr><td>y</td></tr></table>`
+    const tables = htmlToTables(near.repeat(150))
+    expect(tables).toHaveLength(150)
+    const given = tables.filter((table) => table.omitted === undefined)
+    expect(given.length).toBeGreaterThan(0)
+    expect(given.length).toBeLessThanOrEqual(Math.floor(MAX_PAGE_TABLE_CHARS / (1990 * 1000)))
+    expect(tables.map((table) => table.tableIndex)).toEqual(tables.map((_, i) => i))
+    expect(JSON.stringify(tables).length).toBeLessThan(4 * MAX_PAGE_TABLE_CHARS)
+    // Quotes count with their escaping: a cell of quotes reaches the cap sooner than its length says.
+    expect(htmlToTables(`<table><tr><td colspan="1000">${'"'.repeat(1000)}</td></tr><tr><td>y</td></tr></table>`)[0]!.omitted).toBe('too_large')
   })
 
   it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {

@@ -428,7 +428,8 @@ export interface PageTable {
   csvSha256: string
   /**
    * Present when the table is too large to give: its cells, each spanned
-   * value repeated, would exceed 2,000,000 characters. `rows` is then empty,
+   * value repeated, would exceed 2,000,000 characters, or what is left of
+   * 5,000,000 for all of the page's tables. `rows` is then empty,
    * `csv` is `''` and `columns` 0; the table keeps its `tableIndex`.
    */
   omitted?: 'too_large'

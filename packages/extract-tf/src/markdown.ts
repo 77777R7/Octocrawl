@@ -116,6 +116,8 @@ interface Context {
   keepDataUriImages: boolean
   /** When set, every data table the walk writes as a GFM table is also collected here, in document order (htmlToTables). */
   tables?: ExtractedTable[]
+  /** What the collected tables of this page may still hold, in MAX_PAGE_TABLE_CHARS units; shared by every table of one walk. */
+  tableBudget?: { left: number }
 }
 
 /** Never content, or hidden by the page's CSS: skipped together with everything inside. */
@@ -227,10 +229,25 @@ const MAX_COLSPAN = 1000
 const MAX_ROWSPAN = 65534
 /**
  * The most characters a table's rows may hold once its spans are repeated
- * into every slot they cover; a larger table is given as `omitted:
- * 'too_large'` with no rows, so a small page cannot make a huge CSV.
+ * into every slot they cover, and the most all of a page's tables may hold
+ * together; past either, a table is given as `omitted: 'too_large'` with no
+ * rows, so a small page cannot make a huge CSV or response. A cell counts
+ * what its CSV field and its JSON string cost: its text, each `"` three
+ * more times (`""` in CSV, escaped again in JSON) and each `\` once more,
+ * plus three for the separators and quotes.
  */
 export const MAX_TABLE_CHARS = 2_000_000
+export const MAX_PAGE_TABLE_CHARS = 5_000_000
+
+function cellCost(value: string): number {
+  let extra = 3
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c === 34) extra += 3
+    else if (c === 92) extra += 1
+  }
+  return value.length + extra
+}
 
 /**
  * One data table as data: its caption and cells as plain text (a link is its
@@ -246,8 +263,10 @@ function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedT
   if (rows.every((row) => row.length === 0)) return null
   // What the repeated spans would hold, before any of it is built (a span past the last row adds nothing).
   let chars = 0
-  rows.forEach((row, r) => { for (const cell of row) chars += (cell.value.length + 1) * cell.colspan * Math.min(cell.rowspan, rows.length - r) })
-  if (chars > MAX_TABLE_CHARS) return { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
+  rows.forEach((row, r) => { for (const cell of row) chars += cellCost(cell.value) * cell.colspan * Math.min(cell.rowspan, rows.length - r) })
+  const budget = ctx.tableBudget
+  if (chars > MAX_TABLE_CHARS || (budget !== undefined && chars > budget.left)) return { tableIndex, caption: caption === '' ? null : caption, headerRows: 0, rows: [], omitted: 'too_large' }
+  if (budget !== undefined) budget.left -= chars
   let headerRows = 0
   for (const tr of ownRows(table)) {
     const cells = ownCells(tr)
@@ -808,7 +827,7 @@ export interface ExtractedTable {
   headerRows: number
   /** Every row padded to the table's width; a spanned cell's value fills each slot it covers. Empty when the table is omitted. */
   rows: string[][]
-  /** Present when the table's repeated cells would exceed MAX_TABLE_CHARS: its rows are not given. */
+  /** Present when the table's repeated cells would exceed MAX_TABLE_CHARS, or what the page's tables have left of MAX_PAGE_TABLE_CHARS: its rows are not given. */
   omitted?: 'too_large'
 }
 
@@ -835,7 +854,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', ...(tables === undefined ? {} : { tables }) })
+  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
     .map((block) => block.text)
     .join('\n\n')
   doc.close()
