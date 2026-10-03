@@ -1047,13 +1047,15 @@ function safeHost(url: string): string {
   }
 }
 
-const LOGIN_PATH = /(?:^|[/_.-])(?:log[-_]?in|sign[-_]?in|signon|auth(?:enticate)?|sso)(?:$|[/_.?-])/i
+/** A path segment that is a login endpoint (`/login`, `/users/sign_in`, `/ap/signin`, `/login.php`, `/authwall`), not a slug that mentions one. */
+const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
+const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
 /**
  * The result of a fetch with the user's saved login when the site refused
  * that login, else null: a `login_wall` block, or a page that redirected
- * from the one asked for to a login page (a path naming login, sign-in or
- * auth that the requested path did not). The site's login page is not the
+ * from the one asked for to a login page (a path segment that is a login
+ * endpoint, which the requested path did not have). The site's login page is not the
  * page asked for, so it is never answered as its content.
  */
 export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
@@ -1067,6 +1069,6 @@ export function sessionRejection(url: string, result: FetchResult): FetchResult 
   } catch {
     return null
   }
-  if (landed.href === requested.href || LOGIN_PATH.test(requested.pathname) || !LOGIN_PATH.test(landed.pathname)) return null
+  if (landed.href === requested.href || isLoginPath(requested.pathname) || !isLoginPath(landed.pathname)) return null
   return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }

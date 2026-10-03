@@ -1762,7 +1762,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
   const result = step.result
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary }) })
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
   return {
     id: step.id,
     url: step.url,

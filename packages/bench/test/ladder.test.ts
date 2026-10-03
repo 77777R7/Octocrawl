@@ -1080,6 +1080,15 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(sessionRejection('https://example.com/account', at('https://example.com/account'))).toBeNull()
     expect(sessionRejection('https://example.com/account', at('https://example.com/authors/jane'))).toBeNull()
     expect(sessionRejection('https://example.com/login', at('https://example.com/login?x=1'))).toBeNull()
+    // A slug that mentions a login word is a page, not a login endpoint.
+    expect(sessionRejection('https://github.com/acme/old-name', at('https://github.com/acme/auth-service'))).toBeNull()
+    expect(sessionRejection('https://example.com/q/123', at('https://example.com/questions/123/jwt-auth-in-express'))).toBeNull()
+    expect(sessionRejection('https://example.com/settings', at('https://example.com/settings/auth'))).toBeNull()
+    expect(sessionRejection('https://example.com/p/1', at('https://example.com/blog/how-to-login'))).toBeNull()
+    expect(sessionRejection('https://example.com/docs/single-sign-on', at('https://example.com/docs/sso'))).toBeNull()
+    expect(sessionRejection('https://www.amazon.com/gp/css/order-history', at('https://www.amazon.com/ap/signin?openid=x'))).not.toBeNull()
+    expect(sessionRejection('https://www.linkedin.com/in/x', at('https://www.linkedin.com/authwall?trk=x'))).not.toBeNull()
+    expect(sessionRejection('https://example.com/admin', at('https://example.com/login.php'))).not.toBeNull()
   })
 
   it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {

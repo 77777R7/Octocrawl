@@ -20,10 +20,14 @@ function page(url: string, lane: FetchResult['lane'], markdown: string): FetchRe
 }
 
 /** A public rung that answers with the logged-out page, and an authed rung that records the session it was handed. */
-function stubChannels(seen: (SessionSnapshot | null | undefined)[]) {
+function stubChannels(seen: (SessionSnapshot | null | undefined)[], signedOut = false) {
   return (mode: 'standard' | 'research' | 'authed'): Channel[] => {
     const channels: Channel[] = [{ id: 'http', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => page(url, 'http', 'Please sign in to continue.') }]
-    if (mode === 'authed') channels.push({ id: 'authed_session', identity: identityForRoute('authed', { session: true }), fetch: async (url, session) => { seen.push(session); return page(url, 'browser_local_authed', 'Your orders: 3') } })
+    // signedOut: the site refused the saved login and redirected to its login page.
+    const authedPage = (url: string): FetchResult => signedOut
+      ? { ...page(url, 'browser_local_authed', 'Login Page'), evidence: { finalUrl: 'https://www.example.com/login', httpStatus: 200, redirectChain: [url, 'https://www.example.com/login'], contentType: 'text/html', rawBodySha256: null, artifacts: [] } }
+      : page(url, 'browser_local_authed', 'Your orders: 3')
+    if (mode === 'authed') channels.push({ id: 'authed_session', identity: identityForRoute('authed', { session: true }), fetch: async (url, session) => { seen.push(session); return authedPage(url) } })
     return channels
   }
 }
@@ -38,12 +42,12 @@ describe('saved logins in the API engine', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(options: { hosted?: boolean; withFile?: boolean } = {}) {
+  async function setup(options: { hosted?: boolean; withFile?: boolean; signedOut?: boolean } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
     const sessionsFile = join(root, 'sessions.json')
     await new FileSessionStore(sessionsFile).save({ domain: 'example.com', attestedBy: 'test', attestedAt: '2026-10-03T00:00:00.000Z', vendor: 'browser_local_authed', cookies: [{ name: 'sid', value: 'secret', domain: '.example.com', path: '/' }] })
     const seen: (SessionSnapshot | null | undefined)[] = []
-    engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor: stubChannels(seen), hosted: options.hosted, sessionsFile: options.withFile === false ? null : sessionsFile })
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor: stubChannels(seen, options.signedOut), hosted: options.hosted, sessionsFile: options.withFile === false ? null : sessionsFile })
     return { seen, sessionsFile }
   }
 
@@ -69,6 +73,16 @@ describe('saved logins in the API engine', () => {
     const accepted = await engine!.startBatch({ urls: [URL_], mode: 'authed' } as Parameters<ApiEngine['startBatch']>[0])
     for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes((await engine!.getBatch(accepted.taskId))?.status ?? ""); i++) await new Promise((resolve) => setTimeout(resolve, 20))
     expect(seen.map((session) => session?.domain)).toEqual(['example.com'])
+  })
+
+  it('a batch page whose saved login the site refused is login_wall, with the hint to import it again', async () => {
+    await setup({ signedOut: true })
+    const accepted = await engine!.startBatch({ urls: [URL_], mode: 'authed' } as Parameters<ApiEngine['startBatch']>[0])
+    let status = await engine!.getBatch(accepted.taskId)
+    for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine!.getBatch(accepted.taskId) }
+    const item = (await engine!.getBatchItems(accepted.taskId))!.items[0]!
+    expect(item.status).toBe('blocked')
+    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*w2l login import example\.com/)])
   })
 
   it('other modes never load a saved login', async () => {
