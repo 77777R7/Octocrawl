@@ -9,14 +9,19 @@
  * debugging, turned on by the person at chrome://inspect/#remote-debugging
  * and approved by them in Chrome's "Allow remote debugging?" dialog, once
  * for all the pages of one handoff. W2L touches only the tabs it opens, and
- * closes each when it has read it. A page counts as through when it has
- * loaded, shows no check (W2L's own gate, the one that stopped it) on two
- * reads a poll apart, and is on the site that was asked for, so a page that
- * sends the browser elsewhere is not read as that site's.
+ * closes each when it has read it or given up on it.
+ *
+ * A page counts as through when, on CLEAR_READS reads a poll apart, it has
+ * loaded; its document answered 2xx; W2L's gate, given the document's own
+ * status and headers (what the stop was detected by, a vendor header
+ * included), finds no check in it; it is on the site asked for (so a page
+ * that sends the browser elsewhere is not read as that site's) and not on a
+ * login path; and the person is not at a step of their own: no password or
+ * one-time-code field on the page, no form field they are typing in.
  */
 
 import { classifyGate } from '@w2l/http-core'
-import { sessionCoversHost, type UserBrowserRead } from '@w2l/bench'
+import { isLoginPath, sessionCoversHost, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 
 export interface UserChromeOptions {
@@ -35,9 +40,14 @@ export interface UserChromeReadOptions {
   pollMs?: number
   /** Told once, when the page shows a check the person has to pass. */
   onWaiting?: (url: string, check: string) => void
+  /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
+  signal?: AbortSignal
 }
 
-/** A page the person did not get through in time, left (closed its tab), or that ended off the site asked for: it is not read. */
+/** Reads in a row a page must pass to count as through. */
+const CLEAR_READS = 3
+
+/** A page the person did not get through in time, left (closed its tab, quit Chrome), or that ended off the site asked for: it is not read. */
 export class HandoffNotThrough extends Error {
   constructor(message: string, readonly check: string | null) {
     super(message)
@@ -55,10 +65,28 @@ interface PageState {
   ready: string
   status: number | null
   html: string
+  /** A password or one-time-code field is on the page: a sign-in step. */
+  secret: boolean
+  /** The person is in a form field (typing a code, an answer). */
+  typing: boolean
 }
 
-/** What the page shows now: its address, whether it has loaded, the document's HTTP status and its HTML. */
-const STATE = `JSON.stringify({ href: location.href, ready: document.readyState, status: (performance.getEntriesByType('navigation')[0] || {}).responseStatus || null, html: document.documentElement ? document.documentElement.outerHTML : '' })`
+/** What the page shows now. */
+const STATE = `JSON.stringify({
+  href: location.href,
+  ready: document.readyState,
+  status: (performance.getEntriesByType('navigation')[0] || {}).responseStatus || null,
+  html: document.documentElement ? document.documentElement.outerHTML : '',
+  secret: !!document.querySelector('input[type=password], input[autocomplete="one-time-code"]'),
+  typing: !!document.activeElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable),
+})`
+
+/** The main document's last response, as the browser received it. */
+interface DocumentResponse {
+  url: string
+  status: number
+  headers: Record<string, string>
+}
 
 /** Connect to the person's running Chrome, with their approval. */
 export async function openUserChrome(options: UserChromeOptions = {}): Promise<UserChrome> {
@@ -82,51 +110,83 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   const pollMs = options.pollMs ?? 1_000
   const host = new URL(url).hostname
   const started = Date.now()
-  const { targetId } = await connection.send('Target.createTarget', { url }) as { targetId: string }
+  let sawGate: string | null = null
+  const gone = (error: unknown): HandoffNotThrough | null =>
+    error instanceof ChromeLoginError && /closed|No session|No target|not found/i.test(error.message) ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate) : null
+  let targetId: string
+  try {
+    // A blank tab first, so the page's own responses are heard from its first one.
+    targetId = (await connection.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }).targetId
+  } catch (error) {
+    throw gone(error) ?? error
+  }
+  const stops: Array<() => void> = []
   try {
     const { sessionId } = await connection.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
-    let sawGate: string | null = null
+    // Set by the event listener: the main document's last response.
+    const heard: { document: DocumentResponse | null } = { document: null }
+    if (connection.on !== undefined) {
+      stops.push(connection.on('Network.responseReceived', sessionId, (params) => {
+        const response = params.response as { url?: string; status?: number; headers?: Record<string, string> } | undefined
+        if (params.type !== 'Document' || params.frameId !== targetId || response === undefined) return
+        heard.document = { url: String(response.url ?? ''), status: Number(response.status ?? 0), headers: Object.fromEntries(Object.entries(response.headers ?? {}).map(([name, value]) => [name.toLowerCase(), String(value)])) }
+      }))
+      await connection.send('Network.enable', {}, sessionId)
+    }
+    await connection.send('Page.navigate', { url }, sessionId)
     let told = false
     let clear = 0
-    let through = false
-    let last: PageState | null = null
+    let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
+      if (options.signal?.aborted === true) throw new HandoffNotThrough(`the handoff of ${url} was cancelled before W2L read it`, sawGate)
       let state: PageState
       try {
-        const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string }; exceptionDetails?: unknown }
-        if (typeof answer.result?.value !== 'string') continue
+        const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string } }
+        if (typeof answer.result?.value !== 'string') { clear = 0; continue }
         state = JSON.parse(answer.result.value) as PageState
       } catch (error) {
         // A page between two documents has no context to evaluate in; one that is gone is the person's answer.
-        if (error instanceof ChromeLoginError && /closed|No session|No target|not found/i.test(error.message)) throw new HandoffNotThrough(`the tab for ${url} was closed before W2L read it`, sawGate)
+        const left = gone(error)
+        if (left !== null) throw left
+        clear = 0
         continue
       }
-      last = state
-      const gate = classifyGate({ status: state.status ?? 200, header: () => null, body: state.html })
-      const onSite = sameSite(state.href, host)
+      // The document's own response, when it is the one shown (the address may differ by its fragment alone).
+      const response: DocumentResponse | null = heard.document !== null && sameDocument(heard.document.url, state.href) ? heard.document : null
+      const status = response?.status ?? state.status
+      last = { state, response }
+      const gate = classifyGate({ status: status ?? 200, header: (name) => response?.headers[name.toLowerCase()] ?? null, body: state.html })
       if (gate !== null) {
         sawGate ??= gate.reason
         if (!told) { told = true; options.onWaiting?.(url, gate.reason) }
       }
-      clear = gate === null && onSite && state.ready === 'complete' ? clear + 1 : 0
-      if (clear >= 2) { through = true; break }
+      const through = state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
+        && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !state.typing
+      clear = through ? clear + 1 : 0
+      if (clear >= CLEAR_READS) {
+        return {
+          requestedUrl: url,
+          finalUrl: state.href,
+          status,
+          contentType: response?.headers['content-type'] ?? null,
+          html: state.html,
+          fetchedAt: new Date().toISOString(),
+          wallMs: Date.now() - started,
+          sawGate,
+          browser,
+        }
+      }
     }
-    if (!through || last === null) {
-      const where = last === null ? 'it never loaded' : !sameSite(last.href, host) ? `it was on ${safeHost(last.href)}, not ${host}` : sawGate === null ? 'it had not loaded' : `it still showed a check (${sawGate})`
-      throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
-    }
-    return {
-      requestedUrl: url,
-      finalUrl: last.href,
-      status: last.status,
-      html: last.html,
-      fetchedAt: new Date().toISOString(),
-      wallMs: Date.now() - started,
-      sawGate,
-      browser,
-    }
+    const where = last === null ? 'it never loaded'
+      : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
+        : sawGate !== null && classifyGate({ status: last.response?.status ?? last.state.status ?? 200, header: (name) => last!.response?.headers[name.toLowerCase()] ?? null, body: last.state.html }) !== null ? `it still showed a check (${sawGate})`
+          : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
+    throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
+  } catch (error) {
+    throw gone(error) ?? error
   } finally {
+    for (const stop of stops) stop()
     await connection.send('Target.closeTarget', { targetId }).catch(() => undefined)
   }
 }
@@ -140,6 +200,20 @@ function sameSite(href: string, host: string): boolean {
     return false
   }
   return sessionCoversHost(page, host) || sessionCoversHost(host, page)
+}
+
+/** Whether the page is on a login path the URL asked for was not: the site's sign-in, not the page. */
+function onLoginPath(href: string, asked: string): boolean {
+  try {
+    return isLoginPath(new URL(href).pathname) && !isLoginPath(new URL(asked).pathname)
+  } catch {
+    return false
+  }
+}
+
+/** Two addresses of one document: the same but for the fragment. */
+function sameDocument(a: string, b: string): boolean {
+  return a.split('#')[0] === b.split('#')[0]
 }
 
 function safeHost(href: string): string {

@@ -15,13 +15,15 @@ const STOPPED = {
 } as unknown as FetchResult
 
 const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRead => ({
-  requestedUrl: 'https://site.test/members', finalUrl: 'https://site.test/members', status: 200, html, fetchedAt: '2026-10-04T01:00:00.000Z', wallMs: 42_000, sawGate: 'captcha', browser: 'Chrome/144.0', ...extra,
+  requestedUrl: 'https://site.test/members', finalUrl: 'https://site.test/members', status: 200, contentType: 'text/html; charset=utf-8', html, fetchedAt: '2026-10-04T01:00:00.000Z', wallMs: 42_000, sawGate: 'captcha', browser: 'Chrome/144.0', ...extra,
 })
 
 describe('a page read in the person\'s browser', () => {
   it('is read as the browser lane reads a rendered page, recorded as theirs: mode authed, its headers unseen, the stopped fetch\'s robots decision', () => {
     const result = pageFromUserBrowser(read(PAGE), STOPPED, {})
-    expect(result).toMatchObject({ status: 'success', lane: 'browser_local_authed', compliance: null, blockReason: null, evidence: { finalUrl: 'https://site.test/members', httpStatus: 200, redirectChainComplete: false, fetchedAt: '2026-10-04T01:00:00.000Z' } })
+    expect(result).toMatchObject({ status: 'success', lane: 'browser_local_authed', compliance: null, blockReason: null, evidence: { finalUrl: 'https://site.test/members', httpStatus: 200, contentType: 'text/html; charset=utf-8', redirectChainComplete: false, fetchedAt: '2026-10-04T01:00:00.000Z' } })
+    // W2L sent no request for it.
+    expect(result.usage).toMatchObject({ requestCount: 0, attemptCount: 0 })
     expect(result.markdown).toContain('The page behind the check')
     expect(result.trace.map((event) => event.event)).toEqual(['handoff_from', 'robots_checked', 'identity_sent', 'identity_unobserved', 'user_browser_read', 'extract'])
     expect(result.trace[0]).toMatchObject({ detail: { status: 'blocked', blockReason: 'captcha', lane: 'browser_local' } })
@@ -31,7 +33,7 @@ describe('a page read in the person\'s browser', () => {
 
   it('a page that still shows its check is blocked again, and a status the browser did not report is unknown', () => {
     expect(pageFromUserBrowser(read('<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'), STOPPED, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
-    expect(pageFromUserBrowser(read(PAGE, { status: null }), STOPPED, {}).evidence.httpStatus).toBeNull()
+    expect(pageFromUserBrowser(read(PAGE, { status: null, contentType: null }), STOPPED, {}).evidence).toMatchObject({ httpStatus: null, contentType: null })
   })
 
   it('answers the formats asked for, a list among them', () => {

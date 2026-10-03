@@ -267,7 +267,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const raw = await c.req.text()
     const req = parseBatchHandoffRequest(raw.trim() === '' ? undefined : JSON.parse(raw))
     try {
-      const done = await engine.handOffBatch(c.req.param('id'), req)
+      const done = await engine.handOffBatch(c.req.param('id'), req, { signal: c.req.raw.signal })
       return done === null ? fail(c, 'not_found', 'not found') : c.json(done, 200)
     } catch (error) {
       if (error instanceof CrawlStateError) return fail(c, 'conflict', error.message)

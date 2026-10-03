@@ -22,8 +22,10 @@ export interface UserBrowserRead {
   requestedUrl: string
   /** The page's address when it was read. */
   finalUrl: string
-  /** The document's HTTP status, when the browser reported it (Navigation Timing); null when it did not. */
+  /** The document's HTTP status, as the browser received it; null when it did not report one. */
   status: number | null
+  /** The document's Content-Type header as received; null when it was not seen. */
+  contentType: string | null
   /** The rendered document. */
   html: string
   fetchedAt: string
@@ -57,7 +59,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
       httpStatus: read.status,
       redirectChain: [],
       redirectChainComplete: false,
-      contentType: 'text/html',
+      contentType: read.contentType,
       rawBodySha256: sha256Utf8(body),
       artifacts: [],
       fetchedAt: read.fetchedAt,
@@ -66,8 +68,9 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
       wallMs,
       bytesWire: null,
       bytesDecompressed: Buffer.byteLength(body),
-      requestCount: 1,
-      attemptCount: 1,
+      // W2L sent none: the person's browser made the requests, as many as it did.
+      requestCount: 0,
+      attemptCount: 0,
       contentTokens: null as number | null,
       browserMs: wallMs,
       externalCostUsd: null,
@@ -75,7 +78,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
     trace,
   }
   const gate = classifyGate({ status, header: () => null, body })
-  const errorPage = errorPageEvidence(status, 'text/html', body, finalUrl, options)
+  const errorPage = errorPageEvidence(status, read.contentType, body, finalUrl, options)
   const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
   const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
     trace.push({ at: wallMs, lane: LANE, event: 'gate_detected', detail: { blockReason: verdict.reason, signals: verdict.signals, status } })

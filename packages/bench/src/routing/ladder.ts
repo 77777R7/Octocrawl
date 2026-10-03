@@ -1049,7 +1049,7 @@ function safeHost(url: string): string {
 
 /** A path segment that is a login endpoint (`/login`, `/users/sign_in`, `/ap/signin`, `/login.php`, `/authwall`), not a slug that mentions one. */
 const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
-const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
+export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
 /**
  * The result of a fetch with the user's saved login when the site refused

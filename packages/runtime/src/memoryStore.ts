@@ -87,6 +87,15 @@ export class MemoryTaskStore implements TaskStore {
     return counts
   }
 
+  async countBlockReasons(taskId: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {}
+    for (const step of this.steps.values()) {
+      const reason = step.result?.blockReason
+      if (step.taskId === taskId && step.status === 'blocked' && reason != null) counts[reason] = (counts[reason] ?? 0) + 1
+    }
+    return counts
+  }
+
   async listStepsPage(taskId: string, query: StepPageQuery) {
     const errorStatuses = new Set(['failed', 'blocked', 'cancelled', 'budget_exceeded'])
     // The pages: not an error, and not a duplicate of an earlier page unless asked for.

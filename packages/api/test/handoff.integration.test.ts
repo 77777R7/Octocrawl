@@ -4,17 +4,17 @@ import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type BrowserContext } from 'playwright'
+import { chromium, type BrowserContext, type Page } from 'playwright'
 import { buildChannels } from '@w2l/bench'
 import type { CrawlPage } from '@w2l/contracts'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 
 /**
- * The handoff end to end: a batch stopped at a captcha, handed to "the
- * person" in a real Chromium that remote debugging is on in (as the person's
- * Chrome would be), who gets through it there; W2L reads the page and the
- * item's stopped result is replaced. The test plays the person: it clicks the
- * page's button in the tab W2L opened.
+ * The handoff end to end: a batch stopped at a check, handed to "the person"
+ * in a real Chromium that remote debugging is on in (as the person's Chrome
+ * would be), who gets through it there; W2L reads the page and the item's
+ * stopped result is replaced, and only then. The test plays the person, in
+ * the tabs W2L opens.
  */
 
 let server: Server
@@ -23,16 +23,25 @@ let root: string
 let chrome: BrowserContext
 
 const ARTICLE = `<article><h1>The member page</h1>${'<p>What is behind the check: a page of prose, long enough to be read as an article and not as a stub. </p>'.repeat(4)}</article>`
+const CAPTCHA = '<div class="g-recaptcha" data-sitekey="test-key"></div><button id="pass" onclick="document.cookie=\'passed=1; path=/\'; location.reload()">I am human</button>'
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    const html = (body: string) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<!doctype html><html><head><title>Members</title></head><body>${body}</body></html>`) }
+    const cookie = req.headers.cookie ?? ''
+    const html = (body: string, status = 200, headers: Record<string, string> = {}) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers }); res.end(`<!doctype html><html><head><title>Members</title></head><body>${body}</body></html>`) }
     if (req.url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (req.url === '/open') return html(ARTICLE.replace('member page', 'open page'))
-    if (req.url === '/gate') {
-      // A captcha until the person passes it: their browser then holds the cookie the page checks.
-      if ((req.headers.cookie ?? '').includes('passed=1')) return html(ARTICLE)
-      return html('<div class="g-recaptcha" data-sitekey="test-key"></div><button id="pass" onclick="document.cookie=\'passed=1; path=/\'; location.reload()">I am human</button>')
+    // A captcha until the person passes it: their browser then holds the cookie the page checks.
+    if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(CAPTCHA)
+    // Through the captcha, a page with nothing on it: not the page asked for.
+    if (req.url === '/thin') return cookie.includes('passed=1') ? html('<p>ok</p>') : html(CAPTCHA)
+    // A bot check that only its header says (a vendor's), never passed here.
+    if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
+    // A sign-in, then a one-time code, then the page.
+    if (req.url === '/account') {
+      if (cookie.includes('code=1')) return html(ARTICLE)
+      if (cookie.includes('signed=1')) return html('<p>Check your phone</p><form><input id="code" autocomplete="one-time-code"><button id="go" type="button" onclick="document.cookie=\'code=1; path=/\'; location.reload()">Go</button></form>')
+      return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'signed=1; path=/\'; location.reload()">Sign in</button></form>')
     }
     res.writeHead(404); res.end()
   })
@@ -49,15 +58,16 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-function engineFor(taskRoot: string): ApiEngine {
+function engineFor(taskRoot: string, userDataDir = join(root, 'chrome')): ApiEngine {
   const http = buildChannels('standard', { localSubjects: { browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!
-  return createApiEngine({ taskRoot, channelsFor: () => [http], userChrome: { userDataDir: join(root, 'chrome') } })
+  return createApiEngine({ taskRoot, channelsFor: () => [http], userChrome: { userDataDir } })
 }
 
-async function finished(engine: ApiEngine, taskId: string) {
+async function batchOf(engine: ApiEngine, paths: string[]): Promise<string> {
+  const { taskId } = await engine.startBatch({ urls: paths.map((path) => `${base}${path}`), formats: ['markdown'] } as never)
   for (let i = 0; i < 300; i++) {
     const report = await engine.getBatch(taskId)
-    if (report !== null && ['completed', 'failed', 'cancelled'].includes(report.status)) return report
+    if (report !== null && ['completed', 'failed', 'cancelled'].includes(report.status)) return taskId
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error('batch did not finish')
@@ -67,42 +77,113 @@ async function itemsOf(engine: ApiEngine, taskId: string): Promise<CrawlPage[]> 
   return (await engine.getBatchItems(taskId, { limit: 50, debug: true }))!.items
 }
 
+/** The person: what they do in each tab W2L opens, by its path. */
+function person(context: BrowserContext, acts: Record<string, (page: Page) => Promise<void>>): () => void {
+  const listener = (page: Page) => {
+    void (async () => {
+      await page.waitForURL((url) => url.href.startsWith(base), { timeout: 20_000 })
+      await acts[new URL(page.url()).pathname]?.(page)
+    })().catch(() => undefined)
+  }
+  context.on('page', listener)
+  return () => context.off('page', listener)
+}
+
 describe('handing a page a check stopped to the person, in their own Chrome', () => {
   it('the stopped item waits for the person; once they are through, W2L reads the page there and the item is the page', async () => {
-    const engine = engineFor(join(root, 'tasks'))
-    // The person: in each tab W2L opens, they pass the check.
+    const engine = engineFor(join(root, 'tasks-1'))
     const opened: string[] = []
-    chrome.on('page', (page) => {
-      opened.push(page.url())
-      void page.waitForSelector('#pass', { timeout: 20_000 }).then(() => page.click('#pass')).catch(() => undefined)
-    })
+    const seen = (page: Page) => { opened.push(page.url()) }
+    chrome.on('page', seen)
+    const stop = person(chrome, { '/gate': async (page) => { await page.click('#pass') } })
     try {
-      const { taskId } = await engine.startBatch({ urls: [`${base}/gate`, `${base}/open`], formats: ['markdown'] } as never)
-      const report = await finished(engine, taskId)
-      expect(report).toMatchObject({ status: 'completed', waitingForPerson: 1 })
+      const taskId = await batchOf(engine, ['/gate', '/open'])
+      expect(await engine.getBatch(taskId)).toMatchObject({ status: 'completed', waitingForPerson: 1 })
       const stopped = (await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/gate'))!
       expect(stopped).toMatchObject({ status: 'blocked', blockReason: 'captcha', handoff: { reason: 'captcha_required', liveViewUrl: null } })
       expect((await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/open'))!.handoff).toBeUndefined()
 
       const done = await engine.handOffBatch(taskId, {})
       expect(done).toMatchObject({ id: taskId, handedOff: 1, through: 1, notThrough: 0, items: [{ id: stopped.id, url: `${base}/gate`, through: true, status: 'success' }] })
-      // W2L opened the stopped page alone, and closed its tab when it had read it.
-      expect(opened).toEqual([`${base}/gate`])
+      // W2L opened one tab, blank first, for the stopped page alone, and closed it when it had read it.
+      expect(opened).toEqual(['about:blank'])
       for (let i = 0; i < 40 && chrome.pages().some((page) => page.url().startsWith(base)); i++) await new Promise((resolve) => setTimeout(resolve, 50))
       expect(chrome.pages().some((page) => page.url().startsWith(base))).toBe(false)
 
       const item = (await itemsOf(engine, taskId)).find((entry) => entry.url.endsWith('/gate'))!
-      expect(item).toMatchObject({ id: stopped.id, status: 'success', lane: 'browser_local_authed', blockReason: null })
+      expect(item).toMatchObject({ id: stopped.id, status: 'success', lane: 'browser_local_authed', blockReason: null, evidence: { contentType: 'text/html; charset=utf-8', httpStatus: 200 } })
       expect(item.handoff).toBeUndefined()
       expect(item.markdown).toContain('What is behind the check')
-      // W2L sent nothing for it: the person's browser did, as them.
+      // W2L sent nothing for it: the person's browser did, as them; no hint speaks of W2L's own lanes, whose run it replaced.
       expect(item.evidenceRecord).toMatchObject({ lane: 'browser_local_authed', status: 'success', identity: { mode: 'authed', userAgent: null }, robotsDecision: { decision: 'no_robots' } })
       expect(item.trace.map((event) => event.event)).toContain('user_browser_read')
+      expect(item.audit).toBeUndefined()
+      expect(JSON.stringify(item.agentHints ?? [])).not.toContain('lane served')
       expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 0, succeeded: 2, failed: 0 })
-      // Nothing left to hand over.
       expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0, items: [] })
     } finally {
-      chrome.removeAllListeners('page')
+      stop()
+      chrome.off('page', seen)
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a sign-in with a code is waited for while the person is at it, and the page read after', async () => {
+    const engine = engineFor(join(root, 'tasks-2'))
+    const stop = person(chrome, {
+      '/account': async (page) => {
+        await page.click('#in')
+        await page.waitForSelector('#code')
+        // The person takes their time with the code: W2L does not read the code page.
+        await page.click('#code')
+        await page.waitForTimeout(4_000)
+        await page.click('#go')
+      },
+    })
+    try {
+      const taskId = await batchOf(engine, ['/account'])
+      expect((await itemsOf(engine, taskId))[0]).toMatchObject({ status: 'blocked', blockReason: 'login_wall', handoff: { reason: 'login_required' } })
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ through: 1 })
+      expect((await itemsOf(engine, taskId))[0]!.markdown).toContain('What is behind the check')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a page not got through (a check its header alone says, or nothing on the page after) keeps its stopped result, and still waits', async () => {
+    const engine = engineFor(join(root, 'tasks-3'))
+    const stop = person(chrome, { '/thin': async (page) => { await page.click('#pass') } })
+    try {
+      const taskId = await batchOf(engine, ['/dd', '/thin'])
+      const before = await itemsOf(engine, taskId)
+      expect(before.map((item) => [new URL(item.url).pathname, item.status, item.blockReason])).toEqual([['/dd', 'blocked', 'bot_detected_generic'], ['/thin', 'blocked', 'captcha']])
+      const done = await engine.handOffBatch(taskId, { waitMs: 6_000 })
+      expect(done).toMatchObject({ handedOff: 2, through: 0, notThrough: 2 })
+      expect(done!.items.map((item) => item.reason)).toEqual([expect.stringContaining('still showed a check (bot_detected_generic)'), expect.stringContaining('was failed (empty_unverified), not the page')])
+      const after = await itemsOf(engine, taskId)
+      expect(after.map((item) => [item.id, item.status, item.blockReason, item.lane])).toEqual(before.map((item) => [item.id, item.status, item.blockReason, item.lane]))
+      expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 2 })
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a Chrome that quits during the wait ends the handoff, and the batch can be handed over again', async () => {
+    const quitting = await chromium.launchPersistentContext(join(root, 'chrome-quits'), { args: ['--remote-debugging-port=0'] })
+    const engine = engineFor(join(root, 'tasks-4'), join(root, 'chrome-quits'))
+    try {
+      const taskId = await batchOf(engine, ['/gate', '/dd'])
+      setTimeout(() => { void quitting.close() }, 2_000)
+      const started = Date.now()
+      const done = await engine.handOffBatch(taskId, {})
+      expect(Date.now() - started).toBeLessThan(20_000)
+      expect(done).toMatchObject({ handedOff: 2, through: 0, notThrough: 2 })
+      expect(done!.items[0]!.reason).toContain('Chrome quit')
+      // Not left "being handed over": a second handoff runs, and finds Chrome gone.
+      await expect(engine.handOffBatch(taskId, {})).rejects.toThrow(/DevToolsActivePort|did not accept|closed the connection|connect/i)
+    } finally {
       await engine.close()
     }
   }, 120_000)

@@ -177,7 +177,7 @@ async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<Cr
   if (waiting === 0) return null
   io.stderr(`w2l batch: ${waiting} page${waiting === 1 ? '' : 's'} stopped at a check; opening ${waiting === 1 ? 'it' : 'them'} in your Chrome, one at a time (click Allow if Chrome asks)`)
   try {
-    const done = await engine.handOffBatch(taskId, {}, { onWaiting: (url, check) => io.stderr(`w2l batch: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened`) })
+    const done = await engine.handOffBatch(taskId, {}, { onWaiting: (url, check) => io.stderr(`w2l batch: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened`), ...(io.signal === undefined ? {} : { signal: io.signal }) })
     if (done !== null) {
       io.stderr(`w2l batch: ${done.through} of ${done.handedOff} read in your Chrome`)
       for (const item of done.items) if (!item.through) io.stderr(`w2l batch: ${item.url} not read: ${item.reason ?? 'not through'}`)

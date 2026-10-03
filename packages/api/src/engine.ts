@@ -51,6 +51,7 @@ import {
   type BatchHandoffRequest,
   type BatchHandoffResponse,
   HANDOFF_REASONS,
+  CONTENTFUL_STATUS,
   stepStatusFromResult,
   type ParsedBatchStartRequest,
   BATCH_ERRORS_MAX_LIMIT,
@@ -225,7 +226,7 @@ export interface ApiEngine {
    * CrawlStateError while it runs; a HandoffUnavailableError on a server
    * that does not offer it, or when Chrome cannot be reached.
    */
-  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: { onWaiting?: (url: string, check: string) => void }): Promise<BatchHandoffResponse | null>
+  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: { onWaiting?: (url: string, check: string) => void; signal?: AbortSignal }): Promise<BatchHandoffResponse | null>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -686,7 +687,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
-      const waitingForPerson = userChrome === null ? undefined : (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded).length
+      const waitingForPerson = userChrome === null ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -1394,11 +1395,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           try {
             for (const step of waiting) {
               try {
-                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }) })
+                // A caller that went away hands nothing more over: each item left keeps its stopped result.
+                if (hooks.signal?.aborted === true) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
+                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.signal === undefined ? {} : { signal: hooks.signal }) })
                 const result = pageFromUserBrowser(read, step.result!, fetchOpts)
-                // The page still shows a check to W2L's gate: the person's read did not get past it, and the stopped result stands.
-                if (result.status === 'blocked') {
-                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome still showed a check (${result.blockReason})` })
+                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
+                if (!CONTENTFUL_STATUS.has(result.status)) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
                   continue
                 }
                 const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
@@ -1408,7 +1411,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                   links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
                   ...(json === undefined ? {} : { json }),
                 }
-                await store.putStep({ ...step, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
+                const { audit: _stoppedAudit, ...kept } = step
+                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
               } catch (error) {
                 if (!(error instanceof HandoffNotThrough)) throw error
