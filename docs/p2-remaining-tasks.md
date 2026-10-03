@@ -120,19 +120,19 @@
 
 ## G5 可靠性与性能组
 
-- [ ] **T5.1 1,000 URL、20 个域名，中途 `kill -9` 再恢复**
+- [x] **T5.1 1,000 URL、20 个域名，中途 `kill -9` 再恢复**（`npm run verify:batch-crash-1000`，进了 ubuntu CI；真实 20 域名的参考记录未做）
   - 通过门槛：loopback fixture，20 个 `*.test` 或 `*.localhost` 主机名，每个 50 个 URL，可重复跑，进 CI。
   - 断言 0 丢、0 重：每个 URL 恰好完成一次，服务端命中计数等于 1，状态里的计数前后一致。
   - 再跑一次真实站点版本（20 个公开域名）并留记录，只作为参考。
-- [ ] **T5.2 吞吐基准**，结果写进 `docs/benchmarks/`
+- [x] **T5.2 吞吐基准**，结果写进 `docs/benchmarks/`（`npm run bench:throughput`，见 `docs/benchmarks/2026-10-03-throughput.md`；脚本放在 `scripts/reliability/`，与 T5.1 同处）
   - HTTP lane：32 并发、跨域，目标 ≥500 页/分钟、p50 <800 ms。
   - 浏览器 lane：8 个 context，目标 ≥60 页/分钟、p95 <8 s。
   - 脚本放进 `packages/bench`；每份结果写明机器配置、网络环境（代理或直连）和 commit。
   - 没达标就如实写出来，不调口径。
-- [ ] **T5.3 `w2l serve` 在 Windows 上稳定**
+- [ ] **T5.3 `w2l serve` 在 Windows 上稳定**（第一项已做：`npm run verify:serve-smoke`；第二项等 T4.6 发布）
   - 新增 GitHub Actions `windows-latest` job：安装、`serve`、跑一个 loopback batch、停止、重启、resume。
   - 一键安装（`npx @w2l/cli@latest scrape`）在 Windows 上 5 分钟内出结果。
-  - 是否还需要一台真实 Windows 机器，G5 开始前定（见文末"仍待决定"）。
+  - 只用 CI 的 `windows-latest`，不另找真实 Windows 机器（决定 6）。
 
 ## G6 两篇指南
 
@@ -167,7 +167,4 @@ Howard 2026-10-03 确认：
 3. **PDF 只做 3 项**：`llm-agentic.parse.pdf-pages` 跳过（需要文件上传，属于 Paused）。
 4. **1,000 URL 测试的门槛**：loopback 的 20 个主机名作为通过门槛，真实 20 域名的那次只作为参考记录。
 5. **许可证**（2026-10-03 确认）：`@w2l/cli` 和 `@w2l/mcp` 用 AGPL-3.0-only，内置引擎，一行 npx 即可使用；`@w2l/sdk` 和 Python 的 `w2l` 用 MIT。
-
-仍待决定：
-
-- **Windows 验收**（G5 前定）：只用 CI 的 `windows-latest`，还是另外在一台真实 Windows 机器上跑一次。
+6. **Windows 验收**（2026-10-03 确认）：只跑 CI 的 `windows-latest`。
