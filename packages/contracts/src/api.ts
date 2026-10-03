@@ -65,7 +65,11 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
    * result of any age from this one on.
    */
   minAge?: number
-  /** Store this page's result for later reuse when it succeeds. Default true; mode `authed` never stores. */
+  /**
+   * Store this page's result for later reuse when it succeeds. Default true,
+   * except for a request with custom `headers`, which stores only with
+   * `true` (the stored trace keeps their values); mode `authed` never stores.
+   */
   storeInCache?: boolean
   /**
    * Cache only: answer from a stored result and never fetch; a page with

@@ -70,7 +70,7 @@ describe('PageCache', () => {
     const clock = { now: T0 + 60_000 }
     const cache = cacheAt(clock)
     expect(cache.store('k', result({ markdown: '# newer', evidence: { ...result().evidence, fetchedAt: '2026-10-03T08:00:30.000Z' } }))).toBe(true)
-    cache.store('k', result({ markdown: '# older' }))
+    expect(cache.store('k', result({ markdown: '# older' }))).toBe(false)
     expect(cache.lookup('k', { minAgeMs: 0, maxAgeMs: null })).toMatchObject({ fetchedAt: '2026-10-03T08:00:30.000Z', result: { markdown: '# newer' } })
     cache.close()
   })
