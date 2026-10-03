@@ -10,6 +10,7 @@ import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './cap
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
+import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -34,6 +35,8 @@ export interface PreviewServerOptions {
   log?: Logger
   /** Shared with the Cloudflare Worker; at least 32 characters. See acceptProxyHeaders. */
   proxySecret?: string
+  /** The hosted early-access list. Unset, POST /api/waitlist answers 501. */
+  waitlist?: WaitlistStore
 }
 
 const MIME: Record<string, string> = {
@@ -234,6 +237,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
   const visitorId = (req: IncomingMessage) => dailyVisitorId(options.visitorCookieSecret, visitorKey(req, options.visitorCookieSecret))
   const usedUp = new Map<string, { until: number; status: QuotaStatus }>()
   let quotaLookups = { windowStart: 0, count: 0 }
+  const waitlistSubmissions = new Map<string, number>()
   return (req, res) => { void (async () => {
     acceptProxyHeaders(req, options.proxySecret)
     const started = performance.now()
@@ -303,6 +307,27 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         // Without the visitor cookie the count belongs to an address that others may share.
         basis: key.startsWith('visitor:') ? 'visitor' : 'ip',
       })
+      return
+    }
+    if (pathname === '/api/waitlist') {
+      // An explicit sign-up, so it is stored even when the browser sends Do Not Track; nothing about it is logged.
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
+      if (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403, { 'cache-control': 'no-store' }).end(); return }
+      if (!options.waitlist) { sendJson(res, 501, { error: 'waitlist_unavailable' }); return }
+      let entry
+      try { entry = parseWaitlistEntry(await readRequestBody(req, WAITLIST_BODY_BYTES)) } catch { entry = null }
+      if (entry === null) { if (!res.destroyed) sendJson(res, 400, { error: 'invalid_entry' }); return }
+      // A filled hidden field is a bot: it is told the same as a person and nothing is kept.
+      if (entry === 'spam') { if (!res.destroyed) res.writeHead(204, { 'cache-control': 'no-store' }).end(); return }
+      const now = new Date()
+      const key = `${now.toISOString().slice(0, 10)}:${visitorKey(req, options.visitorCookieSecret)}`
+      const sent = waitlistSubmissions.get(key) ?? 0
+      if (sent >= WAITLIST_DAILY_SUBMISSIONS) { sendJson(res, 429, { error: 'too_many_requests' }); return }
+      if (waitlistSubmissions.size >= 5_000) waitlistSubmissions.clear()
+      waitlistSubmissions.set(key, sent + 1)
+      try { await options.waitlist.save(entry, now) }
+      catch { if (!res.destroyed) sendJson(res, 503, { error: 'waitlist_unavailable' }); return }
+      if (!res.destroyed) res.writeHead(204, { 'cache-control': 'no-store' }).end()
       return
     }
     if (pathname === '/api/events') {

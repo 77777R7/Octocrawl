@@ -8,3 +8,5 @@ export { FirestorePreviewQuota, firestoreQuotaFromEnv, quotaStatus, SITE_DAILY_P
 export type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 export { FirestoreAmazonOriginGate, firestoreAmazonGateFromEnv, AmazonGateBusyError } from './amazonGate.js'
 export type { AmazonOriginGate, AmazonOriginPermit } from './amazonGate.js'
+export { FirestoreWaitlist, firestoreWaitlistFromEnv, parseWaitlistEntry, WAITLIST_NEEDS, WAITLIST_ROLES, WAITLIST_TRIGGERS } from './waitlist.js'
+export type { WaitlistEntry, WaitlistStore } from './waitlist.js'

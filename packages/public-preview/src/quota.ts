@@ -141,14 +141,7 @@ export class FirestorePreviewQuota implements PreviewQuota {
   }
 
   private async accessToken(execution: ExecutionBudget): Promise<string> {
-    const response = await this.fetcher('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', {
-      headers: { 'Metadata-Flavor': 'Google' },
-      signal: this.requestSignal(execution, 3_000),
-    })
-    if (!response.ok) throw new Error('Cloud Run service identity is unavailable')
-    const body = await response.json() as { access_token?: string }
-    if (!body.access_token) throw new Error('Cloud Run service identity returned no token')
-    return body.access_token
+    return metadataAccessToken(this.fetcher, this.requestSignal(execution, 3_000))
   }
 
   private requestSignal(execution: ExecutionBudget, capMs: number): AbortSignal {
@@ -157,6 +150,17 @@ export class FirestorePreviewQuota implements PreviewQuota {
     const timeout = AbortSignal.timeout(remaining)
     return execution.signal ? AbortSignal.any([execution.signal, timeout]) : timeout
   }
+}
+
+/** An access token for the Cloud Run service identity, from the metadata server. */
+export async function metadataAccessToken(fetcher: typeof fetch, signal: AbortSignal): Promise<string> {
+  const response = await fetcher('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', {
+    headers: { 'Metadata-Flavor': 'Google' }, signal,
+  })
+  if (!response.ok) throw new Error('Cloud Run service identity is unavailable')
+  const body = await response.json() as { access_token?: string }
+  if (!body.access_token) throw new Error('Cloud Run service identity returned no token')
+  return body.access_token
 }
 
 export function firestoreQuotaFromEnv(env: NodeJS.ProcessEnv = process.env): PreviewQuota {

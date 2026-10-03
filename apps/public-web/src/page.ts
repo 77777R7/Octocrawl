@@ -1,5 +1,6 @@
 import { glyphBand, glyphCloud } from './glyphArt'
 import { sessionMarkup } from './sessionScript'
+import { waitlistMarkup } from './waitlistMarkup'
 
 /** Light sections in page order. Each gets a `[ 0N / 0M ]` bar numbered from this list, so adding or moving a
  * section renumbers the rest. The bar repeats the section's kicker, so screen readers skip it. */
@@ -226,6 +227,7 @@ export function pageMarkup(): string {
     </section>
 
     <footer class="site-footer">
+      ${waitlistMarkup()}
       <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">

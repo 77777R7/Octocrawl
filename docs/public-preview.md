@@ -243,6 +243,17 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project="$W2L_PROJECT_ID" --freshness=7d --format=json
 ```
 
+### Hosted waitlist
+
+The home page footer carries a hidden-until-scripted early-access form; it opens from there, from the link shown once a visitor's daily previews run out, and from the Limits page (`/?from=limits#waitlist`). It posts to `POST /api/waitlist` (same origin only, 2 KB, fixed roles and needs, a hidden honeypot field, five sign-ups per visitor per UTC day per instance). Each address is one document in the Firestore `waitlist` collection, with an HMAC of the address under `W2L_QUOTA_HASH_KEY` as its id, so a repeat sign-up replaces the answers and keeps the first `createdAt`; no cookie, IP address or preview is stored with it, and nothing about it is logged. The runtime service account's `roles/datastore.user` covers the new collection. Read and maintain it as the owner:
+
+```sh
+node scripts/public-preview/waitlist.mjs            # counts by role, need, entry point and referrer
+node scripts/public-preview/waitlist.mjs --emails   # plus every entry as CSV
+node scripts/public-preview/waitlist.mjs --delete someone@example.org
+node scripts/public-preview/waitlist.mjs --expire   # entries older than 12 months, as the privacy page promises
+```
+
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.
 
 ## Release checks
