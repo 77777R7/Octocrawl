@@ -11,6 +11,7 @@ import { EgressRoutes } from '../src/egress.js'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 import { robotsFetcherVia } from '../src/subjects/provider.js'
+import { HttpSitemapSource } from '../src/sitemapSource.js'
 
 /**
  * Local mode behind the operator's forward proxy (HTTPS_PROXY / HTTP_PROXY /
@@ -27,6 +28,8 @@ let proxy: Server
 let proxyEndpoint: string
 let seen: string[] = []
 let userAgents: string[] = []
+// Each request's target host and the Host header it carried.
+let hosts: string[] = []
 let policy: NetworkPolicy
 
 beforeAll(async () => {
@@ -35,6 +38,13 @@ beforeAll(async () => {
     userAgents.push(req.headers['user-agent'] ?? '')
     const target = new URL(req.url ?? '/', 'http://absolute-form.invalid')
     const path = target.pathname
+    hosts.push(`${target.hostname} host=${req.headers.host}`)
+    // Like www.python.org's CDN, the site answers by the Host header: the apex redirects to www.
+    if (path === '/sitemap.xml' && target.hostname.endsWith('w2l-apex.invalid')) {
+      if (req.headers.host !== 'www.w2l-apex.invalid') { res.writeHead(301, { location: 'http://www.w2l-apex.invalid/sitemap.xml' }).end(); return }
+      res.writeHead(200, { 'content-type': 'application/xml' }).end('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>http://www.w2l-apex.invalid/a</loc></url></urlset>')
+      return
+    }
     // Like SEC.gov, the fake SEC host serves only its prescribed `<Company or name> <email>` User-Agent.
     const secDeclared = target.hostname === 'www.sec.gov' && /^[^()]+ [^\s()]+@[^\s()]+$/.test(req.headers['user-agent'] ?? '')
     if (path === '/robots.txt' && (target.hostname !== 'www.sec.gov' || secDeclared)) {
@@ -69,7 +79,7 @@ afterAll(async () => {
   await new Promise<void>(resolve => proxy.close(() => resolve()))
 })
 
-beforeEach(() => { seen = []; userAgents = [] })
+beforeEach(() => { seen = []; userAgents = []; hosts = [] })
 
 describe('HTTP lane behind the environment proxy', () => {
   it('sends the page and its robots.txt through the proxy without local DNS and records it', async () => {
@@ -127,6 +137,21 @@ describe('HTTP lane behind the environment proxy', () => {
       origin.closeAllConnections()
       await new Promise<void>(resolve => origin.close(() => resolve()))
     }
+  })
+})
+
+describe('sitemap reader behind the environment proxy', () => {
+  it('sends each redirect hop the Host of its own URL', async () => {
+    const source = new HttpSitemapSource({ networkPolicy: policy })
+    try {
+      const loaded = await source.load({ seedUrl: 'http://w2l-apex.invalid/', maxUrls: 10, maxFiles: 2 })
+      expect(seen.filter(line => line.endsWith('/sitemap.xml'))).toEqual(['GET http://w2l-apex.invalid/sitemap.xml', 'GET http://www.w2l-apex.invalid/sitemap.xml'])
+      // undici's ProxyAgent writes `host` into the headers object it is given; a reused object sent the apex's Host to www.
+      expect(hosts.slice(-2)).toEqual(['w2l-apex.invalid host=w2l-apex.invalid', 'www.w2l-apex.invalid host=www.w2l-apex.invalid'])
+      expect(loaded.files.map(file => [file.url, file.finalUrl, file.status, file.kind, file.error, file.proxyUsed])).toEqual([
+        ['http://w2l-apex.invalid/sitemap.xml', 'http://www.w2l-apex.invalid/sitemap.xml', 200, 'urlset', null, true],
+      ])
+    } finally { await source.close() }
   })
 })
 
