@@ -72,6 +72,16 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
  */
 export function resolveListSpec(html: string, request: ListFormatRequest): { spec: ListSpec | null; detected?: ListDetection } {
   if (request.itemSelector !== undefined && request.fields !== undefined) return { spec: { type: 'list', itemSelector: request.itemSelector, fields: request.fields } }
+  // A lane asks twice of one page (is it content, then its records): the second answer is the first.
+  if (lastResolved !== null && lastResolved.html === html && lastResolved.request === request) return lastResolved.resolved
+  const resolved = detectSpec(html, request)
+  lastResolved = { html, request, resolved }
+  return resolved
+}
+
+let lastResolved: { html: string; request: ListFormatRequest; resolved: { spec: ListSpec | null; detected?: ListDetection } } | null = null
+
+function detectSpec(html: string, request: ListFormatRequest): { spec: ListSpec | null; detected?: ListDetection } {
   if (request.itemSelector !== undefined) {
     const fields = detectFields(html, request.itemSelector) ?? []
     return { spec: { type: 'list', itemSelector: request.itemSelector, fields }, detected: { fields, alternatives: [] } }

@@ -60,6 +60,44 @@ describe('detectLists', () => {
   })
 })
 
+describe('detectLists, on pages that would mislead it', () => {
+  it('a field some items lack is missing from them, not read from another element', () => {
+    const sold = (n: number) => `<div class="p"><h3>Name ${n}</h3><em><span>Sold out ${n}</span></em></div>`
+    const html = `<div class="list">${[1, 2, 3].map((n) => `<div class="p"><h3>Name ${n}</h3><span>£${n}.00</span></div>`).join('')}${sold(4)}${sold(5)}</div>`
+    const [best] = detectLists(html)
+    const records = extractListRecords(html, 'https://x.test/', { type: 'list', ...best! })
+    expect(records.map((record) => record.values.price ?? null)).toEqual(['£1.00', '£2.00', '£3.00', null, null])
+  })
+
+  it('never names a field after a column the list adds', () => {
+    const html = `<ul class="books">${[1, 2, 3, 4].map((n) => `<li class="book"><span class="title">Book ${n}</span><span class="page">p. ${n}0</span><span class="index">#${n}</span><span class="source_url">u${n}</span></li>`).join('')}</ul>`
+    const names = detectLists(html)[0]!.fields.map((field) => field.name)
+    expect(names).toEqual(['title', 'page_2', 'index_2', 'source_url_2'])
+  })
+
+  it('leaves out an element whose tag a selector cannot name (Word\'s o:p)', () => {
+    const html = `<div class="l">${[1, 2, 3].map((n) => `<div class="it"><o:p>V${n}</o:p><b>N${n}</b></div>`).join('')}</div>`
+    const [best] = detectLists(html)
+    expect(best!.fields).toEqual([{ name: 'text', selector: 'b' }])
+    expect(extractListRecords(html, 'https://x.test/', { type: 'list', ...best! })[0]!.values.text).toBe('N1')
+  })
+
+  it('does not take a site\'s navigation for the page\'s list', () => {
+    const shell = `<header><nav><ul>${['Home', 'Shop', 'About', 'Blog', 'Help'].map((label) => `<li><a href="/${label}">${label}</a></li>`).join('')}</ul></nav></header><div id="app"></div>`
+    expect(detectLists(shell)).toEqual([])
+  })
+
+  it('items with thousands of distinct parts are read in bounded time', () => {
+    const item = (i: number) => `<div class="it">${Array.from({ length: 8000 }, (_, k) => `<span class="c${k}">v${i}_${k}</span>`).join('')}</div>`
+    const html = `<main><div class="list">${[1, 2, 3, 4, 5].map(item).join('')}</div></main>`
+    const started = Date.now()
+    const [best] = detectLists(html)
+    // 22 s before the bound on paths per item.
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(best!.fields.length).toBeLessThanOrEqual(12)
+  }, 30_000)
+})
+
 describe('resolveListSpec', () => {
   it('keeps a list the request names in full, and says nothing was detected', () => {
     const request = { type: 'list' as const, itemSelector: 'div.product', fields: [{ name: 'n', selector: 'h3' }] }

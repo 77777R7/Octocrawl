@@ -43,6 +43,13 @@ const MAX_DEPTH = 6
 const SAMPLE = 200
 /** The most groups named and scored, the largest first. */
 const MAX_GROUPS = 60
+/** The most paths read inside one item, and the most common paths tried as fields: what bounds the cost of an item with thousands of parts. */
+const MAX_PATHS = 300
+const MAX_FIELD_PATHS = 48
+/** A tag a selector can name: not a namespaced one (Word's `o:p`), which the extractor would read as a pseudo-class. */
+const NAMEABLE_TAG = /^[a-z][a-z0-9-]*$/
+/** The CSV's own columns: no field takes their names. */
+const RESERVED_NAMES: readonly string[] = ['source_url', 'page', 'index']
 const SIMPLE_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/
 const MENU_ANCESTORS: ReadonlySet<string> = new Set(['NAV', 'HEADER', 'FOOTER', 'ASIDE'])
 const MENU_ROLES: ReadonlySet<string> = new Set(['navigation', 'menu', 'menubar', 'listbox', 'tablist', 'tree'])
@@ -157,13 +164,16 @@ function selectorFor(byTag: Map<string, Element[]>, items: Element[], parents: S
   return closest
 }
 
+const CLASS_SETS = new WeakMap<Element, Set<string>>()
+
 /** Whether an element fits one step as the extractor matches it: `#id`, or `tag.class...` with every class among its own. */
 function fits(el: Element, step: string): boolean {
   if (step.startsWith('#')) return el.id === step.slice(1)
   const [tag, ...classes] = step.split('.')
   if (el.tagName.toLowerCase() !== tag) return false
   if (classes.length === 0) return true
-  const own = new Set((el.getAttribute('class') ?? '').split(/\s+/))
+  let own = CLASS_SETS.get(el)
+  if (own === undefined) CLASS_SETS.set(el, own = new Set((el.getAttribute('class') ?? '').split(/\s+/)))
   return classes.every((name) => own.has(name))
 }
 
@@ -179,12 +189,13 @@ function hasAncestorIn(el: Element, set: Set<Element>): boolean {
   return false
 }
 
-/** The paths inside an item, each its chain of tag.firstClass steps, at most MAX_DEPTH deep, with the first element at each. */
+/** The paths inside an item, each its chain of tag.firstClass steps, at most MAX_DEPTH deep and MAX_PATHS many, with the first element at each; an element whose tag a selector cannot name is left out, and what is inside it. */
 function innerPaths(item: Element): Map<string, Element> {
   const paths = new Map<string, Element>()
   const walk = (el: Element, path: string, depth: number): void => {
     for (const child of Array.from(el.children)) {
-      if (NOT_CONTENT.has(child.tagName)) continue
+      if (paths.size >= MAX_PATHS) return
+      if (NOT_CONTENT.has(child.tagName) || !NAMEABLE_TAG.test(child.tagName.toLowerCase())) continue
       const key = path === '' ? stepOf(child, false, true) : `${path} > ${stepOf(child, false, true)}`
       if (!paths.has(key)) paths.set(key, child)
       if (depth < MAX_DEPTH) walk(child, key, depth + 1)
@@ -205,23 +216,27 @@ function scoreList(all: Element[]): number | null {
   const common = commonPaths(paths)
   const avgPaths = paths.reduce((sum, set) => sum + set.size, 0) / items.length
   const similarity = avgPaths === 0 ? 0.5 : Math.min(1, common.length / avgPaths)
-  // A menu: a list in a menu, or hidden, or items that are each one short link.
+  // A site's navigation or a hidden list is never the page's list; a menu by its class, or items that are each one short link, count for little.
   let inMenu = false
-  for (let up: Element | null = items[0]!; up !== null && up.tagName !== 'BODY' && !inMenu; up = up.parentElement) inMenu = menuLike(up)
+  for (let up: Element | null = items[0]!; up !== null && up.tagName !== 'BODY'; up = up.parentElement) {
+    const kind = menuLike(up)
+    if (kind === 'navigation') return null
+    if (kind === 'menu') inMenu = true
+  }
   const linkOnly = items.every((item, i) => texts[i]!.length < 30 && (item.tagName === 'A' ? qsa(item, 'a').length === 0 : qsa(item, 'a').length === 1) && paths[i]!.size <= 2)
   const penalty = inMenu ? 0.15 : linkOnly ? 0.3 : 1
   return Math.sqrt(all.length) * Math.log1p(avgText) * (0.5 + similarity) * penalty
 }
 
 /**
- * Whether an element is a menu's or hidden: nav, header, footer or aside; a
- * menu's role; a class that names a menu, a dropdown, tabs or pagination; the
- * `hidden` attribute, `aria-hidden`, or a closed <details>.
+ * Whether an element is a site's navigation or hidden (nav, header, footer
+ * or aside; a menu's role; the `hidden` attribute, `aria-hidden`, a closed
+ * <details>), or a menu by its class (a menu, a dropdown, tabs, pagination).
  */
-function menuLike(el: Element): boolean {
-  if (MENU_ANCESTORS.has(el.tagName) || MENU_ROLES.has(el.getAttribute('role') ?? '')) return true
-  if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || (el.tagName === 'DETAILS' && !el.hasAttribute('open'))) return true
-  return classesOf(el).some((name) => MENU_CLASS.test(name))
+function menuLike(el: Element): 'navigation' | 'menu' | null {
+  if (MENU_ANCESTORS.has(el.tagName) || MENU_ROLES.has(el.getAttribute('role') ?? '')) return 'navigation'
+  if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || (el.tagName === 'DETAILS' && !el.hasAttribute('open'))) return 'navigation'
+  return classesOf(el).some((name) => MENU_CLASS.test(name)) ? 'menu' : null
 }
 
 /** The paths at least FIELD_SHARE of the items hold, in the order first met. */
@@ -240,8 +255,9 @@ function fieldsOf(all: Element[]): ListField[] {
 /** The fields most items hold, in document order. */
 function fieldsFor(items: Element[], common: string[], paths: Map<string, Element>[]): ListField[] {
   const fields: ListField[] = []
-  const names = new Set<string>()
+  const names = new Set<string>(RESERVED_NAMES)
   const descendants = items.map((item) => qsa(item, '*'))
+  const itemStep = stepOf(items[0]!, false)
   const add = (base: string, field: Omit<ListField, 'name'>): void => {
     if (fields.length >= MAX_FIELDS) return
     let name = base
@@ -254,17 +270,18 @@ function fieldsFor(items: Element[], common: string[], paths: Map<string, Elemen
     const el = paths[i]!.get(path)
     return el === undefined ? [] : [{ i, el }]
   })
-  for (const path of common) {
+  for (const path of common.slice(0, MAX_FIELD_PATHS)) {
+    if (fields.length >= MAX_FIELDS) break
     const holders = at(path)
     const el = holders[0]!.el
     if (el.tagName === 'IMG') {
       const attribute = ['src', 'data-src'].find((name) => holders.some((h) => (h.el.getAttribute(name) ?? '') !== ''))
-      const selector = attribute === undefined ? null : selectorWithin(path, holders, descendants)
+      const selector = attribute === undefined ? null : selectorWithin(path, holders, descendants, itemStep)
       if (selector !== null) add('image', { selector, attribute })
       continue
     }
     if (el.tagName === 'A' && holders.some((h) => (h.el.getAttribute('href') ?? '') !== '')) {
-      const selector = selectorWithin(path, holders, descendants)
+      const selector = selectorWithin(path, holders, descendants, itemStep)
       if (selector === null) continue
       const label = nameFrom(el, holders, 'title', path)
       if (varies(holders.map((h) => textOf(h.el)))) add(label, { selector })
@@ -276,7 +293,7 @@ function fieldsFor(items: Element[], common: string[], paths: Map<string, Elemen
     if (!own && el.children.length > 0) continue
     const values = holders.map((h) => textOf(h.el))
     if (!varies(values)) continue
-    const selector = selectorWithin(path, holders, descendants)
+    const selector = selectorWithin(path, holders, descendants, itemStep)
     if (selector !== null) add(nameFrom(el, holders, 'text', path), { selector })
   }
   // A list whose items hold no common path (a plain <li>text</li>): the item itself.
@@ -290,12 +307,20 @@ function varies(values: Array<string | null>): boolean {
   return present.length > 0 && (new Set(present).size > 1 || present.length < MIN_ITEMS)
 }
 
-/** The shortest tail of a path (its steps joined by `>`) whose first match in each item is the element at the path; null when not even the whole path is. */
-function selectorWithin(path: string, holders: Array<{ i: number; el: Element }>, descendants: Element[][]): string | null {
+/**
+ * The shortest tail of a path (its steps joined by `>`) whose first match in
+ * each item that holds the path is the element at it, and that matches
+ * nothing in the items that do not (their value is then missing, not another
+ * element's); else the whole path from the item's own step (`div.p > span`,
+ * a span that is the item's child and not one deeper); null when not even
+ * that is.
+ */
+function selectorWithin(path: string, holders: Array<{ i: number; el: Element }>, descendants: Element[][], itemStep: string): string | null {
   const steps = path.split(' > ')
-  for (let n = 1; n <= steps.length; n++) {
-    const tail = steps.slice(-n)
-    if (holders.every((h) => descendants[h.i]!.find((el) => fitsChain(el, tail)) === h.el)) return tail.join(' > ')
+  const at = new Map(holders.map((h) => [h.i, h.el]))
+  const tails = [...steps.map((_, n) => steps.slice(steps.length - n - 1)), [itemStep, ...steps]]
+  for (const tail of tails) {
+    if (descendants.every((inside, i) => (inside.find((el) => fitsChain(el, tail)) ?? null) === (at.get(i) ?? null))) return tail.join(' > ')
   }
   return null
 }
