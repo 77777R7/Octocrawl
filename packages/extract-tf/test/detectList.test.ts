@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { detectLists, extractListRecords, resolveListSpec } from '../src/index.js'
+import { MAX_SELECTOR_PARTS, selectorParts } from '../src/selectors.js'
 
 const product = (n: number) => `<div class="product"><a href="/p/${n}"><img src="/img/${n}.png" alt=""></a><h3 class="name"><a href="/p/${n}">Product ${n}</a></h3><p class="price">£${n}.99</p><button class="buy">Add to cart</button></div>`
 // A shop page: a menu of links in the header, products in rows of three, links in the footer.
@@ -86,6 +87,51 @@ describe('detectLists, on pages that would mislead it', () => {
     const shell = `<header><nav><ul>${['Home', 'Shop', 'About', 'Blog', 'Help'].map((label) => `<li><a href="/${label}">${label}</a></li>`).join('')}</ul></nav></header><div id="app"></div>`
     expect(detectLists(shell)).toEqual([])
   })
+
+  it('items in the footer are not read with the posts that share their layout', () => {
+    const block = (items: string) => `<div class="container"><div class="row"><div class="col-md-12"><ul class="list-unstyled">${items}</ul></div></div></div>`
+    const posts = [1, 2, 3, 4, 5, 6].map((n) => `<li><a href="/post/${n}">Post number ${n}</a><span class="date">2026-10-0${n}</span></li>`).join('')
+    const links = ['Terms', 'Privacy', 'Jobs'].map((label) => `<li><a href="/${label}">${label}</a></li>`).join('')
+    const html = `<body><main>${block(posts)}</main><footer>${block(links)}</footer></body>`
+    const [best] = detectLists(html)
+    expect(best!.count).toBe(6)
+    expect(extractListRecords(html, 'https://x.test/', { type: 'list', ...best! }).map((record) => record.values.title)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `Post number ${n}`))
+  })
+
+  it('a list only in an aside is not the page\'s list', () => {
+    expect(detectLists(`<main><h1>Home</h1></main><aside><ul>${[1, 2, 3, 4].map((n) => `<li><a href="/${n}">Headline ${n}</a><p>Summary ${n}</p></li>`).join('')}</ul></aside>`)).toEqual([])
+  })
+
+  it('selectors stay within what a request may send back', () => {
+    const classes = Array.from({ length: 21 }, (_, i) => `u-utility-class-${i}`).join(' ')
+    const html = `<div class="grid">${[1, 2, 3, 4].map((n) => `<div class="${classes}"><b class="${classes}">Item ${n}</b><i class="${classes}">Note ${n}</i></div>`).join('')}</div>`
+    const [best] = detectLists(html)
+    for (const selector of [best!.itemSelector, ...best!.fields.flatMap((field) => field.selector ?? [])]) expect(selector.length).toBeLessThanOrEqual(200)
+    expect(selectorParts(best!.itemSelector) + best!.fields.reduce((sum, field) => sum + (field.selector === undefined ? 0 : selectorParts(field.selector)), 0)).toBeLessThanOrEqual(MAX_SELECTOR_PARTS)
+  })
+
+  it('a lazy image\'s source is the one that differs, not the placeholder every item has', () => {
+    const html = `<ul class="g">${[1, 2, 3].map((n) => `<li class="c"><img src="data:image/gif;base64,R0lGOD" data-src="/img/${n}.jpg"><b>Item ${n}</b></li>`).join('')}</ul>`
+    expect(detectLists(html)[0]!.fields).toContainEqual({ name: 'image', selector: 'img', attribute: 'data-src' })
+  })
+
+  it('a parent with a class attribute of thousands is read in bounded time', () => {
+    const k = 10_000
+    const html = `<main><div class="${Array.from({ length: k }, (_, i) => `c${i}`).join(' ')}">${'<i>ab</i>'.repeat(k)}</div></main>`
+    const started = Date.now()
+    detectLists(html)
+    // 11.8 s before classes were read once per element, and at most eight of them.
+    expect(Date.now() - started).toBeLessThan(3_000)
+  }, 30_000)
+
+  it('a page of many groups of one shape is named in bounded time', () => {
+    const group = (k: number) => `<div class="p k${k}">${'<div class="a">xx</div>'.repeat(1000)}</div>`
+    const html = `<div class="w"><div class="h"><div class="g">${Array.from({ length: 64 }, (_, k) => group(k)).join('')}</div></div></div>`
+    const started = Date.now()
+    detectLists(html)
+    // 15.4 s before the work was bounded.
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 30_000)
 
   it('items with thousands of distinct parts are read in bounded time', () => {
     const item = (i: number) => `<div class="it">${Array.from({ length: 8000 }, (_, k) => `<span class="c${k}">v${i}_${k}</span>`).join('')}</div>`
