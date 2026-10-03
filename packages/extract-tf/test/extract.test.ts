@@ -530,4 +530,13 @@ describe('extractTf selection and whole page', () => {
     expect(loose.mainHtml).not.toContain('Promo box')
     expect(extractTf.extract(chrome, { blockAds: false }).mainHtml).toContain('Promo box')
   })
+
+  it('keeps the main content after a <head> tag in the body', () => {
+    const html = '<!doctype html><html><head><title>Kiln log</title></head><body><article><h1>Kiln log</h1><head/>' +
+      '<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p>' +
+      '<p>Sediment cores from the estuary date to 1873. Researchers compared them against the almanac kept at the plinth house.</p></article></body></html>'
+    const md = htmlToMarkdown(extractTf.extract(html).mainHtml)
+    expect(md).toContain('The kiln reached 1240 degrees')
+    expect(md).toContain('Sediment cores from the estuary')
+  })
 })

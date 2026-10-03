@@ -48,6 +48,13 @@ ${Array.from({ length: 6 }, (_, i) => `<tr><td><a href="kilns/${i + 1}">Kiln ${i
 ${Array.from({ length: 6 }, (_, i) => `<tr><td>Kiln ${i + 7}</td><td>${30 - i}</td><td><b>Cobalt</b> and <em>ash</em> glaze, batch ${i + 1}</td></tr>`).join('\n')}
 </table></div>
 <div id="colophon">Survey office, 2026</div></body></html>`],
+  // A template that writes a second <head/> into the body: a browser ignores the tag.
+  ['https://notes.fixture.test/kilns/firing-12', `<!doctype html><html><head><title>Firing 12</title></head><body>
+<nav><a href="/">Notes</a></nav>
+<article><h1>Firing 12</h1><head/><meta name="author" content="Harbour office">
+<p>The kiln reached 1240 degrees before the glaze vitrified, and the second kiln line held its curve within fifteen degrees.</p>
+<p>Sediment cores from the estuary date to 1873. Researchers compared them against the almanac kept at the plinth house.</p>
+</article></body></html>`],
 ]
 
 function monitorMarkdown([url, html]: [string, string]): string {
@@ -62,6 +69,6 @@ describe('EXTRACTOR_VERSION', () => {
     const digest = createHash('sha256').update(markdown.join('\n\u0000\n')).digest('hex')
     // If only the digest differs, the extraction or Markdown output changed:
     // bump EXTRACTOR_VERSION (src/version.ts) and pin the new pair together.
-    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/6', digest: '5eb81e8b610d65444070f71452ceaac60c95314cf618940e8dde96ebf0890221' })
+    expect({ version: EXTRACTOR_VERSION, digest }).toEqual({ version: 'extract-tf/7', digest: '5ca3d1fd96b2cb7ad7d343a77535a71a4981c9654a8b52473d45d32532d9bd06' })
   })
 })

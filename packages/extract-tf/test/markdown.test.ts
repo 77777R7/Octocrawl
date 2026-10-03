@@ -182,6 +182,17 @@ describe('htmlToMarkdown', () => {
 
 const BASE = 'https://fixture.test/docs/page'
 
+describe('htmlToMarkdown with a <head> tag in the body', () => {
+  it('ignores the tag, as a browser does, instead of losing what follows it', () => {
+    expect(htmlToMarkdown('<head/><p>Some text</p>')).toBe('Some text')
+    const page = (stray: string) => `<!doctype html><html><head><title>T</title></head><body><h1>H</h1>${stray}<p>x</p><table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table></body></html>`
+    const expected = '# H\n\nx\n\n| a | b |\n| --- | --- |\n| c | d |'
+    expect(htmlToMarkdown(page('<head/>'))).toBe(expected)
+    expect(htmlToMarkdown(page('<head><meta name="x" content="1">'))).toBe(expected)
+    expect(htmlToMarkdown(page('<head><meta name="x" content="1"></head>'))).toBe(expected)
+  })
+})
+
 describe('htmlToMarkdown blocks and inline whitespace', () => {
   it('separates adjacent blocks and keeps inline spacing and markup', () => {
     expect(htmlToMarkdown('<div>Alpha</div><div>Beta</div>')).toBe('Alpha\n\nBeta')
