@@ -192,7 +192,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <header class="frame site-header">
           <a class="brand" href="#top" aria-label="Octocrawl home">
-            <img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="50" height="50" />
+            <img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="50" height="50" />
             <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="149" height="23" />
           </a>
           <nav class="site-nav" aria-label="Main navigation">
@@ -435,7 +435,7 @@ export function pageMarkup(): string {
                 <thead><tr><th scope="col">Case</th><th scope="col">Site</th><th scope="col">Result</th></tr></thead>
                 <tbody>${RECORD_ROWS.map(([id, host, result, kind]) => `<tr class="is-${kind}"><td>${id}</td><td>${host}</td><td><span aria-hidden="true">${kind === 'ok' ? '✓' : '✗'}</span> ${result}</td></tr>`).join('')}</tbody>
               </table>
-              <div class="record-mark" aria-hidden="true"><pre>${glyphWaves(110, 7)}</pre><span class="record-octopus"><img src="/assets/octopus-original.webp" alt="" width="76" height="76" loading="lazy" /></span></div>
+              <div class="record-mark" aria-hidden="true"><pre>${glyphWaves(110, 7)}</pre><span class="record-octopus"><img src="/assets/octopus-160.webp" alt="" width="76" height="76" loading="lazy" /></span></div>
             </div>
           </div>
         </div>
@@ -475,7 +475,7 @@ export function pageMarkup(): string {
           <div class="frame flow-diagram" aria-hidden="true">
             <div class="flow-node"><span class="flow-box"><span class="flow-glyph">›_</span></span><span class="flow-name">YOUR AGENT</span></div>
             <div class="flow-line"><span class="flow-chip">MCP · REST · SDK</span></div>
-            <div class="flow-node is-main"><span class="flow-box"><span class="flow-ring"><img src="/assets/octopus-original.webp" alt="" width="68" height="68" loading="lazy" /></span></span><span class="flow-name">OCTOCRAWL</span></div>
+            <div class="flow-node is-main"><span class="flow-box"><span class="flow-ring"><img src="/assets/octopus-160.webp" alt="" width="68" height="68" loading="lazy" /></span></span><span class="flow-name">OCTOCRAWL</span></div>
             <div class="flow-line"><span class="flow-chip is-ok">robots.txt ✓</span></div>
             <div class="flow-node"><span class="flow-box"><pre class="flow-page">┌──────┐
 │ ▒▒▒▒ │
@@ -623,7 +623,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">
-            <a class="brand footer-brand" href="#top" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="130" height="20" /></a>
+            <a class="brand footer-brand" href="#top" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="130" height="20" /></a>
             <p class="footer-tagline">Start with one link.</p>
             <p class="footer-note">Open-source web data you can cite</p>
           </div>
@@ -637,7 +637,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
           <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#examples">What comes back</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#why-w2l">Why Octocrawl</a></li><li><a href="#run-it-yourself">Run it yourself</a></li><li><a href="#faq">FAQ</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/w2l/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/w2l">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
         </nav>
