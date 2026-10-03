@@ -233,8 +233,9 @@ const MAX_ROWSPAN = 65534
  * together; past either, a table is given as `omitted: 'too_large'` with no
  * rows, so a small page cannot make a huge CSV or response. A cell counts
  * what its CSV field and its JSON string cost: its text, each `"` three
- * more times (`""` in CSV, escaped again in JSON) and each `\` once more,
- * plus three for the separators and quotes.
+ * more times (`""` in CSV, escaped again in JSON), each `\` once more and
+ * each control character five more (`\u00XX` in JSON), plus three for the
+ * separators and quotes.
  */
 export const MAX_TABLE_CHARS = 2_000_000
 export const MAX_PAGE_TABLE_CHARS = 5_000_000
@@ -245,6 +246,8 @@ function cellCost(value: string): number {
     const c = value.charCodeAt(i)
     if (c === 34) extra += 3
     else if (c === 92) extra += 1
+    // JSON writes a control character as \u00XX.
+    else if (c < 32) extra += 5
   }
   return value.length + extra
 }

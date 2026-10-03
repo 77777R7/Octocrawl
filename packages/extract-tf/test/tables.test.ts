@@ -59,6 +59,7 @@ describe('htmlToTables', () => {
     expect(JSON.stringify(tables).length).toBeLessThan(4 * MAX_PAGE_TABLE_CHARS)
     // Quotes count with their escaping: a cell of quotes reaches the cap sooner than its length says.
     expect(htmlToTables(`<table><tr><td colspan="1000">${'"'.repeat(1000)}</td></tr><tr><td>y</td></tr></table>`)[0]!.omitted).toBe('too_large')
+    expect(htmlToTables(`<table><tr><td colspan="1000">${'\u0001'.repeat(1000)}</td></tr><tr><td>y</td></tr></table>`)[0]!.omitted).toBe('too_large')
   })
 
   it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {
