@@ -6,6 +6,10 @@ export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, Rev
 export type { AppendToBatchOptions, ChunkedBatchJob, ChunkedBatchOptions, ChunkedBatchResult } from './client.js'
 export type { BatchCollected, BatchDocuments, CrawlCollected, CrawlDocuments, PageCollection, PagedListOptions, PaginationEnd, PaginationLimits, PaginationStop } from './client.js'
 export type {
+  EvidenceRecord,
+  PageTable,
+  PdfPageMarkdown,
+  PdfParser,
   ActiveCrawl,
   ActiveCrawlList,
   ActiveCrawlOptions,

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer } from './server.js'
@@ -30,8 +31,9 @@ async function main(): Promise<void> {
   await server.connect(transport)
 }
 
+// Run as the bin: through node_modules/.bin the entry is a symlink, so its real path is compared.
 const entry = process.argv[1]
-if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+if (entry !== undefined && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   main().catch((err: unknown) => {
     console.error(err instanceof Error ? err.message : String(err))
     process.exitCode = 1

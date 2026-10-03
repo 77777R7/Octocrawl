@@ -37,7 +37,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <header class="frame site-header">
           <a class="brand" href="#top" aria-label="Octocrawl home">
-            <img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="50" height="50" />
+            <img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="50" height="50" />
             <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="149" height="23" />
           </a>
           <nav class="site-nav" aria-label="Main navigation">
@@ -229,7 +229,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">
-            <a class="brand footer-brand" href="#top" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-original.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="130" height="20" /></a>
+            <a class="brand footer-brand" href="#top" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="130" height="20" /></a>
             <p class="footer-tagline">Start with one link.</p>
             <p class="footer-note">Open-source web data you can cite</p>
           </div>
@@ -243,7 +243,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
           <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#faq">FAQ</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/w2l/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/w2l">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
         </nav>

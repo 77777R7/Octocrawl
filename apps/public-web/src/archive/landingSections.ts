@@ -247,7 +247,7 @@ export function archivedSectionsMarkup(): string {
                 <thead><tr><th scope="col">Case</th><th scope="col">Site</th><th scope="col">Result</th></tr></thead>
                 <tbody>${RECORD_ROWS.map(([id, host, result, kind]) => `<tr class="is-${kind}"><td>${id}</td><td>${host}</td><td><span aria-hidden="true">${kind === 'ok' ? '✓' : '✗'}</span> ${result}</td></tr>`).join('')}</tbody>
               </table>
-              <div class="record-mark" aria-hidden="true"><pre>${glyphWaves(110, 7)}</pre><span class="record-octopus"><img src="/assets/octopus-original.webp" alt="" width="76" height="76" loading="lazy" /></span></div>
+              <div class="record-mark" aria-hidden="true"><pre>${glyphWaves(110, 7)}</pre><span class="record-octopus"><img src="/assets/octopus-160.webp" alt="" width="76" height="76" loading="lazy" /></span></div>
             </div>
           </div>
         </div>
@@ -287,7 +287,7 @@ export function archivedSectionsMarkup(): string {
           <div class="frame flow-diagram" aria-hidden="true">
             <div class="flow-node"><span class="flow-box"><span class="flow-glyph">›_</span></span><span class="flow-name">YOUR AGENT</span></div>
             <div class="flow-line"><span class="flow-chip">MCP · REST · SDK</span></div>
-            <div class="flow-node is-main"><span class="flow-box"><span class="flow-ring"><img src="/assets/octopus-original.webp" alt="" width="68" height="68" loading="lazy" /></span></span><span class="flow-name">OCTOCRAWL</span></div>
+            <div class="flow-node is-main"><span class="flow-box"><span class="flow-ring"><img src="/assets/octopus-160.webp" alt="" width="68" height="68" loading="lazy" /></span></span><span class="flow-name">OCTOCRAWL</span></div>
             <div class="flow-line"><span class="flow-chip is-ok">robots.txt ✓</span></div>
             <div class="flow-node"><span class="flow-box"><pre class="flow-page">┌──────┐
 │ ▒▒▒▒ │

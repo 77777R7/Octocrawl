@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import { get, type Server } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FetchResult } from '@w2l/contracts'
@@ -41,6 +41,9 @@ async function site(extra: Partial<PreviewServerOptions> = {}) {
   await writeFile(join(dir, 'index.html'), '<link rel="canonical" href="__W2L_ORIGIN__/" /><h1>Home</h1>')
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   await writeFile(join(dir, 'robots.txt'), 'Sitemap: __W2L_ORIGIN__/sitemap.xml\n')
+  await mkdir(join(dir, 'docs', 'limits'), { recursive: true })
+  await writeFile(join(dir, 'docs', 'limits', 'index.html'), '<h1>Limits</h1>')
+  await writeFile(join(dir, 'docs', 'limits', 'index.md'), '# Limits\n')
   const lines: LogLine[] = []
   const server = createPreviewServer({
     quota: { consume: async () => 'ok' }, capture: async target => fixture(target.url), staticDir: dir, amazonState: null,
@@ -119,6 +122,40 @@ describe('public site routes', () => {
     const { url } = await site({ quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 } }, consume: async () => 'ok' } })
     await fetch(`${url}/api/quota`, { headers: { 'cf-connecting-ip': '198.51.100.9' } })
     expect(keys[0]).not.toContain('198.51.100.9')
+  })
+
+  it('moves each page to its one slash address, keeping the query', async () => {
+    const { url } = await site()
+    for (const [path, location] of [['/docs/limits?a=1', '/docs/limits/?a=1'], ['/index.html', '/'], ['/docs/limits/index.html', '/docs/limits/']]) {
+      const response = await fetch(`${url}${path}`, { redirect: 'manual' })
+      expect([path, response.status, response.headers.get('location')]).toEqual([path, 301, location])
+    }
+    expect((await fetch(`${url}/docs/limits/`, { redirect: 'manual' })).status).toBe(200)
+    expect((await fetch(`${url}/docs/missing`, { redirect: 'manual' })).status).toBe(404)
+    // fetch() would normalise this path; sent raw, it must not redirect to another host (//docs/...).
+    const raw = await new Promise<string | undefined>((resolve, reject) => get({ host: '127.0.0.1', port: new URL(url).port, path: '/.//docs/limits' }, response => { response.resume(); resolve(response.headers.location) }).on('error', reject))
+    expect(raw).toBe('/docs/limits/')
+  })
+
+  it('points a Markdown copy at its page and sends HSTS only over https', async () => {
+    const local = await site()
+    const copy = await fetch(`${local.url}/docs/limits/index.md`)
+    expect(copy.headers.get('link')).toBe(`<${local.url}/docs/limits/>; rel="canonical"`)
+    expect((await fetch(`${local.url}/docs/limits/index%2Emd`)).headers.get('link')).toBe(`<${local.url}/docs/limits/>; rel="canonical"`)
+    expect(copy.headers.get('strict-transport-security')).toBeNull()
+    expect((await fetch(`${local.url}/docs/limits/`)).headers.get('link')).toBeNull()
+    const configured = await site({ publicOrigin: 'https://w2l.example' })
+    const page = await fetch(configured.url, { headers: { 'x-forwarded-host': 'w2l.example' } })
+    expect(page.headers.get('strict-transport-security')).toBe('max-age=31536000; includeSubDomains')
+  })
+
+  it('sets the visitor cookie on pages only, so robots.txt stays publicly cacheable', async () => {
+    const { url } = await site({ visitorCookieSecret: 's'.repeat(32) })
+    expect((await fetch(url)).headers.get('set-cookie')).toMatch(/^w2l_visitor=/)
+    for (const path of ['/robots.txt', '/docs/limits/index.md', '/docs/limits', '/missing']) {
+      expect([path, (await fetch(`${url}${path}`, { redirect: 'manual' })).headers.get('set-cookie')]).toEqual([path, null])
+    }
+    expect((await fetch(`${url}/robots.txt`)).headers.get('cache-control')).toBe('public, max-age=3600')
   })
 
   it('rejects a public origin with a path or plain http', () => {
