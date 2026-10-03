@@ -52,10 +52,10 @@
   - 命中时必须带 `cacheState: "hit"`、`cachedAt`（原始抓取时间），以及原始抓取的 Evidence Record：其中 `fetchedAt`、`robotsDecision` 和各个 hash 都取自原始抓取。
   - 只有真的去抓了，才能写 `miss`。没查缓存时写 `cacheState: null`，或者干脆不带这个字段，不能猜成 `miss`。
   - `/fc` 映射成 `metadata.cacheState` 和 `metadata.cachedAt`；同时删掉 `firecrawl.ts:47` 那条"left out until W2L has a cache"的说明，以及断言这两个字段不存在的测试。
-- [ ] **T2.4 与 `useCached` 的关系**：crawl 上已有的 `useCached` 实际上不会生效（`core-features.csv:11` 有记录）。要么让它变成 `maxAge` 的别名，要么删掉，二选一，并写进文档。
+- [ ] **T2.4 与 `useCached` 的关系**：审计（`core-features.csv:11`）说 `useCached` 不会生效，但这条早于 crawl resume 功能。核实后发现，`POST /v1/crawl/:id/resume` 会重新抓已有页面，只有 `useCached` 能让 resume 复用这个爬取任务自己的页面。所以保留 `useCached`，只在文档里写清它和 `maxAge` 的区别：前者只复用本任务的页面，后者跨请求复用缓存。（2026-10-03 修正）
 - [ ] **T2.5（补进来的 P2 行，Howard 已确认并入）Evidence Record 记录自定义 headers 和移动设备**
   - 新增字段，例如 `request.headers`（凭证类 header 已经被拒，所以可以记名字和值）和 `request.device`。
-  - 和缓存命中可能带来的字段改动一起，**只升一次** `EVIDENCE_SCHEMA_VERSION`，并更新已发布的 JSON Schema。
+  - 按 `packages/contracts/src/evidenceRecord.ts` 的版本规则，只做新增的改动留在 `w2l.evidence/1`：新字段在 schema 文件里是可选的（`EVIDENCE_RECORD_ADDED_KEYS`），W2L 照常每条都写。不升 `EVIDENCE_SCHEMA_VERSION`。（2026-10-03 修正：原来写的"升一次版本"不符合这条规则）
 - [ ] **T2.6 文档**：缓存语义（默认值、哪些选项算进键、命中时证据里显示什么）写进 API 参考和 `docs/firecrawl-shim.md`。
 - 验收：
   - 单元测试：命中、未命中、`minAge`、`storeInCache: false`、仅缓存模式未命中、键里每个选项各自的变化。
@@ -163,7 +163,7 @@ G2 → G3 → G4 → G5 → G6。
 Howard 2026-10-03 确认：
 
 1. **缓存默认值**：原生入口默认 `maxAge: 0`，即不复用，除非请求里显式要求；`/fc` 只认请求里显式传入的 `maxAge`，不套用 Firecrawl 的 4 小时默认值。
-2. **T2.5 并入缓存组**：headers 和移动设备写进 Evidence Record，和缓存一起只升一次 schema 版本。
+2. **T2.5 并入缓存组**：headers 和移动设备写进 Evidence Record。后来核实，这是 v1 内的新增改动，不升 schema 版本（见 T2.5）。
 3. **PDF 只做 3 项**：`llm-agentic.parse.pdf-pages` 跳过（需要文件上传，属于 Paused）。
 4. **1,000 URL 测试的门槛**：loopback 的 20 个主机名作为通过门槛，真实 20 域名的那次只作为参考记录。
 
