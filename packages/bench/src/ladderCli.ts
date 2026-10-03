@@ -56,7 +56,7 @@ import {
   MemoryRoutingHistory,
   type RoutingHistory,
 } from './routing/vendorRouter.js'
-import { FileSessionStore, type SessionSnapshot, type SessionStore } from './routing/sessionStore.js'
+import { FileSessionStore, sessionCoversHost, type SessionSnapshot, type SessionStore } from './routing/sessionStore.js'
 
 export const USAGE =
   'usage: w2l scrape [--research|--authed] [--persist-session] [--live-view] [--session-store f] [--history-file f] [--handoff] <url>\n' +
@@ -250,7 +250,7 @@ export function buildChannels(
         // providers. A mismatched snapshot is audited and skipped the same
         // way — it belongs to another rung, and "does not apply" is a
         // routing fact, not an error.
-        if (session === undefined || session === null || session.vendor !== 'browser_local_authed' || session.domain !== host) {
+        if (session === undefined || session === null || session.vendor !== 'browser_local_authed' || !sessionCoversHost(session.domain, host)) {
           const trace: TraceEvent[] = [
             {
               at: 0,

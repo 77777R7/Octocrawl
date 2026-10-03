@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildChannels,
@@ -100,7 +101,7 @@ import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
+import { FileSessionBrokerStore, FileSessionStore, SessionBroker, type SessionStore } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
@@ -262,6 +263,15 @@ export interface ApiEngineOptions {
    */
   hosted?: boolean
   /**
+   * The file of the user's saved logins (`w2l login import`), read by mode
+   * `authed` to fetch a page with the session saved for its domain. The
+   * engine only reads it; a run never writes a session there. Absent or
+   * null: no saved logins, and mode `authed` has no session to use. A
+   * hosted engine never reads one, whatever is passed: a token holder must
+   * not browse with the operator's accounts.
+   */
+  sessionsFile?: string | null
+  /**
    * The receivers a job `webhook` may name beyond https: with
    * `allowHttpLoopback` (the default off a hosted engine) a plain-http
    * receiver on loopback is taken, for a local developer's receiver. A hosted
@@ -334,6 +344,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const shutdownController = new AbortController()
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
+  const savedLogins: SessionStore | null = options.hosted === true || (options.sessionsFile ?? null) === null ? null : readOnlySessions(new FileSessionStore(options.sessionsFile!))
+  /** The saved logins a run of `mode` may use: mode `authed` alone. */
+  const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
   const headed = options.headed === true
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
@@ -706,7 +719,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -872,7 +885,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
     }
-    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride) : null
     const operation = (async () => {
@@ -1829,4 +1842,18 @@ async function markCrawlFailed(store: SqliteTaskStore, taskId: string): Promise<
       await store.putAttempt({ ...latest, status: 'failed', endedAt: now })
     }
   } catch {}
+}
+
+/**
+ * Where a local W2L keeps the user's saved logins: `W2L_SESSIONS_FILE`, else
+ * `~/.w2l/sessions.json`. One file for the API server, the command line and
+ * the local MCP service, so a login imported once is seen by all three.
+ */
+export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): string {
+  return env.W2L_SESSIONS_FILE ?? join(homedir(), '.w2l', 'sessions.json')
+}
+
+/** A session store the engine reads but never writes: saved logins come from `w2l login import` alone. */
+function readOnlySessions(store: SessionStore): SessionStore {
+  return { load: (domain) => store.load(domain), save: async () => {} }
 }

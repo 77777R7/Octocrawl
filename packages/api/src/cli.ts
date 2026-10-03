@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
 import { createApp, injectJobWebSockets } from './app.js'
-import { createApiEngine } from './engine.js'
+import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { parseListen, parsePort } from './listen.js'
 
 export { parseListen, parsePort }
@@ -31,6 +31,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     mapMaxTimeoutMs: listen.mapMaxTimeoutMs,
     allowRobotsOverride: listen.allowRobotsOverride,
     hosted: listen.mode === 'hosted',
+    sessionsFile: listen.mode === 'hosted' ? null : defaultSessionsFile(env),
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
     workerCount: listen.workerCount,
   })

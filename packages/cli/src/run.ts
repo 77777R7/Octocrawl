@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -58,6 +58,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       taskRoot,
       networkPolicy: listen.networkPolicy,
       allowRobotsOverride: listen.allowRobotsOverride,
+      sessionsFile: defaultSessionsFile(io.env),
       webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
       workerCount: listen.workerCount,
       resumeOnStart: false,

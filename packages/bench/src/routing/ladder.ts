@@ -31,7 +31,7 @@ import {
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
-import type { SessionSnapshot, SessionStore } from './sessionStore.js'
+import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One channel: a lane implementation the ladder can try. */
 export interface Channel {
@@ -344,7 +344,7 @@ export class LadderRunner {
         session !== undefined && session !== null
           ? session
           : this.sessionStore !== null
-            ? await raceWithSignal(this.sessionStore.load(safeHost(url)), execution.signal)
+            ? await raceWithSignal(loadSessionForHost(this.sessionStore, safeHost(url)), execution.signal)
             : null
     }
     if (effectiveSession !== null) {
@@ -372,6 +372,19 @@ export class LadderRunner {
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
+
+    // A saved login for this host goes first: many sites answer a logged-out
+    // visitor with a 200 (a login form, a public variant of the page), which
+    // the public rungs would take as the answer and the session would never
+    // be used. Only a local session moves its rung; a vendor's resume
+    // material stays with its provider rung.
+    const sessionFirst = effectiveSession !== null && effectiveSession.vendor === 'browser_local_authed' && sessionCoversHost(effectiveSession.domain, safeHost(url))
+      ? ordered.find((c) => c.id === 'authed_session') ?? null
+      : null
+    if (sessionFirst !== null) {
+      ordered = [sessionFirst, ...ordered.filter((c) => c !== sessionFirst)]
+      ladderTrace.push({ at: 0, event: 'ladder_session_first', channel: sessionFirst.id, detail: { domain: effectiveSession!.domain } })
+    }
 
     // waitFor needs a rung that runs scripts and waits before capture; the
     // HTTP rung cannot. Such rungs are skipped, and when none is left the
@@ -427,6 +440,13 @@ export class LadderRunner {
       }
       last = result
       if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
+      // The site refused the saved login (expired, signed out): that is the
+      // answer. A public rung after it would return the logged-out page as
+      // if it were the page the caller asked for.
+      if (channel === sessionFirst && result.status === 'blocked' && result.blockReason === 'login_wall') {
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: result.blockReason } })
+        return finish(result, false)
+      }
 
       // Vendor attribution happens for every attempt, successful or not —
       // a vendor's win IS its history. The outcome is judged on the

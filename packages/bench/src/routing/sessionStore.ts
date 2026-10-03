@@ -58,6 +58,28 @@ export interface SessionStore {
   save(snapshot: SessionSnapshot): Promise<void>
 }
 
+/**
+ * Whether a session saved for `domain` applies to `host`: the domain itself
+ * or a subdomain of it, as a cookie for `.example.com` reaches
+ * `www.example.com`. The cookies still carry their own scope; this only
+ * decides which saved session a host may use.
+ */
+export function sessionCoversHost(domain: string, host: string): boolean {
+  const d = domain.toLowerCase().replace(/^\./, '')
+  const h = host.toLowerCase()
+  return h === d || h.endsWith(`.${d}`)
+}
+
+/** The session for `host`: the one saved for the host itself, else the nearest parent domain's. */
+export async function loadSessionForHost(store: SessionStore, host: string): Promise<SessionSnapshot | null> {
+  const labels = host.toLowerCase().split('.')
+  for (let i = 0; i <= labels.length - 2; i++) {
+    const session = await store.load(labels.slice(i).join('.'))
+    if (session !== null) return session
+  }
+  return null
+}
+
 /** The credential-free fact a record can carry. */
 export function sessionFingerprint(snapshot: SessionSnapshot): string {
   return sha256Hex(
