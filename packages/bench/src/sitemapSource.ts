@@ -242,7 +242,8 @@ export class HttpSitemapSource implements SitemapSource {
         const response = await request(current, {
           dispatcher: this.route.dispatcherFor(current),
           method: 'GET',
-          headers,
+          // A copy per hop: undici's ProxyAgent writes `host` into the object it is given, so a reused one sends the first hop's Host to every later one.
+          headers: { ...headers },
           headersTimeout: HEADERS_TIMEOUT_MS,
           bodyTimeout: BODY_TIMEOUT_MS,
           signal: scope.signal,
