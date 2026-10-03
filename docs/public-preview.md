@@ -189,7 +189,7 @@ Mail for `hello@octocrawl.dev`, the address on the Contact, Privacy and Acceptab
 
 ### Search engines
 
-The home page carries `WebSite` and `SoftwareApplication` structured data and every docs page `TechArticle` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
+The home page carries `WebSite`, `Organization` and `SoftwareApplication` structured data and every docs page `TechArticle` and `BreadcrumbList` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
 
 ### Refresh the Amazon.sg state
 

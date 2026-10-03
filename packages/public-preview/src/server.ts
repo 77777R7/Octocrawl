@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
-import { extname, relative, resolve } from 'node:path'
+import { basename, extname, relative, resolve } from 'node:path'
 import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
@@ -168,7 +168,21 @@ const STATIC_HEADERS = {
 /** Files that may carry the origin token: pages, the sitemap and robots.txt. */
 const ORIGIN_TEXT = new Set(['.html', '.xml', '.txt'])
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, origin: string): Promise<void> {
+/** Browsers may only reach the site over https once they have seen it there; local http stays usable. */
+function transportHeaders(origin: string): Record<string, string> {
+  return origin.startsWith('https:') ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}
+}
+
+/** One address per page: a directory without its slash, or a page named by its index.html, moves to the slash
+ * address its canonical link names. Leading slashes collapse so the target can never read as another host. */
+function pageAddressRedirect(pathname: string, isDirectory: boolean, isIndexFile: boolean): string | null {
+  let target: string | null = null
+  if (isDirectory && !pathname.endsWith('/')) target = `${pathname}/`
+  else if (isIndexFile && pathname.endsWith('/index.html')) target = pathname.slice(0, -'index.html'.length)
+  return target === null ? null : target.replace(/^\/+/, '/')
+}
+
+async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, search: string, origin: string, onPage: () => void): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
   let relativePath: string
@@ -177,7 +191,10 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   if (relative(root, requested).startsWith('..')) { res.writeHead(404).end(); return }
   let file = requested
   let info = await stat(file).catch(() => null)
-  if (info?.isDirectory()) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
+  const isDirectory = info?.isDirectory() === true
+  if (isDirectory) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
+  const moved = info?.isFile() ? pageAddressRedirect(pathname, isDirectory, !isDirectory && basename(file) === 'index.html') : null
+  if (moved !== null) { res.writeHead(301, { location: `${moved}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
   // The site has no client-side routes: a path without a file is a 404, never the home page answering 200.
   let status = 200
   if (!info?.isFile() || relative(root, file).startsWith('..')) {
@@ -189,10 +206,16 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   const extension = extname(file)
   let content = await readFile(file)
   if (ORIGIN_TEXT.has(extension) && content.includes(ORIGIN_TOKEN)) content = Buffer.from(content.toString('utf8').replaceAll(ORIGIN_TOKEN, origin))
+  // Only a page visit needs the visitor cookie; on robots.txt, the sitemap or an asset it would make the response
+  // private and keep it out of shared caches.
+  if (status === 200 && extension === '.html') onPage()
+  // A docs page's Markdown copy is for LLM readers; search engines are pointed at the page it copies.
+  const markdownCopy = status === 200 && basename(file) === 'index.md'
+    ? { link: `<${origin}${pathname.slice(0, -'index.md'.length)}>; rel="canonical"` } : {}
   res.writeHead(status, {
     'content-type': MIME[extension] ?? 'application/octet-stream', 'content-length': content.length,
     'cache-control': status !== 200 || extension === '.html' ? 'no-store' : 'public, max-age=3600',
-    ...STATIC_HEADERS,
+    ...STATIC_HEADERS, ...transportHeaders(origin), ...markdownCopy,
   })
   res.end(req.method === 'HEAD' ? undefined : content)
 }
@@ -294,8 +317,10 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (pathname.startsWith('/api/')) { res.writeHead(404).end(); return }
       const redirect = canonicalRedirect(req, publicOrigin, pathname)
       if (redirect) { res.writeHead(301, { location: redirect, 'cache-control': 'public, max-age=300' }).end(); return }
-      if (req.method === 'GET' && options.visitorCookieSecret) issueVisitorCookie(req, res, options.visitorCookieSecret)
-      await serveStatic(req, res, options.staticDir, pathname, requestOrigin(req, publicOrigin))
+      const secret = options.visitorCookieSecret
+      await serveStatic(req, res, options.staticDir, pathname, requestUrl.search, requestOrigin(req, publicOrigin), () => {
+        if (req.method === 'GET' && secret) issueVisitorCookie(req, res, secret)
+      })
       return
     }
     if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
