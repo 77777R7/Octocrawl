@@ -44,12 +44,14 @@ export interface ActionRunContext {
   takeRefusedNavigation: () => { url: string; reason: string } | null
   /** Why W2L would not fetch the URL a step left the page at (reached through a redirect the guard does not see), or null. */
   refuseLanded: (url: string) => Promise<string | null>
-  /** Documents the main frame has loaded so far; a URL changed within the page (pushState) loads none. */
-  documentLoads: () => number
+  /** The URL of every document the main frame has loaded so far, in order; a URL changed within the page (pushState) loads none. */
+  loadedDocuments: () => readonly string[]
 }
 
 export interface ActionRun {
   result: ActionsResult
+  /** How many of the page's loaded documents the steps checked: the ones after it loaded after the steps. */
+  checkedDocuments: number
   /** Files written under W2L_CAPTURE_RAW_DIR, for `evidence.artifacts`. */
   artifacts: string[]
 }
@@ -68,10 +70,11 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   const result: ActionsResult = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [] }
   const artifacts: string[] = []
   let checkedUrl = withoutHash(page.url())
+  // Documents loaded before the first step are the fetch's; every one after it is checked, in order, whatever its URL.
+  let checkedDocuments = ctx.loadedDocuments().length
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
-    const loads = ctx.documentLoads()
     const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, artifacts: artifacts.length }
     try {
       const detail = await runStep(action, ctx, result, artifacts)
@@ -80,17 +83,21 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
       if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the page stayed where it was`)
       const now = withoutHash(page.url())
       const moved = now !== checkedUrl
-      if (moved && ctx.documentLoads() !== loads) {
-        // A redirect after the navigation the guard let through: the page is somewhere W2L does not fetch, and what the step read of it is dropped.
-        const landed = await ctx.refuseLanded(now)
+      // Every document loaded since the last check, a redirect's landing among them: one W2L does not fetch fails the step, and what
+      // the step read is dropped. A check can take a while (robots.txt of a new origin), so documents loaded meanwhile are checked too.
+      for (let loaded = ctx.loadedDocuments(); checkedDocuments < loaded.length; loaded = ctx.loadedDocuments()) {
+        const landedUrl = loaded[checkedDocuments]!
+        const landed = await ctx.refuseLanded(landedUrl)
+        // A refused document stays unchecked: the page may still show it, and the check after the steps then reads nothing.
         if (landed !== null) {
           result.screenshots.length = before.screenshots
           result.scrapes.length = before.scrapes
           result.javascriptReturns.length = before.javascriptReturns
           result.pdfs.length = before.pdfs
           artifacts.length = before.artifacts
-          throw new StepFailure('navigation_refused', `the step left the page at ${now}, which W2L does not fetch (${landed}); it is not read`)
+          throw new StepFailure('navigation_refused', `the step led the page to ${landedUrl}, which W2L does not fetch (${landed}); it is not read`)
         }
+        checkedDocuments++
       }
       checkedUrl = now
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'ok', ms: Math.round(performance.now() - started), ...detail, ...(moved ? { navigatedTo: now } : {}) } })
@@ -102,7 +109,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
       break
     }
   }
-  return { result, artifacts }
+  return { result, artifacts, checkedDocuments }
 }
 
 async function runStep(action: PageAction, ctx: ActionRunContext, result: ActionsResult, artifacts: string[]): Promise<Record<string, unknown>> {

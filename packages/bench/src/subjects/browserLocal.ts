@@ -856,9 +856,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // the requested URL did, before its request is sent: one W2L does not
       // fetch is stopped there, and the page stays where it was.
       const refusedNavigations: { url: string; reason: string }[] = []
-      // The URL the page was on before the first step: a redirect of the requested URL is the fetch's, not the steps'.
-      const beforeSteps = page.url()
-      const loadsBeforeSteps = documents.loads
       // A URL the caller recorded a robots override for is fetched as the requested URL was.
       const overriddenUrl = options.robotsOverride === undefined ? null : url
       if (options.actions !== undefined && options.actions.length > 0) {
@@ -896,7 +893,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           viewport: page.viewportSize() ?? window.viewport,
           takeRefusedNavigation: () => refusedNavigations.shift() ?? null,
           refuseLanded: (landed) => this.refuseNavigation(landed, identity, execution, relaxedRoutes, overriddenUrl),
-          documentLoads: () => documents.loads,
+          loadedDocuments: () => documents.loaded,
         })
         throwIfExecutionStopped(execution)
       }
@@ -956,12 +953,14 @@ export class BrowserLocalSubject implements SubjectAdapter {
         const late = refusedNavigations.shift()
         const last = options.actions!.length - 1
         if (late !== undefined && ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
-        // The page the steps left, reached through a redirect the guard does not see, is checked as a navigation to it would be.
-        // Only a document the steps loaded: a URL changed within the page (pushState) requested nothing.
-        const landed = documents.loads === loadsBeforeSteps || withoutFragment(finalUrl) === withoutFragment(beforeSteps) ? null : await this.refuseNavigation(finalUrl, identity, execution, relaxedRoutes, overriddenUrl)
-        if (landed !== null) {
-          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: finalUrl, reason: landed } })
-          if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `the steps left the page at ${finalUrl}, which W2L does not fetch (${landed}); it is not read` }
+        // Documents the page loaded after the steps were checked (a late redirect the guard does not see) are checked as the steps' were:
+        // a refused one means the page read now may be it, so nothing is read. A redirect of the requested URL is the fetch's, and
+        // pushState loads no document.
+        for (const loadedUrl of documents.loaded.slice(ran.actions.checkedDocuments)) {
+          const landed = await this.refuseNavigation(loadedUrl, identity, execution, relaxedRoutes, overriddenUrl)
+          if (landed === null) continue
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: loadedUrl, reason: landed } })
+          if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which W2L does not fetch (${landed}); it is not read` }
           return this.notRead(url, start, trace, finalUrl)
         }
       }
@@ -1614,10 +1613,5 @@ function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResu
 
 /** Steps that could not run on the page at all, reported as the first one failing. */
 function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
-  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [] }
-}
-
-function withoutFragment(url: string): string {
-  const at = url.indexOf('#')
-  return at === -1 ? url : url.slice(0, at)
+  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0 }
 }

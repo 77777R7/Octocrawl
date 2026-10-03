@@ -30,7 +30,10 @@ beforeAll(async () => {
     if (req.url === '/redirecting') return html(`<h1>Redirecting</h1>${PROSE}<a id="go" href="/go">Go</a><a id="pop" target="_blank" href="/private/popup">Pop</a><a id="popok" target="_blank" href="/more">Pop ok</a>`)
     if (req.url === '/private/x') return html(`<h1>Private x</h1>${PROSE}<p>Not for crawlers.</p><a id="back" href="/more">Back</a>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
-    if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p>`)
+    if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p><a id="real" href="/gotab">Real</a>`)
+    if (req.url === '/gotab') { res.writeHead(302, { location: '/private/tab' }); res.end(); return }
+    if (req.url === '/slowhop') { res.writeHead(302, { location: '/delayed' }); res.end(); return }
+    if (req.url === '/delayed') return html(`<h1>Delayed</h1>${PROSE}<script>setTimeout(() => { location.href = '/go' }, 300)</script>`)
     if (req.url === '/echo-header') return html(`<h1>Header</h1>${PROSE}<p>X-Test: ${String(req.headers['x-test'] ?? 'none')}</p><button id="b" onclick="document.getElementById('out').textContent = 'The button was clicked.'">B</button><p id="out"></p>`)
     if (req.url === '/data.csv') { res.writeHead(200, { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename=data.csv' }); res.end('a,b\n1,2\n'); return }
     if (req.url?.startsWith('/private')) return html(`<h1>Private page</h1>${PROSE}<p>Not for crawlers.</p>`)
@@ -136,6 +139,21 @@ describe('actions, real browser', () => {
     expect(result.actions?.scrapes).toEqual([])
     expect(result.markdown ?? '').not.toContain('Not for crawlers')
     expect(result.status).toBe('failed')
+  }, 60_000)
+
+  it('a document loaded at the URL pushState had already shown is still checked', async () => {
+    const result = await run('/spa', [{ type: 'click', selector: '#tab' }, { type: 'click', selector: '#real' }, { type: 'scrape' }, { type: 'click', selector: '#back' }])
+    expect(result.actions?.failed).toMatchObject({ index: 1, code: 'navigation_refused' })
+    expect(JSON.stringify(result.actions?.scrapes)).not.toContain('Not for crawlers')
+    expect(result.markdown ?? '').not.toContain('Not for crawlers')
+  }, 60_000)
+
+  it('a document a page loads between steps, after the guard let its navigation through, is checked before the next step reads it', async () => {
+    // /delayed sends the page to /go 300 ms after load; /go redirects to /private/x, which the route never sees.
+    const result = await run('/links', [{ type: 'executeJavascript', script: 'location.href = "/slowhop"' }, { type: 'wait', milliseconds: 1500 }, { type: 'scrape' }])
+    expect(result.actions?.failed).toMatchObject({ code: 'navigation_refused' })
+    expect(JSON.stringify(result.actions?.scrapes)).not.toContain('Not for crawlers')
+    expect(result.markdown ?? '').not.toContain('Not for crawlers')
   }, 60_000)
 
   it('a redirect of the requested URL itself is the fetch\'s, not the steps\'', async () => {
