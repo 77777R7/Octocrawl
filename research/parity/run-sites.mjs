@@ -138,6 +138,10 @@
 //               { url, ...case.request }. doc is the call's structuredContent with doc.items = its links,
 //               doc.outputValid (ajv against the listed outputSchema), doc.textMatches (the text content
 //               parses to the same object), doc.error (a JSON-RPC error) and doc.roundTripMs.
+// Added for the cache group (P2, 2026-10-03):
+//   scrape      case.compareDelayMs waits that long before case.compareRequest is sent (an age for minAge).
+//   fc-scrape   case.compareRequest scrapes the same URL again through /fc into doc.compare, after
+//               case.compareDelayMs when set, as on scrape.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -266,6 +270,7 @@ const runners = {
     const response = await call('POST', '/v1/scrape', { url: c.url, ...c.request })
     const doc = { ...(response.json ?? {}), elapsedMs: Date.now() - began }
     if (c.compareRequest) {
+      if (c.compareDelayMs !== undefined) await sleep(c.compareDelayMs)
       const compare = await call('POST', '/v1/scrape', { url: c.url, ...c.compareRequest })
       doc.compare = compare.json ?? {}
       response.compare = compare
@@ -353,7 +358,14 @@ const runners = {
   },
   async 'fc-scrape'(c) {
     const response = await call('POST', '/fc/v1/scrape', { url: c.url, ...c.request })
-    return { response, doc: response.json ?? {} }
+    const doc = { ...(response.json ?? {}) }
+    if (c.compareRequest) {
+      if (c.compareDelayMs !== undefined) await sleep(c.compareDelayMs)
+      const compare = await call('POST', '/fc/v1/scrape', { url: c.url, ...c.compareRequest })
+      doc.compare = { ...(compare.json ?? {}), httpStatus: compare.httpStatus }
+      response.compare = compare
+    }
+    return { response, doc }
   },
   async batch(c) {
     const startedAt = Date.now()

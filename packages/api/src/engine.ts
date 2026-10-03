@@ -21,7 +21,7 @@ import {
   RobotsOriginCache,
   type Channel,
 } from '@w2l/bench'
-import { collectLinkDetails, invalidSelector, MAX_SELECTOR_PARTS, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
+import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
 import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
@@ -87,9 +87,13 @@ import {
   type MapRequest,
   type MapResponse,
   type MapSources,
+  cacheLookupRequested,
+  cacheStateOf,
+  type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, type CrawlPolicy } from '@w2l/http-core'
+import { createExecutionScope, evaluateGovernance, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -297,6 +301,25 @@ const NO_SITEMAP: MapSources['sitemap'] = {
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
 const DEFAULT_WORKER_COUNT = 4
 
+/**
+ * How the cache takes part in one page's fetch: the key of the page under
+ * the options that shape its result, the age bounds of a lookup (null: none
+ * is made), whether a miss ends the page (`lockdown`) and whether a
+ * successful fetch is stored.
+ */
+interface CachePlan {
+  key: string
+  bounds: PageCacheBounds | null
+  lockdown: boolean
+  store: boolean
+}
+
+/** What the cache says before a page is fetched: a stored result to answer with, a lockdown miss that ends the page, or fetch it (after a lookup that missed, or none). */
+type CacheAnswer =
+  | { kind: 'hit'; result: FetchResult }
+  | { kind: 'lockdown_miss'; result: FetchResult }
+  | { kind: 'fetch'; missed: boolean }
+
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
   const monitorStore = MonitorStore.open(join(taskRoot, 'section-b-control.sqlite'), {leaseMs: options.monitorLeaseMs, attemptTimeoutMs: options.monitorAttemptTimeoutMs})
@@ -315,6 +338,56 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
   const fileStore = new FileStore(join(taskRoot, 'files'))
+  // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
+  const pageCache = PageCache.open(taskRoot)
+  /**
+   * The cache's part in fetching `url` with these options through `channels`,
+   * or null when it has none: mode `authed` never looks up or stores (a page
+   * read with the user's session stays theirs), nor does a request that
+   * neither looks up nor stores. A request with custom `headers` stores only
+   * when it says `storeInCache: true`: their values stay off disk unless the
+   * caller asks. The key holds every option the lanes receive except the
+   * deadline, which bounds a fetch but does not shape a successful result,
+   * plus the mode, the rungs the request may use (so a server's channel
+   * policy is never crossed), `fastMode`, a recorded robots override and the
+   * build that extracts (extractor versions and the declared source commit),
+   * so a reused result's Evidence Record names the build that produced it.
+   */
+  const cachePlanFor = (url: string, mode: 'standard' | 'research' | 'authed', page: PageOptions, formats: readonly ScrapeFormat[] | undefined, channels: readonly Channel[], robotsOverride?: RobotsOverride): CachePlan | null => {
+    if (mode === 'authed') return null
+    const lookup = cacheLookupRequested(page)
+    const customHeaders = page.headers !== undefined && Object.keys(page.headers).length > 0
+    const store = customHeaders ? page.storeInCache === true : page.storeInCache !== false
+    if (!lookup && !store) return null
+    const { timeout: _timeout, ...shape } = fetchOptions(page, formats)
+    const rungs = channels.map((channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`)
+    const build = { extractor: EXTRACTOR_VERSION, pdf: PDF_TEXT_VERSION, file: FILE_TEXT_VERSION, commit: sourceCommitFromEnv() }
+    const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build })
+    return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store }
+  }
+  /**
+   * The cache's answer before a fetch. A URL governance refuses is never
+   * looked up: the ladder refuses it before any request, as it would
+   * without the cache, lockdown or not.
+   */
+  const consultCache = (plan: CachePlan | null, url: string, policy: CrawlPolicy): CacheAnswer => {
+    if (plan === null || plan.bounds === null || !evaluateGovernance(url, policy).allowed) return { kind: 'fetch', missed: false }
+    const hit = pageCache.lookup(plan.key, plan.bounds)
+    if (hit !== null) return { kind: 'hit', result: cacheHitResult(hit) }
+    if (plan.lockdown) return { kind: 'lockdown_miss', result: cacheMissResult(url, plan.bounds) }
+    return { kind: 'fetch', missed: true }
+  }
+  /** A fetched result after the cache: `cache_miss` when a lookup found nothing, stored when the plan stores and it succeeded (`cache_stored`). A failed write is logged and the result stands. */
+  const afterFetch = (plan: CachePlan | null, answer: CacheAnswer, result: FetchResult): FetchResult => {
+    let next = answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(result, plan.bounds) : result
+    if (plan?.store !== true) return next
+    try {
+      if (pageCache.store(plan.key, result)) next = withCacheStored(next)
+    } catch (error) {
+      console.error(JSON.stringify({ component: 'api', event: 'page_cache_unwritten', url: result.requestedUrl, error: error instanceof Error ? error.message : String(error) }))
+    }
+    return next
+  }
   /** A request may lower the file cap, never raise it past the operator's. */
   const checkFileCap = (req: PageOptions): void => {
     if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
@@ -642,9 +715,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
+        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, robotsOverrideFor?.(url))
+        const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
-          const outcome = await ladder.scrape(url, page)
+          const outcome: ScrapeOutcome = answer.kind === 'fetch'
+            ? await ladder.scrape(url, page).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+            : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
@@ -789,8 +866,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : {}),
     }
     const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
+    const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride) : null
     const operation = (async () => {
-      const run = await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
+      const answer = consultCache(plan, req.url, policy)
+      const run = answer.kind === 'fetch'
+        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
+          .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+        : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       const agentHints = agentHintsFor(req, run)
       const full: ScrapeRun = {
         ...run.result,
@@ -799,7 +882,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         summary: run.summary,
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
-      const response = await prepareScrapeResponse(full, req, scope, null, overallStart, scrapeId)
+      const shaped = await prepareScrapeResponse(full, req, scope, null, overallStart, scrapeId)
+      // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
+      const response = answer.kind === 'fetch' ? shaped : withoutFetchUsage(shaped)
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {
@@ -1302,6 +1387,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       monitorStore.close()
       deliveryStore.close()
       idempotency.close()
+      pageCache.close()
     },
   }
 
@@ -1413,7 +1499,32 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
 
 /** The page options a batch or crawl request set, stored on its task so a resumed task keeps them (`fastMode` among them: it selects rungs, not a lane option). */
 function pageOptions(req: PageOptions): PageOptions {
-  return { ...fetchOptions(req), ...(req.timeout === undefined ? {} : { timeout: req.timeout }), ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }) }
+  return {
+    ...fetchOptions(req),
+    ...(req.timeout === undefined ? {} : { timeout: req.timeout }),
+    ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }),
+    ...(req.maxAge === undefined ? {} : { maxAge: req.maxAge }),
+    ...(req.minAge === undefined ? {} : { minAge: req.minAge }),
+    ...(req.storeInCache === undefined ? {} : { storeInCache: req.storeInCache }),
+    ...(req.lockdown === undefined ? {} : { lockdown: req.lockdown }),
+  }
+}
+
+/**
+ * A response the cache answered: its usage is this call's, which requested
+ * nothing (no request, attempt, byte or browser time, and none of the
+ * original fetch's network timings), with the call's own wall time and its
+ * serialize, model and total times; the result's evidence stays the
+ * original fetch's.
+ */
+function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(response: T): T {
+  const { timings, ...usage } = response.usage as T['usage'] & { timings?: { serializeMs?: number; modelMs?: number; totalMs?: number } }
+  const own = timings === undefined ? undefined : {
+    ...(timings.serializeMs === undefined ? {} : { serializeMs: timings.serializeMs }),
+    ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
+    ...(timings.totalMs === undefined ? {} : { totalMs: timings.totalMs }),
+  }
+  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: null, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1650,6 +1761,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     trace: result?.trace ?? [],
     audit: step.audit,
     cached: step.cached,
+    ...(result === null ? {} : cacheStateOf(result.trace)),
     contentHash: step.contentHash,
     createdAt: step.createdAt,
     updatedAt: step.updatedAt,

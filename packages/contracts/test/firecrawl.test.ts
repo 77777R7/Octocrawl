@@ -84,7 +84,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     ])
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /challenge/i.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /fire-engine/i.test(d))).toBe(true)
-    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /refetch|useCached/i.test(d))).toBe(true)
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /omitted maxAge reuses nothing/i.test(d))).toBe(true)
   })
 
   it('maps the supported Firecrawl fields onto the native request', () => {
@@ -149,6 +149,10 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, removeBase64Images: true })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toMatchObject({ url, removeBase64Images: false })
     expect(() => parseFirecrawlScrapeRequest({ url, removeBase64Images: 'no' })).toThrow('removeBase64Images must be a boolean')
+    // The cache options keep their Firecrawl names and the native rules.
+    expect(parseFirecrawlScrapeRequest({ url, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })).toEqual({ url, maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true })
+    expect(parseFirecrawlCrawlRequest({ url, sitemap: 'skip', scrapeOptions: { maxAge: 1000, lockdown: true } })).toMatchObject({ url, maxAge: 1000, lockdown: true })
+    expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { lockdown: true } })).toThrow(/set sitemap to "skip"/)
   })
 
   it('maps the images format and an attributes entry for scrape and a crawl\'s scrapeOptions, and serves both on data when the result carries them', () => {

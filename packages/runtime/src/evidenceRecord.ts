@@ -14,6 +14,7 @@ import {
   type EvidenceArtifact,
   type EvidenceFieldLocation,
   type EvidenceRecord,
+  type EvidenceRequestHeader,
   type EvidenceRobotsDecision,
   type FetchResult,
   type FileDescription,
@@ -94,12 +95,36 @@ export function toEvidenceRecord(
       userAgent,
       mode: result.compliance?.mode ?? identityEvent(result.trace)?.mode ?? request.mode,
       contact: userAgent === null ? null : declaredContact(userAgent),
+      device: requested ? declaredDevice(result) : null,
+      requestHeaders: requested ? sentCustomHeaders(result) : null,
     },
   }
 }
 
+/** The lanes whose identity events a result's own lane answers for: the browser lanes record theirs as `browser_local`. */
+function sameLaneFamily(a: Lane, b: Lane): boolean {
+  return a === b || (a.startsWith('browser') && b.startsWith('browser'))
+}
+
+/** The device the answering lane's identity declared (`identity_sent` on the HTTP lane, `identity_declared` on browser lanes); null when it recorded none. */
+function declaredDevice(result: FetchResult): 'desktop' | 'mobile' | null {
+  const event = [...result.trace].reverse().find(item => (item.event === 'identity_sent' || item.event === 'identity_declared') && sameLaneFamily(item.lane, result.lane))
+  const device = event?.detail?.device
+  return device === 'desktop' || device === 'mobile' ? device : null
+}
+
+/** The caller's custom headers the answering lane sent (`request_headers_added`), sorted by name, each value as its SHA-256; empty when it sent none. */
+function sentCustomHeaders(result: FetchResult): EvidenceRequestHeader[] {
+  const event = [...result.trace].reverse().find(item => item.event === 'request_headers_added' && sameLaneFamily(item.lane, result.lane))
+  const headers = Array.isArray(event?.detail?.headers) ? event.detail.headers as { name?: unknown; value?: unknown }[] : []
+  return headers
+    .filter((header): header is { name: string; value: string } => typeof header.name === 'string' && typeof header.value === 'string')
+    .map(({ name, value }) => ({ name: name.toLowerCase(), valueSha256: sha256Utf8(value) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 /** `W2L_SOURCE_COMMIT` when it is a commit hash (7 to 40 hex digits), else unknown. */
-function sourceCommitFromEnv(): string | null {
+export function sourceCommitFromEnv(): string | null {
   const value = process.env.W2L_SOURCE_COMMIT?.trim().toLowerCase() ?? ''
   return /^[0-9a-f]{7,40}$/.test(value) ? value : null
 }

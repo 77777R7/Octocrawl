@@ -60,15 +60,34 @@ describe('toEvidenceRecord', () => {
       fieldEvidence: null,
       artifacts: [],
       proxy: null,
-      identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org' },
+      identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org', device: null, requestHeaders: [] },
     })
+  })
+
+  it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {
+    const mobileUa = 'Mozilla/5.0 (Linux; Android 14) Chrome/140 Mobile'
+    const httpMobile = result({}, [
+      { at: 0, lane: 'http', event: 'identity_sent', detail: { mode: 'standard', device: 'mobile', headers: [{ name: 'user-agent', value: mobileUa }] } },
+      { at: 0, lane: 'http', event: 'request_headers_added', detail: { headers: [{ name: 'x-trace', value: 't1' }, { name: 'accept-language', value: 'de' }] } },
+    ])
+    expect(toEvidenceRecord(httpMobile, { mode: 'standard' }, {}).identity).toEqual({
+      userAgent: mobileUa, mode: 'standard', contact: null, device: 'mobile',
+      requestHeaders: [{ name: 'accept-language', valueSha256: sha256Utf8('de') }, { name: 'x-trace', valueSha256: sha256Utf8('t1') }],
+    })
+    // An http attempt escalated to the browser: the browser lane answered, so its declaration and headers are the record's.
+    const escalated = result({ lane: 'browser_local', compliance: compliance() }, [
+      { at: 0, lane: 'http', event: 'identity_sent', detail: { mode: 'standard', device: 'desktop', headers: [] } },
+      { at: 0, lane: 'http', event: 'request_headers_added', detail: { headers: [{ name: 'x-trace', value: 'http' }] } },
+      { at: 5, lane: 'browser_local', event: 'identity_declared', detail: { mode: 'standard', device: 'mobile' } },
+    ])
+    expect(toEvidenceRecord(escalated, { mode: 'standard' }, {}).identity).toMatchObject({ device: 'mobile', requestHeaders: [] })
   })
 
   it('prefers the signed compliance record, and says a browser lane lists only the endpoints', () => {
     const record = toEvidenceRecord(result({ lane: 'browser_local', compliance: compliance() }), { mode: 'standard' }, {})
     expect(record.redirectChain).toEqual({ urls: [url, final], complete: false })
     expect(record.robotsDecision).toMatchObject({ decision: 'allowed', robotsSha256: ROBOTS, crawlDelayMs: null })
-    expect(record.identity).toEqual({ userAgent: 'Mozilla/5.0 Chrome/140', mode: 'standard', contact: null })
+    expect(record.identity).toEqual({ userAgent: 'Mozilla/5.0 Chrome/140', mode: 'standard', contact: null, device: null, requestHeaders: [] })
     expect(record.outputSha256).toEqual({ markdown: null, json: null })
   })
 
@@ -94,7 +113,7 @@ describe('toEvidenceRecord', () => {
     const record = toEvidenceRecord(denied, { mode: 'research' }, { markdown: null })
     expect(record).toMatchObject({
       finalUrl: null, redirectChain: { urls: [], complete: true }, fetchedAt: null, httpStatus: null, reason: 'policy_denied', rawSha256: null,
-      identity: { userAgent: null, mode: 'research', contact: null },
+      identity: { userAgent: null, mode: 'research', contact: null, device: null, requestHeaders: null },
     })
     // Recorded before W2L kept the robots.txt hash in the trace: unknown, not invented.
     expect(record.robotsDecision).toEqual({ decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, unreachable: null, crawlDelayMs: null, userOverride: false })

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -334,6 +334,39 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, onlyMainContent: 'false' })).toThrow('onlyMainContent must be a boolean')
     for (const waitFor of [-1, 60_001, 1.5, '500']) expect(() => parseBatchStartRequest({ urls: [url], waitFor })).toThrow('waitFor must be an integer number of milliseconds from 0 to 60000')
     for (const timeout of [999, 300_001, null]) expect(() => parseCrawlStartRequest({ url, timeout })).toThrow('timeout must be an integer number of milliseconds from 1000 to 300000')
+  })
+
+  it('takes the cache options on scrape, batch and crawl within their bounds, and refuses contradictions by name', () => {
+    const url = 'https://example.com/'
+    const options = { maxAge: 3_600_000, minAge: 60_000, storeInCache: false, lockdown: true }
+    expect(parseScrapeRequest({ url, ...options })).toMatchObject(options)
+    expect(parseBatchStartRequest({ urls: [url], ...options })).toMatchObject(options)
+    expect(parseCrawlStartRequest({ url, ...options, sitemap: 'skip' })).toMatchObject(options)
+    expect(parseScrapeRequest({ url })).not.toHaveProperty('maxAge')
+    expect(parseScrapeRequest({ url, maxAge: MAX_CACHE_AGE_MS, minAge: 0 })).toMatchObject({ maxAge: MAX_CACHE_AGE_MS, minAge: 0 })
+    for (const maxAge of [-1, 1.5, '60000', MAX_CACHE_AGE_MS + 1]) expect(() => parseScrapeRequest({ url, maxAge })).toThrow(`maxAge must be an integer number of milliseconds from 0 to ${MAX_CACHE_AGE_MS}`)
+    expect(() => parseBatchStartRequest({ urls: [url], storeInCache: 'yes' })).toThrow('storeInCache must be a boolean')
+    expect(() => parseScrapeRequest({ url, maxAge: 1000, minAge: 1001 })).toThrow('minAge must be at most maxAge')
+    expect(() => parseScrapeRequest({ url, lockdown: true, maxAge: 0 })).toThrow(/lockdown answers from the cache alone/)
+    expect(() => parseCrawlStartRequest({ url, lockdown: true })).toThrow(/set sitemap to "skip"/)
+    expect(() => parseCrawlStartRequest({ url, lockdown: true, sitemap: 'only' })).toThrow(/set sitemap to "skip"/)
+    expect(() => parseScrapeRequest({ url, mode: 'authed', maxAge: 1000 })).toThrow(/not available in mode 'authed'/)
+    expect(() => parseScrapeRequest({ url, mode: 'authed', lockdown: true })).toThrow(/not available in mode 'authed'/)
+    // Storing is simply skipped in mode authed; saying not to store is no contradiction.
+    expect(parseScrapeRequest({ url, mode: 'authed', storeInCache: false, maxAge: 0 })).toMatchObject({ storeInCache: false, maxAge: 0 })
+  })
+
+  it('looks a page up only for maxAge above 0, minAge or lockdown, and reads what the cache did from the trace', () => {
+    expect(cacheLookupRequested({})).toBe(false)
+    expect(cacheLookupRequested({ storeInCache: true })).toBe(false)
+    expect(cacheLookupRequested({ maxAge: 1 })).toBe(true)
+    expect(cacheLookupRequested({ minAge: 0 })).toBe(true)
+    expect(cacheLookupRequested({ lockdown: true })).toBe(true)
+    expect(cacheLookupRequested({ maxAge: 0, minAge: 0 })).toBe(false)
+    expect(cacheStateOf([])).toEqual({})
+    expect(cacheStateOf([{ at: 0, lane: 'http', event: 'cache_miss', detail: {} }])).toEqual({ cacheState: 'miss' })
+    const hit = { at: 0, lane: 'http' as const, event: 'cache_hit', detail: { cachedAt: '2026-10-03T08:00:00.000Z' } }
+    expect(cacheStateOf([{ at: 0, lane: 'http', event: 'cache_miss', detail: {} }, hit])).toEqual({ cacheState: 'hit', cachedAt: '2026-10-03T08:00:00.000Z' })
   })
 
   it('takes maxFileBytes on scrape, batch and crawl, and an operator cap from W2L_MAX_FILE_BYTES that a request only lowers', () => {

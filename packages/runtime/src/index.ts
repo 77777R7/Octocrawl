@@ -24,7 +24,9 @@ export { IDEMPOTENCY_FILENAME, IdempotencyStore, requestFingerprint } from './id
 export type { IdempotencyClaim, IdempotencyStoreOptions } from './idempotencyStore.js'
 
 export * from './webhookInbox.js'
-export { toEvidenceRecord } from './evidenceRecord.js'
+export { sourceCommitFromEnv, toEvidenceRecord } from './evidenceRecord.js'
+export { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, untriedAudit, withCacheMiss, withCacheStored } from './pageCache.js'
+export type { PageCacheBounds, PageCacheHit, PageCacheOptions } from './pageCache.js'
 export type { EvidenceOutput, EvidenceRecordOptions } from './evidenceRecord.js'
 export { MapRunner } from './map.js'
 export type { MapSpec } from './map.js'
