@@ -57,14 +57,14 @@ Results on the start page in both maps:
 - `startPage` is `{ finalUrl: https://www.python.org/, httpStatus: 200, status: success, lane: http, linksFound: 128 }`.
 - The only warning is `sitemap_unreadable`. Neither `start_page_unreadable` nor `start_page_client_rendered` appears.
 
-The remaining failures do not come from the http lane:
+The remaining failures do not come from the http lane's page fetch:
 
-1. **python.org's `/sitemap.xml` loops on its own URL.** This was reported, not worked around. It fails `status` in both cases and `sources.sitemap.files.0.kind` in MP14. The sitemap file record shows the redirect chain:
+1. **The sitemap read loops behind the proxy, because of W2L's own request.** It fails `status` in both cases and `sources.sitemap.files.0.kind` in MP14. The sitemap file record shows:
    - `url: https://python.org/sitemap.xml`
    - `finalUrl: https://www.python.org/sitemap.xml`
    - `status: 301`, `kind: unreadable`, `error: redirect_limit`, source `guess`
 
-   That is, https://www.python.org/sitemap.xml answers 301 back to its own URL until the policy's redirect limit. The map reports it as `sitemap_unreadable` and `partial`. The cases expect `completed` and `absent`, which were seen on 2026-10-03 under a different condition that this run did not reproduce. Whether the self-redirect depends on the identity headers or the egress was not checked.
+   This is not python.org redirecting its sitemap to itself. undici's `ProxyAgent` writes `host` into the headers object it is given, and the sitemap reader reused one object across a file's redirect hops. So every request to `www.python.org` still carried `host: python.org`, and the CDN answered each with the apex's redirect to `www`, until the redirect limit. Without the proxy, or with a fresh headers object, `https://www.python.org/sitemap.xml` answers 404 and the file is `absent`, as the cases expect. The diagnosis and the fix are in PR #107 and [2026-10-03-sitemap-proxy-host.md](2026-10-03-sitemap-proxy-host.md). This record first described the loop as python.org's own; that wording was corrected before the PR merged.
 2. **MP13 keeps an `http://` variant of a link.** The start page links `http://docs.python.org/3/tutorial/introduction.html` and also its `https://` form. The map collapses the two into the first one seen: its `refused.samples.collapsed` has `{ url: "https://docs.python.org/3/tutorial/introduction.html", into: "http://docs.python.org/3/tutorial/introduction.html" }`. So the map returns the `http://` URL, which the case's `^https://` pattern rejects. That is how the map collapses variants, and this change does not touch it.
 
 ## What the change does
