@@ -14,7 +14,11 @@
 import { createHash } from 'node:crypto'
 import type { Page } from 'playwright'
 import {
+  LIST_DEFAULTS,
+  LIST_WAIT_MS,
   MAX_ACTION_WAIT_MS,
+  type ListRun,
+  type ListStop,
   type ActionErrorCode,
   type ActionPdf,
   type ActionsResult,
@@ -67,7 +71,7 @@ class StepFailure extends Error {
 
 export async function runPageActions(actions: readonly PageAction[], ctx: ActionRunContext): Promise<ActionRun> {
   const { page, execution, trace } = ctx
-  const result: ActionsResult = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [] }
+  const result: ActionsResult = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists: [] }
   const artifacts: string[] = []
   let checkedUrl = withoutHash(page.url())
   // Documents loaded before the first step are the fetch's; every one after it is checked, in order, whatever its URL.
@@ -85,15 +89,18 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
-    const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, artifacts: artifacts.length }
-    try {
-      const detail = await runStep(action, ctx, result, artifacts)
-      // Every document the step loaded, a redirect's landing among them (the guard sees only a navigation's first request).
+    const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, lists: result.lists.length, artifacts: artifacts.length }
+    // Every document loaded so far, a redirect's landing among them (the guard sees only a navigation's first request), and a
+    // navigation the guard stopped: either fails the step. A paginate step checks between its pages, the runner after every step.
+    const guard = async (): Promise<void> => {
       const landed = await refusedDocument()
       if (landed !== null) throw new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
-      // A navigation the step started that the guard stopped: the request never went out.
       const refused = ctx.takeRefusedNavigation()
       if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the request was not sent`)
+    }
+    try {
+      const detail = await runStep(action, ctx, result, artifacts, index, guard)
+      await guard()
       const now = withoutHash(page.url())
       const moved = now !== checkedUrl
       checkedUrl = now
@@ -112,6 +119,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
         result.scrapes.length = before.scrapes
         result.javascriptReturns.length = before.javascriptReturns
         result.pdfs.length = before.pdfs
+        result.lists.length = before.lists
         artifacts.length = before.artifacts
       }
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'failed', ms: Math.round(performance.now() - started), code: failure.code, error: failure.message } })
@@ -122,7 +130,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   return { result, artifacts, checkedDocuments }
 }
 
-async function runStep(action: PageAction, ctx: ActionRunContext, result: ActionsResult, artifacts: string[]): Promise<Record<string, unknown>> {
+async function runStep(action: PageAction, ctx: ActionRunContext, result: ActionsResult, artifacts: string[], index: number, guard: () => Promise<void>): Promise<Record<string, unknown>> {
   const { page, execution } = ctx
   const signal = execution.signal
   switch (action.type) {
@@ -224,7 +232,139 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       result.pdfs.push(pdf)
       return { format, landscape, scale, bytes: pdf.bytes, sha256 }
     }
+    case 'scrollToEnd':
+    case 'loadMore':
+    case 'paginate': {
+      const run = action.type === 'scrollToEnd' ? await scrollToEnd(action, ctx, index)
+        : action.type === 'loadMore' ? await loadMore(action, ctx, index)
+          : await paginate(action, ctx, index, result, guard)
+      result.lists.push(run)
+      return { stoppedBy: run.stoppedBy, rounds: run.rounds, items: run.items, ...(run.itemsRead === undefined ? {} : { itemsRead: run.itemsRead }) }
+    }
   }
+}
+
+/** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
+const QUIET_ROUNDS_TO_END = 2
+
+interface Measure { height: number; items: number | null }
+
+/** The page's (or the element's) scroll height, and the items `itemSelector` matches. */
+async function measure(ctx: ActionRunContext, itemSelector: string | undefined, within?: string): Promise<Measure> {
+  const height = await bounded(ctx, within === undefined
+    ? ctx.page.evaluate(() => (document.scrollingElement ?? document.body).scrollHeight)
+    : ctx.page.locator(within).first().evaluate((element) => element.scrollHeight))
+  const items = itemSelector === undefined ? null : await bounded(ctx, ctx.page.locator(itemSelector).count())
+  return { height, items }
+}
+
+const grew = (before: Measure, after: Measure): boolean => after.height > before.height || (after.items !== null && before.items !== null && after.items > before.items)
+
+/** Wait for what a round loads: the pause asked for, then the page's quiet, within the time left. */
+async function afterRound(ctx: ActionRunContext, waitMs: number): Promise<void> {
+  const pause = Math.min(waitMs, Math.max(0, timeLeft(ctx)))
+  if (pause > 0) await abortableSleep(pause, ctx.execution.signal)
+  await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, Math.max(0, timeLeft(ctx))))
+}
+
+/** Whether a round of `waitMs` still fits before the time kept back to read the page. */
+const roundFits = (ctx: ActionRunContext, waitMs: number): boolean => timeLeft(ctx) > waitMs + 500
+
+async function scrollToEnd(action: Extract<PageAction, { type: 'scrollToEnd' }>, ctx: ActionRunContext, index: number): Promise<ListRun> {
+  const max = action.maxScrolls ?? LIST_DEFAULTS.maxScrolls
+  const waitMs = action.waitMs ?? LIST_WAIT_MS.default
+  if (action.selector !== undefined && await bounded(ctx, ctx.page.locator(action.selector).count()) === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
+  let last = await measure(ctx, action.itemSelector, action.selector)
+  let rounds = 0
+  let quiet = 0
+  let stoppedBy: ListStop
+  for (;;) {
+    if (rounds >= max) { stoppedBy = 'max'; break }
+    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+    await bounded(ctx, action.selector === undefined
+      ? ctx.page.evaluate(() => { window.scrollTo(0, (document.scrollingElement ?? document.body).scrollHeight) })
+      : ctx.page.locator(action.selector).first().evaluate((element) => { element.scrollTop = element.scrollHeight }))
+    rounds++
+    await afterRound(ctx, waitMs)
+    const now = await measure(ctx, action.itemSelector, action.selector)
+    quiet = grew(last, now) ? 0 : quiet + 1
+    last = now
+    if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'end'; break }
+  }
+  return { index, type: 'scrollToEnd', stoppedBy, rounds, items: last.items }
+}
+
+/** Why a control cannot be used: gone, hidden, or disabled (the attribute, aria-disabled, or a `disabled` class on it or around it). */
+async function unusable(ctx: ActionRunContext, selector: string): Promise<string | null> {
+  const control = ctx.page.locator(selector).first()
+  if (await bounded(ctx, ctx.page.locator(selector).count()) === 0) return 'gone'
+  if (!await bounded(ctx, control.isVisible())) return 'hidden'
+  const disabled = await bounded(ctx, control.evaluate((element) =>
+    (element as HTMLButtonElement).disabled === true ||
+    element.getAttribute('aria-disabled') === 'true' ||
+    element.closest('.disabled, [aria-disabled="true"], [disabled]') !== null))
+  return disabled ? 'disabled' : null
+}
+
+async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: ActionRunContext, index: number): Promise<ListRun> {
+  const max = action.maxClicks ?? LIST_DEFAULTS.maxClicks
+  const waitMs = action.waitMs ?? LIST_WAIT_MS.default
+  let last = await measure(ctx, action.itemSelector)
+  let rounds = 0
+  let quiet = 0
+  let stoppedBy: ListStop
+  for (;;) {
+    // The control gone, hidden or disabled is the list's end; gone before the first click, it was never there.
+    const why = await unusable(ctx, action.selector)
+    if (why !== null) {
+      if (rounds === 0 && why === 'gone') throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
+      stoppedBy = 'end'
+      break
+    }
+    if (rounds >= max) { stoppedBy = 'max'; break }
+    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+    await raceWithSignal(ctx.page.locator(action.selector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+    rounds++
+    await afterRound(ctx, waitMs)
+    const now = await measure(ctx, action.itemSelector)
+    quiet = grew(last, now) ? 0 : quiet + 1
+    last = now
+    if (quiet >= QUIET_ROUNDS_TO_END) { stoppedBy = 'no_growth'; break }
+  }
+  return { index, type: 'loadMore', stoppedBy, rounds, items: last.items }
+}
+
+async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: ActionRunContext, index: number, result: ActionsResult, guard: () => Promise<void>): Promise<ListRun> {
+  const max = action.maxPages ?? LIST_DEFAULTS.maxPages
+  const waitMs = action.waitMs ?? LIST_WAIT_MS.default
+  const seen = new Set<string>()
+  let pages = 0
+  let itemsRead: number | null = action.itemSelector === undefined ? null : 0
+  let items: number | null = null
+  let stoppedBy: ListStop
+  for (;;) {
+    // The page as it stands, unless it is one already read (a next control that leads back, or one that did nothing).
+    const html = await bounded(ctx, ctx.page.content())
+    const url = ctx.page.url()
+    const text = await bounded(ctx, ctx.page.evaluate(() => document.body?.innerText ?? ''))
+    const fingerprint = createHash('sha256').update(`${withoutHash(url)}\u0000${text}`).digest('hex')
+    if (seen.has(fingerprint)) { stoppedBy = 'repeat'; break }
+    seen.add(fingerprint)
+    result.scrapes.push({ url, html })
+    pages++
+    if (action.itemSelector !== undefined) {
+      items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+      itemsRead = (itemsRead ?? 0) + items
+    }
+    if (pages >= max) { stoppedBy = 'max'; break }
+    if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
+    if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
+    await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+    await afterRound(ctx, waitMs)
+    // The next page goes through the same checks as any page a step reaches, before it is read.
+    await guard()
+  }
+  return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead }
 }
 
 /**

@@ -86,6 +86,8 @@ export interface FirecrawlPage {
     scrapes: Array<{ url: string; html: string }>
     javascriptReturns: Array<{ type: string; value: unknown }>
     pdfs: string[]
+    /** W2L's own list steps (scrollToEnd, loadMore, paginate): what each did and why it stopped; present when the request had one. */
+    lists?: Array<{ index: number; type: string; stoppedBy: string; rounds: number; items: number | null; itemsRead?: number | null }>
     failed?: { index: number; type: string; code: string; message: string }
   }
   /** The native `warnings` as one string, their messages joined with a space; present when the result has any. */
@@ -535,6 +537,7 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
       scrapes: result.actions.scrapes.map((scrape) => ({ url: scrape.url, html: scrape.html })),
       javascriptReturns: result.actions.javascriptReturns.map((value) => ({ type: value.type, value: value.value })),
       pdfs: result.actions.pdfs.map((pdf) => `data:${pdf.contentType};base64,${pdf.base64}`),
+      ...(result.actions.lists.length === 0 ? {} : { lists: result.actions.lists.map((list) => ({ ...list })) }),
       ...(result.actions.failed === undefined ? {} : { failed: { ...result.actions.failed } }),
     } }),
     ...(warning === undefined ? {} : { warning }),
