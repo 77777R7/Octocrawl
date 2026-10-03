@@ -114,9 +114,22 @@ describe('the person\'s Chrome', () => {
   })
 
   it('the person\'s sign-in on another host of the site is waited for, and the page read once back on it', async () => {
-    const chrome = fakeChrome([at('https://login.example.org/sso', PAGE), at('https://www.site.test/a', PAGE)])
+    const chrome = fakeChrome([at('https://login.example.org/sso', PAGE, { secret: true }), at('https://www.site.test/a', PAGE)])
     const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
     expect(await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).toMatchObject({ finalUrl: 'https://www.site.test/a', sawGate: null })
+  })
+
+  it('a sign-in that ends on the home page: the tab is taken back to the page asked for, and that page is read', async () => {
+    const home = '<html><body><article><h1>Welcome home</h1>' + '<p>The site\'s home page, long enough to be read. </p>'.repeat(4) + '</article></body></html>'
+    const chrome = fakeChrome([at('https://site.test/a', GATE), at('https://site.test/', home), at('https://site.test/', home), at('https://site.test/', home), at('https://site.test/a', PAGE)])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    expect(await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).toMatchObject({ finalUrl: 'https://site.test/a', html: PAGE })
+    expect(chrome.calls.filter((call) => call.startsWith('Page.navigate'))).toHaveLength(2)
+  })
+
+  it('a page clear in the person\'s Chrome from the start, with nothing for them to do, is not read', async () => {
+    const reader = await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE)]).connect })
+    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).rejects.toThrow('showed no check in your Chrome (you may already be signed in there), so W2L did not read it')
   })
 
   it('a tab the person closed is not read', async () => {

@@ -23,7 +23,8 @@ let root: string
 let chrome: BrowserContext
 
 const ARTICLE = `<article><h1>The member page</h1>${'<p>What is behind the check: a page of prose, long enough to be read as an article and not as a stub. </p>'.repeat(4)}</article>`
-const CAPTCHA = '<div class="g-recaptcha" data-sitekey="test-key"></div><button id="pass" onclick="document.cookie=\'passed=1; path=/\'; location.reload()">I am human</button>'
+/** A captcha its button passes, by setting `name` (one per page: the tests share one browser, and its cookies). */
+const captcha = (name: string) => `<div class="g-recaptcha" data-sitekey="test-key"></div><button id="pass" onclick="document.cookie='${name}=1; path=/'; location.reload()">I am human</button>`
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -32,13 +33,20 @@ beforeAll(async () => {
     if (req.url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (req.url === '/open') return html(ARTICLE.replace('member page', 'open page'))
     // A captcha until the person passes it: their browser then holds the cookie the page checks.
-    if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(CAPTCHA)
+    if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(captcha('passed'))
     // Through the captcha, a page with nothing on it: not the page asked for.
-    if (req.url === '/thin') return cookie.includes('passed=1') ? html('<p>ok</p>') : html(CAPTCHA)
+    if (req.url === '/thin') return cookie.includes('thin=1') ? html('<p>ok</p>') : html(captcha('thin'))
     // Behind the captcha, a page with a search box that takes the focus and a sign-in box it hides.
-    if (req.url === '/search') return cookie.includes('passed=1') ? html(`<input name="q" autofocus><div style="display:none"><input type="password"></div>${ARTICLE}`) : html(CAPTCHA)
+    if (req.url === '/search') return cookie.includes('search=1') ? html(`<input name="q" autofocus><div style="display:none"><input type="password"></div>${ARTICLE}`) : html(captcha('search'))
     // A challenge that runs its script for a moment, then reloads into the page by itself.
     if (req.url === '/jsc') return cookie.includes('js=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>setTimeout(() => { document.cookie = "js=1; path=/"; location.reload() }, 1500)</script>')
+    // A login-walled page: signed out, it sends you to sign in, and signing in ends on the home page.
+    if (req.url === '/orders') {
+      if (cookie.includes('member=1')) return html(ARTICLE.replace('The member page', 'Your orders'))
+      res.writeHead(302, { location: '/signin' }); res.end(); return
+    }
+    if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
+    if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
     // A bot check that only its header says (a vendor's), never passed here.
     if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
     // A sign-in, then a one-time code, then the page.
@@ -181,6 +189,27 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       const taskId = await batchOf(engine, ['/search', '/jsc'])
       const done = await engine.handOffBatch(taskId, { waitMs: 20_000 })
       expect(done).toMatchObject({ handedOff: 2, through: 2 })
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a sign-in that ends on the home page is followed back to the page asked for; once signed in, a page with nothing to do is not read', async () => {
+    const engine = engineFor(join(root, 'tasks-8'))
+    const stop = person(chrome, { '/signin': async (page) => { await page.click('#in') } })
+    try {
+      const first = await batchOf(engine, ['/orders'])
+      expect((await itemsOf(engine, first))[0]).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+      expect(await engine.handOffBatch(first, {})).toMatchObject({ through: 1 })
+      const item = (await itemsOf(engine, first))[0]!
+      expect(item.markdown).toContain('Your orders')
+      expect(item.evidence?.finalUrl).toBe(`${base}/orders`)
+      // The person is signed in now: a page their Chrome shows them with nothing for them to do is their session's, and not read.
+      const second = await batchOf(engine, ['/orders'])
+      const done = await engine.handOffBatch(second, {})
+      expect(done).toMatchObject({ through: 0, items: [{ reason: expect.stringContaining('showed no check in your Chrome') }] })
+      expect((await itemsOf(engine, second))[0]).toMatchObject({ status: 'blocked' })
     } finally {
       stop()
       await engine.close()

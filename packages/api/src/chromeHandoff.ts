@@ -19,6 +19,11 @@
  * login path; and the person is not at a step of their own: no password or
  * one-time-code field showing on the page, no form field whose value they
  * are changing. Its address is Chrome's, not what the page's script says.
+ * A page through elsewhere on the site (the home page a sign-in ends on) is
+ * taken back to the page asked for. And the person must have had something
+ * to do in the tab (a check, a sign-in step, a field they typed in, a page
+ * that loaded a second document): a page clear from its first document is
+ * their own session's, and W2L does not read it.
  */
 
 import { classifyGate } from '@w2l/http-core'
@@ -47,6 +52,10 @@ export interface UserChromeReadOptions {
 
 /** Reads in a row a page must pass to count as through. */
 const CLEAR_READS = 3
+/** Times W2L takes the tab back to the page asked for when the person's way through ended elsewhere on the site (a home page after a sign-in). */
+const RETURNS = 2
+/** A document answered with one of these is a check, whatever its body. */
+const CHECK_STATUSES: ReadonlySet<number> = new Set([401, 403, 407, 429, 503])
 
 /** A page the person did not get through in time, left (closed its tab, quit Chrome), or that ended off the site asked for: it is not read. */
 export class HandoffNotThrough extends Error {
@@ -131,13 +140,18 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   const stops: Array<() => void> = []
   try {
     const { sessionId } = await connection.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
-    // Set by the event listener: the main document's last response.
-    const heard: { document: DocumentResponse | null } = { document: null }
+    // Set by the event listener: the main document's last response, and how many documents the tab has loaded.
+    const heard: { document: DocumentResponse | null; documents: number } = { document: null, documents: 0 }
     if (connection.on !== undefined) {
       stops.push(connection.on('Network.responseReceived', sessionId, (params) => {
         const response = params.response as { url?: string; status?: number; headers?: Record<string, string> } | undefined
         if (params.type !== 'Document' || params.frameId !== targetId || response === undefined) return
+        heard.documents++
         heard.document = { url: String(response.url ?? ''), status: Number(response.status ?? 0), headers: Object.fromEntries(Object.entries(response.headers ?? {}).map(([name, value]) => [name.toLowerCase(), String(value)])) }
+        // A check answered in the response alone (a challenge status or a vendor's header) is one the person met, however fast it passed.
+        const seen = heard.document
+        const check = classifyGate({ status: seen.status, header: (name) => seen.headers[name.toLowerCase()] ?? null, body: '' })
+        if (check !== null || CHECK_STATUSES.has(seen.status)) sawGate ??= check?.reason ?? `http_${seen.status}`
       }))
       await connection.send('Network.enable', {}, sessionId)
     }
@@ -145,6 +159,9 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     let navigation: unknown = null
     void connection.send('Page.navigate', { url }, sessionId).catch((error: unknown) => { navigation = error })
     let told = false
+    let returns = 0
+    // Whether the person had something to do in this tab: a check, a sign-in step, a field they typed in, a page that changed.
+    let acted = false
     let field: string | null | undefined
     let clear = 0
     let last: { state: PageState; response: DocumentResponse | null } | null = null
@@ -178,10 +195,22 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       }
       const typing = state.field !== null && field !== undefined && state.field !== field
       field = state.field
+      // A second document (a reload, a sign-in's redirect, a challenge passing) is the page changing under the person's hand or its check's.
+      if (sawGate !== null || state.secret || typing || heard.documents > 1) acted = true
       const through = state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
         && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !typing
       clear = through ? clear + 1 : 0
       if (clear >= CLEAR_READS) {
+        // A page that was clear in the person's Chrome from the start, with nothing for them to do, is their own session's page,
+        // read with no act of theirs: W2L does not read it. Their login is used only where they import it for a site.
+        if (!acted) throw new HandoffNotThrough(`${url} showed no check in your Chrome (you may already be signed in there), so W2L did not read it: W2L reads a page in your Chrome only after you got through a check in that tab. To read it with your login, run w2l login import ${host} and the batch in mode authed`, null)
+        // Through, but elsewhere on the site (a sign-in that ends on the home page): the tab goes back to the page asked for.
+        if (pageOf(state.href) !== pageOf(url) && returns < RETURNS) {
+          returns++
+          clear = 0
+          void connection.send('Page.navigate', { url }, sessionId).catch((error: unknown) => { navigation = error })
+          continue
+        }
         return {
           requestedUrl: url,
           finalUrl: state.href,
@@ -225,6 +254,16 @@ function onLoginPath(href: string, asked: string): boolean {
     return isLoginPath(new URL(href).pathname) && !isLoginPath(new URL(asked).pathname)
   } catch {
     return false
+  }
+}
+
+/** A page's path and query, without a trailing slash or the fragment: the page an address names, on whichever host of the site. */
+function pageOf(href: string): string {
+  try {
+    const parsed = new URL(href)
+    return `${parsed.pathname.replace(/\/+$/, '') || '/'}${parsed.search}`
+  } catch {
+    return href
   }
 }
 
