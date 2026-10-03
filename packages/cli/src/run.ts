@@ -49,7 +49,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const line = parseCommandLine(command, rest)
     if (line.cli.help) { io.stdout(usage(command)); return 0 }
     if (command === 'batch' && line.cli.urlsFile !== undefined) line.urls.push(...await urlsFrom(line.cli.urlsFile))
-    const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/api'
+    // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
+    const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
     const listen = parseListen([], io.env)
     for (const notice of listen.notices) io.stderr(`w2l: ${notice}`)
     const engine = createApiEngine({
@@ -61,6 +62,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)
+    } catch (error) {
+      // Ctrl-C during a scrape or a map: the engine gave up the call; nothing is left to resume.
+      if (io.signal?.aborted && !(error instanceof UsageError) && !(error instanceof RequestError)) {
+        io.stderr(`w2l ${command}: interrupted`)
+        return 130
+      }
+      throw error
     } finally {
       await engine.close({ cancelActive: true })
     }
@@ -98,6 +106,11 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       let taskId: string
       if (cli.resume !== undefined) {
         if (urls.length > 0) throw new UsageError('w2l crawl --resume takes the task id, not a URL')
+        // A crawl recorded as pending or running may be another process's (an API server on this task root): resuming it here would run it twice.
+        const current = await engine.getCrawl(cli.resume)
+        if (current !== null && (current.status === 'pending' || current.status === 'running')) {
+          throw new UsageError(`crawl ${cli.resume} is ${current.status}: another process may be running it. If none is, w2l serve on this task root resumes it`)
+        }
         const accepted = await engine.resumeCrawl(cli.resume)
         if (accepted === null) throw new UsageError(`no crawl ${cli.resume} under this task root`)
         taskId = accepted.taskId
@@ -188,10 +201,21 @@ async function urlsFrom(file: string): Promise<string[]> {
 
 async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv.includes('--help')) {
-    io.stdout('usage: w2l serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>]\nRuns the local API (as w2l-api does) on W2L_TASK_ROOT, else .w2l/api, until SIGINT.')
+    io.stdout('usage: w2l serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT.')
     return 0
   }
-  const server = await runApiServer(argv, io.env, { signals: false, log: io.stderr })
+  // --task-root, as on the other commands; the server reads W2L_TASK_ROOT.
+  const rest = [...argv]
+  const at = rest.findIndex((arg) => arg === '--task-root' || arg.startsWith('--task-root='))
+  let env = io.env
+  if (at !== -1) {
+    const inline = rest[at]!.includes('=') ? rest[at]!.slice(rest[at]!.indexOf('=') + 1) : undefined
+    const value = inline ?? rest[at + 1]
+    if (value === undefined || value.startsWith('--')) { io.stderr('w2l serve: --task-root takes a value'); return 2 }
+    rest.splice(at, inline === undefined ? 2 : 1)
+    env = { ...io.env, W2L_TASK_ROOT: value }
+  }
+  const server = await runApiServer(rest, env, { signals: false, log: io.stderr })
   await new Promise<void>((resolve) => {
     if (io.signal?.aborted) resolve()
     else io.signal?.addEventListener('abort', () => resolve(), { once: true })

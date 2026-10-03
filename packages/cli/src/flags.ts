@@ -27,8 +27,17 @@ const KINDS: Readonly<Record<string, Kind>> = {
   robotsOverride: 'json', robotsOverrides: 'json',
 }
 
-/** The URL keys are positional, and `origin` is the CLI's own label, so neither is a flag. */
-const NOT_FLAGS: ReadonlySet<string> = new Set(['url', 'urls', 'origin'])
+/**
+ * The URL keys are positional and `origin` is the CLI's own label, so
+ * neither is a flag. `webhook` is not offered: a command runs no delivery
+ * worker, so its events would wait until an API server opened the task root.
+ */
+const NOT_FLAGS: ReadonlySet<string> = new Set(['url', 'urls', 'origin', 'webhook'])
+
+/** Options the CLI refuses with the supported route, instead of as unknown. */
+const REFUSED_FLAGS: Readonly<Record<string, string>> = {
+  webhook: '--webhook is not offered by the command line, which runs no delivery worker: start the API (w2l serve) and send the crawl or batch to it',
+}
 
 const KEYS: Readonly<Record<Command, readonly string[]>> = { scrape: SCRAPE_KEYS, crawl: CRAWL_KEYS, batch: BATCH_KEYS, map: MAP_KEYS }
 
@@ -96,8 +105,10 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
     }
     if (name === 'help') { cli.help = true; continue }
     if (name === 'markdown' && command === 'scrape') { cli.markdown = true; continue }
+    const refused = REFUSED_FLAGS[name]
+    if (refused !== undefined && (command === 'crawl' || command === 'batch')) throw new UsageError(refused)
     const cliKey = CLI_VALUE_FLAGS[name]
-    if (cliKey !== undefined && (cliKey !== 'urlsFile' || command === 'batch') && (cliKey !== 'resume' || command === 'crawl')) {
+    if (cliKey !== undefined && (cliKey !== 'urlsFile' || command === 'batch') && (cliKey !== 'resume' || command === 'crawl') && (cliKey !== 'out' || command !== 'map')) {
       (cli as Record<string, unknown>)[cliKey] = value()
       continue
     }
@@ -119,7 +130,11 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
     const kind = KINDS[key] ?? 'json'
     switch (kind) {
       case 'boolean': {
-        if (negated) { body[key] = false; break }
+        if (negated) {
+          if (inline !== undefined) throw new UsageError(`--no-${name} takes no value`)
+          body[key] = false
+          break
+        }
         if (inline === undefined) { body[key] = true; break }
         if (inline !== 'true' && inline !== 'false') throw new UsageError(`--${name} is true or false, got ${inline}`)
         body[key] = inline === 'true'
@@ -190,7 +205,8 @@ export function usage(command: Command | null): string {
       '  serve                 run the local API (--port, --host, --hosted, --token)',
       '',
       'Every option of the REST API is a flag under its kebab-case name: maxAge is --max-age.',
-      'w2l <command> --help lists them. The task root is W2L_TASK_ROOT, else .w2l/api.',
+      'w2l <command> --help lists them. A command\'s task root is --task-root, else W2L_TASK_ROOT,',
+      'else .w2l/cli, apart from the API\'s .w2l/api: never point a command at the task root of a running server.',
     ].join('\n')
   }
   const synopsis: Record<Command, string> = {
@@ -207,5 +223,5 @@ export function usage(command: Command | null): string {
     }
     return `  --${flagName(key)}${hint[kind]}${kind === 'boolean' ? ` (or --no-${flagName(key)})` : ''}   ${key}`
   })
-  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '  --task-root <dir>   where tasks, files and the page cache live', '  --help'].join('\n')
+  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '  --task-root <dir>   where tasks, files and the page cache live (default W2L_TASK_ROOT, else .w2l/cli)', '  --help'].join('\n')
 }

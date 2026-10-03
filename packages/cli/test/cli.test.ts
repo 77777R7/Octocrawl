@@ -45,6 +45,11 @@ describe('flags', () => {
     expect(() => parseCommandLine('scrape', ['u', '--headers', '{bad'])).toThrow('--headers takes JSON')
     expect(() => parseCommandLine('scrape', ['u', '--timeout'])).toThrow('--timeout takes a value')
     expect(() => parseCommandLine('scrape', ['u', '--mobile=yes'])).toThrow('--mobile is true or false')
+    expect(() => parseCommandLine('scrape', ['u', '--no-mobile=false'])).toThrow('--no-mobile takes no value')
+    expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('unknown flag --out for w2l map')
+    // A command runs no delivery worker, so it offers no webhook.
+    expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*w2l serve/)
+    expect(() => parseCommandLine('batch', ['u', '--webhook={"url":"https://hooks.example/w"}'])).toThrow(/--webhook is not offered/)
   })
 })
 
@@ -59,6 +64,7 @@ let root: string
 beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+    if (req.url?.startsWith('/slow')) { setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Slow')), 3_000); return }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(`Tides ${req.url}`, req.url === '/tides/a' ? TABLE : ''))
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -124,6 +130,30 @@ describe('w2l against a local site', () => {
     const map = await cli(['map', `${origin}/tides/`, '--sitemap', 'skip'])
     expect(map.code).toBe(0)
     expect(JSON.parse(map.out).links.map((link: { url: string }) => link.url)).toContain(`${origin}/tides/b`)
+  })
+
+  it('answers 130 when a scrape is interrupted, and refuses to resume a crawl another process may be running', async () => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 300)
+    const interrupted = await cli(['scrape', `${origin}/slow/a`], controller.signal)
+    expect(interrupted.code).toBe(130)
+
+    const port = await freePort()
+    const shared = join(root, 'shared')
+    const stop = new AbortController()
+    const serving = cli(['serve', '--port', String(port), '--task-root', shared], stop.signal)
+    let started: { taskId?: string } = {}
+    for (let i = 0; i < 100 && started.taskId === undefined; i++) {
+      started = await fetch(`http://127.0.0.1:${port}/v1/crawl`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `${origin}/slow/`, maxPages: 1, sitemap: 'skip' }) })
+        .then((res) => res.json() as Promise<{ taskId?: string }>, () => ({}))
+      if (started.taskId === undefined) await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const resumed = await cli(['crawl', '--resume', started.taskId!, '--task-root', shared])
+    expect(started.taskId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(resumed.code).toBe(2)
+    expect(resumed.err).toMatch(/is (pending|running): another process may be running it/)
+    stop.abort()
+    expect((await serving).code).toBe(0)
   })
 
   it('serves the API until stopped', async () => {
