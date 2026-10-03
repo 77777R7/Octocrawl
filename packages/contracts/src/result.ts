@@ -3,6 +3,7 @@ import type { ComplianceRecord } from './compliance.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { StructuredExtractionResult } from './structured.js'
 import type { FileDescription } from './file.js'
+import type { ActionsResult } from './actions.js'
 
 export interface ResourceTimings {
   /** Every wait in the origin scheduler but a cooldown: the concurrency ceiling and the minimum interval between requests. */
@@ -387,6 +388,12 @@ export interface FetchResult {
    * travels once.
    */
   screenshot?: ScreenshotEvidence | null
+  /**
+   * What the request's `actions` produced (screenshots, HTML snapshots,
+   * script returns, PDFs) and the step that failed, if one did. Present on
+   * every result of the browser lane that ran the steps; absent otherwise.
+   */
+  actions?: ActionsResult
   /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
    * warning first when a recorded override set a robots.txt rule aside, then

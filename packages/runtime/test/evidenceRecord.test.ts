@@ -62,6 +62,7 @@ describe('toEvidenceRecord', () => {
       artifacts: [],
       proxy: null,
       identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org', device: null, requestHeaders: [] },
+      pageActions: null,
     })
   })
 
@@ -201,5 +202,16 @@ describe('toEvidenceRecord', () => {
     expect(toEvidenceRecord(proxied, { mode: 'standard' }, {})).toMatchObject({ proxy: '127.0.0.1:7890', extractor: { commit: '7e2a7b3' } })
     process.env.W2L_SOURCE_COMMIT = 'not a commit'
     expect(toEvidenceRecord(proxied, { mode: 'standard' }, {}).extractor.commit).toBeNull()
+  })
+
+  it('pageActions lists the steps that ran, the result\'s failed step winning over its trace event', () => {
+    const base = { requestedUrl: 'https://example.com/', status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null, budgetExceeded: null, lane: 'browser_local' as const, escalations: [], markdown: 'x', truncated: false, truncatedAt: null, compliance: null, evidence: { finalUrl: 'https://example.com/', httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] }, usage: { wallMs: 1, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 1, browserMs: 1, externalCostUsd: null } }
+    const trace = [
+      { at: 0, lane: 'browser_local' as const, event: 'action', detail: { index: 0, type: 'executeJavascript', outcome: 'ok' } },
+      { at: 0, lane: 'browser_local' as const, event: 'action', detail: { index: 1, type: 'click', outcome: 'ok' } },
+    ]
+    const actions = { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 1, type: 'click' as const, code: 'navigation_refused' as const, message: 'm' } }
+    expect(toEvidenceRecord({ ...base, trace, actions }, { mode: 'standard' }, {}).pageActions).toEqual({ steps: [{ type: 'executeJavascript', outcome: 'ok' }, { type: 'click', outcome: 'failed' }], scriptRan: true })
+    expect(toEvidenceRecord({ ...base, trace }, { mode: 'standard' }, {}).pageActions).toBeNull()
   })
 })

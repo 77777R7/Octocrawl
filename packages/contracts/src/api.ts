@@ -15,6 +15,7 @@ import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
+import { MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -268,6 +269,8 @@ export interface CompactScrapeResponse {
   attributes?: FetchResult['attributes']
   /** Present when a `screenshot` entry was asked for, as on the full response: the capture, or null when the browser lane rendered no page or could not capture it. */
   screenshot?: FetchResult['screenshot']
+  /** Present when the request ran `actions`: what the steps produced, and the step that failed if one did. */
+  actions?: FetchResult['actions']
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
   metadata: ScrapeResponseMetadata
@@ -774,6 +777,7 @@ export const REFUSAL_HINTS = {
   ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
   useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
+  actions: 'actions run on scrape and batch, where each page named gets the same steps; a crawl or a map does not take them',
 } as const
 
 /** The hint for a refused request key, or null when the key has none (an option W2L simply does not know). */
@@ -782,6 +786,7 @@ export function refusalHint(key: string, value: unknown): string | null {
   if (name === 'stealth' || (name === 'proxy' && (value === 'stealth' || value === 'enhanced'))) return REFUSAL_HINTS.stealth
   if (name === 'ignoreRobotsTxt') return REFUSAL_HINTS.ignoreRobotsTxt
   if (name === 'useIndex') return REFUSAL_HINTS.useIndex
+  if (name === 'actions') return REFUSAL_HINTS.actions
   return null
 }
 
@@ -794,12 +799,12 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -1264,10 +1269,11 @@ function readScreenshotViewport(value: unknown): ScreenshotViewport | undefined 
  * identity's 412x915. A window larger than the screen would contradict the
  * identity (identityBundleIssues), so it is refused before anything is fetched.
  */
-function checkScreenshotViewport(mobile: boolean | undefined, formats: readonly ScrapeFormat[] | undefined): void {
+function checkScreenshotViewport(mobile: boolean | undefined, formats: readonly ScrapeFormat[] | undefined, actions?: readonly PageAction[]): void {
   if (mobile !== true) return
   const screen = browserFingerprintFor('mobile').screen
-  for (const format of formats ?? []) {
+  // A screenshot step takes a viewport as the screenshot format does.
+  for (const format of [...(formats ?? []), ...(actions ?? [])]) {
     if (typeof format !== 'object' || format.type !== 'screenshot' || format.viewport === undefined) continue
     if (format.viewport.width > screen.width || format.viewport.height > screen.height) {
       throw new RequestError(`screenshot viewport ${format.viewport.width}x${format.viewport.height} is not within the declared mobile screen ${screen.width}x${screen.height}`)
@@ -1566,6 +1572,10 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
   const blockAds = readBoolean(rec.blockAds, 'blockAds')
   const removeBase64Images = readBoolean(rec.removeBase64Images, 'removeBase64Images')
   const parsers = readParsers(rec.parsers)
+  const actions = readActions(rec.actions)
+  const cache = readCacheOptions(rec, mode)
+  // A page after actions is that run's page: it is never stored, and never answered from a page stored without them.
+  if (actions !== undefined && (cacheLookupRequested(cache) || cache.storeInCache === true)) throw new RequestError('the cache is not available with actions: a page after actions is never stored or reused')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -1580,7 +1590,83 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
     ...(blockAds === undefined ? {} : { blockAds }),
     ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
     ...(parsers === undefined ? {} : { parsers }),
-    ...readCacheOptions(rec, mode),
+    ...(actions === undefined ? {} : { actions }),
+    ...cache,
+  }
+}
+
+const ACTION_KEYS: Readonly<Record<PageAction['type'], readonly string[]>> = {
+  wait: ['milliseconds', 'selector'],
+  click: ['selector', 'all'],
+  write: ['text'],
+  press: ['key'],
+  scroll: ['direction', 'selector'],
+  screenshot: ['fullPage', 'quality', 'viewport'],
+  scrape: [],
+  executeJavascript: ['script'],
+  pdf: ['format', 'landscape', 'scale'],
+}
+
+/** `actions`: 1 to MAX_ACTIONS steps, each Firecrawl's shape, checked before anything is fetched. */
+function readActions(value: unknown): readonly PageAction[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ACTIONS) throw new RequestError(`actions must be an array of 1 to ${MAX_ACTIONS} steps`)
+  return value.map((item, index) => readAction(item, `actions[${index}]`))
+}
+
+function readAction(value: unknown, name: string): PageAction {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${name} must be an object with a type`)
+  const rec = value as Record<string, unknown>
+  const type = rec.type
+  if (typeof type !== 'string' || !Object.hasOwn(ACTION_KEYS, type)) throw new RequestError(`${name}.type must be one of ${Object.keys(ACTION_KEYS).join(', ')}`)
+  const allowed = ACTION_KEYS[type as PageAction['type']]
+  for (const key of Object.keys(rec)) if (key !== 'type' && !allowed.includes(key)) throw new RequestError(`${name}: ${type} takes no ${key}`)
+  const selector = (key: string, required: boolean): string | undefined => {
+    const raw = rec[key]
+    if (raw === undefined && !required) return undefined
+    if (typeof raw !== 'string' || raw.trim().length === 0 || raw.length > 200) throw new RequestError(`${name}.${key} must be a CSS selector of 1 to 200 characters`)
+    return raw.trim()
+  }
+  switch (type) {
+    case 'wait': {
+      if ((rec.milliseconds === undefined) === (rec.selector === undefined)) throw new RequestError(`${name}: wait takes milliseconds or a selector, one of them`)
+      if (rec.selector !== undefined) return { type, selector: selector('selector', true)! }
+      return { type, milliseconds: readMilliseconds(rec.milliseconds, `${name}.milliseconds`, 1, MAX_ACTION_WAIT_MS)! }
+    }
+    case 'click': {
+      const all = readBoolean(rec.all, `${name}.all`)
+      return { type, selector: selector('selector', true)!, ...(all === undefined ? {} : { all }) }
+    }
+    case 'write':
+      if (typeof rec.text !== 'string' || rec.text.length === 0 || rec.text.length > MAX_ACTION_TEXT_CHARS) throw new RequestError(`${name}.text must be a string of 1 to ${MAX_ACTION_TEXT_CHARS} characters`)
+      return { type, text: rec.text }
+    case 'press':
+      if (typeof rec.key !== 'string' || rec.key.trim().length === 0 || rec.key.length > 64) throw new RequestError(`${name}.key must be a key name of 1 to 64 characters (Enter, Tab, ArrowDown, a, ...)`)
+      return { type, key: rec.key.trim() }
+    case 'scroll': {
+      // Firecrawl v1 left the direction out for down; v2 requires it.
+      const direction = rec.direction ?? 'down'
+      if (direction !== 'up' && direction !== 'down') throw new RequestError(`${name}.direction must be up or down`)
+      const within = selector('selector', false)
+      return { type, direction, ...(within === undefined ? {} : { selector: within }) }
+    }
+    case 'screenshot': {
+      const shot = readScreenshotFormat({ ...rec, type: 'screenshot' })
+      const { type: _type, ...options } = shot
+      return { type: 'screenshot', ...options }
+    }
+    case 'scrape':
+      return { type }
+    case 'executeJavascript':
+      if (typeof rec.script !== 'string' || rec.script.trim().length === 0 || rec.script.length > MAX_ACTION_SCRIPT_CHARS) throw new RequestError(`${name}.script must be a script of 1 to ${MAX_ACTION_SCRIPT_CHARS} characters`)
+      return { type, script: rec.script }
+    default: {
+      // pdf
+      if (rec.format !== undefined && !(PDF_PAPER_FORMATS as readonly unknown[]).includes(rec.format)) throw new RequestError(`${name}.format must be one of ${PDF_PAPER_FORMATS.join(', ')}`)
+      const landscape = readBoolean(rec.landscape, `${name}.landscape`)
+      if (rec.scale !== undefined && (typeof rec.scale !== 'number' || !Number.isFinite(rec.scale) || rec.scale < 0.1 || rec.scale > 2)) throw new RequestError(`${name}.scale must be a number from 0.1 to 2`)
+      return { type: 'pdf', ...(rec.format === undefined ? {} : { format: rec.format as PdfPaperFormat }), ...(landscape === undefined ? {} : { landscape }), ...(rec.scale === undefined ? {} : { scale: rec.scale as number }) }
+    }
   }
 }
 
@@ -1604,7 +1690,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
     ...readAttribution(rec),
   }
-  checkScreenshotViewport(req.mobile, req.formats)
+  checkScreenshotViewport(req.mobile, req.formats, req.actions)
   return req
 }
 
@@ -1773,7 +1859,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(webhook === undefined ? {} : { webhook }),
     ...readAttribution(rec),
   }
-  checkScreenshotViewport(req.mobile, req.formats)
+  checkScreenshotViewport(req.mobile, req.formats, req.actions)
   return req
 }
 

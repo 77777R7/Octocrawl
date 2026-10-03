@@ -2630,6 +2630,310 @@
         {"item": "scrape-formats.pdf-parser", "type": "apiStatus", "equals": 400},
         {"item": "scrape-formats.pdf-parser", "type": "field", "path": "code", "equals": "unsupported_parameter"}
       ]
+    },
+    {
+      "id": "AC01",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": {"debug": true, "formats": ["markdown"], "actions": [{"type": "wait", "milliseconds": 1000}, {"type": "click", "selector": "li.next > a"}, {"type": "wait", "selector": ".quote"}, {"type": "scrape"}, {"type": "screenshot"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. The audit's pipeline check (scrape-execution.actions-pipeline): a script-rendered quote list; Next loads page 2, whose first quote (seen with curl on /page/2/) begins 'This life is what you make it'.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "actions-pipeline", "type": "field", "path": "status", "equals": "success"},
+        {"item": "actions-pipeline", "type": "markdownIncludes", "text": "This life is what you make it"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.0.html", "includes": "This life is what you make it"},
+        {"item": "action-screenshot", "type": "field", "path": "actions.screenshots.length", "equals": 1},
+        {"item": "actions-pipeline", "type": "traceEvent", "match": {"event": "action", "detail.index": 4, "detail.outcome": "ok"}}
+      ]
+    },
+    {
+      "id": "AC02",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://the-internet.herokuapp.com/dynamic_loading/2",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "#start button"}, {"type": "wait", "milliseconds": 6000}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. The element is rendered after a 5 s load the Start button begins (action-wait-duration).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-wait-duration", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-wait-duration", "type": "markdownIncludes", "text": "Hello World!"},
+        {"item": "action-wait-duration", "type": "traceEvent", "match": {"event": "action", "detail.type": "wait", "detail.milliseconds": 6000, "detail.outcome": "ok"}}
+      ]
+    },
+    {
+      "id": "AC03",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://the-internet.herokuapp.com/dynamic_loading/1",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "#start button"}, {"type": "wait", "selector": "#finish"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. #finish is in the page from the start but hidden until the load ends: a wait for it must wait for it to be shown (action-wait-selector, action-click).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-wait-selector", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-wait-selector", "type": "markdownIncludes", "text": "Hello World!"}
+      ]
+    },
+    {
+      "id": "AC04",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://the-internet.herokuapp.com/key_presses",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "#target"}, {"type": "press", "key": "Enter"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. The page reports the key last pressed in #result (action-press).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-press", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-press", "type": "markdownIncludes", "text": "You entered: ENTER"}
+      ]
+    },
+    {
+      "id": "AC05",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/scroll",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. An infinite list: 10 quotes, more on scroll (action-scroll; the audit expects 30 or more after three scrolls).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": 10},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "min": 30}
+      ]
+    },
+    {
+      "id": "AC06",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.scrapethissite.com/pages/ajax-javascript/",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "#2015"}, {"type": "wait", "selector": ".film"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. Oscar winners by year, loaded by AJAX when a year is clicked; 2015's best picture is Spotlight (real-site-test-set row 6).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "markdownIncludes", "text": "Spotlight"}
+      ]
+    },
+    {
+      "id": "AC07",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "click", "selector": ".ecomerce-items-scroll-more"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. A product list with a 'More' button that adds items (a 'load more' page).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC08",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. A product list that loads more items on scroll; its path is under /test-sites/e-commerce/, which robots.txt does not disallow (it disallows /test-sites/scroll/).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC09",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "button.page-link[data-id=\"2\"]"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelector(\"button.page-link.active\").dataset.id"}, {"type": "scrape"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. Pagination by AJAX buttons: page 2 replaces the list without a navigation.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1}
+      ]
+    },
+    {
+      "id": "AC10",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://example.com/",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.title"}, {"type": "executeJavascript", "script": "return 42"}, {"type": "pdf", "format": "A4", "landscape": true, "scale": 0.8}, {"type": "screenshot", "fullPage": true}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. The audit's executeJavascript and pdf checks: the returns as typed values, and a PDF that starts %PDF (checked in the run record from the base64).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-execute-javascript", "type": "field", "path": "actions.javascriptReturns", "equals": [{"type": "string", "value": "Example Domain"}, {"type": "number", "value": 42}]},
+        {"item": "action-pdf", "type": "field", "path": "actions.pdfs.0.format", "equals": "A4"},
+        {"item": "action-pdf", "type": "field", "path": "actions.pdfs.0.landscape", "equals": true},
+        {"item": "action-screenshot", "type": "field", "path": "actions.screenshots.0.fullPage", "equals": true}
+      ]
+    },
+    {
+      "id": "AC11",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://example.com/",
+      "request": {"actions": [{"type": "hover", "selector": "a"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. An action W2L does not offer is refused by name before anything is fetched (HTTP 400).",
+      "checks": [
+        {"item": "actions-pipeline", "type": "apiStatus", "equals": 400},
+        {"item": "actions-pipeline", "type": "field", "path": "error", "includes": "actions[0].type must be one of"}
+      ]
+    },
+    {
+      "id": "AC12",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://example.com/",
+      "request": {"debug": true, "actions": [{"type": "scrape"}, {"type": "click", "selector": "#no-such-button"}, {"type": "scrape"}]},
+      "note": "Added 2026-10-03 for the interaction group I2 (actions), frozen before the first run. A step that fails ends the pipeline: failed / action_failed, the step named, the steps after it not run, the page as it stood.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "actions-pipeline", "type": "field", "path": "status", "equals": "failed"},
+        {"item": "actions-pipeline", "type": "field", "path": "failureReason", "equals": "action_failed"},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.failed.index", "equals": 1},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.failed.code", "equals": "selector_not_found"},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.scrapes.length", "equals": 1},
+        {"item": "actions-pipeline", "type": "markdownIncludes", "text": "Example Domain"}
+      ]
+    },
+    {
+      "id": "AC13",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": {"debug": true, "formats": ["markdown"], "actions": [{"type": "wait", "milliseconds": 1000}, {"type": "click", "selector": "li.next > a"}, {"type": "wait", "selector": ".quote"}, {"type": "scrape"}, {"type": "screenshot"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC01 with onlyMainContent false. Its steps passed there, and the extractor found no main content on the list page it led to (failed/empty_unverified), which is the extractor's verdict, not the steps'.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "actions-pipeline", "type": "field", "path": "status", "equals": "success"},
+        {"item": "actions-pipeline", "type": "markdownIncludes", "text": "This life is what you make it"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.0.html", "includes": "This life is what you make it"},
+        {"item": "action-screenshot", "type": "field", "path": "actions.screenshots.length", "equals": 1},
+        {"item": "actions-pipeline", "type": "traceEvent", "match": {"event": "action", "detail.index": 4, "detail.outcome": "ok"}}
+      ]
+    },
+    {
+      "id": "AC14",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/scroll",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 1000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC05 with onlyMainContent false (the same empty_unverified on the list). One screen per scroll took the list from 10 to 20 quotes there, not 30: that check stays in AC05; here the list grows.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC15",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.scrapethissite.com/pages/ajax-javascript/",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "[id=\"2015\"]"}, {"type": "wait", "selector": ".film"}]},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC06 with the year's link named by an attribute selector: '#2015' is not a valid CSS selector (an id selector cannot start with a digit), which AC06 reports as action_error.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "markdownIncludes", "text": "Spotlight"}
+      ]
+    },
+    {
+      "id": "AC16",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "click", "selector": ".ecomerce-items-scroll-more"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC07 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC17",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC08 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC18",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/computers/laptops",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "button.page-link[data-id=\"2\"]"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelector(\"button.page-link.active\").dataset.id"}, {"type": "scrape"}], "onlyMainContent": false},
+      "note": "Added 2026-10-03 after the first run of AC01-AC12 (record 2026-10-03-i2-actions-86c0c76), which stays as it was: AC09 with onlyMainContent false: its steps passed there, and the extractor found no main content on the product list (failed/empty_unverified).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"},
+        {"item": "action-scrape", "type": "field", "path": "actions.scrapes.length", "equals": 1}
+      ]
+    },
+    {
+      "id": "AC19",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://quotes.toscrape.com/js-delayed/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 60000, "actions": [{"type": "wait", "selector": ".quote"}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".quote\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. The quotes are written by a script 10 s after load (delayInMilliseconds = 10000 in the page): the wait for .quote must outlast it.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-wait-selector", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-wait-selector", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": 10},
+        {"item": "action-wait-selector", "type": "markdownIncludes", "text": "Albert Einstein"}
+      ]
+    },
+    {
+      "id": "AC20",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/more/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "click", "selector": ".ecomerce-items-scroll-more"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second 'load more' list (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AC21",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "click", "selector": "button.page-link[data-id=\"2\"]"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelector(\"button.page-link.active\").dataset.id"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second list paginated by AJAX buttons (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-click", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-click", "type": "field", "path": "actions.javascriptReturns.0.value", "equals": "2"}
+      ]
+    },
+    {
+      "id": "AC22",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://webscraper.io/test-sites/e-commerce/scroll/phones/touch",
+      "request": {"debug": true, "onlyMainContent": false, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "scroll", "direction": "down"}, {"type": "wait", "milliseconds": 2000}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".thumbnail\").length"}]},
+      "note": "Added 2026-10-03 after the second run (to bring the pages that need an interaction to ten reachable from this network: the-internet.herokuapp.com, AC02-AC04, did not load through the proxy and is unreachable direct), frozen before its first run. A second list that loads on scroll (phones).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-scroll", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
     }
   ]
 }

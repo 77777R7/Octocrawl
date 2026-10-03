@@ -31,14 +31,15 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'Challenge / block pages are success: false (Firecrawl often returns them as success markdown).',
   'A page with no main content is success: false (failed: empty_unverified) with the whole page in data.markdown as evidence; with onlyMainContent: false it is success: true.',
   'A page whose server HTML is a shell for data its scripts fill in is fetched again on the browser rung, and the rendered page is the answer when it holds more; otherwise the HTTP page is returned with client_rendered_suspected and low_content_yield warnings on the native response, whose messages /fc passes through as data.warning (one string, joined with a space), as it does every native warning. Firecrawl renders every page in a browser.',
-  'No fire-engine, proxy pools, actions or JSON extract.',
+  'No fire-engine, proxy pools or JSON extract.',
+  'actions (scrape only; a crawl\'s scrapeOptions.actions is refused) run on the local browser rung alone, which such a request selects, after load, stability and waitFor and before the formats are read: wait (milliseconds up to 60000, or a selector, waited for up to 60 s within the scrape\'s timeout), click (all: true clicks every match), write (into the focused element), press, scroll (one screen up or down, of the page or the element a selector names), screenshot, scrape, executeJavascript (a function body; return gives the value) and pdf; at most 50 steps. data.actions holds screenshots and pdfs as data: URIs (Firecrawl returns URLs), scrapes as { url, html } and javascriptReturns as { type, value }. A step that fails stops the steps after it: success is false with data.actions.failed naming the step, its code and message, and data.markdown is the page as it stood. A step that leads the page to a URL robots.txt or the egress policy refuses fails with navigation_refused and that page is not read. A hosted server refuses actions, and the cache is not used with them.',
   'An omitted maxAge reuses nothing: every page is fetched live unless the request sets maxAge above 0, minAge or lockdown (Firecrawl reuses its own index by default; its Python SDK sends maxAge 4 hours). A reused page is one W2L itself stored, under the same options, on this server (its task root), never a shared index; only a success is stored, and data.metadata says cacheState hit with cachedAt (its fetch time) or miss when one was looked up. lockdown with no stored result is HTTP 404 SCRAPE_LOCKDOWN_CACHE_MISS on scrape, and nothing is fetched; a crawl in lockdown needs sitemap skip, and each page with no stored result is failed with cache_miss. Mode authed neither stores nor reuses. A Firecrawl body never sets useCached, W2L\'s reuse of a crawl\'s own pages on resume.',
   'Omitted limit / maxDepth stay unbounded on a local server; a hosted server takes its crawl limit for an omitted or null limit and refuses a larger one. Firecrawl defaults are 10000 / 10.',
   'maxDepth counts link hops from the start URL (Firecrawl calls that maxDiscoveryDepth); Firecrawl maxDepth counts URL path depth.',
   'Crawl start is mapped onto native POST /v1/crawl; the shim itself returns 200 {success,id,url}.',
   'creditsUsed and expiresAt are null: W2L counts no credits and keeps crawl results until their task directory is deleted.',
   'Crawl status describes the latest attempt: completed counts its successful pages, total adds its failed, blocked and duplicate pages and, while this API process runs the crawl, the pages in flight and queued (null for a paused crawl); data lists the failed and blocked pages too (with metadata.error) but not the duplicates, whose content is an earlier entry\'s, up to 100 per response (limit 1 to 1000) with next carrying a W2L cursor; skip is rejected.',
-  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, maxAge, minAge, storeInCache, lockdown, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only), maxConcurrency, origin, integration and the same scrapeOptions (applied to every page). The formats are markdown, links, html, rawHtml, images, screenshot (also screenshot@fullPage, and { type: "screenshot", fullPage, quality, viewport }) and an { type: "attributes", selectors } entry; other formats and parameters the shim does not map (proxy, location, actions, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
+  'Scrape maps url, formats, onlyMainContent, includeTags, excludeTags, waitFor, timeout, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, maxAge, minAge, storeInCache, lockdown, actions, origin and integration; crawl maps url, limit (as maxPages), maxDepth, includePaths, excludePaths, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain (and its v1 name allowBackwardLinks), allowSubdomains, allowExternalLinks, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only), maxConcurrency, origin, integration and the same scrapeOptions (applied to every page). The formats are markdown, links, html, rawHtml, images, screenshot (also screenshot@fullPage, and { type: "screenshot", fullPage, quality, viewport }) and an { type: "attributes", selectors } entry; other formats and parameters the shim does not map (proxy, location, json, ...) are rejected by name with HTTP 400 and success: false; a refusal of stealth, proxy: stealth or enhanced, or ignoreRobotsTxt names the supported route in agent_hints.',
   'A crawl follows links inside the start URL\'s path subtree on its host and www twin by default (crawlEntireDomain false), folds /a and /a/, / and /index.html, www and apex, http and https into one page (deduplicateSimilarURLs true) and reports every collapsed or refused link in the native crawl status (discovery) and each page\'s trace (links_offered); allowSubdomains takes every host under the start URL\'s apex (no public-suffix list), allowExternalLinks every host, each page with its own robots.txt read.',
   'sitemap (default include, as in Firecrawl) reads the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, with the crawl\'s own http identity, robots.txt verdict, SSRF checks and proxy, and queues their URLs ahead of the start page\'s links under the same host, subtree, path and depth rules; only follows no page link; skip reads none. The native crawl status lists every sitemap file read, refused or unreadable in discovery.sitemap; the shim\'s status carries nothing of it, and sitemap fetches have no signed compliance record. maxConcurrency caps the pages one crawl fetches at once, at most the service\'s worker count (HTTP 400 above it), and never raises the per-host ceiling.',
   'screenshot (data.screenshot, a data:image/png;base64 string, or image/jpeg with quality 1 to 100) is captured on the local browser rung alone, which such a request selects (no http attempt; a server without a browser rung refuses the format with HTTP 400): after load, stability and waitFor, before the DOM is read, CSS-pixel sized at the declared 1280x800 viewport (device scale factor 2 is declared, not baked into the image) or at the viewport asked for (integers 320..1920 by 240..1080, within the declared screen; a window size, not a change of identity); fullPage captures the document\'s whole height at that width without scrolling first, so sections a page loads on scroll may show unloaded. A capture the browser could not make leaves data.screenshot null with a screenshot_unavailable warning while the page stands; a file or a page that was not rendered has null too. Firecrawl captures at its own viewport and may return a URL instead of the image.',
@@ -76,6 +77,17 @@ export interface FirecrawlPage {
   attributes?: Array<{ selector: string; attribute: string; values: string[] }>
   /** Present when a `screenshot` entry was asked for: the capture as a `data:image/png;base64,…` (or `image/jpeg`) string, as Firecrawl v1 clients read it; null when the browser rung rendered no page or could not capture it. */
   screenshot?: string | null
+  /**
+   * Present when the request ran `actions`: screenshots and PDFs as data: URIs, the HTML of each scrape step, each
+   * script's return, and the step that failed if one did.
+   */
+  actions?: {
+    screenshots: string[]
+    scrapes: Array<{ url: string; html: string }>
+    javascriptReturns: Array<{ type: string; value: unknown }>
+    pdfs: string[]
+    failed?: { index: number; type: string; code: string; message: string }
+  }
   /** The native `warnings` as one string, their messages joined with a space; present when the result has any. */
   warning?: string
   /** What to change about the request next time, one sentence each (the native `agentHints`); present when W2L has any. */
@@ -357,11 +369,14 @@ export function wrapJobWebhook(envelope: JobWebhookEnvelope, result: FetchResult
   }
 }
 
-/** The scrape options the shim maps: formats (markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage, an attributes entry and a screenshot entry), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, maxAge, minAge, storeInCache and lockdown; the native parser validates them. */
+/** The scrape options the shim maps: formats (markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage, an attributes entry and a screenshot entry), onlyMainContent, waitFor, timeout, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images, maxAge, minAge, storeInCache, lockdown and, on a scrape, actions; the native parser validates them. */
 function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, keys: readonly string[], problems: ShimProblems): Record<string, unknown> {
-  checkShimKeys(rec, prefix, [...keys, 'formats', 'parsers', 'parsePDF', ...SHIM_PAGE_OPTIONS], problems)
+  // actions are a scrape's: a crawl's scrapeOptions.actions is refused by name.
+  const takesActions = prefix === ''
+  checkShimKeys(rec, prefix, [...keys, 'formats', 'parsers', 'parsePDF', ...SHIM_PAGE_OPTIONS, ...(takesActions ? ['actions'] : [])], problems)
   const mapped: Record<string, unknown> = {}
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
+  if (takesActions && rec.actions !== undefined) mapped.actions = rec.actions
   mapped.parsers = shimParsers(rec.parsers, rec.parsePDF, prefix)
   if (rec.formats === undefined) return mapped
   const isTyped = (item: unknown): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).type === 'string'
@@ -515,6 +530,13 @@ function firecrawlPage(result: FetchResult, scrape?: ScrapeMetadata, agentHints?
     ...(result.attributes === undefined ? {} : { attributes: result.attributes.map((entry) => ({ selector: entry.selector, attribute: entry.attribute, values: [...entry.values] })) }),
     // The image as a data URI, which Firecrawl v1 clients read; null when it was asked for and there is none.
     ...(result.screenshot === undefined ? {} : { screenshot: result.screenshot === null ? null : `data:${result.screenshot.contentType};base64,${result.screenshot.base64}` }),
+    ...(result.actions === undefined ? {} : { actions: {
+      screenshots: result.actions.screenshots.map((shot) => `data:${shot.contentType};base64,${shot.base64}`),
+      scrapes: result.actions.scrapes.map((scrape) => ({ url: scrape.url, html: scrape.html })),
+      javascriptReturns: result.actions.javascriptReturns.map((value) => ({ type: value.type, value: value.value })),
+      pdfs: result.actions.pdfs.map((pdf) => `data:${pdf.contentType};base64,${pdf.base64}`),
+      ...(result.actions.failed === undefined ? {} : { failed: { ...result.actions.failed } }),
+    } }),
     ...(warning === undefined ? {} : { warning }),
     ...(agentHints === undefined || agentHints.length === 0 ? {} : { agent_hints: [...agentHints] }),
     metadata: {

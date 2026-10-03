@@ -42,7 +42,7 @@
     },
     "reason": {
       "description": "Why the status is what it is: the failure reason when status is failed, the block reason when blocked, the exhausted budget when budget_exceeded. Null for every other status.",
-      "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
+      "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "action_failed", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
     },
     "lane": {
       "description": "The lane that produced the result: http (W2L's own HTTP client), browser_local (a local headless Chromium), browser_local_authed (the same with the user's session), browser_proxy (a browser through the operator's egress) or provider (a third-party browser service).",
@@ -92,12 +92,19 @@
     "identity": {
       "description": "Who W2L said it was on the wire.",
       "$ref": "#/$defs/identity"
+    },
+    "pageActions": {
+      "description": "The request's actions that ran on the page before it was read, in order, with their outcome; null when the request had none. rawSha256 and outputSha256 are of the page as the steps left it, and scriptRan says when a script of the caller's ran in it, so its content may be the script's. Added to v1 with the interaction group: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "anyOf": [
+        { "$ref": "#/$defs/pageActions" },
+        { "type": "null" }
+      ]
     }
   },
   "allOf": [
     {
       "if": { "properties": { "status": { "const": "failed" } } },
-      "then": { "properties": { "reason": { "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss"] } } }
+      "then": { "properties": { "reason": { "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "action_failed"] } } }
     },
     {
       "if": { "properties": { "status": { "const": "blocked" } } },
@@ -274,6 +281,37 @@
             { "type": "array", "items": { "$ref": "#/$defs/requestHeader" } },
             { "type": "null" }
           ]
+        }
+      }
+    },
+    "pageActions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps", "scriptRan"],
+      "properties": {
+        "steps": {
+          "description": "The steps that ran, in the order given; a step that failed is the last.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/pageActionStep" }
+        },
+        "scriptRan": {
+          "description": "Whether an executeJavascript step ran in the page.",
+          "type": "boolean"
+        }
+      }
+    },
+    "pageActionStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "outcome"],
+      "properties": {
+        "type": {
+          "description": "The step's type.",
+          "enum": ["wait", "click", "write", "press", "scroll", "screenshot", "scrape", "executeJavascript", "pdf"]
+        },
+        "outcome": {
+          "description": "ok, or failed (the steps after it did not run).",
+          "enum": ["ok", "failed"]
         }
       }
     },

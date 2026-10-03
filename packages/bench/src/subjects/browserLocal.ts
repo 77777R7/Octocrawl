@@ -1,4 +1,4 @@
-import { estimateTokens, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, estimateTokens, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -24,6 +24,7 @@ import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -314,11 +315,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // tls_unverified warning.
     const robots: { overrideWarning: FetchWarning | null } = { overrideWarning: null }
     const tlsWarning: FetchWarning | null = options.skipTlsVerification === true ? tlsUnverifiedWarning(new URL(url).hostname) : null
+    // Set when the request's actions ran on the page: every result of this fetch then carries what they produced.
+    const ran: { actions?: ActionRun } = {}
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       return {
-        ...result,
+        ...withActions(result, ran.actions),
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
@@ -342,7 +345,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       cooldownWaitMs = permit.cooldownWaitMs
       if (permit.limitedByConcurrency) concurrencyWaitMs = permit.concurrencyWaitMs
       throwIfExecutionStopped(scope)
-      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) })
+      const result = await this.fetchWithinBudget(url, scope, (intervalMs, cooldownMs) => { queueMs += intervalMs; cooldownWaitMs += cooldownMs }, options, (applied) => { robots.overrideWarning = applied.warning; onRobotsOverride?.(applied) }, ran)
       if (result.retryAt !== undefined) this.scheduler.cooldown(origin, result.retryAt)
       return finish(result)
     } catch (error) {
@@ -361,7 +364,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
-  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void): Promise<FetchResult> {
+  private async fetchWithinBudget(url: string, execution: ExecutionContext, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, options: FetchOptions = {}, onRobotsOverride?: (applied: RobotsOverrideApplied) => void, ran: { actions?: ActionRun } = {}): Promise<FetchResult> {
     const signal = execution.signal
     const start = Date.now()
     const trace: TraceEvent[] = [{ at: 0, lane: 'browser_local', event: 'browser_start' }]
@@ -383,6 +386,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
     // matches, removed before the context closes.
     let requestRoute: ((route: Route) => Promise<void>) | null = null
     const routeMatch = '**/*'
+    // The navigation guard and popup closer of a request's actions, removed before the context closes (a managed profile's outlives the fetch).
+    let actionsRoute: ((route: Route) => Promise<void>) | null = null
+    let popupCloser: ((opened: Page) => void) | null = null
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -822,7 +828,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
         rateLimit: { previousRequestAtMs, observedDelayMs, requiredDelayMs, compliant, recentSameHostCount: attemptCount },
         access: this.access,
       }), identity, headerGate)
-      if (file !== null) return file
+      if (file !== null) {
+        // A file has no page to run steps on: they are reported as not run, never skipped silently.
+        if (options.actions !== undefined && options.actions.length > 0) ran.actions = stepsNotRun(options.actions, `the URL answered a file (${file.evidence.contentType ?? 'unknown type'}), which has no page to run steps on`)
+        return file
+      }
       // waitFor: the caller's extra wait after load and stability. It counts
       // toward the scrape's deadline; when the deadline would end it, the
       // wait stops early enough to capture the page as it is then, and that
@@ -839,6 +849,54 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
       if (deniedResources > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_resources_denied', detail: { count: deniedResources } })
       if (adsBlocked > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'ads_blocked', detail: { count: adsBlocked, hosts: [...adHostsBlocked] } })
+      // The request's actions: after load, stability and waitFor, before the
+      // screenshot format and the DOM are read, so both show the page the
+      // steps left. While they run and until the page is read, a navigation
+      // of the main frame goes through robots.txt and the egress policy as
+      // the requested URL did, before its request is sent: one W2L does not
+      // fetch is stopped there, and the page stays where it was.
+      const refusedNavigations: { url: string; reason: string }[] = []
+      // A URL the caller recorded a robots override for is fetched as the requested URL was.
+      const overriddenUrl = options.robotsOverride === undefined ? null : url
+      if (options.actions !== undefined && options.actions.length > 0) {
+        const own = page
+        // On the context, so a window a step opens is guarded as the page is; such a window is closed at once.
+        actionsRoute = async (route) => {
+          const request = route.request()
+          if (!request.isNavigationRequest()) return route.fallback()
+          // A new window's first navigation comes before its frame exists (Playwright throws for it): it is a main frame's.
+          let frame: ReturnType<typeof request.frame> | null = null
+          try { frame = request.frame() } catch { frame = null }
+          if (frame !== null && frame !== frame.page().mainFrame()) return route.fallback()
+          const reason = await this.refuseNavigation(request.url(), identity, execution, relaxedRoutes, overriddenUrl).catch((error: unknown) => `it could not be checked (${error instanceof Error ? error.message.slice(0, 120) : String(error)})`)
+          if (reason === null) return route.fallback()
+          refusedNavigations.push({ url: request.url(), reason })
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: request.url(), reason } })
+          // 204 No Content: the browser stays on the page it has (an aborted navigation would show its own error page instead).
+          return route.fulfill({ status: 204, body: '' })
+        }
+        await context.route(routeMatch, actionsRoute)
+        popupCloser = (opened) => {
+          if (opened === own) return
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'popup_closed', detail: { url: opened.url() } })
+          void opened.close().catch(() => {})
+        }
+        context.on('page', popupCloser)
+        ran.actions = await runPageActions(options.actions, {
+          page,
+          execution,
+          trace,
+          at: () => Date.now() - start,
+          settle: async (maxMs) => { if (maxMs > 0) await settle(maxMs) },
+          reserveMs: CAPTURE_RESERVE_MS,
+          deviceScaleFactor: fingerprint.deviceScaleFactor,
+          viewport: page.viewportSize() ?? window.viewport,
+          takeRefusedNavigation: () => refusedNavigations.shift() ?? null,
+          refuseLanded: (landed) => this.refuseNavigation(landed, identity, execution, relaxedRoutes, overriddenUrl),
+          loadedDocuments: () => documents.loaded,
+        })
+        throwIfExecutionStopped(execution)
+      }
       // The screenshot format: the page as it stands after load, stability
       // and waitFor, before the DOM is read below, so the image and the
       // capture show the same page. It goes on whatever the rendered page
@@ -888,6 +946,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
           await assertSafeUrl(finalUrl, this.networkPolicy)
         } catch (err) {
           return this.denied(url, start, trace, err)
+        }
+      }
+      if (ran.actions !== undefined) {
+        // A navigation stopped after the last step (a late script redirect) is the steps' too.
+        const late = refusedNavigations.shift()
+        const last = options.actions!.length - 1
+        if (late !== undefined && ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
+        // Documents the page loaded after the steps were checked (a late redirect the guard does not see) are checked as the steps' were:
+        // a refused one means the page read now may be it, so nothing is read. A redirect of the requested URL is the fetch's, and
+        // pushState loads no document.
+        for (const loadedUrl of documents.loaded.slice(ran.actions.checkedDocuments)) {
+          const landed = await this.refuseNavigation(loadedUrl, identity, execution, relaxedRoutes, overriddenUrl)
+          if (landed === null) continue
+          trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: loadedUrl, reason: landed } })
+          if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which W2L does not fetch (${landed}); it is not read` }
+          return this.notRead(url, start, trace, finalUrl)
         }
       }
       if (!steady || body === null) return this.keptNavigating(url, start, trace, documents, finalUrl, attemptCount)
@@ -1196,6 +1270,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // of a page that keeps navigating paused in the handler, and a close
       // that waited for it would not end (the refresh-loop case).
       if (context !== undefined && requestRoute !== null) await context.unroute(routeMatch, requestRoute).catch(() => {})
+      if (context !== undefined && actionsRoute !== null) await context.unroute(routeMatch, actionsRoute).catch(() => {})
+      if (context !== undefined && popupCloser !== null) context.off('page', popupCloser)
       if (context !== this.managedContext && context !== undefined) await closeWithin(context.close(), PAGE_CLOSE_MS)
       await relaxedRoutes?.close()
     }
@@ -1350,6 +1426,41 @@ export class BrowserLocalSubject implements SubjectAdapter {
     }
   }
 
+  /** Why W2L would not fetch this URL as a navigation of the page (the egress policy, robots.txt under the page's identity), or null when it would. */
+  private async refuseNavigation(target: string, identity: { respectsRobots: boolean; userAgent: string }, execution: ExecutionContext, relaxedRoutes: EgressRoutes | null, overridden: string | null = null): Promise<string | null> {
+    if (!/^https?:/i.test(target)) return null
+    try {
+      await assertSafeUrl(target, this.networkPolicy)
+    } catch (error) {
+      return `the egress policy refuses it: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`
+    }
+    if (!identity.respectsRobots || target === overridden) return null
+    const lookup = await this.robotsCache.lookup(target, identity.userAgent, execution, relaxedRoutes === null ? undefined : (to) => relaxedRoutes.dispatcherFor(to))
+    const verdict = this.robotsCache.decision(lookup, target, identity.userAgent)
+    if (verdict.decision !== 'disallowed') return null
+    return verdict.unreachable === undefined ? `robots.txt (${verdict.robotsUrl}) disallows it` : `its robots.txt could not be read (${verdict.unreachable})`
+  }
+
+  /** A page the steps left at a URL W2L does not fetch: nothing of it is read, and the actions say why. */
+  private notRead(url: string, start: number, trace: TraceEvent[], finalUrl: string): FetchResult {
+    return {
+      requestedUrl: url,
+      status: 'failed',
+      failureReason: 'action_failed',
+      blockReason: null,
+      budgetExceeded: null,
+      lane: 'browser_local',
+      escalations: [],
+      markdown: null,
+      truncated: false,
+      truncatedAt: null,
+      compliance: null,
+      evidence: { finalUrl, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: null },
+      trace,
+    }
+  }
+
   private denied(
     url: string,
     start: number,
@@ -1480,4 +1591,27 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.browserPromise = null
     await this.robotsCache.teardown()
   }
+}
+
+/**
+ * A result of a fetch that ran the request's actions: what they produced,
+ * and their files among the evidence's artifacts. When a step failed, a page
+ * read as content is `failed` with `action_failed`, its content kept as the
+ * page stood: it is not the page the steps were to reach. A page that was
+ * not content anyway (blocked, failed) keeps its own verdict.
+ */
+function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResult {
+  if (ran === undefined) return result
+  const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)
+  return {
+    ...result,
+    actions: ran.result,
+    ...(failed ? { status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null } : {}),
+    evidence: { ...result.evidence, artifacts: [...result.evidence.artifacts, ...ran.artifacts] },
+  }
+}
+
+/** Steps that could not run on the page at all, reported as the first one failing. */
+function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
+  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0 }
 }

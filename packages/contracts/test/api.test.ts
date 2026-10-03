@@ -293,7 +293,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, actions: [], location: {} })).toThrow('unsupported parameters: actions, location')
+    expect(() => parseScrapeRequest({ url, location: {}, zeroDataRetention: true })).toThrow('unsupported parameters: location, zeroDataRetention')
     expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
   })
@@ -439,7 +439,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
     const url = 'https://example.com/'
-    expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
+    expect(thrown(() => parseScrapeRequest({ url, location: {}, proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['location', 'proxy'] } })
     expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
     expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'changeTracking' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'changeTracking'] } })
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
@@ -516,7 +516,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'stealth' }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
     expect(thrown(() => parseCrawlStartRequest({ url, proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
     expect((thrown(() => parseScrapeRequest({ url, proxy: 'basic' })) as RequestError).agentHints).toBeUndefined()
-    expect((thrown(() => parseScrapeRequest({ url, actions: [] })) as RequestError).agentHints).toBeUndefined()
+    expect((thrown(() => parseScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
+    // A crawl or a map takes no actions; the refusal names where they run.
+    expect(thrown(() => parseCrawlStartRequest({ url, actions: [{ type: 'scrape' }] }))).toMatchObject({ details: { parameters: ['actions'] }, agentHints: [REFUSAL_HINTS.actions] })
     expect(refusalHint('scrapeOptions.proxy', 'stealth')).toBe(REFUSAL_HINTS.stealth)
     expect(refusalHint('scrapeOptions.location', {})).toBeNull()
     // The 429 answer is not a request error: its code stays outside the set, and its body names the wait.
@@ -624,5 +626,64 @@ describe('parseMapRequest', () => {
     for (const timeout of [999, 300_001, 1_500.5, '60000']) expect(() => parseMapRequest({ url, timeout }), String(timeout)).toThrow(/^timeout must be an integer number of milliseconds from 1000 to 300000$/)
     expect(() => parseMapRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
     expect(() => parseMapRequest({})).toThrow('url is required')
+  })
+})
+
+describe('actions', () => {
+  const url = 'https://example.com/'
+  it('takes Firecrawl\'s steps on scrape and batch, as given', () => {
+    const actions = [
+      { type: 'wait', milliseconds: 1000 },
+      { type: 'click', selector: ' li.next > a ' },
+      { type: 'wait', selector: '.quote' },
+      { type: 'write', text: 'firecrawl' },
+      { type: 'press', key: 'Enter' },
+      { type: 'scroll', direction: 'up', selector: '#feed' },
+      { type: 'scroll' },
+      { type: 'screenshot', fullPage: true, quality: 80 },
+      { type: 'scrape' },
+      { type: 'executeJavascript', script: 'return document.title' },
+      { type: 'pdf', format: 'A4', landscape: true, scale: 0.8 },
+      { type: 'click', selector: '.more', all: true },
+    ]
+    expect(parseScrapeRequest({ url, actions }).actions).toEqual([
+      { type: 'wait', milliseconds: 1000 },
+      { type: 'click', selector: 'li.next > a' },
+      { type: 'wait', selector: '.quote' },
+      { type: 'write', text: 'firecrawl' },
+      { type: 'press', key: 'Enter' },
+      { type: 'scroll', direction: 'up', selector: '#feed' },
+      { type: 'scroll', direction: 'down' },
+      { type: 'screenshot', fullPage: true, quality: 80 },
+      { type: 'scrape' },
+      { type: 'executeJavascript', script: 'return document.title' },
+      { type: 'pdf', format: 'A4', landscape: true, scale: 0.8 },
+      { type: 'click', selector: '.more', all: true },
+    ])
+    expect(parseBatchStartRequest({ urls: [url], actions: [{ type: 'scrape' }] }).actions).toEqual([{ type: 'scrape' }])
+    expect(parseScrapeRequest({ url }).actions).toBeUndefined()
+  })
+
+  it('refuses a malformed step by its index before anything is fetched', () => {
+    expect(() => parseScrapeRequest({ url, actions: [] })).toThrow('actions must be an array of 1 to 50 steps')
+    expect(() => parseScrapeRequest({ url, actions: Array.from({ length: 51 }, () => ({ type: 'scrape' })) })).toThrow('1 to 50 steps')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrape' }, { type: 'hover', selector: 'a' }] })).toThrow('actions[1].type must be one of wait, click, write, press, scroll, screenshot, scrape, executeJavascript, pdf')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait' }] })).toThrow('actions[0]: wait takes milliseconds or a selector, one of them')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 500, selector: 'a' }] })).toThrow('one of them')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 60_001 }] })).toThrow('actions[0].milliseconds must be an integer number of milliseconds from 1 to 60000')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'click' }] })).toThrow('actions[0].selector must be a CSS selector of 1 to 200 characters')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'click', selector: 'a', text: 'x' }] })).toThrow('actions[0]: click takes no text')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scroll', direction: 'left' }] })).toThrow('actions[0].direction must be up or down')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'executeJavascript', script: ' ' }] })).toThrow('actions[0].script')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'pdf', format: 'B5' }] })).toThrow('actions[0].format must be one of')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'pdf', scale: 3 }] })).toThrow('actions[0].scale must be a number from 0.1 to 2')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
+    expect(() => parseScrapeRequest({ url, mobile: true, actions: [{ type: 'screenshot', viewport: { width: 1280, height: 800 } }] })).toThrow('not within the declared mobile screen')
+  })
+
+  it('a page after actions is never stored or answered from the cache', () => {
+    expect(() => parseScrapeRequest({ url, maxAge: 60_000, actions: [{ type: 'scrape' }] })).toThrow('the cache is not available with actions')
+    expect(() => parseScrapeRequest({ url, storeInCache: true, actions: [{ type: 'scrape' }] })).toThrow('the cache is not available with actions')
+    expect(parseScrapeRequest({ url, maxAge: 0, storeInCache: false, actions: [{ type: 'scrape' }] }).actions).toHaveLength(1)
   })
 })

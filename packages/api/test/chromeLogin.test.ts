@@ -6,11 +6,11 @@ import { FileSessionStore } from '@w2l/bench'
 import { ChromeLoginError, chromeEndpoint, chromeUserDataDir, cookiesForDomain, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin, type CdpConnection } from '../src/chromeLogin.js'
 
 const COOKIES = [
-  { name: '__Host-sid', value: 'v1', domain: 'www.example.com', path: '/', expires: -1, httpOnly: true, secure: true, session: true, sameSite: 'Lax' as const },
-  { name: 'pref', value: 'v2', domain: '.example.com', path: '/', expires: 1893456000, httpOnly: false, secure: false },
-  { name: 'api', value: 'v3', domain: 'api.www.example.com', path: '/', expires: 1893456000, httpOnly: false, secure: true },
-  { name: 'other', value: 'v4', domain: '.notexample.com', path: '/', expires: -1, httpOnly: false, secure: false },
-  { name: 'tracker', value: 'v5', domain: '.com', path: '/', expires: -1, httpOnly: false, secure: false },
+  { name: '__Host-sid', value: 'cookie-value-1', domain: 'www.example.com', path: '/', expires: -1, httpOnly: true, secure: true, session: true, sameSite: 'Lax' as const },
+  { name: 'pref', value: 'cookie-value-2', domain: '.example.com', path: '/', expires: 1893456000, httpOnly: false, secure: false },
+  { name: 'api', value: 'cookie-value-3', domain: 'api.www.example.com', path: '/', expires: 1893456000, httpOnly: false, secure: true },
+  { name: 'other', value: 'cookie-value-4', domain: '.notexample.com', path: '/', expires: -1, httpOnly: false, secure: false },
+  { name: 'tracker', value: 'cookie-value-5', domain: '.com', path: '/', expires: -1, httpOnly: false, secure: false },
 ]
 
 function fakeChrome(cookies = COOKIES) {
@@ -63,11 +63,11 @@ describe('w2l login import from the user\'s Chrome', () => {
     expect(saved?.vendor).toBe('browser_local_authed')
     expect(saved?.attestedAt).toBe('2026-10-03T09:00:00.000Z')
     expect(saved?.cookies?.map((c) => c.name)).toEqual(['__Host-sid', 'pref', 'api'])
-    expect(saved?.cookies?.[0]).toEqual({ name: '__Host-sid', value: 'v1', domain: 'www.example.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' })
+    expect(saved?.cookies?.[0]).toEqual({ name: '__Host-sid', value: 'cookie-value-1', domain: 'www.example.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' })
     expect(saved?.cookies?.[1]?.expires).toBe(1893456000)
     // Readable by the user alone, and the import printed no cookie value.
     if (process.platform !== 'win32') expect((await stat(sessionsFile)).mode & 0o777).toBe(0o600)
-    expect(JSON.stringify(imported)).not.toMatch(/v1|v2|v3/)
+    expect(JSON.stringify(imported)).not.toMatch(/cookie-value-/)
   })
 
   it('a site Chrome holds no cookies for is refused with what to do, and nothing is saved', async () => {
@@ -84,7 +84,7 @@ describe('w2l login import from the user\'s Chrome', () => {
     const listed = await listSavedLogins(sessionsFile)
     expect(listed).toHaveLength(1)
     expect(listed[0]).toMatchObject({ domain: 'example.com', cookieCount: 3 })
-    expect(JSON.stringify(listed)).not.toMatch(/v1|v2|v3/)
+    expect(JSON.stringify(listed)).not.toMatch(/cookie-value-/)
     expect(await removeSavedLogin(sessionsFile, 'https://example.com/')).toBe(true)
     expect(await removeSavedLogin(sessionsFile, 'example.com')).toBe(false)
     expect(await listSavedLogins(sessionsFile)).toEqual([])

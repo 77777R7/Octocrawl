@@ -63,6 +63,8 @@ export class MainFrameDocuments {
    * have read a document that is gone.
    */
   loads = 0
+  /** The URL of every document the main frame loaded, in order (as `loads` counts them): what a navigation check has to see, one by one. */
+  readonly loaded: string[] = []
 
   constructor(private readonly page: Page) {
     page.on('response', response => this.onResponse(response))
@@ -140,7 +142,10 @@ export class MainFrameDocuments {
       entry = { url, response: null, kind: 'unanswered' }
     }
     this.current = entry
-    if (entry.kind === 'document' || entry.kind === 'unanswered') this.loads++
+    if (entry.kind === 'document' || entry.kind === 'unanswered') {
+      this.loads++
+      this.loaded.push(url)
+    }
     if (this.entries.length >= MAX_REDIRECT_CHAIN) {
       this.entries.splice(1, 1)
       this.dropped = true
