@@ -77,6 +77,7 @@ export function toEvidenceRecord(
     lane: result.lane,
     robotsDecision: robotsDecision(result),
     rawSha256: evidence.rawBodySha256 ?? null,
+    contentEncoding: evidence.contentEncoding ?? null,
     outputSha256: {
       markdown: typeof output.markdown === 'string' ? sha256Utf8(output.markdown) : null,
       json: output.json === undefined || output.json === null || output.json.data === null ? null : sha256Utf8(canonicalJson(output.json.data as JsonValue)),
