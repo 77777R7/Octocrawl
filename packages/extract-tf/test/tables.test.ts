@@ -62,6 +62,33 @@ describe('htmlToTables', () => {
     expect(htmlToTables(`<table><tr><td colspan="1000">${'\u0001'.repeat(1000)}</td></tr><tr><td>y</td></tr></table>`)[0]!.omitted).toBe('too_large')
   })
 
+  it('counts the empty cells that pad every row to the widest in a table\'s size', () => {
+    // 380 KB of HTML: one wide empty row over 20,000 one-cell rows pads to 20,001 rows of 1,000 cells (60 MB of JSON).
+    const padded = `<table><tr><td colspan="1000"></td></tr>${'<tr><td>y</td></tr>'.repeat(20_000)}</table>`
+    const next = '<table><tr><td>k</td><td>v</td></tr><tr><td>1</td><td>2</td></tr></table>'
+    const html = padded + next
+    const tables = htmlToTables(html)
+    expect(tables[0]).toEqual({ tableIndex: 0, caption: null, headerRows: 0, rows: [], omitted: 'too_large' })
+    expect(tables[1]).toMatchObject({ tableIndex: 1, rows: [['k', 'v'], ['1', '2']] })
+    expect(tables).toHaveLength(gfmTables(htmlToMarkdown(html)))
+    // The padding counts against the page's budget too: ten tables each just under the cap cannot all be given.
+    const near = `<table><tr><td colspan="1000"></td></tr>${'<tr><td>y</td></tr>'.repeat(600)}</table>`
+    const many = htmlToTables(near.repeat(10))
+    expect(many.filter((table) => table.omitted === undefined).length).toBeLessThanOrEqual(Math.floor(MAX_PAGE_TABLE_CHARS / (3 * 1000 * 600)))
+    expect(JSON.stringify(many).length).toBeLessThan(4 * MAX_PAGE_TABLE_CHARS)
+  })
+
+  it('keeps its indexes when the Markdown writes a table too large to pad unpadded', () => {
+    // One wide empty row over 2,000 one-cell rows: the GFM grid would add 2 million empty cells.
+    const html = `<table><tr><td colspan="1000"></td></tr>${'<tr><td>y</td></tr>'.repeat(2_000)}</table>` +
+      '<table><tr><td>k</td><td>v</td></tr><tr><td>1</td><td>2</td></tr></table>'
+    const markdown = htmlToMarkdown(html)
+    expect(markdown.length).toBeLessThan(html.length)
+    const tables = htmlToTables(html)
+    expect(tables).toHaveLength(gfmTables(markdown))
+    expect(tables[1]).toMatchObject({ tableIndex: 1, rows: [['k', 'v'], ['1', '2']] })
+  })
+
   it('leaves out what the Markdown leaves out: excluded elements and empty tables', () => {
     const html = '<table class="ads"><tr><td>a</td></tr><tr><td>b</td></tr></table><table><tr></tr><tr></tr></table><table><tr><td>x</td></tr><tr><td>y</td></tr></table>'
     expect(htmlToTables(html, { exclude: ['.ads'] }).map((table) => [table.tableIndex, table.rows])).toEqual([[0, [['x'], ['y']]]])
