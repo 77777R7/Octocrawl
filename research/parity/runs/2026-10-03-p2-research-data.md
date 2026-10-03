@@ -47,7 +47,7 @@ The three tables that are not equal in every cell:
 - **pandas' extra tables** on TB04 and TB07 are one-row and one-cell tables, which W2L does not count as data tables (documented).
 
 What this does not show:
-- After this run, the review found that a span repeated into every slot let a small page make a huge CSV. The fix in `b9761a5` caps spans as browsers do and gives a table over 2,000,000 characters as `omitted: "too_large"`. It is unit-tested (the test fails without the fix) and was not run live. None of the 28 tables here comes near either limit; the largest is 223×4.
+- After this run, the review found that a span repeated into every slot let a small page make a huge CSV. The fix in `b9761a5` caps spans as browsers do and gives a table over 2,000,000 characters as `omitted: "too_large"`; `c924b81` adds one budget of 5,000,000 characters for all of a page's tables and counts each cell's CSV and JSON escaping. Both are unit-tested, each test failing without its fix, (the test fails without the fix) and was not run live. None of the 28 tables here comes near either limit; the largest is 223×4.
 - Captions came only from `<caption>`. GOV.UK writes its table titles as a bold paragraph above each table, so its 9 tables have `caption: null`, as documented.
 - `onlyMainContent: false`, batch items, crawl pages and the provider lane are covered by fixture tests (`packages/api/test/tables.test.ts`, `packages/extract-tf/test/tables.test.ts`). They were not run live.
 
