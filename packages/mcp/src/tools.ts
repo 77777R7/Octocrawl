@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -30,6 +30,10 @@ const PAGE_OPTION_PROPERTIES = {
   fastMode: { type: 'boolean', description: 'http lane only, no browser escalation: a page that needs script execution returns the http lane\'s verdict (a shell is failed/empty_unverified, never rendered). Default false.' },
   blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
   removeBase64Images: { type: 'boolean', description: 'Leave an image whose src is a data: URI out of the Markdown, keeping its alt text (default true, Firecrawl\'s default). false keeps it as ![alt](data:…), which contentTokens then counts. html and rawHtml are never rewritten.' },
+  maxAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse a stored result of this page fetched at most this many milliseconds ago with the same options, instead of fetching it. Default 0: nothing is reused, the page is fetched live. A reused result says metadata.cacheState "hit" (cacheState on a crawl page or batch item) with cachedAt, its fetch time, and carries that fetch\'s evidenceRecord unchanged; a page looked up and not found says "miss". Not in mode authed.' },
+  minAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse only a stored result at least this many milliseconds old (at most maxAge; without maxAge, any age from this one on).' },
+  storeInCache: { type: 'boolean', description: 'Store this page\'s result for later reuse when it succeeds. Default true; mode authed never stores.' },
+  lockdown: { type: 'boolean', description: 'Cache only: answer from a stored result and never fetch the page; one with none is failed with cache_miss. A crawl in lockdown needs sitemap "skip".' },
 } as const
 /** A crawl's or batch's webhook: a URL string or the configuration object; the native parser checks it, the engine's mode decides what the URL may be. */
 const WEBHOOK_PROPERTY = {
@@ -407,6 +411,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       includeTags: req.includeTags,
       excludeTags: req.excludeTags,
       ...executionOptions(req),
+      ...cacheOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
       ...integrationOf(req),
     }, request)
@@ -446,6 +451,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       includeTags: req.includeTags,
       excludeTags: req.excludeTags,
       ...executionOptions(req),
+      ...cacheOptions(req),
       ...integrationOf(req),
     }, request)
   }
@@ -477,7 +483,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)
@@ -546,6 +552,16 @@ function executionOptions(req: Pick<PageOptions, 'headers' | 'mobile' | 'skipTls
     ...(req.fastMode === undefined ? {} : { fastMode: req.fastMode }),
     ...(req.blockAds === undefined ? {} : { blockAds: req.blockAds }),
     ...(req.removeBase64Images === undefined ? {} : { removeBase64Images: req.removeBase64Images }),
+  }
+}
+
+/** The cache options of a parsed request, those that were set: maxAge, minAge, storeInCache and lockdown. */
+function cacheOptions(req: CacheOptions): CacheOptions {
+  return {
+    ...(req.maxAge === undefined ? {} : { maxAge: req.maxAge }),
+    ...(req.minAge === undefined ? {} : { minAge: req.minAge }),
+    ...(req.storeInCache === undefined ? {} : { storeInCache: req.storeInCache }),
+    ...(req.lockdown === undefined ? {} : { lockdown: req.lockdown }),
   }
 }
 

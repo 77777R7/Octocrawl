@@ -27,7 +27,7 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { browserFingerprintFor, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
+import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
 import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
@@ -1082,6 +1082,7 @@ export function scrapeResponseMetadata(run: ScrapeRun, scrapeId: string): Scrape
     proxyUsed: proxyUsedOf(run),
     timezone: timezoneOf(run),
     ...concurrencySignal(run.summary),
+    ...cacheStateOf(run.trace),
   }
 }
 

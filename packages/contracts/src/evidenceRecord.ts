@@ -108,6 +108,27 @@ export interface EvidenceIdentity {
   mode: CrawlMode
   /** The contact the User-Agent declares (research mode with `W2L_CONTACT`); null when none. */
   contact: string | null
+  /**
+   * The device the answering lane's identity declared (`mobile` for a
+   * request with `mobile: true`); null when W2L sent no request for the page,
+   * in mode `research` (a bot declares no device) or when the lane recorded
+   * none (the provider lane). Added to v1 (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  device: 'desktop' | 'mobile' | null
+  /**
+   * The caller's custom headers (`headers`) the answering lane sent, names
+   * lower-cased and sorted, with their values; empty when it sent none; null
+   * when W2L sent no request for the page. Credentials and identity headers
+   * are refused before a request, so none is listed. Added to v1
+   * (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  requestHeaders: readonly EvidenceRequestHeader[] | null
+}
+
+/** One custom request header as sent. */
+export interface EvidenceRequestHeader {
+  name: string
+  value: string
 }
 
 export interface EvidenceRecord {
@@ -151,7 +172,8 @@ export const EVIDENCE_RECORD_KEYS = {
   extractor: keysOf<EvidenceExtractor>()(['name', 'version', 'commit']),
   fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
   artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256', 'bytes', 'contentType']),
-  identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact']),
+  identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact', 'device', 'requestHeaders']),
+  requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'value']),
 } as const
 
 /**
@@ -160,4 +182,5 @@ export const EVIDENCE_RECORD_KEYS = {
  */
 export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
   artifact: ['bytes', 'contentType'],
+  identity: ['device', 'requestHeaders'],
 }

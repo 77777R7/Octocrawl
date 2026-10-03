@@ -27,6 +27,12 @@ export interface ScrapeOutcome {
   links: readonly string[]
   audit?: LadderRunAudit
   crawlDelayMs?: number | null
+  /**
+   * True when the result is a stored one the cache answered with: nothing
+   * was fetched, so the page costs no fetch and says nothing new about its
+   * host's robots.txt (its Crawl-delay is left as it was).
+   */
+  cached?: boolean
 }
 
 /**
@@ -283,7 +289,12 @@ export interface CrawlPage {
   usage?: import('./result.js').ResourceUsage | null
   trace: readonly TraceEvent[]
   audit?: LadderRunAudit
+  /** True when the page was not fetched in this attempt: a stored result was reused (the cache, or a resume's own pages). */
   cached: boolean
+  /** Whether the cache answered, as on a scrape response's `metadata`: present when the task looked pages up (`maxAge`, `minAge`, `lockdown`). */
+  cacheState?: 'hit' | 'miss'
+  /** On a hit, when the reused result was fetched (its `evidenceRecord.fetchedAt`). */
+  cachedAt?: string
   contentHash: string | null
   createdAt: string
   updatedAt: string

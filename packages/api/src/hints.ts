@@ -144,6 +144,9 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
     const hint = robotsHint(result, host) ?? egressHint(result, host)
     if (hint !== null) hints.push(hint)
   }
+  if (result.status === 'failed' && result.failureReason === 'cache_miss') {
+    hints.push('lockdown answers from stored results only and none of this page fits the request (same options, within maxAge and minAge); send it without lockdown to fetch the page')
+  }
   if (result.status === 'blocked' && result.blockReason === 'login_wall') {
     hints.push('the page asks for a login; W2L does not create accounts; use mode authed with your own session')
   }

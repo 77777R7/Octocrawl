@@ -38,6 +38,7 @@ import {
   wrapCrawlStatus,
   wrapMap,
   wrapScrape,
+  isLockdownCacheMiss,
   type ScrapeResponse,
 } from '@w2l/contracts'
 
@@ -485,7 +486,10 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.post('/fc/v1/scrape', async (c) => {
     const req = parseFirecrawlScrapeRequest(await c.req.json())
     // A client disconnect cancels the scrape, as on native /v1/scrape.
-    return c.json(wrapScrape(await engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal }) as ScrapeResponse), 200)
+    const response = await engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal }) as ScrapeResponse
+    // Firecrawl answers a cache-only miss with 404; nothing was fetched.
+    if (isLockdownCacheMiss(response)) return c.json({ success: false, error: 'lockdown: no stored result of this page fits the request, so nothing was fetched', code: 'SCRAPE_LOCKDOWN_CACHE_MISS' }, 404)
+    return c.json(wrapScrape(response), 200)
   })
 
   app.post('/fc/v1/crawl', async (c) => {

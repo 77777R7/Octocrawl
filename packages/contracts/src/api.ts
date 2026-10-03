@@ -9,7 +9,7 @@ import { BROWSER_FINGERPRINT, browserFingerprintFor, type CrawlMode, type Robots
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport, SitemapMode } from './crawl.js'
 import { SITEMAP_MODES } from './crawl.js'
 import type { FetchOptions } from './execution.js'
-import type { FetchResult, FetchWarning, LadderRunAudit } from './result.js'
+import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
@@ -50,6 +50,61 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
    * the browser lane refuses it with HTTP 400.
    */
   fastMode?: boolean
+  /**
+   * Reuse a stored result of this page fetched at most this many
+   * milliseconds ago, under the same options, instead of fetching it; 0 to
+   * MAX_CACHE_AGE_MS. Default 0: nothing is looked up and the page is
+   * fetched. A reused result says so (`cacheState: "hit"`, `cachedAt`) and
+   * carries the original fetch's evidence; a looked-up page that had none
+   * says `miss`. Not available in mode `authed`.
+   */
+  maxAge?: number
+  /**
+   * Reuse only a stored result at least this many milliseconds old; 0 to
+   * MAX_CACHE_AGE_MS, at most `maxAge`. Without `maxAge` it looks up a
+   * result of any age from this one on.
+   */
+  minAge?: number
+  /** Store this page's result for later reuse when it succeeds. Default true; mode `authed` never stores. */
+  storeInCache?: boolean
+  /**
+   * Cache only: answer from a stored result and never fetch; a page with
+   * none is `failed` with `cache_miss`. `maxAge` and `minAge` still bound
+   * the age when given; `maxAge: 0` contradicts it. A crawl in this mode
+   * reads no sitemap, so it needs `sitemap: "skip"`.
+   */
+  lockdown?: boolean
+}
+
+/** The largest `maxAge` or `minAge` a request may set: ten years in milliseconds. */
+export const MAX_CACHE_AGE_MS = 315_360_000_000
+
+/** The cache options of a request, as PageOptions names them. */
+export type CacheOptions = Pick<PageOptions, 'maxAge' | 'minAge' | 'storeInCache' | 'lockdown'>
+
+/**
+ * Whether a request looks a page up in the cache: a `maxAge` above 0, a
+ * `minAge` or `lockdown`, unless `maxAge` is 0. Otherwise nothing is looked
+ * up, and the result carries no `cacheState`.
+ */
+export function cacheLookupRequested(options: CacheOptions): boolean {
+  // `maxAge: 0` is the explicit bypass, whatever else is set.
+  if (options.maxAge === 0) return false
+  return options.maxAge !== undefined || options.minAge !== undefined || options.lockdown === true
+}
+
+/**
+ * What the cache did for a result, read from its trace: `hit` with the
+ * reused fetch's time after a `cache_hit` event, `miss` after a
+ * `cache_miss` event, nothing when the cache was not asked. The last such
+ * event decides.
+ */
+export function cacheStateOf(trace: readonly TraceEvent[]): Pick<ScrapeMetadata, 'cacheState' | 'cachedAt'> {
+  const event = [...trace].reverse().find((item) => item.event === 'cache_hit' || item.event === 'cache_miss')
+  if (event === undefined) return {}
+  if (event.event === 'cache_miss') return { cacheState: 'miss' }
+  const cachedAt = event.detail?.cachedAt
+  return { cacheState: 'hit', ...(typeof cachedAt === 'string' ? { cachedAt } : {}) }
 }
 
 /** The caveats a scrape response may carry for an agent: what to change about the request, in one sentence each. */
@@ -95,6 +150,15 @@ export interface ScrapeMetadata {
   concurrencyLimited: boolean
   /** Milliseconds the attempts of this scrape waited on that ceiling, cooldown and pacing excluded; 0 when none did. */
   concurrencyQueueDurationMs: number
+  /**
+   * Whether the cache answered: `hit` when a stored result was reused (the
+   * rest of the response is that fetch's), `miss` when one was looked up
+   * and none fit. Absent when nothing was looked up (no `maxAge` above 0,
+   * no `minAge`, no `lockdown`): never a guessed `miss`.
+   */
+  cacheState?: 'hit' | 'miss'
+  /** On a hit, when the reused result was fetched (its `evidenceRecord.fetchedAt`). Absent otherwise. */
+  cachedAt?: string
 }
 
 /** A scrape response's `metadata`: the page's declarations (all null on a page that was not read as content) and the call's facts. */
@@ -276,6 +340,11 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   mode?: ApiCrawlMode
   maxPages?: number | null
   maxDepth?: number | null
+  /**
+   * A resume (`POST /v1/crawl/:id/resume`, or a restart) reuses the pages
+   * this crawl already fetched instead of fetching them again. It reaches no
+   * other request's pages: `maxAge` reuses a stored result of any request.
+   */
   useCached?: boolean
   allowlistedDomains?: readonly string[]
   /** Formats for every page, validated as for scrape. Omitted selects Markdown. */
@@ -715,7 +784,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images'] as const
+const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
@@ -1410,8 +1479,31 @@ function checkMobileMode(mode: ApiCrawlMode | undefined, mobile: boolean | undef
   if (mode === 'research' && mobile === true) throw new RequestError('mobile is not available in research mode: the research identity declares a bot, not a device')
 }
 
-/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds and removeBase64Images, shared by scrape, batch and crawl. */
-function readPageOptions(rec: Record<string, unknown>): PageOptions {
+/**
+ * The cache options: `maxAge` and `minAge` from 0 to MAX_CACHE_AGE_MS with
+ * `minAge` at most `maxAge`, `storeInCache` and `lockdown`; a `lockdown`
+ * with `maxAge: 0` asks for a stored result it forbids, and mode `authed`
+ * neither looks up nor stores, so it refuses a lookup by name.
+ */
+function readCacheOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | undefined): CacheOptions {
+  const maxAge = readMilliseconds(rec.maxAge, 'maxAge', 0, MAX_CACHE_AGE_MS)
+  const minAge = readMilliseconds(rec.minAge, 'minAge', 0, MAX_CACHE_AGE_MS)
+  const storeInCache = readBoolean(rec.storeInCache, 'storeInCache')
+  const lockdown = readBoolean(rec.lockdown, 'lockdown')
+  if (maxAge !== undefined && minAge !== undefined && minAge > maxAge) throw new RequestError('minAge must be at most maxAge')
+  if (lockdown === true && maxAge === 0) throw new RequestError('lockdown answers from the cache alone, which maxAge 0 forbids: leave maxAge out or set it above 0')
+  const options: CacheOptions = {
+    ...(maxAge === undefined ? {} : { maxAge }),
+    ...(minAge === undefined ? {} : { minAge }),
+    ...(storeInCache === undefined ? {} : { storeInCache }),
+    ...(lockdown === undefined ? {} : { lockdown }),
+  }
+  if (mode === 'authed' && cacheLookupRequested(options)) throw new RequestError("the cache is not available in mode 'authed': a page read with your session is never stored or reused")
+  return options
+}
+
+/** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images and the cache options, shared by scrape, batch and crawl. */
+function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | undefined): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
   if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > MAX_FILE_BYTES_CEILING)) {
@@ -1438,6 +1530,7 @@ function readPageOptions(rec: Record<string, unknown>): PageOptions {
     ...(fastMode === undefined ? {} : { fastMode }),
     ...(blockAds === undefined ? {} : { blockAds }),
     ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
+    ...readCacheOptions(rec, mode),
   }
 }
 
@@ -1448,7 +1541,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
   const mode = readMode(rec.mode)
-  const page = readPageOptions(rec)
+  const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const req: ScrapeRequest = {
     url: readUrl(rec.url),
@@ -1474,7 +1567,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const mode = readMode(rec.mode)
-  const page = readPageOptions(rec)
+  const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const allowlistedDomains = readAllowlist(rec.allowlistedDomains)
   const scope: Partial<Record<(typeof CRAWL_SCOPE_KEYS)[number], boolean>> = {}
@@ -1487,6 +1580,8 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     throw new RequestError('allowExternalLinks cannot be combined with allowlistedDomains')
   }
   const sitemap = readSitemapMode(rec.sitemap)
+  // A sitemap is fetched, never cached: a crawl that may fetch nothing reads none, and says so.
+  if (page.lockdown === true && sitemap !== 'skip') throw new RequestError('lockdown fetches nothing, so a crawl in it reads no sitemap: set sitemap to "skip"')
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
   const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   const webhook = readWebhook(rec.webhook)
@@ -1608,7 +1703,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const includeSubdomains = readBatchScopeNoOp(rec.includeSubdomains, 'includeSubdomains')
   const webhook = readWebhook(rec.webhook)
   const mode = readMode(rec.mode)
-  const page = readPageOptions(rec)
+  const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const req: ParsedBatchStartRequest = {
     urls, mode, formats: readFormats(rec.formats), includeLinks: rec.includeLinks as boolean | undefined,
