@@ -117,4 +117,76 @@ describe('HttpSitemapSource', () => {
       await new Promise<void>((resolve) => plain.close(() => resolve()))
     }
   })
+
+  it('collects only what accept takes, without its refusals counting toward maxUrls, and offers what is left of the file once maxUrls is reached', async () => {
+    const source = new HttpSitemapSource({ networkPolicy: policy })
+    try {
+      const offered: string[] = []
+      const loaded = await source.load({ seedUrl: `${origin}/`, maxUrls: 2, maxFiles: 20, accept: async (entry) => { offered.push(entry.url.replace(origin, '')); return !['/a', '/b'].includes(entry.url.replace(origin, '')) } })
+      expect(offered).toEqual(['/', '/a', '/b', '/c'])
+      expect(loaded.urls.map((entry) => entry.url.replace(origin, ''))).toEqual(['/', '/c'])
+      expect(loaded.truncated).toBe('urls')
+      // maxUrls 0: the first urlset's entries are offered and counted as left over, never collected.
+      const full: string[] = []
+      const none = await source.load({ seedUrl: `${origin}/`, maxUrls: 0, maxFiles: 20, accept: (entry) => { full.push(entry.url.replace(origin, '')); return true } })
+      expect(none.urls).toEqual([])
+      expect(full).toEqual(['/', '/a'])
+      expect(none.truncated).toBe('urls')
+    } finally {
+      await source.close()
+    }
+  })
+
+  it('reads entry details only for a load that passes accept or softDeadlineAt, so a crawl\'s entries stay url and file', async () => {
+    const dated = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(404).end(); return }
+      res.writeHead(200, { 'content-type': 'application/xml' }).end(urlset([`${datedOrigin}/one`]).replace('</loc>', '</loc><lastmod>2026-10-01</lastmod>'))
+    })
+    await new Promise<void>((resolve) => dated.listen(0, '127.0.0.1', resolve))
+    const datedOrigin = `http://127.0.0.1:${(dated.address() as AddressInfo).port}`
+    const source = new HttpSitemapSource({ networkPolicy: policy })
+    try {
+      const crawl = await source.load({ seedUrl: `${datedOrigin}/`, maxUrls: 50, maxFiles: 20 })
+      expect(crawl.urls).toEqual([{ url: `${datedOrigin}/one`, file: `${datedOrigin}/sitemap.xml` }])
+      const map = await source.load({ seedUrl: `${datedOrigin}/`, maxUrls: 50, maxFiles: 20, accept: () => true })
+      expect(map.urls).toEqual([{ url: `${datedOrigin}/one`, file: `${datedOrigin}/sitemap.xml`, lastmod: '2026-10-01' }])
+    } finally {
+      await source.close()
+      dated.closeAllConnections()
+      await new Promise<void>((resolve) => dated.close(() => resolve()))
+    }
+  })
+
+  it('stops at softDeadlineAt with the files read so far, the stalled one recorded as unreadable/timeout, and throws nothing', async () => {
+    let stalled: import('node:http').ServerResponse | null = null
+    const slow = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end(`Sitemap: ${slowOrigin}/index.xml\n`); return }
+      if (req.url === '/index.xml') { res.writeHead(200, { 'content-type': 'application/xml' }).end(index([`${slowOrigin}/first.xml`, `${slowOrigin}/stall.xml`, `${slowOrigin}/never.xml`])); return }
+      if (req.url === '/first.xml') { res.writeHead(200, { 'content-type': 'application/xml' }).end(urlset([`${slowOrigin}/one`]).replace('</loc>', '</loc><lastmod>2026-10-01</lastmod>')); return }
+      // Headers and half a body, then nothing.
+      if (req.url === '/stall.xml') { res.writeHead(200, { 'content-type': 'application/xml' }); res.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>'); stalled = res; return }
+      res.writeHead(200, { 'content-type': 'application/xml' }).end(urlset([`${slowOrigin}/never`]))
+    })
+    await new Promise<void>((resolve) => slow.listen(0, '127.0.0.1', resolve))
+    const slowOrigin = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`
+    const source = new HttpSitemapSource({ networkPolicy: policy })
+    try {
+      const began = Date.now()
+      const loaded = await source.load({ seedUrl: `${slowOrigin}/`, maxUrls: 50, maxFiles: 20, softDeadlineAt: began + 800 })
+      expect(Date.now() - began).toBeLessThan(800 + 500)
+      expect(stalled).not.toBeNull()
+      expect(loaded.files.map((file) => [file.url.replace(slowOrigin, ''), file.kind, file.error])).toEqual([['/index.xml', 'index', null], ['/first.xml', 'urlset', null], ['/stall.xml', 'unreadable', 'timeout']])
+      expect(loaded.urls).toEqual([{ url: `${slowOrigin}/one`, file: `${slowOrigin}/first.xml`, lastmod: '2026-10-01' }])
+      expect(loaded.truncated).toBe('time')
+      expect(loaded.unreadFiles).toBe(1)
+      // A caller's own cancellation still throws.
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new Error('caller left')), 300)
+      await expect(source.load({ seedUrl: `${slowOrigin}/`, maxUrls: 50, maxFiles: 20, softDeadlineAt: Date.now() + 5_000 }, { signal: controller.signal })).rejects.toThrow('caller left')
+    } finally {
+      await source.close()
+      slow.closeAllConnections()
+      await new Promise<void>((resolve) => slow.close(() => resolve()))
+    }
+  })
 })

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Agent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici'
-import { chunkUrls, SDK_ORIGIN, SDK_VERSION, W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
+import { chunkUrls, MAP_ANSWER_MARGIN_MS, SDK_ORIGIN, SDK_VERSION, W2L, W2LError, WaitTimeoutError, type CreateMonitorRequest } from '../src/index.js'
 
 describe('W2L SDK', () => {
   it('posts scrape and crawl to the native paths', async () => {
@@ -195,6 +195,42 @@ describe('W2L SDK', () => {
       expect(waits).toEqual([31_000, 330_000])
       // Other requests keep the dispatcher's own wait.
       await expect(client.getBatch('task-1')).rejects.toThrow(TypeError)
+    } finally {
+      setGlobalDispatcher(original)
+      await agent.close()
+      api.closeAllConnections()
+      await new Promise<void>((resolve) => api.close(() => resolve()))
+    }
+  })
+
+  it('posts a map to /v1/map with its origin, waits its timeout plus 5 s for the answer, and reads its record back', async () => {
+    const bodies: unknown[] = []
+    const record = { requestedAt: '2026-10-03T00:00:00.000Z', request: { url: 'https://example.com/' }, response: { id: '7c1d4d2c-0f3e-4a7b-9b1a-2f0d4d1b5a6e', status: 'completed', links: [] } }
+    const api = createServer((req, res) => {
+      let text = ''
+      req.on('data', (chunk) => { text += chunk })
+      req.on('end', () => {
+        if (req.method === 'POST' && req.url === '/v1/map') { bodies.push(JSON.parse(text)); res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(record.response)); return }
+        if (req.url === `/v1/maps/${record.response.id}`) { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(record)); return }
+        res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found","code":"not_found"}')
+      })
+    })
+    await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve))
+    const original = getGlobalDispatcher()
+    const agent = new Agent()
+    const waits: Array<number | null | undefined> = []
+    setGlobalDispatcher({ dispatch: (options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) => { waits.push(options.headersTimeout); return agent.dispatch(options, handler) } } as unknown as Dispatcher)
+    try {
+      const client = new W2L({ baseUrl: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, token: '' })
+      expect(await client.map('https://example.com/', { limit: 10, timeout: 3_000 })).toEqual(record.response)
+      await client.map('https://example.com/', {}, { origin: 'mcp-host@1' })
+      expect(bodies).toEqual([{ url: 'https://example.com/', limit: 10, timeout: 3_000, origin: SDK_ORIGIN }, { url: 'https://example.com/', origin: 'mcp-host@1' }])
+      expect(MAP_ANSWER_MARGIN_MS).toBe(5_000)
+      expect(await client.getMap(record.response.id)).toEqual(record)
+      await expect(client.getMap('gone')).rejects.toMatchObject({ name: 'W2LError', message: 'map not found: gone', status: 404, code: 'not_found', path: '/v1/maps/gone' })
+      // The POSTs wait the map's timeout (60 000 ms by default) plus 5 s; reads keep the dispatcher's own wait.
+      expect(waits.slice(0, 2)).toEqual([8_000, 65_000])
+      expect(waits.slice(2).every((wait) => wait === undefined)).toBe(true)
     } finally {
       setGlobalDispatcher(original)
       await agent.close()

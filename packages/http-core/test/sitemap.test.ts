@@ -41,6 +41,37 @@ describe('parseSitemapXml', () => {
     expect(parseSitemapXml('{"urlset":[]}').kind).toBe('not_sitemap')
     expect(parseSitemapXml(`﻿${URLSET(['https://example.com/'])}`).locs).toEqual(['https://example.com/'])
   })
+
+  it('reads each entry\'s lastmod and news:title only when asked, aligned with locs and never borrowed from a neighbour', () => {
+    const text = `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:n="http://www.google.com/schemas/sitemap-news/0.9">
+<url><loc>https://example.com/a</loc><lastmod> 2026-09-30T08:00:00+00:00 </lastmod><n:news><n:title>Kiln &amp; glaze</n:title></n:news></url>
+<url><lastmod>2026-01-01</lastmod><loc>https://example.com/b</loc></url>
+<url><loc>ftp://example.com/dropped</loc><lastmod>1999-01-01</lastmod></url>
+<url><loc>https://example.com/c</loc><n:news><n:title><![CDATA[Firing <guide>]]></n:title></n:news></url>
+<url><loc>https://example.com/d</loc></url>
+</urlset>`
+    const plain = parseSitemapXml(text)
+    expect(plain).toEqual({ kind: 'urlset', locs: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d'], truncated: false, dropped: 1 })
+    const detailed = parseSitemapXml(text, { details: true })
+    expect(detailed.locs).toEqual(plain.locs)
+    expect(detailed.details).toEqual([{ lastmod: '2026-09-30T08:00:00+00:00', title: 'Kiln & glaze' }, { lastmod: '2026-01-01' }, { title: 'Firing <guide>' }, {}])
+    // Without a news namespace, a title element is not a news title.
+    expect(parseSitemapXml(URLSET(['https://example.com/']).replace('</url>', '<title>Not news</title></url>'), { details: true }).details).toEqual([{ lastmod: '2026-09-30' }])
+  })
+
+  it('reads details in linear time when the locs have no url element around them', () => {
+    // Every loc bare: each entry's window must stop at the next loc instead of scanning to </urlset>.
+    const bare = `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${Array.from({ length: SITEMAP_MAX_ENTRIES }, (_, i) => `<loc>https://example.com/p/${i}</loc><lastmod>2026-09-${String((i % 28) + 1).padStart(2, '0')}</lastmod>`).join('\n')}</urlset>`
+    const began = performance.now()
+    const parsed = parseSitemapXml(bare, { details: true })
+    const elapsed = performance.now() - began
+    expect(parsed.locs).toHaveLength(SITEMAP_MAX_ENTRIES)
+    expect(parsed.details).toHaveLength(SITEMAP_MAX_ENTRIES)
+    expect(parsed.details?.slice(0, 2)).toEqual([{ lastmod: '2026-09-01' }, { lastmod: '2026-09-02' }])
+    expect(parsed.details?.at(-1)).toEqual({ lastmod: `2026-09-${String(((SITEMAP_MAX_ENTRIES - 1) % 28) + 1).padStart(2, '0')}` })
+    // The quadratic scan took about 25 s here; a linear one takes well under a second.
+    expect(elapsed).toBeLessThan(3000)
+  })
 })
 
 describe('gzip detection', () => {

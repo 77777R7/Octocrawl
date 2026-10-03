@@ -46,6 +46,8 @@ it('speaks real Streamable HTTP and enforces origin, bearer subject and scope',a
     expect(tools.tools.map(tool=>tool.name)).toContain('scrape_product')
     expect(tools.tools.map(tool=>tool.name)).toContain('batch_products')
     expect(tools.tools.map(tool=>tool.name)).not.toContain('crawl')
+    expect(tools.tools.map(tool=>tool.name)).not.toContain('map')
+    await expect(client.callTool({name:'map',arguments:{url:'https://www.amazon.sg/dp/B000VW9PIK'}})).rejects.toThrow('tool not available in this deployment')
     const result=await client.callTool({name:'list_monitors',arguments:{}})
     expect(result.content).toMatchObject([{type:'text',text:'[]'}])
     await expect(client.callTool({name:'preview_monitor',arguments:{url:'https://elsewhere.example'}})).rejects.toThrow('allowlist')

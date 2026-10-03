@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, CRAWL_MODES, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -542,5 +542,51 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const tooMany = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, 'v']))
     const tooLarge = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`k${i}`, 'a'.repeat(1000)]))
     for (const metadata of [[], 'x', null, { n: 1 }, { nested: {} }, { long: 'a'.repeat(1001) }, tooMany, tooLarge]) expect(() => parse(metadata), JSON.stringify(metadata).slice(0, 40)).toThrow(message)
+  })
+})
+
+describe('parseMapRequest', () => {
+  const url = 'https://www.sitemaps.org/'
+
+  it('takes url, mode, limit, timeout, search, sitemap and the scope options, and nothing it does not offer', () => {
+    expect(parseMapRequest({ url })).toEqual({ url })
+    expect(parseMapRequest({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })).toEqual({ url, mode: 'research', limit: 100_000, timeout: 1_000, origin: 'js-sdk@1', integration: 'nightly' })
+    expect(parseMapRequest({ url, limit: 1, timeout: 300_000, mode: 'standard' })).toMatchObject({ limit: 1, timeout: 300_000 })
+    const scoped = { url, search: '  sitemap  protocol ', sitemap: 'only', includeSubdomains: true, ignoreQueryParameters: true, includePaths: ['^/docs/'], excludePaths: ['/old/'], regexOnFullURL: false, crawlEntireDomain: true, deduplicateSimilarURLs: false }
+    expect(parseMapRequest(scoped)).toEqual({ ...scoped, search: 'sitemap  protocol' })
+    // The page options a map has no use for are refused by name, and so are the crawl's host flags: includeSubdomains is a map's.
+    const supported = 'url, mode, limit, timeout, search, sitemap, includeSubdomains, ignoreQueryParameters, regexOnFullURL, crawlEntireDomain, deduplicateSimilarURLs, includePaths, excludePaths, origin, integration'
+    for (const key of ['allowSubdomains', 'allowExternalLinks', 'maxPages', 'headers', 'mobile', 'skipTlsVerification', 'formats', 'location']) {
+      expect(thrown(() => parseMapRequest({ url, [key]: true })), key).toMatchObject({ code: 'unsupported_parameter', details: { parameters: [key] }, message: `unsupported parameter: ${key} (supported: ${supported})` })
+    }
+    expect(thrown(() => parseMapRequest({ url, useIndex: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['useIndex'] }, agentHints: [REFUSAL_HINTS.useIndex] })
+    expect(thrown(() => parseMapRequest({ url, ignoreRobotsTxt: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect(thrown(() => parseMapRequest({ url, stealth: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
+  })
+
+  it('checks search, sitemap and the scope options with their messages, the crawl\'s own for the shared ones', () => {
+    const searchMessage = /^search must be a string of 1 to 200 characters with at most 10 words$/
+    for (const search of ['', '   ', 'x'.repeat(201), Array.from({ length: 11 }, (_, i) => `w${i}`).join(' '), 7, null]) expect(() => parseMapRequest({ url, search }), String(search)).toThrow(searchMessage)
+    expect(parseMapRequest({ url, search: 'x'.repeat(200) }).search).toHaveLength(200)
+    expect(parseMapRequest({ url, search: Array.from({ length: 10 }, (_, i) => `w${i}`).join('\t') }).search).toContain('w9')
+    for (const sitemap of ['include', 'skip', 'only'] as const) expect(parseMapRequest({ url, sitemap })).toEqual({ url, sitemap })
+    for (const sitemap of ['all', 'INCLUDE', true, null]) expect(() => parseMapRequest({ url, sitemap })).toThrow(/^sitemap must be include, skip, or only$/)
+    for (const key of ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs']) {
+      expect(() => parseMapRequest({ url, [key]: 'true' }), key).toThrow(new RegExp(`^${key} must be a boolean$`))
+    }
+    // The path patterns take the crawl's bounds and refusals.
+    expect(() => parseMapRequest({ url, includePaths: '^/docs/' })).toThrow('includePaths must be an array of at most 1000 regular expressions of 1 to 2000 characters')
+    expect(() => parseMapRequest({ url, excludePaths: ['('] })).toThrow('excludePaths contains an invalid regular expression: (')
+    expect(() => parseMapRequest({ url, includePaths: ['(a+)+$'] })).toThrow(/^includePaths contains a regular expression that can take too long to match/)
+    expect(() => parseCrawlStartRequest({ url, includePaths: ['(a+)+$'] })).toThrow(/^includePaths contains a regular expression that can take too long to match/)
+  })
+
+  it('refuses mode authed, and a limit or timeout out of range, each with its message', () => {
+    expect(thrown(() => parseMapRequest({ url, mode: 'authed' }))).toMatchObject({ status: 400, code: 'invalid_request', message: 'mode authed is not available for map: a map reads public sitemaps and one public page' })
+    expect(() => parseMapRequest({ url, mode: 'fast' })).toThrow('mode must be standard or research')
+    for (const limit of [0, -1, 1.5, '50', 100_001, null]) expect(() => parseMapRequest({ url, limit }), String(limit)).toThrow(/^limit must be an integer from 1 to 100000$/)
+    for (const timeout of [999, 300_001, 1_500.5, '60000']) expect(() => parseMapRequest({ url, timeout }), String(timeout)).toThrow(/^timeout must be an integer number of milliseconds from 1000 to 300000$/)
+    expect(() => parseMapRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
+    expect(() => parseMapRequest({})).toThrow('url is required')
   })
 })

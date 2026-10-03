@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { CrawlReport, FetchResult, JobWebhookEnvelope, ScrapeResponse, StepRecord } from '../src/index.js'
+import type { CrawlReport, FetchResult, JobWebhookEnvelope, MapResponse, ScrapeResponse, StepRecord } from '../src/index.js'
 import {
   FIRECRAWL_SHIM_DIFFS,
   FIRECRAWL_SHIM_SNAPSHOT,
   parseFirecrawlCrawlRequest,
+  parseFirecrawlMapRequest,
   parseFirecrawlScrapeRequest,
   REFUSAL_HINTS,
   RequestError,
@@ -11,6 +12,7 @@ import {
   wrapCrawlStatus,
   firecrawlCrawlCounts,
   wrapJobWebhook,
+  wrapMap,
   wrapScrape,
 } from '../src/index.js'
 
@@ -68,16 +70,16 @@ function scrape(partial: Partial<FetchResult> & Pick<FetchResult, 'status' | 're
 }
 
 describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
-  it('freezes scrape/crawl only and lists the known diffs', () => {
+  it('freezes scrape, crawl and map and lists the known diffs', () => {
     expect(FIRECRAWL_SHIM_SNAPSHOT.capturedAt).toBe('2026-09-18')
     expect(FIRECRAWL_SHIM_SNAPSHOT.apiVersion).toBe('v1')
-    expect([...FIRECRAWL_SHIM_SNAPSHOT.paths]).toEqual(['/scrape', '/crawl', '/crawl/:id'])
+    expect([...FIRECRAWL_SHIM_SNAPSHOT.paths]).toEqual(['/scrape', '/crawl', '/crawl/:id', '/map'])
+    expect(FIRECRAWL_SHIM_SNAPSHOT.docs.map).toBe('https://docs.firecrawl.dev/api-reference/v1-endpoint/map')
     expect([...FIRECRAWL_SHIM_SNAPSHOT.notCovered]).toEqual([
       'search',
       'interact',
       'agent',
       'monitor',
-      'map',
       'extract',
     ])
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /challenge/i.test(d))).toBe(true)
@@ -506,5 +508,48 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(wrapJobWebhook(envelope('cancelled'), null)).toMatchObject({ type: 'crawl.failed', error: 'cancelled' })
     expect(wrapJobWebhook({ ...envelope('page'), jobKind: 'batch' }, result).type).toBe('batch_scrape.page')
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /webhook/.test(d) && /crawl\.page/.test(d))).toBe(true)
+  })
+
+  it('maps a map request: v1 ignoreSitemap and sitemapOnly, the v2 sitemap winning, both v1 flags refused, W2L\'s defaults for what is omitted', () => {
+    const url = 'https://www.sitemaps.org/'
+    expect(parseFirecrawlMapRequest({ url })).toEqual({ url })
+    expect(parseFirecrawlMapRequest({ url, ignoreSitemap: true })).toEqual({ url, sitemap: 'skip' })
+    expect(parseFirecrawlMapRequest({ url, ignoreSitemap: false })).toEqual({ url, sitemap: 'include' })
+    expect(parseFirecrawlMapRequest({ url, sitemapOnly: true })).toEqual({ url, sitemap: 'only' })
+    expect(parseFirecrawlMapRequest({ url, sitemapOnly: false })).toEqual({ url })
+    expect(parseFirecrawlMapRequest({ url, ignoreSitemap: false, sitemapOnly: true })).toEqual({ url, sitemap: 'only' })
+    expect(parseFirecrawlMapRequest({ url, sitemapOnly: true, sitemap: 'include' })).toEqual({ url, sitemap: 'include' })
+    expect(() => parseFirecrawlMapRequest({ url, ignoreSitemap: true, sitemapOnly: true })).toThrow(/^ignoreSitemap and sitemapOnly cannot both be true$/)
+    expect(() => parseFirecrawlMapRequest({ url, ignoreSitemap: 'yes' })).toThrow('ignoreSitemap must be a boolean')
+    expect(() => parseFirecrawlMapRequest({ url, sitemapOnly: 1 })).toThrow('sitemapOnly must be a boolean')
+    expect(() => parseFirecrawlMapRequest({ url, sitemap: 'never' })).toThrow('sitemap must be include, skip, or only')
+    const full = { url, search: 'protocol', includeSubdomains: true, ignoreQueryParameters: true, limit: 50, timeout: 10_000, origin: 'js-sdk@4.42.0', integration: 'nightly' }
+    expect(parseFirecrawlMapRequest(full)).toEqual(full)
+    expect(() => parseFirecrawlMapRequest({ url, limit: 0 })).toThrow('limit must be an integer from 1 to 100000')
+    expect(() => parseFirecrawlMapRequest({ url, search: '' })).toThrow('search must be a string of 1 to 200 characters with at most 10 words')
+    // What the shim does not map is refused by name, useIndex with the hint; the native scope keys are not Firecrawl map options.
+    for (const key of ['useIndex', 'location', 'ignoreCache', 'threatProtection', 'auditMetadata', 'includePaths']) {
+      let error: unknown
+      try { parseFirecrawlMapRequest({ url, [key]: true }) } catch (thrown) { error = thrown }
+      expect(error, key).toBeInstanceOf(RequestError)
+      expect(error, key).toMatchObject({ code: 'unsupported_parameter', message: `unsupported parameter: ${key}`, details: { parameters: [key] } })
+      expect((error as RequestError).agentHints, key).toEqual(key === 'useIndex' ? [REFUSAL_HINTS.useIndex] : undefined)
+    }
+    expect(FIRECRAWL_SHIM_DIFFS.some((d) => /POST \/fc\/v1\/map/.test(d) && /orders by relevance/.test(d) && /includeSubdomains and ignoreQueryParameters are false/.test(d))).toBe(true)
+  })
+
+  it('wraps a map as Firecrawl answers one: URL strings, the warnings joined, success false for a failed map', () => {
+    const base: MapResponse = {
+      id: '2b7e1f0c-5d1a-4c3e-9f0a-1b2c3d4e5f60', url: 'https://www.sitemaps.org/', status: 'completed', stoppedBy: null,
+      links: [{ url: 'https://www.sitemaps.org/', title: 'Home', titleSource: 'page', via: ['start'], robots: 'allowed' }, { url: 'https://www.sitemaps.org/faq.php', via: ['link', 'sitemap'], robots: 'allowed' }],
+      sources: { startPage: null, sitemap: null },
+      refused: { duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, assetDenied: 0, robots: 0, robotsUnchecked: 0, searchFiltered: 0, overLimit: 0, samples: { collapsed: [], hostDenied: [], robots: [] } },
+      identity: { mode: 'standard', userAgent: 'W2L/1' }, warnings: [], elapsedMs: 12,
+    }
+    expect(wrapMap(base)).toEqual({ success: true, id: base.id, links: ['https://www.sitemaps.org/', 'https://www.sitemaps.org/faq.php'] })
+    const partial: MapResponse = { ...base, status: 'partial', stoppedBy: 'timeout', warnings: [{ code: 'map_timeout', message: 'the map stopped at its 1000 ms timeout.' }, { code: 'sitemap_unreadable', message: '1 sitemap file was not read.' }], agentHints: ['raise timeout'] }
+    expect(wrapMap(partial)).toEqual({ success: true, id: base.id, links: ['https://www.sitemaps.org/', 'https://www.sitemaps.org/faq.php'], warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agent_hints: ['raise timeout'] })
+    const failed: MapResponse = { ...base, status: 'failed', links: [], warnings: [{ code: 'sitemap_unreadable', message: 'no sitemap was found.' }] }
+    expect(wrapMap(failed)).toEqual({ success: false, id: base.id, error: 'no sitemap was found.', links: [] })
   })
 })

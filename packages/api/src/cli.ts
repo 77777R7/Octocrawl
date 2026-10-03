@@ -17,6 +17,8 @@ async function main(): Promise<void> {
     taskRoot,
     networkPolicy: listen.networkPolicy,
     defaultMaxPages: listen.defaultMaxPages,
+    mapMaxLimit: listen.mapMaxLimit,
+    mapMaxTimeoutMs: listen.mapMaxTimeoutMs,
     allowRobotsOverride: listen.allowRobotsOverride,
     hosted: listen.mode === 'hosted',
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
@@ -45,7 +47,7 @@ async function main(): Promise<void> {
   })
   for (const notice of listen.notices) console.log(`w2l-api: ${notice}`)
   console.log(`w2l-api: ${listen.delivery.notice}`)
-  if (listen.rateLimit !== undefined) console.log(`w2l-api: rate limit ${listen.rateLimit.perMinute} requests per minute per caller on scrape, crawl and batch starts`)
+  if (listen.rateLimit !== undefined) console.log(`w2l-api: rate limit ${listen.rateLimit.perMinute} requests per minute per caller on scrape, map, crawl and batch starts`)
   console.log(`w2l-api ${listen.mode} listening on http://${listen.host}:${listen.port}`)
 }
 

@@ -44,6 +44,21 @@ export interface SitemapLoadRequest {
   maxUrls: number
   /** At most this many sitemap files are fetched for one load, an index and its children each counting as one. */
   maxFiles: number
+  /**
+   * Opt-in (a map passes it, a crawl does not): judges each entry before it is
+   * collected. An entry it refuses is not collected and does not count toward
+   * `maxUrls`. Once `maxUrls` entries are in hand, the rest of the file in
+   * flight is still offered, and those it accepts are counted as left over
+   * (`truncated: 'urls'`), never collected.
+   */
+  accept?: (entry: SitemapEntry) => boolean | Promise<boolean>
+  /**
+   * Opt-in (a map passes it, a crawl does not): an absolute UTC time after
+   * which the load stops and returns what it has, `truncated: 'time'`. The
+   * file in flight is aborted and recorded as `unreadable`, error `timeout`.
+   * The caller's own cancellation still throws.
+   */
+  softDeadlineAt?: number
 }
 
 /** Where a load looked for sitemaps: the `Sitemap:` lines of the start URL's robots.txt, or the conventional `/sitemap.xml` when it lists none. */
@@ -83,6 +98,10 @@ export interface SitemapFileRecord {
 export interface SitemapEntry {
   url: string
   file: string
+  /** The entry's `<lastmod>`, as written (trimmed, entities decoded, not normalised); absent when it has none. A crawl ignores it. */
+  lastmod?: string
+  /** The entry's `<news:title>`, entity-decoded and trimmed; absent when it has none. A crawl ignores it. */
+  title?: string
 }
 
 export interface SitemapLoadResult {
@@ -92,8 +111,10 @@ export interface SitemapLoadResult {
   files: SitemapFileRecord[]
   /** The entries collected, in listed order, each once, up to `maxUrls`. */
   urls: SitemapEntry[]
-  /** Set when the load stopped before reading everything: at `maxFiles` with files unread, or at `maxUrls` with entries uncollected. */
-  truncated: 'files' | 'urls' | null
+  /** Set when the load stopped before reading everything: at `maxFiles` with files unread, at `maxUrls` with entries uncollected, or at `softDeadlineAt` (`time`, never on a crawl). */
+  truncated: 'files' | 'urls' | 'time' | null
+  /** Only with `truncated: 'time'`: the files located (declared, or children of an index read) and not requested, the aborted one excluded; absent when the deadline came before any was located. */
+  unreadFiles?: number
 }
 
 /**
@@ -116,7 +137,8 @@ export interface SitemapDiscovery {
   listed: number
   /** Entries the frontier accepted as pages to fetch. */
   enqueued: number
-  truncated: 'files' | 'urls' | null
+  /** As SitemapLoadResult says; a crawl never produces `time`. */
+  truncated: 'files' | 'urls' | 'time' | null
   /** Why the load itself failed, when it threw before returning; `files` then holds what it had read. Null otherwise. */
   error: string | null
 }

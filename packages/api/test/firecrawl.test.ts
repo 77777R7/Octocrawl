@@ -82,6 +82,29 @@ describe('Firecrawl /scrape /crawl shim', () => {
     expect(await post('/fc/v1/crawl', { url, webhook: { url: 'https://example.com/hook', retries: 3 } })).toMatchObject({ status: 400, body: { success: false, error: 'unknown webhook option: retries', code: 'invalid_request' } })
   })
 
+  it('POST /fc/v1/map answers the links as strings with the map\'s id, and refuses what it does not map in the /fc envelope', async () => {
+    const app = createApp(engine)
+    const post = async (body: unknown) => {
+      const res = await app.request('/fc/v1/map', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return { status: res.status, body: await res.json() }
+    }
+    const url = `${server.url}/crawl/listing`
+    // The listing's item links lie outside /crawl/listing/, the start URL's subtree; its title matches the search.
+    const { status, body } = await post({ url, search: 'Lantern catalog', ignoreSitemap: false })
+    expect(status).toBe(200)
+    expect(body).toEqual({ success: true, id: expect.stringMatching(/^[0-9a-f-]{36}$/), links: [url] })
+    // The native record is kept under the same id.
+    expect((await (await app.request(`/v1/maps/${body.id}`)).json()).response).toMatchObject({ status: 'completed', refused: { subtreeDenied: 3 }, sources: { sitemap: { mode: 'include' } } })
+    expect(await post({ url, useIndex: true, threatProtection: true })).toEqual({
+      status: 400,
+      body: { success: false, error: 'unsupported parameters: useIndex, threatProtection', code: 'unsupported_parameter', details: { parameters: ['useIndex', 'threatProtection'] }, agent_hints: ['W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] },
+    })
+    expect(await post({ url, ignoreSitemap: true, sitemapOnly: true })).toEqual({ status: 400, body: { success: false, error: 'ignoreSitemap and sitemapOnly cannot both be true', code: 'invalid_request' } })
+    // A sitemap-only map of a site without a sitemap found nothing: success false, with why.
+    const empty = await post({ url, sitemapOnly: true })
+    expect(empty).toMatchObject({ status: 200, body: { success: false, links: [], error: expect.stringContaining('no sitemap was found') } })
+  })
+
   it('POST /fc/v1/crawl starts native crawl and GET returns Firecrawl status pages', async () => {
     const app = createApp(engine)
     const started = await app.request('/fc/v1/crawl', {

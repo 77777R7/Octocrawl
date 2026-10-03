@@ -14,12 +14,16 @@
  * listed order; at most `maxFiles` files are read and the load stops once
  * `maxUrls` entries are in hand. Every file read, refused or unreadable is on
  * the record the crawl keeps; none of these fetches has a compliance record.
+ * Two options are a map's alone, so a crawl's load is unchanged: `accept`
+ * judges each entry before it is collected, and `softDeadlineAt` ends the
+ * load with what it has (the file in flight aborted and recorded as
+ * unreadable/timeout) instead of throwing.
  */
 
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import type { CrawlMode, ExecutionContext, IdentityDevice, NetworkPolicy, SitemapEntry, SitemapFileRecord, SitemapLoadRequest, SitemapLoadResult, SitemapSource } from '@w2l/contracts'
-import { createExecutionScope, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { createExecutionScope, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
 import { request } from 'undici'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, readCappedBody, SsrfDeniedError } from './egress.js'
 import { EgressRoute } from './egressRoute.js'
@@ -47,6 +51,8 @@ interface ReadFile {
   record: SitemapFileRecord
   /** The file's entries when it parsed as a sitemap: child files for an index, pages for a urlset. */
   locs: readonly string[] | null
+  /** Each entry's `<lastmod>` and `<news:title>`, aligned with `locs`. */
+  details?: readonly SitemapEntryDetail[]
 }
 
 export class HttpSitemapSource implements SitemapSource {
@@ -73,21 +79,37 @@ export class HttpSitemapSource implements SitemapSource {
 
   async load(request: SitemapLoadRequest, context: ExecutionContext = {}): Promise<SitemapLoadResult> {
     const scope = createExecutionScope(context)
+    // The soft deadline's own scope: what it cuts is recorded, never thrown; the caller's cancellation still throws.
+    const soft = request.softDeadlineAt === undefined ? null : createExecutionScope({ signal: scope.signal, deadlineAt: request.softDeadlineAt })
+    const work = soft ?? scope
+    const timedOut = (): boolean => soft !== null && !scope.signal.aborted && (soft.signal.aborted || Date.now() >= request.softDeadlineAt!)
+    // Entry details (lastmod, news:title) are read only for a load that passes a map's options, so a crawl's parse is the one it always was.
+    const details = request.accept !== undefined || request.softDeadlineAt !== undefined
     try {
       const seed = new URL(request.seedUrl)
       const identity = this.identityFor(seed.hostname)
       const result: SitemapLoadResult = { identity: { mode: this.mode, userAgent: identity.userAgent }, sources: [], files: [], urls: [], truncated: null }
       // Where to look: the Sitemap lines of the start URL's robots.txt (one read, shared with the http lane), else the conventional location.
-      const robots = await this.robots.lookup(seed.href, identity.userAgent, scope)
+      let robots: Awaited<ReturnType<RobotsOriginCache['lookup']>>
+      try {
+        robots = await this.robots.lookup(seed.href, identity.userAgent, work)
+      } catch (error) {
+        if (!timedOut()) throw error
+        // Cut before anything was located: how many files there were is unknown, so unreadFiles is left out.
+        result.truncated = 'time'
+        return result
+      }
       const declared = dedupe((robots?.robots?.sitemaps ?? []).map((line) => httpHref(line, robots?.robotsUrl)).filter((url): url is string => url !== null))
       result.sources.push(declared.length > 0 ? 'robots' : 'guess')
       const queue: Array<{ url: string; depth: number }> = (declared.length > 0 ? declared : [`${seed.origin}/sitemap.xml`]).map((url) => ({ url, depth: 0 }))
       const seen = new Set<string>()
       while (queue.length > 0) {
         if (result.files.length >= request.maxFiles) { result.truncated = 'files'; break }
+        if (timedOut()) { result.truncated = 'time'; result.unreadFiles = queue.length; break }
         const next = queue.shift()!
-        const file = await this.readFile(next.url, scope)
+        const file = await this.readFile(next.url, details, work, soft === null ? undefined : scope)
         result.files.push(file.record)
+        if (file.record.error === 'timeout' && timedOut()) { result.truncated = 'time'; result.unreadFiles = queue.length; break }
         if (file.locs === null) continue
         if (file.record.kind === 'index') {
           // One level: a child that is itself an index is recorded, not followed.
@@ -95,16 +117,26 @@ export class HttpSitemapSource implements SitemapSource {
           continue
         }
         let left = 0
-        for (const url of file.locs) {
+        const accept = request.accept
+        for (const [i, url] of file.locs.entries()) {
           if (seen.has(url)) continue
-          if (result.urls.length >= request.maxUrls) { left++; continue }
+          const entry = entryOf(url, next.url, file.details?.[i])
+          // Past maxUrls an entry is left over; with `accept`, only one it would have taken.
+          if (result.urls.length >= request.maxUrls) {
+            if (accept === undefined) { left++; continue }
+            seen.add(url)
+            if (await accept(entry)) left++
+            continue
+          }
           seen.add(url)
-          result.urls.push({ url, file: next.url } satisfies SitemapEntry)
+          if (accept !== undefined && !(await accept(entry))) continue
+          result.urls.push(entry)
         }
         if (result.urls.length >= request.maxUrls && (left > 0 || queue.length > 0)) { result.truncated = 'urls'; break }
       }
       return result
     } finally {
+      soft?.dispose()
       scope.dispose()
     }
   }
@@ -120,8 +152,13 @@ export class HttpSitemapSource implements SitemapSource {
     return { userAgent: prepared.identity.userAgent, headers: prepared.identityHeaders }
   }
 
-  /** One sitemap file: its robots.txt verdict, then its fetch, inflation and parse, each outcome a record and never a thrown error unless the load was cancelled. */
-  private async readFile(url: string, scope: ExecutionContext): Promise<ReadFile> {
+  /**
+   * One sitemap file: its robots.txt verdict, then its fetch, inflation and
+   * parse, each outcome a record and never a thrown error unless the load was
+   * cancelled. With `outer` (a load with a soft deadline), `scope` is the soft
+   * one: its expiry is this file's `timeout`, and only `outer` stopping throws.
+   */
+  private async readFile(url: string, details: boolean, scope: ExecutionContext, outer?: ExecutionContext): Promise<ReadFile> {
     const identity = this.identityFor(new URL(url).hostname)
     const record: SitemapFileRecord = { url, finalUrl: null, status: null, contentType: null, bytes: null, sha256: null, kind: 'unreadable', entries: null, robots: null, proxyUsed: this.route.viaOperatorProxy(url) !== null, error: null }
     const unreadable = (error: string): ReadFile => ({ record: { ...record, kind: 'unreadable', error }, locs: null })
@@ -151,13 +188,20 @@ export class HttpSitemapSource implements SitemapSource {
       } catch (error) {
         return unreadable((error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE' ? 'decompressed_too_large' : 'gzip_error')
       }
-      const parsed = parseSitemapXml(text)
+      const parsed = parseSitemapXml(text, { details })
       if (parsed.kind === 'not_sitemap') return { record: { ...record, kind: 'not_sitemap' }, locs: null }
       return {
         record: { ...record, kind: parsed.kind, entries: parsed.locs.length, error: parsed.truncated ? 'entries_over_50000' : null },
         locs: parsed.locs,
+        ...(parsed.details === undefined ? {} : { details: parsed.details }),
       }
     } catch (error) {
+      if (outer !== undefined) {
+        // The caller's cancellation stops the load; the soft deadline only ends this file.
+        throwIfExecutionStopped(outer)
+        if (outer.signal?.aborted) throw error
+        if (scope.signal?.aborted || (scope.deadlineAt !== undefined && Date.now() >= scope.deadlineAt)) return unreadable('timeout')
+      }
       // Cancellation and the deadline stop the load; anything else is this file's own fault.
       throwIfExecutionStopped(scope)
       if (scope.signal?.aborted) throw error
@@ -222,6 +266,16 @@ function httpHref(value: string, base?: string): string | null {
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
   } catch {
     return null
+  }
+}
+
+/** A collected entry: its URL, the file that listed it, and the file's `<lastmod>` and `<news:title>` for it when it gave them. */
+function entryOf(url: string, file: string, detail: SitemapEntryDetail | undefined): SitemapEntry {
+  return {
+    url,
+    file,
+    ...(detail?.lastmod === undefined ? {} : { lastmod: detail.lastmod }),
+    ...(detail?.title === undefined ? {} : { title: detail.title }),
   }
 }
 

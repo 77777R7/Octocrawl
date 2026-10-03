@@ -24,7 +24,9 @@ import {
   firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
   parseFirecrawlCrawlStatusQuery,
+  parseFirecrawlMapRequest,
   parseFirecrawlScrapeRequest,
+  parseMapRequest,
   parseScrapeRequest,
   RequestError,
   parseMonitorRevision,
@@ -34,6 +36,7 @@ import {
   type MonitorRevision,
   wrapCrawlAccepted,
   wrapCrawlStatus,
+  wrapMap,
   wrapScrape,
   type ScrapeResponse,
 } from '@w2l/contracts'
@@ -51,8 +54,8 @@ export interface AppOptions {
   exposeInternalErrors?: boolean
   /**
    * The operator's per-caller budget for the requests that start work
-   * (`POST /v1/scrape`, `/v1/crawl`, `/v1/batches`, `/fc/v1/scrape`,
-   * `/fc/v1/crawl`): this many per sliding minute, per bearer token (or for
+   * (`POST /v1/scrape`, `/v1/crawl`, `/v1/batches`, `/v1/map`,
+   * `/fc/v1/scrape`, `/fc/v1/crawl`, `/fc/v1/map`): this many per sliding minute, per bearer token (or for
    * the one local caller when the server takes no token). Over it: HTTP 429
    * with `Retry-After`. In memory, per process; absent means no limit.
    */
@@ -120,7 +123,7 @@ function presentedToken(c: Context): string {
 }
 
 /** The requests the rate limit counts: those that start work. Status reads are free. */
-const RATE_LIMITED_POSTS: ReadonlySet<string> = new Set(['/v1/scrape', '/v1/crawl', '/v1/batches', '/fc/v1/scrape', '/fc/v1/crawl'])
+const RATE_LIMITED_POSTS: ReadonlySet<string> = new Set(['/v1/scrape', '/v1/crawl', '/v1/batches', '/v1/map', '/fc/v1/scrape', '/fc/v1/crawl', '/fc/v1/map'])
 
 /**
  * A sliding 60 s window per caller key, in memory: the moments of the
@@ -183,6 +186,18 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   /** The record of one scrape call, by the `scrapeId` its response carried. */
   app.get('/v1/scrapes/:id', async (c) => {
     const record = await engine.getScrape(c.req.param('id'))
+    return record === null ? fail(c, 'not_found', 'not found') : c.json(record, 200)
+  })
+
+  /** A map answers at its deadline with what it found (200, never a 408); a client that disconnects cancels it, and nothing is recorded. */
+  app.post('/v1/map', async (c) => {
+    const req = parseMapRequest(await c.req.json())
+    return c.json(await engine.map(req, { signal: c.req.raw.signal }), 200)
+  })
+
+  /** The record of one map, by the `id` its response carried. */
+  app.get('/v1/maps/:id', async (c) => {
+    const record = await engine.getMap(c.req.param('id'))
     return record === null ? fail(c, 'not_found', 'not found') : c.json(record, 200)
   })
 
@@ -478,6 +493,12 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const req = parseFirecrawlCrawlRequest(body)
     const accepted = await engine.startCrawl(req)
     return c.json(wrapCrawlAccepted(accepted, req.url), 200)
+  })
+
+  /** A map as Firecrawl answers one: 200 with the links as strings, success false when it found nothing; a client disconnect cancels it. */
+  app.post('/fc/v1/map', async (c) => {
+    const req = parseFirecrawlMapRequest(await c.req.json())
+    return c.json(wrapMap(await engine.map(req, { signal: c.req.raw.signal })), 200)
   })
 
   /** One page of the latest attempt's steps; `next` carries the native cursor to the following one. */

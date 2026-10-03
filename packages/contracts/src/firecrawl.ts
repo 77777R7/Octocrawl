@@ -1,13 +1,14 @@
 /**
- * Firecrawl v1 scrape/crawl snapshot, frozen 2026-09-18.
+ * Firecrawl v1 scrape/crawl snapshot, frozen 2026-09-18, and its map path (added 2026-10-03).
  *
- * A one-shot migration shim: map the two main paths onto the native
+ * A one-shot migration shim: map the main paths onto the native
  * contract. Not a compatibility layer. A parameter or format the shim cannot
  * honour is rejected by name (HTTP 400, success: false), never ignored.
  */
 
-import type { AgentHints, CrawlAccepted, ParsedCrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
-import { parseCrawlStartRequest, parseScrapeRequest, refusalHint, RequestError, warningOf } from './api.js'
+import type { AgentHints, CrawlAccepted, MapRequest, ParsedCrawlStartRequest, ScrapeMetadata, ScrapeRequest, ScrapeResponse } from './api.js'
+import { parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, refusalHint, RequestError, warningOf } from './api.js'
+import type { MapResponse } from './map.js'
 import type { CrawlReport } from './crawl.js'
 import type { JobWebhookEnvelope } from './delivery.js'
 import type { FetchResult } from './result.js'
@@ -20,9 +21,10 @@ export const FIRECRAWL_SHIM_SNAPSHOT = {
     scrape: 'https://docs.firecrawl.dev/api-reference/v1-endpoint/scrape',
     crawl: 'https://docs.firecrawl.dev/api-reference/v1-endpoint/crawl-post',
     crawlStatus: 'https://docs.firecrawl.dev/api-reference/v1-endpoint/crawl-get',
+    map: 'https://docs.firecrawl.dev/api-reference/v1-endpoint/map',
   },
-  paths: ['/scrape', '/crawl', '/crawl/:id'] as const,
-  notCovered: ['search', 'interact', 'agent', 'monitor', 'map', 'extract'] as const,
+  paths: ['/scrape', '/crawl', '/crawl/:id', '/map'] as const,
+  notCovered: ['search', 'interact', 'agent', 'monitor', 'extract'] as const,
 }
 
 export const FIRECRAWL_SHIM_DIFFS = [
@@ -55,6 +57,7 @@ export const FIRECRAWL_SHIM_DIFFS = [
   'waitFor skips the HTTP rung, which cannot run scripts, and starts at the browser rung; the wait counts toward timeout.',
   'metadata has title, description, language, keywords, robots and favicon only when the page declares them, and the Open Graph (ogTitle, ogDescription, ogUrl, ogImage, ogAudio, ogVideo, ogDeterminer, ogLocale, ogLocaleAlternate, ogSiteName), Dublin Core (dcTermsCreated, dcDateCreated, dcDate, dcTermsType, dcType, dcTermsAudience, dcTermsSubject, dcSubject, dcDescription, dcTermsKeywords) and article (publishedTime, modifiedTime, articleTag, articleSection) tags under Firecrawl\'s names, each only when the page states it, as written (no date normalisation, no fallback from another tag); twitter:* and other meta tags are not passed through, and a failed or blocked page has none.',
   'A PDF answers success: true with its text layer as markdown, a <!-- page N --> line before each page, and no metadata.numPages; a PDF without a text layer is success: false with failed: empty_unverified (no OCR). CSV, JSON and text files give their text as received; XLSX, XLS and ZIP files are success: true with markdown null. A file over W2L_MAX_FILE_BYTES is success: false with failed: body_too_large.',
+  'Map (POST /fc/v1/map) maps url, search, sitemap (v2; v1 ignoreSitemap true is skip and false include, sitemapOnly true is only; both v1 flags true is HTTP 400), includeSubdomains, ignoreQueryParameters, limit (1 to 100000, default 5000), timeout (1000 to 300000 ms for the whole map, default 60000; Firecrawl documents no default), origin and integration onto native POST /v1/map, and answers 200 { success: true, id, links: [url strings], warning?, agent_hints? }, or 200 { success: false, id, error, links: [] } when the map found nothing because a source failed or its deadline passed; useIndex, location, ignoreCache, threatProtection and auditMetadata are refused by name (useIndex with the hint that W2L keeps no URL index). Omitted options take W2L\'s defaults: includeSubdomains and ignoreQueryParameters are false, where Firecrawl v2 documents true for both. search keeps the URLs in which every word appears in the decoded URL or the title in hand, in discovery order; Firecrawl orders by relevance. A map reads the sitemaps the site declares and one page body (the start URL, http rung only), so a site without a sitemap maps only its start page\'s links; a title is the start page\'s own, an anchor\'s text or a sitemap\'s <news:title>, never fetched from the target; robots-disallowed URLs are left out and counted on the native response (GET /v1/maps/:id), which also records every sitemap file read.',
   'A crawl\'s webhook (a URL string or { url, headers, metadata, events }) is mapped onto the native webhook and its receiver gets Firecrawl\'s payload shape: { success, type: crawl.started | crawl.page | crawl.completed | crawl.failed, id, data: [page], metadata, error? }, one durable delivery per event with retries, every request carrying x-w2l-event-id, x-w2l-event-version and x-w2l-delivery-id (and the signature pair with secretEnv, a native option). A cancelled crawl is crawl.failed with error "cancelled". The native rules apply: https (plain http for a loopback receiver of a local server only), no content-type, host or x-w2l-* header, at most 32 headers and 32 metadata strings; a hosted server takes public https receivers only. GET /v1/deliveries?jobId=<id> on the native API lists the deliveries.',
 ] as const
 
@@ -134,6 +137,11 @@ export interface FirecrawlScrapeResponse {
   data: FirecrawlPage
   error?: string
 }
+
+/** POST /fc/v1/map: the URLs as strings; a map that found nothing because a source failed or its deadline passed is `success: false`. */
+export type FirecrawlMapResponse =
+  | { success: true; id: string; links: string[]; warning?: string; agent_hints?: AgentHints }
+  | { success: false; id: string; error: string; links: []; agent_hints?: AgentHints }
 
 export interface FirecrawlCrawlStarted {
   success: true
@@ -282,6 +290,43 @@ export function parseFirecrawlCrawlRequest(body: unknown): ParsedCrawlStartReque
   if (rec.webhook !== undefined) native.webhook = rec.webhook
   const parsed = parseCrawlStartRequest(native)
   return parsed.webhook === undefined || parsed.webhook === null ? parsed : { ...parsed, webhookPayloadFormat: 'firecrawl' }
+}
+
+/** What `/fc/v1/map` takes: Firecrawl's v1 MapParams and the v2 names it maps; anything else is refused by name (useIndex, location, ignoreCache, threatProtection, auditMetadata, ...). */
+const SHIM_MAP_KEYS = ['url', 'search', 'sitemap', 'ignoreSitemap', 'sitemapOnly', 'includeSubdomains', 'ignoreQueryParameters', 'limit', 'timeout', ...SHIM_ATTRIBUTION] as const
+
+/**
+ * A Firecrawl map request as the native one. v1 ignoreSitemap true is
+ * sitemap skip and false include, sitemapOnly true is only, both true is
+ * refused; the v2 `sitemap` wins over the v1 flags, as on the crawl shim.
+ * The native parser validates the rest; an omitted option takes W2L's
+ * default (includeSubdomains and ignoreQueryParameters false).
+ */
+export function parseFirecrawlMapRequest(body: unknown): MapRequest {
+  const rec = asRecord(body)
+  const problems = noProblems()
+  checkShimKeys(rec, '', SHIM_MAP_KEYS, problems)
+  throwShimProblems(problems)
+  const native: Record<string, unknown> = {}
+  for (const key of SHIM_MAP_KEYS) if (key !== 'ignoreSitemap' && key !== 'sitemapOnly' && rec[key] !== undefined) native[key] = rec[key]
+  if (rec.ignoreSitemap !== undefined && typeof rec.ignoreSitemap !== 'boolean') throw new RequestError('ignoreSitemap must be a boolean')
+  if (rec.sitemapOnly !== undefined && typeof rec.sitemapOnly !== 'boolean') throw new RequestError('sitemapOnly must be a boolean')
+  if (rec.ignoreSitemap === true && rec.sitemapOnly === true) throw new RequestError('ignoreSitemap and sitemapOnly cannot both be true')
+  if (rec.sitemap === undefined) {
+    if (rec.sitemapOnly === true) native.sitemap = 'only'
+    else if (rec.ignoreSitemap !== undefined) native.sitemap = rec.ignoreSitemap ? 'skip' : 'include'
+  }
+  return parseMapRequest(native)
+}
+
+/** The native map response as Firecrawl's: the links as URL strings, the warnings' messages joined, the hints as `agent_hints`. */
+export function wrapMap(response: MapResponse): FirecrawlMapResponse {
+  const warning = response.warnings.length === 0 ? undefined : response.warnings.map((item) => item.message).join(' ')
+  const hints = response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agent_hints: response.agentHints }
+  if (response.status === 'failed') {
+    return { success: false, id: response.id, error: warning ?? 'the map found no links', links: [], ...hints }
+  }
+  return { success: true, id: response.id, links: response.links.map((link) => link.url), ...(warning === undefined ? {} : { warning }), ...hints }
 }
 
 /**

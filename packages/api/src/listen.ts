@@ -1,4 +1,4 @@
-import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
 
@@ -27,6 +27,9 @@ export interface ListenConfig {
   tokens: readonly string[]
   networkPolicy: NetworkPolicy
   defaultMaxPages: number | null
+  /** The largest map `limit` and `timeout` the server takes: 5000 and 60 000 ms hosted, 100 000 and 300 000 ms locally. */
+  mapMaxLimit: number
+  mapMaxTimeoutMs: number
   /**
    * Whether a scrape or batch may carry a recorded robots override. A local
    * server's user decides that for their own fetches; a hosted server takes
@@ -70,6 +73,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       // Hosted SSRF guarantees depend on direct, DNS-pinned connections.
       networkPolicy: withOperatorContact(tunedPolicy(hostedNetworkPolicy(), env), env),
       defaultMaxPages: 100,
+      mapMaxLimit: HOSTED_MAP_MAX_LIMIT,
+      mapMaxTimeoutMs: HOSTED_MAP_MAX_TIMEOUT_MS,
       allowRobotsOverride: false,
       notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])].filter(notice => notice !== null),
       ...(rateLimit === undefined ? {} : { rateLimit }),
@@ -85,6 +90,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     tokens,
     networkPolicy,
     defaultMaxPages: null,
+    mapMaxLimit: MAX_MAP_LIMIT,
+    mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
     notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])],
     ...(rateLimit === undefined ? {} : { rateLimit }),

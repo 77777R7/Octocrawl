@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { MAP_KEYS, type MapResponse } from '@w2l/contracts'
 import { SDK_ORIGIN, W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { createMcpServer, mcpOrigin } from '../src/server.js'
@@ -8,7 +9,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -594,6 +595,47 @@ describe('MCP tools', () => {
       const properties = TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { anyOf?: unknown[] }>
       expect(properties.webhook?.anyOf, name).toHaveLength(2)
     }
+  })
+
+  it('offers map as a read-only tool with the map request\'s keys and an output schema, compact by default and in full with debug', async () => {
+    const tool = TOOLS.find((t) => t.name === 'map')!
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([...MAP_KEYS.filter((key) => key !== 'origin'), 'debug'].sort())
+    expect(tool.inputSchema.additionalProperties).toBe(false)
+    expect('annotations' in tool && tool.annotations).toEqual({ title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true })
+    expect('outputSchema' in tool && tool.outputSchema.required).toEqual(['id', 'status', 'stoppedBy', 'links'])
+    const native: MapResponse = {
+      id: 'map-1', url: 'https://example.com/docs/', status: 'partial', stoppedBy: 'timeout',
+      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs', titleSource: 'page', via: ['start'], robots: 'allowed' }, { url: 'https://example.com/docs/a', via: ['sitemap'], sitemapFile: 'https://example.com/sitemap.xml', lastmod: '2026-10-01', robots: 'no_robots' }],
+      sources: { startPage: null, sitemap: null },
+      refused: { duplicate: 1, collapsed: 2, hostDenied: 3, subtreeDenied: 0, pathDenied: 0, assetDenied: 0, robots: 1, robotsUnchecked: 0, searchFiltered: 4, overLimit: 0, samples: { collapsed: [], hostDenied: [], robots: [] } },
+      identity: { mode: 'standard', userAgent: 'W2L/1' },
+      warnings: [{ code: 'map_timeout', message: 'the map stopped at its 1000 ms timeout.' }, { code: 'sitemap_unreadable', message: '1 sitemap file was not read.' }],
+      agentHints: ['raise timeout'], elapsedMs: 1000,
+    }
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/map') ? json(native) : json({ error: 'no' }, 404)
+    }) as typeof fetch })
+    expect(await callTool(client, 'map', { url: 'https://example.com/docs/', search: 'docs', sitemap: 'include', limit: 10, integration: 'nightly' }, { origin: 'mcp-test@1' })).toEqual({
+      id: 'map-1', status: 'partial', stoppedBy: 'timeout',
+      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs' }, { url: 'https://example.com/docs/a' }],
+      warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agentHints: ['raise timeout'], counts: { returned: 2, refused: 11 },
+    })
+    expect(bodies[0]).toEqual({ url: 'https://example.com/docs/', search: 'docs', sitemap: 'include', limit: 10, integration: 'nightly', origin: 'mcp-test@1' })
+    expect(await callTool(client, 'map', { url: 'https://example.com/docs/', debug: true })).toEqual(native)
+    // Refused by the shared parser before any API call, with the API's code over MCP.
+    const mcp = new Client({ name: 'w2l-test', version: '1.0.0' })
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
+    try {
+      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } })).rejects.toThrow('invalid_request: limit must be an integer from 1 to 100000')
+      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
+      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } })).rejects.toThrow('invalid_request: debug must be a boolean')
+    } finally {
+      await mcp.close()
+    }
+    expect(bodies).toHaveLength(2)
   })
 })
 
