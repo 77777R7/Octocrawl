@@ -3,12 +3,12 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -411,6 +411,11 @@ export const TOOLS = [
     description: 'The items of a batch that did not succeed, across every attempt (a resumed batch keeps its earlier failures): errors [{ id, timestamp, url, status, code, error, httpStatus }] in pages of up to 1000 (cursor, limit), and robotsBlocked, every URL robots.txt refused (policy_denied by a robots_disallowed trace event with no recorded override; a governance or SSRF refusal is not robots and stays in errors only).',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'], additionalProperties: false },
   },
+  {
+    name: 'hand_off_batch',
+    description: "Hand a finished batch's items that a check stopped (a captcha, a challenge, a login wall: items whose handoff field is set, get_batch's waitingForPerson) to the person in their own Chrome, on a server running on their machine: each opens in a new Chrome tab, one at a time, the person gets through it there, and W2L reads the page once it is through and replaces the stopped result with it (lane browser_local_authed, mode authed). W2L passes no check itself. Chrome must have remote debugging on (chrome://inspect/#remote-debugging) and the person clicks Allow once. Returns when every item is read or given up: { id, handedOff, through, notThrough, items: [{ id, url, through, status, reason? }] }. Tell the person before calling it: it waits for them, up to waitMs per page (default 600000).",
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, waitMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, required: ['id'], additionalProperties: false },
+  },
   ...MONITOR_TOOLS,
 ] as const
 
@@ -547,6 +552,12 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const input = readCrawlQuery(args)
     if (input.maxResults !== undefined) return client.collectBatchItems(input.id, { ...input.options, maxResults: input.maxResults }, request)
     return client.getBatchItems(input.id, input.options, request)
+  }
+  if (name === 'hand_off_batch') {
+    const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null
+    if (typeof rec?.id !== 'string' || !rec.id) throw new RequestError('id is required')
+    const { id, ...body } = rec
+    return client.handOffBatch(id, parseBatchHandoffRequest(body), request)
   }
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null

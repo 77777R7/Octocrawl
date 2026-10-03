@@ -22,7 +22,8 @@ export class ChromeLoginError extends Error {}
 
 /** One Chrome DevTools Protocol connection: a command and its answer. */
 export interface CdpConnection {
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>
+  /** A command to the browser, or with `sessionId` to the page a `Target.attachToTarget` session reaches. */
+  send(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown>
   close(): void
 }
 
@@ -60,7 +61,7 @@ export interface ImportedLogin {
   sessionsFile: string
 }
 
-const ENABLE_HINT = 'open chrome://inspect/#remote-debugging in Chrome (144 or later), turn on "Allow remote debugging for this browser instance", then run this again'
+export const ENABLE_HINT = 'open chrome://inspect/#remote-debugging in Chrome (144 or later), turn on "Allow remote debugging for this browser instance", then run this again'
 
 /** The stable Chrome's user data directory on this OS. */
 export function chromeUserDataDir(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
@@ -183,11 +184,11 @@ export function connectCdp(endpoint: string, timeoutMs: number): Promise<CdpConn
       opened = true
       clearTimeout(timer)
       resolve({
-        send(method, params = {}) {
+        send(method, params = {}, sessionId) {
           const id = nextId++
           return new Promise((done, fail) => {
             pending.set(id, { resolve: done, reject: fail })
-            socket.send(JSON.stringify({ id, method, params }))
+            socket.send(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }))
           })
         },
         close() {

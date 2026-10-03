@@ -61,6 +61,8 @@ export interface CliOptions {
   markdown?: boolean
   /** batch: a file of URLs, one per line (`#` starts a comment). */
   urlsFile?: string
+  /** batch: when it ends, hand the items a check stopped (a captcha, a challenge, a login wall) to the person in their own Chrome. */
+  handoff?: boolean
   /** crawl: resume this crawl (its task id) instead of starting one. */
   resume?: string
   /** The task root (default `W2L_TASK_ROOT`, else `.w2l/api`). */
@@ -108,6 +110,7 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
     }
     if (name === 'help') { cli.help = true; continue }
     if (name === 'markdown' && command === 'scrape') { cli.markdown = true; continue }
+    if (name === 'handoff' && command === 'batch') { cli.handoff = true; continue }
     const refused = REFUSED_FLAGS[name]
     if (refused !== undefined && (command === 'crawl' || command === 'batch')) throw new UsageError(refused)
     const cliKey = CLI_VALUE_FLAGS[name]
@@ -216,7 +219,7 @@ export function usage(command: Command | null): string {
   const synopsis: Record<Command, string> = {
     scrape: 'usage: w2l scrape <url> [options] [--markdown] [--out <dir>]',
     crawl: 'usage: w2l crawl <url> [options] [--out <dir>] | w2l crawl --resume <taskId>',
-    batch: 'usage: w2l batch <url>... [--urls-file <file>] [options] [--out <dir>]',
+    batch: 'usage: w2l batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and W2L reads the page. W2L passes no check itself.',
     map: 'usage: w2l map <url> [options]',
   }
   const lines = optionKeys(command).map((key) => {

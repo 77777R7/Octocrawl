@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
-import { CrawlStateError, TaskNotFoundError, type ApiEngine } from './engine.js'
+import { CrawlStateError, HandoffUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
 import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
@@ -20,6 +20,7 @@ import {
   parseCrawlStartRequest,
   parseBatchErrorsQuery,
   parseBatchStartRequest,
+  parseBatchHandoffRequest,
   parseCrawlPageQuery,
   firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
@@ -254,6 +255,25 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     if (query.limit !== undefined && query.limit > 50) throw new RequestError('batch item limit must be at most 50')
     const page = await engine.getBatchItems(c.req.param('id'), query)
     return page ? c.json(page) : fail(c, 'not_found', 'not found')
+  })
+
+  /**
+   * The items a check stopped (a captcha, a challenge, a login wall), handed
+   * to the person in their own Chrome, one at a time, and read there once
+   * they are through: the answer comes when every item is read or given up.
+   * Offered by a local server on loopback alone; another answers 409, as does one that cannot reach Chrome.
+   */
+  app.post('/v1/batches/:id/handoff', async (c) => {
+    const raw = await c.req.text()
+    const req = parseBatchHandoffRequest(raw.trim() === '' ? undefined : JSON.parse(raw))
+    try {
+      const done = await engine.handOffBatch(c.req.param('id'), req)
+      return done === null ? fail(c, 'not_found', 'not found') : c.json(done, 200)
+    } catch (error) {
+      if (error instanceof CrawlStateError) return fail(c, 'conflict', error.message)
+      if (error instanceof HandoffUnavailableError) return fail(c, 'conflict', error.message)
+      throw error
+    }
   })
 
   /** The batch's errors across every attempt, with the URLs robots.txt refused; no bodies, so pages of up to 1000. */

@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, HandoffUnavailableError, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -61,6 +61,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       networkPolicy: listen.networkPolicy,
       allowRobotsOverride: listen.allowRobotsOverride,
       sessionsFile: defaultSessionsFile(io.env),
+      // The CLI runs on the person's machine and answers them alone: a page a check stopped can be handed to them in their Chrome.
+      userChrome: {},
       webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
       workerCount: listen.workerCount,
       resumeOnStart: false,
@@ -145,11 +147,12 @@ type Page = {
 
 /** Wait for a crawl or batch to end, then answer with its report and every page it recorded. */
 async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo): Promise<number> {
-  const report = await settled(engine, kind, taskId, io.signal)
+  let report = await settled(engine, kind, taskId, io.signal)
   if (report === null) {
     io.stderr(`w2l ${kind}: interrupted; the task is paused${kind === 'crawl' ? `, and w2l crawl --resume ${taskId} continues it` : ' and resumes when the API starts on this task root'}`)
     return 130
   }
+  if (kind === 'batch' && cli.handoff === true) report = await handOff(engine, taskId, io) ?? report
   const items: CrawlPage[] = []
   for (let cursor: string | undefined; ;) {
     const page = await engine.listJobPages(taskId, { ...(cursor === undefined ? {} : { cursor }), limit: 50 })
@@ -165,6 +168,25 @@ async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string
     io.stdout(JSON.stringify({ report, items }, null, 2))
   }
   return report.status === 'completed' ? 0 : 1
+}
+
+/** The batch's items a check stopped, handed to the person in their Chrome; the batch's report after, or null when nothing was handed over. */
+async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<CrawlReport | null> {
+  const before = await engine.getBatch(taskId)
+  const waiting = before?.waitingForPerson ?? 0
+  if (waiting === 0) return null
+  io.stderr(`w2l batch: ${waiting} page${waiting === 1 ? '' : 's'} stopped at a check; opening ${waiting === 1 ? 'it' : 'them'} in your Chrome, one at a time (click Allow if Chrome asks)`)
+  try {
+    const done = await engine.handOffBatch(taskId, {}, { onWaiting: (url, check) => io.stderr(`w2l batch: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened`) })
+    if (done !== null) {
+      io.stderr(`w2l batch: ${done.through} of ${done.handedOff} read in your Chrome`)
+      for (const item of done.items) if (!item.through) io.stderr(`w2l batch: ${item.url} not read: ${item.reason ?? 'not through'}`)
+    }
+  } catch (error) {
+    if (!(error instanceof HandoffUnavailableError)) throw error
+    io.stderr(`w2l batch: no handoff: ${error.message}`)
+  }
+  return engine.getBatch(taskId)
 }
 
 async function settled(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, signal: AbortSignal | undefined): Promise<CrawlReport | null> {

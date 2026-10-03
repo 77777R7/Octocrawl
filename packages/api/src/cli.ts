@@ -35,6 +35,8 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     allowRobotsOverride: listen.allowRobotsOverride,
     hosted: listen.mode === 'hosted',
     sessionsFile: servesLogins ? defaultSessionsFile(env) : null,
+    // A page a check stopped is handed to the person in their own Chrome by a server that answers them alone.
+    userChrome: servesLogins ? {} : null,
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
     workerCount: listen.workerCount,
   })

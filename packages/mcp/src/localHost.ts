@@ -41,7 +41,7 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
 /** Single-user local service. It never binds a public interface or exposes REST. */
 export function createLocalService(config: LocalConfig): {server: HttpServer; close: () => Promise<void>} {
   if (!Number.isSafeInteger(config.port) || config.port < 0 || config.port > 65535) throw new Error('port must be 0..65535')
-  const runtime=createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:config.networkPolicy ?? localNetworkPolicy(),deliveryNetworkPolicy:config.deliveryNetworkPolicy,monitorPollMs:config.monitorPollMs,deliveryPollMs:config.deliveryPollMs,exposeInternalErrors:true,sessionsFile:defaultSessionsFile(),
+  const runtime=createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:config.networkPolicy ?? localNetworkPolicy(),deliveryNetworkPolicy:config.deliveryNetworkPolicy,monitorPollMs:config.monitorPollMs,deliveryPollMs:config.deliveryPollMs,exposeInternalErrors:true,sessionsFile:defaultSessionsFile(),userChrome:{},
     ...(config.amazonPublicState === undefined ? {} : {publicPreferenceState:config.amazonPublicState,
       browserAllowedHosts:['www.amazon.sg','m.media-amazon.com','images-na.ssl-images-amazon.com','images-eu.ssl-images-amazon.com'],
       channelPolicy:(url:string)=>new URL(url).hostname === 'www.amazon.sg' ? 'browser_only' as const : ['docs.firecrawl.dev','modelcontextprotocol.io'].includes(new URL(url).hostname) ? 'http_only' as const : 'ladder' as const})})
