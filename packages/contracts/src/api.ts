@@ -13,7 +13,7 @@ import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './re
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
-import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
+import type { AttributeSelector, ListField, ListFormatRequest, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
 import { LIST_WAIT_MS, MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, MAX_LIST_PAGES, MAX_LIST_ROUNDS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
 import type { WebhookPayloadFormat } from './delivery.js'
@@ -34,7 +34,7 @@ export const MAX_WAIT_FOR_MS = 60_000
  * `screenshot`: the `html`, `rawHtml`, `images`, `attributes` and `screenshot`
  * formats ask for those.
  */
-export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot'> {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot' | 'list'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -252,7 +252,7 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'tables' | 'attributes' | 'screenshot')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'tables' | 'attributes' | 'screenshot' | 'list')[]
   markdown?: string | null
   /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
   html?: string | null
@@ -267,6 +267,8 @@ export interface CompactScrapeResponse {
   pages?: FetchResult['pages']
   /** Present when an `attributes` entry was asked for and the page was read as content, as on the full response. */
   attributes?: FetchResult['attributes']
+  /** Present when a `list` entry was asked for and the page was read: its records. */
+  list?: FetchResult['list']
   /** Present when a `screenshot` entry was asked for, as on the full response: the capture, or null when the browser lane rendered no page or could not capture it. */
   screenshot?: FetchResult['screenshot']
   /** Present when the request ran `actions`: what the steps produced, and the step that failed if one did. */
@@ -1196,7 +1198,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
 
 /** The formats a request names as strings; `attributes` carries its selectors and is named as an object. */
 const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'tables', 'screenshot']
-const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes']
+const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes', 'list']
 /** Firecrawl v1's spelling of a full-page screenshot: `{ type: 'screenshot', fullPage: true }`. */
 const SCREENSHOT_FULL_PAGE_ALIAS = 'screenshot@fullPage'
 const JSON_FORMAT_KEYS: readonly string[] = ['type', 'schema', 'prompt', 'modelFallback']
@@ -1220,6 +1222,41 @@ const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, htm
  * API engine as for `includeTags`) and each attribute an HTML attribute name
  * of at most 100 characters.
  */
+const LIST_FORMAT_KEYS: readonly string[] = ['type', 'itemSelector', 'fields']
+const LIST_FIELD_KEYS: readonly string[] = ['name', 'selector', 'attribute']
+const LIST_ATTRIBUTE = /^[A-Za-z_][A-Za-z0-9_:.-]{0,99}$/
+
+/** `{ type: 'list', itemSelector, fields }`: the selectors' syntax is checked by the engine (invalidSelector), like includeTags. */
+function readListFormat(rec: Record<string, unknown>, name: string): ListFormatRequest {
+  for (const key of Object.keys(rec)) if (!LIST_FORMAT_KEYS.includes(key)) throw new RequestError(`unsupported list format option: ${key}`)
+  const selectorOf = (value: unknown, at: string): string => {
+    if (typeof value !== 'string' || value.trim().length === 0 || value.length > 200) throw new RequestError(`${at} must be a CSS selector of 1 to 200 characters`)
+    return value.trim()
+  }
+  const itemSelector = selectorOf(rec.itemSelector, `${name}.itemSelector`)
+  if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > 50) throw new RequestError(`${name}.fields must be an array of 1 to 50 {name, selector?, attribute?} entries`)
+  const names = new Set<string>()
+  const fields = rec.fields.map((value: unknown, i: number): ListField => {
+    const at = `${name}.fields[${i}]`
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${at} must be {name, selector?, attribute?}`)
+    const field = value as Record<string, unknown>
+    for (const key of Object.keys(field)) if (!LIST_FIELD_KEYS.includes(key)) throw new RequestError(`${at}: unsupported list field option: ${key}`)
+    if (typeof field.name !== 'string' || field.name.trim().length === 0 || field.name.length > 64) throw new RequestError(`${at}.name must be a name of 1 to 64 characters`)
+    const fieldName = field.name.trim()
+    if (names.has(fieldName)) throw new RequestError(`${at}.name repeats ${fieldName}: field names must be unique`)
+    // The CSV adds these columns after the fields: a field of the same name would be shadowed by one of them.
+    if (['source_url', 'page', 'index'].includes(fieldName)) throw new RequestError(`${at}.name ${fieldName} is the name of a column the list adds (source_url, page, index): choose another`)
+    names.add(fieldName)
+    if (field.attribute !== undefined && (typeof field.attribute !== 'string' || !LIST_ATTRIBUTE.test(field.attribute))) throw new RequestError(`${at}.attribute must be an HTML attribute name`)
+    return {
+      name: fieldName,
+      ...(field.selector === undefined ? {} : { selector: selectorOf(field.selector, `${at}.selector`) }),
+      ...(field.attribute === undefined ? {} : { attribute: field.attribute as string }),
+    }
+  })
+  return { type: 'list', itemSelector, fields }
+}
+
 function readAttributeSelectors(value: unknown): readonly AttributeSelector[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 50) throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
   return value.map((entry, index) => {
@@ -1320,6 +1357,12 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
       if (logical.has('attributes')) throw new RequestError('formats must contain at most one attributes entry')
       logical.add('attributes')
       formats.push({ type: 'attributes', selectors: readAttributeSelectors(rec.selectors) })
+      continue
+    }
+    if (rec.type === 'list') {
+      if (logical.has('list')) throw new RequestError('formats must contain at most one list entry')
+      logical.add('list')
+      formats.push(readListFormat(rec, `formats[${index}]`))
       continue
     }
     if (rec.type === 'screenshot') {

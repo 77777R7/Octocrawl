@@ -59,7 +59,7 @@ const INTEGRATION_PROPERTY = {
   integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
 } as const
 /** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then; screenshot is null then. */
-const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. tables gives every data table of the content the Markdown was written from, in the Markdown\'s order: { tableIndex, caption, sourceUrl, headerRows, columns, rows, csv, csvSha256 }, cells as plain text, a spanned cell repeated in every slot it covers. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules. screenshot (or screenshot@fullPage, or one { type: "screenshot", fullPage, quality, viewport } entry) captures the rendered page on the browser rung alone, which the request then selects (no http attempt; a server without a browser rung refuses it): a PNG, or a JPEG at quality 1 to 100, CSS-pixel sized at the declared 1280x800 viewport or the viewport asked for (320..1920 by 240..1080), of the viewport or the whole document (fullPage, without scrolling), returned as { contentType, width, height, fullPage, viewport, deviceScaleFactor, quality, bytes, sha256, path, base64 }, null when the page could not be captured.'
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. tables gives every data table of the content the Markdown was written from, in the Markdown\'s order: { tableIndex, caption, sourceUrl, headerRows, columns, rows, csv, csvSha256 }, cells as plain text, a spanned cell repeated in every slot it covers. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules. A { type: "list", itemSelector, fields: [{ name, selector?, attribute? }] } entry (one per request) returns the page\'s records: every element itemSelector matches is a record (one inside another is part of it), each field read from it (the text of its first match within the record, or the record itself without a selector, or the attribute; href/src made absolute), as { itemSelector, fields, records: [{ values, missing, source: { url, page, index } }], pages, incomplete, csv, csvSha256 }; a missing value is null and named in missing, never filled in; with a paginate action, the records of every page it read; a page of records is not failed as having no main content. screenshot (or screenshot@fullPage, or one { type: "screenshot", fullPage, quality, viewport } entry) captures the rendered page on the browser rung alone, which the request then selects (no http attempt; a server without a browser rung refuses it): a PNG, or a JPEG at quality 1 to 100, CSS-pixel sized at the declared 1280x800 viewport or the viewport asked for (320..1920 by 240..1080), of the viewport or the whole document (fullPage, without scrolling), returned as { contentType, width, height, fullPage, viewport, deviceScaleFactor, quality, bytes, sha256, path, base64 }, null when the page could not be captured.'
 /** One entry of `formats`: a format name, a json schema request, an attributes request or a screenshot request. */
 const FORMAT_ITEMS = {
   anyOf: [
@@ -85,6 +85,19 @@ const FORMAT_ITEMS = {
         },
       },
       required: ['type', 'selectors'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        type: { const: 'list' },
+        itemSelector: { type: 'string', minLength: 1, maxLength: 200 },
+        fields: {
+          type: 'array', minItems: 1, maxItems: 50,
+          items: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: 64 }, selector: { type: 'string', minLength: 1, maxLength: 200 }, attribute: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_:.-]*$' } }, required: ['name'], additionalProperties: false },
+        },
+      },
+      required: ['type', 'itemSelector', 'fields'],
       additionalProperties: false,
     },
     {

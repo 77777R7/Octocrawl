@@ -241,6 +241,7 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
       images: ['https://fixture.test/media/1.jpg'],
       attributes: [{ selector: 'main a', attribute: 'href', values: ['/a'] }],
       screenshot: { contentType: 'image/png' as const, width: 1280, height: 800, fullPage: false, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, quality: null, bytes: 3, sha256: 'a'.repeat(64), path: null, base64: 'iVBO' },
+      list: { itemSelector: 'li', fields: ['name'], records: [{ values: { name: 'same' }, missing: [], source: { url: SEED, page: 1, index: 0 } }], pages: 1, incomplete: 0, truncated: false, csv: 'name,source_url,page,index\r\n', csvSha256: 'c'.repeat(64) },
     }
     const first = outcome(SEED, [ITEM_A, ITEM_B], 'same-body')
     const repeated = outcome(ITEM_A, [SEED], 'same-body')
