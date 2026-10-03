@@ -2424,6 +2424,212 @@
         {"item": "scrape-execution.custom-headers", "type": "field", "path": "evidenceRecord.identity.requestHeaders", "equals": [{"name": "accept-language", "valueSha256": "4f429ced49de5975fdfd9fa2e649772597ff8c78bcff9e49a652c89e266af9c5"}, {"name": "x-research-run", "valueSha256": "ee8250fb76e094b34b471f13a73dbbe51d1ae142e9df59d7c0d31ec20f0a0a8e"}]},
         {"item": "scrape-execution.custom-headers", "type": "evidenceSchema"}
       ]
+    },
+    {
+      "id": "TB01",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://www.scrapethissite.com/pages/forms/",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. Hockey teams, one data table with a th header row. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB02",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://webscraper.io/test-sites/tables",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. Two tables with thead. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 2},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB03",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://webscraper.io/test-sites/tables/tables-multiple-header-rows",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. Header rows spanning columns. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB04",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. Large sortable tables with footnote marks and rowspan. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB05",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://en.wikipedia.org/wiki/List_of_countries_and_dependencies_by_population",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. A long population table. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB06",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://www.gov.uk/government/statistics/subnational-electricity-and-gas-consumption-summary-report-2024/subnational-electricity-and-gas-consumption-summary-report-2024--2",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. Nine statistics tables whose titles are paragraphs above them, not captions. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 8},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB07",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://www.eia.gov/electricity/annual/html/epa_01_01.html",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. A page read by the table strategy, with spanned header cells. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB08",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. A product information table of th/td rows. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB09",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://www.bls.gov/news.release/empsit.t01.htm",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. A BLS release table; the http lane is refused with 403, so the browser lane may answer. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "TB10",
+      "batch": "tables",
+      "feature": "tables-csv",
+      "url": "https://ourworldindata.org/grapher/co-emissions-per-capita?tab=table",
+      "request": {"formats": ["markdown", "tables", "rawHtml"]},
+      "note": "Added 2026-10-03 for the researcher data group (P2 tables → CSV), frozen before the first run. A table the page renders with scripts: the browser lane answers. Every data table must be one GFM table of the Markdown, each row as wide as its table, the CSV hash right; the cells are then compared with pandas.read_html on the same rawHtml (research/parity/tables-crosscheck.py), which the run record reports.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "tables-csv", "type": "field", "path": "status", "in": ["success", "partial"]},
+        {"item": "tables-csv", "type": "tablesConsistent", "min": 1},
+        {"item": "tables-csv", "type": "eachItem", "path": "tables", "check": {"type": "field", "path": "sourceUrl", "present": true}}
+      ]
+    },
+    {
+      "id": "PD01",
+      "batch": "pdf-options",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://www.eia.gov/outlooks/ieo/pdf/IEO2023_Narrative.pdf",
+      "request": {"parsers": [{"type": "pdf", "mode": "fast", "maxPages": 2, "pages": true, "pageMarkers": false}]},
+      "note": "Added 2026-10-03 for the researcher data group (the audit's M3 PDF options). The 70-page EIA report (corpus R3) cut at 2 pages as asked: success, pagesRead 2 of 70, pages[] for both, no markers in the Markdown.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pagesRead", "equals": 2},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "file.pdf.pageCount", "min": 60, "record": true},
+        {"item": "scrape-formats.pdf-pages", "type": "field", "path": "pages.length", "equals": 2},
+        {"item": "scrape-formats.pdf-pages", "type": "field", "path": "pages.1.pageNumber", "equals": 2},
+        {"item": "scrape-formats.pdf-page-markers", "type": "markdownExcludes", "text": "<!-- page"},
+        {"item": "scrape-formats.pdf-parser", "type": "evidenceSchema"}
+      ]
+    },
+    {
+      "id": "PD02",
+      "batch": "pdf-options",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://www.ovhcloud.com/sites/default/files/external_files/kpis_fy25.pdf",
+      "request": {},
+      "compareRequest": {"parsers": []},
+      "note": "Added 2026-10-03 for the researcher data group (the audit's M3 PDF options). OVHcloud KPIs (corpus S4, 3 pages): natively the markers stay on by default; parsers [] then reads no text and keeps the file.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-formats.pdf-page-markers", "type": "markdownIncludes", "text": "<!-- page 2 -->"},
+        {"item": "scrape-formats.pdf-page-markers", "type": "markdownIncludes", "text": "<!-- page 3 -->"},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "compare.status", "equals": "success"},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "compare.markdown", "equals": null},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "compare.file.warnings.0.code", "equals": "pdf_not_parsed"},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "compare.file.sha256", "equalsPath": "file.sha256"}
+      ]
+    },
+    {
+      "id": "PD03",
+      "batch": "pdf-options",
+      "endpoint": "fc-scrape",
+      "feature": "scrape-formats.pdf-page-markers",
+      "url": "https://www.insee.fr/fr/statistiques/fichier/version-html/8654458/ip2077.pdf",
+      "request": {},
+      "compareRequest": {"parsers": [{"type": "pdf", "pageMarkers": true, "pages": true}]},
+      "note": "Added 2026-10-03 for the researcher data group (the audit's M3 PDF options). Insee Premiere (corpus R2, 4 pages) through /fc: no markers unless asked and metadata.numPages; then pageMarkers and pages as asked.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "success", "equals": true},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "data.metadata.numPages", "equals": 4},
+        {"item": "scrape-formats.pdf-page-markers", "type": "field", "path": "data.markdown", "excludes": "<!-- page"},
+        {"item": "scrape-formats.pdf-page-markers", "type": "field", "path": "compare.data.markdown", "includes": "<!-- page 2 -->"},
+        {"item": "scrape-formats.pdf-pages", "type": "field", "path": "compare.data.pages.length", "equals": 4}
+      ]
+    },
+    {
+      "id": "PD04",
+      "batch": "pdf-options",
+      "feature": "scrape-formats.pdf-parser",
+      "url": "https://www.insee.fr/fr/statistiques/fichier/version-html/8654458/ip2077.pdf",
+      "request": {"parsers": [{"type": "pdf", "mode": "ocr"}]},
+      "note": "Added 2026-10-03 for the researcher data group (the audit's M3 PDF options). mode ocr is refused by name before anything is fetched: W2L runs no OCR.",
+      "checks": [
+        {"item": "scrape-formats.pdf-parser", "type": "apiStatus", "equals": 400},
+        {"item": "scrape-formats.pdf-parser", "type": "field", "path": "code", "equals": "unsupported_parameter"}
+      ]
     }
   ]
 }
