@@ -8,6 +8,8 @@ Result: 6 of 6 cases, 27 of 27 checks.
 
 Run 2, after the review fixes (records as a reader sees them, limits, a failed later step, duplicates; see the commit after the first run's): `991549b`, the same command, [record](2026-10-04-i4-list-records-991549b.md): 6 of 6 cases, 27 of 27 checks, the same counts as the first run.
 
+Run 3, after the re-review fixes (lead warnings, page merge by the items' whole text, SVG text): `a9d917c`, the same command, [record](2026-10-04-i4-list-records-a9d917c.md): 6 of 6 cases, 27 of 27 checks.
+
 | Case | Page | How | Records | Pages | Incomplete | First record |
 | --- | --- | --- | --- | --- | --- | --- |
 | LR01 | books.toscrape.com, Mystery | paginate + list (title, url, price, availability) | 32 | 2 | 0 | Sharp Objects, its catalogue URL made absolute |
