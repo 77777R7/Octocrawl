@@ -32,6 +32,7 @@ beforeAll(async () => {
     const one = /^\/one\/(\d)$/.exec(url)
     if (one !== null) { const n = Number(one[1]); return html(`<article class="post"><h2>Post ${n}</h2><span class="stock">In stock</span></article>${n < 3 ? `<a class="next" href="/one/${n + 1}">Next</a>` : ''}`) }
     if (url === '/many') return html(Array.from({ length: 10_005 }, (_, i) => `<div class="card"><a class="name" href="/p/${i}">I${i}</a></div>`).join(''))
+    if (url === '/article') return html(`<article><h1>A note</h1>${'<p>One long paragraph of prose about nothing in particular, written to be read as an article. </p>'.repeat(4)}</article>`)
     const page = /^\/pages\/(\d)$/.exec(url)
     if (page !== null) { const n = Number(page[1]); return html(`${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}${n < 3 ? `<a class="next" href="/pages/${n + 1}">Next</a>` : ''}`) }
     res.writeHead(404); res.end()
@@ -110,6 +111,36 @@ describe('list format', () => {
       const result = await http.fetch(`${base}/cards`, Date.now() + 30_000, undefined, {}, undefined, { list: LIST })
       expect(result.list?.records).toHaveLength(12)
       expect(result.status).toBe('success')
+    } finally {
+      await http.teardown()
+    }
+  }, 60_000)
+
+  it('without itemSelector, finds the list and its fields, and says what it chose', async () => {
+    const result = await browser('/cards', { list: { type: 'list' } })
+    expect(result.status).toBe('success')
+    expect(result.list).toMatchObject({ itemSelector: 'main > div.card', fields: ['name', 'link', 'price'], detected: { fields: [{ name: 'name', selector: 'a.name' }, { name: 'link', selector: 'a.name', attribute: 'href' }, { name: 'price', selector: 'span.price' }] } })
+    expect(result.list?.records[0]?.values).toEqual({ name: 'Item 1', link: `${base}/p/1`, price: '1.00' })
+    expect(result.list?.records).toHaveLength(12)
+  }, 60_000)
+
+  it('over a paginate step, finds the list on the first page and reads every page the same way', async () => {
+    const result = await browser('/pages/1', { list: { type: 'list' }, actions: [{ type: 'paginate', nextSelector: 'a.next', waitMs: 200 }] })
+    expect(result.list).toMatchObject({ itemSelector: 'main > div.card', pages: 3, incomplete: 0 })
+    expect(result.list?.records.map((record) => record.values.name)).toEqual(['Item 11', 'Item 12', 'Item 13', 'Item 21', 'Item 22', 'Item 23', 'Item 31', 'Item 32', 'Item 33'])
+  }, 60_000)
+
+  it('a page with no list says so, with no records, and is read as it would be without the format', async () => {
+    const http = new ResilientHttpSubject('standard')
+    try {
+      const result = await http.fetch(`${base}/article`, Date.now() + 30_000, undefined, {}, undefined, { list: { type: 'list' } })
+      expect(result.status).toBe('success')
+      expect(result.list).toMatchObject({ itemSelector: null, fields: [], records: [], detected: { fields: [], alternatives: [] } })
+      expect(result.warnings?.map((warning) => warning.code)).toEqual(['list_not_detected'])
+      // The cards page has its list, found on the HTTP lane the same way.
+      const cards = await http.fetch(`${base}/cards`, Date.now() + 30_000, undefined, {}, undefined, { list: { type: 'list', itemSelector: 'div.card' } })
+      expect(cards.list).toMatchObject({ itemSelector: 'div.card', fields: ['name', 'link', 'price'] })
+      expect(cards.status).toBe('success')
     } finally {
       await http.teardown()
     }

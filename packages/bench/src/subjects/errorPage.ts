@@ -1,5 +1,5 @@
-import type { AttributeExtraction, FetchOptions, FetchResult, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import type { AttributeExtraction, FetchOptions, FetchResult, FetchWarning, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
+import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /**
@@ -76,9 +76,10 @@ export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'd
 export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list'> {
   const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction } = {}
   if (options.list !== undefined) {
-    const records = extractListRecords(raw, url, options.list)
-    const list = listExtraction(options.list, records, 1, records.cut === true)
-    trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated } })
+    const { spec, detected } = resolveListSpec(raw, options.list)
+    const records = spec === null ? [] : extractListRecords(raw, url, spec)
+    const list = listExtraction(spec, records, 1, 'cut' in records && records.cut === true, detected)
+    trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated, ...(detected === undefined ? {} : { detected: list.itemSelector }) } })
     out.list = list
   }
   if (options.includeImages === true) {
@@ -117,10 +118,15 @@ export function tableCsv(rows: readonly (readonly string[])[]): string {
   return rows.map((row) => row.map(field).join(',')).join('\r\n') + (rows.length > 0 ? '\r\n' : '')
 }
 
-/** A result whose list a limit cut, with the `list_truncated` warning that says so. */
+/** A result whose list a limit cut, or that found no list on the page, with the warning that says so (`list_truncated`, `list_not_detected`). */
 export function withListCaveat<T extends FetchResult>(result: T): T {
-  if (result.list?.truncated !== true || result.warnings?.some((warning) => warning.code === 'list_truncated')) return result
-  return { ...result, warnings: [...(result.warnings ?? []), { code: 'list_truncated', message: `The list stopped at ${result.list.records.length} records: the page had more than the list format carries (${MAX_LIST_RECORDS} records, ${MAX_LIST_VALUE_CHARS} characters of values).` }] }
+  const list = result.list
+  if (list === undefined) return result
+  const has = (code: string) => result.warnings?.some((warning) => warning.code === code) === true
+  const caveats: FetchWarning[] = []
+  if (list.truncated && !has('list_truncated')) caveats.push({ code: 'list_truncated', message: `The list stopped at ${list.records.length} records: the page had more than the list format carries (${MAX_LIST_RECORDS} records, ${MAX_LIST_VALUE_CHARS} characters of values).` })
+  if (list.itemSelector === null && !has('list_not_detected')) caveats.push({ code: 'list_not_detected', message: 'No list was found on the page: no elements repeat beside each other with text in them. Name the items with itemSelector to read them.' })
+  return caveats.length === 0 ? result : { ...result, warnings: [...(result.warnings ?? []), ...caveats] }
 }
 
 /**
@@ -131,7 +137,9 @@ export function withListCaveat<T extends FetchResult>(result: T): T {
  */
 export function listRecordsFound(raw: string, url: string, options: FetchOptions): boolean {
   // A record with a value read: elements that matched but hold nothing (a loading skeleton) are not content.
-  return options.list !== undefined && extractListRecords(raw, url, options.list).some((record) => record.missing.length < options.list!.fields.length)
+  if (options.list === undefined) return false
+  const { spec } = resolveListSpec(raw, options.list)
+  return spec !== null && extractListRecords(raw, url, spec).some((record) => record.missing.length < spec.fields.length)
 }
 
 /**

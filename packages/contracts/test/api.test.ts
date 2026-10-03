@@ -715,9 +715,15 @@ describe('the list format', () => {
     expect(parseBatchStartRequest({ urls: [url], formats: [list] }).formats).toHaveLength(1)
   })
 
+  it('without itemSelector, or without fields, leaves them to W2L', () => {
+    expect(parseScrapeRequest({ url, formats: [{ type: 'list' }] }).formats).toEqual([{ type: 'list' }])
+    expect(parseScrapeRequest({ url, formats: [{ type: 'list', itemSelector: ' li.card ' }] }).formats).toEqual([{ type: 'list', itemSelector: 'li.card' }])
+  })
+
   it('refuses a malformed list by name', () => {
     const at = (list: unknown) => () => parseScrapeRequest({ url, formats: [list] })
-    expect(at({ type: 'list', fields: [{ name: 'a' }] })).toThrow('formats[0].itemSelector must be a CSS selector of 1 to 200 characters')
+    expect(at({ type: 'list', fields: [{ name: 'a' }] })).toThrow('formats[0].fields needs an itemSelector')
+    expect(at({ type: 'list', itemSelector: ' ' })).toThrow('formats[0].itemSelector must be a CSS selector of 1 to 200 characters')
     expect(at({ type: 'list', itemSelector: 'li', fields: [] })).toThrow('formats[0].fields must be an array of 1 to 50')
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }, { name: 'a' }] })).toThrow('formats[0].fields[1].name repeats a')
     expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', attribute: 'not an attr' }] })).toThrow('formats[0].fields[0].attribute must be an HTML attribute name')

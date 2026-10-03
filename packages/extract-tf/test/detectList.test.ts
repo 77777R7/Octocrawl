@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest'
+import { detectLists, extractListRecords, resolveListSpec } from '../src/index.js'
+
+const product = (n: number) => `<div class="product"><a href="/p/${n}"><img src="/img/${n}.png" alt=""></a><h3 class="name"><a href="/p/${n}">Product ${n}</a></h3><p class="price">£${n}.99</p><button class="buy">Add to cart</button></div>`
+// A shop page: a menu of links in the header, products in rows of three, links in the footer.
+const SHOP = `<html><body>
+<header><nav><ul class="menu">${['Home', 'Shop', 'About', 'Contact', 'Blog', 'Help'].map((label) => `<li><a href="/${label}">${label}</a></li>`).join('')}</ul></nav></header>
+<main><h1>Kettles</h1><div class="grid">${[0, 1, 2, 3].map((row) => `<div class="row">${[1, 2, 3].map((i) => product(row * 3 + i)).join('')}</div>`).join('')}</div></main>
+<footer><ul class="links">${['Terms', 'Privacy', 'Jobs', 'Press'].map((label) => `<li><a href="/${label}">${label}</a></li>`).join('')}</ul></footer>
+</body></html>`
+
+describe('detectLists', () => {
+  it('finds the products across their rows, not the menus, and the fields they hold', () => {
+    const [best, ...rest] = detectLists(SHOP)
+    expect(best).toMatchObject({ itemSelector: 'div.row > div.product', count: 12 })
+    expect(best!.fields).toEqual([
+      { name: 'link', selector: 'a', attribute: 'href' },
+      { name: 'image', selector: 'img', attribute: 'src' },
+      { name: 'name', selector: 'h3.name > a' },
+      { name: 'name_link', selector: 'h3.name > a', attribute: 'href' },
+      { name: 'price', selector: 'p.price' },
+    ])
+    // The button reads the same on every product: a label, not a field.
+    expect(best!.fields.map((field) => field.name)).not.toContain('buy')
+    expect(rest.map((list) => list.itemSelector)).not.toContain('div.row > div.product')
+    expect(rest.every((list) => list.score < best!.score)).toBe(true)
+  })
+
+  it('what it finds reads as records', () => {
+    const [best] = detectLists(SHOP)
+    const records = extractListRecords(SHOP, 'https://shop.test/kettles', { type: 'list', ...best! })
+    expect(records).toHaveLength(12)
+    expect(records[4]!.values).toEqual({ link: 'https://shop.test/p/5', image: 'https://shop.test/img/5.png', name: 'Product 5', name_link: 'https://shop.test/p/5', price: '£5.99' })
+  })
+
+  it('a cell whose state class differs between rows is still one field', () => {
+    const row = (n: number, state: string) => `<tr class="team"><td class="name">Team ${n}</td><td class="wins">${n * 3}</td><td class="pct ${state}">0.${n}</td></tr>`
+    const html = `<table class="table"><tr><th>Name</th><th>Wins</th><th>%</th></tr>${[1, 2, 3, 4, 5].map((n) => row(n, n % 2 === 0 ? 'text-success' : 'text-danger')).join('')}</table>`
+    const [best] = detectLists(html)
+    expect(best).toMatchObject({ itemSelector: 'table.table > tr.team', count: 5 })
+    expect(best!.fields).toEqual([{ name: 'name', selector: 'td.name' }, { name: 'wins', selector: 'td.wins' }, { name: 'pct', selector: 'td.pct' }])
+  })
+
+  it('leaves out a field no selector tells from an earlier one in the item', () => {
+    const quote = (n: number) => `<div class="quote"><span class="text">Quote ${n}</span><span>by Author ${n}</span></div>`
+    const html = `<div class="col">${[1, 2, 3].map(quote).join('')}</div>`
+    // The second span: its selector `span` finds the first one first.
+    expect(detectLists(html)[0]!.fields).toEqual([{ name: 'text', selector: 'span.text' }])
+  })
+
+  it('items with no inner elements are read whole', () => {
+    expect(detectLists('<main><ul class="todo"><li>Buy milk</li><li>Walk the dog</li><li>Call home</li></ul></main>')[0]).toMatchObject({ itemSelector: 'ul.todo > li', fields: [{ name: 'text' }] })
+  })
+
+  it('finds nothing on a page without repeated elements, or whose repeats hold no text', () => {
+    expect(detectLists('<main><h1>About</h1><p>One paragraph.</p><div>A box</div></main>')).toEqual([])
+    // An article's paragraphs and headings, and a table's cells, are parts of records, not records.
+    expect(detectLists(`<article>${'<h2>Part</h2><p>Some prose, long enough to read.</p>'.repeat(5)}</article>`)).toEqual([])
+    expect(detectLists(`<div class="grid">${'<div class="cell"><img src="/x.png"></div>'.repeat(5)}</div>`)).toEqual([])
+  })
+})
+
+describe('resolveListSpec', () => {
+  it('keeps a list the request names in full, and says nothing was detected', () => {
+    const request = { type: 'list' as const, itemSelector: 'div.product', fields: [{ name: 'n', selector: 'h3' }] }
+    expect(resolveListSpec(SHOP, request)).toEqual({ spec: request })
+  })
+
+  it('finds the fields of the items named, and the list and its fields when none are named', () => {
+    const named = resolveListSpec(SHOP, { type: 'list', itemSelector: 'div.product' })
+    expect(named.spec?.itemSelector).toBe('div.product')
+    expect(named.detected).toEqual({ fields: named.spec!.fields, alternatives: [] })
+    expect(named.spec!.fields.map((field) => field.name)).toEqual(['link', 'image', 'name', 'name_link', 'price'])
+    const found = resolveListSpec(SHOP, { type: 'list' })
+    expect(found.spec?.itemSelector).toBe('div.row > div.product')
+    expect(found.detected?.alternatives.length).toBeGreaterThan(0)
+  })
+
+  it('no list on the page: no spec', () => {
+    expect(resolveListSpec('<p>Nothing here</p>', { type: 'list' })).toEqual({ spec: null, detected: { fields: [], alternatives: [] } })
+  })
+})

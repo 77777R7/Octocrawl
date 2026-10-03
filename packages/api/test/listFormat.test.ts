@@ -60,6 +60,13 @@ describe('the list format in the API', () => {
     expect(plain.body.list).toBeUndefined()
   })
 
+  it('hands a list without itemSelector or fields to the lane to find', async () => {
+    const app = await setup()
+    expect((await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, formats: [{ type: 'list' }] })).status).toBe(200)
+    expect((await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, formats: [{ type: 'list', itemSelector: 'li' }] })).status).toBe(200)
+    expect(asked).toEqual([{ type: 'list' }, { type: 'list', itemSelector: 'li' }])
+  })
+
   it('refuses a list selector W2L does not match before anything is fetched', async () => {
     const app = await setup()
     const sibling = await post(app, '/v1/scrape', { url: `${server.url}/crawl/listing`, formats: [{ ...list, fields: [{ name: 'n', selector: 'h3 + p' }] }] })

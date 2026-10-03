@@ -3135,6 +3135,106 @@
         {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 30},
         {"item": "list-records", "type": "field", "path": "list.records.0.values.url", "includes": "http"}
       ]
+    },
+    {
+      "id": "LD01",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+      "request": {"debug": true, "timeout": 180000, "formats": ["markdown", {"type": "list"}], "actions": [{"type": "paginate", "nextSelector": "li.next > a"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. LR01 with no itemSelector or fields: the 32 books over 2 pages, found on the first page and read the same way on the second, each with a price.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 32},
+        {"item": "list-detect", "type": "field", "path": "list.pages", "equals": 2},
+        {"item": "list-detect", "type": "field", "path": "list.records.0.values.price", "includes": "£"},
+        {"item": "list-detect", "type": "field", "path": "list.detected.fields.length", "min": 3}
+      ]
+    },
+    {
+      "id": "LD02",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://quotes.toscrape.com/",
+      "request": {"debug": true, "formats": ["markdown", {"type": "list"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. LR05 with no itemSelector or fields: the page's 10 quotes, each with its author.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "list.itemSelector", "includes": "div.quote"},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 10},
+        {"item": "list-detect", "type": "field", "path": "list.records.0.values.author", "equals": "Albert Einstein"}
+      ]
+    },
+    {
+      "id": "LD03",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://www.scrapethissite.com/pages/forms/",
+      "request": {"debug": true, "formats": [{"type": "list"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. The first page of LR03's table: 25 team seasons, not the pagination or the table's header row.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "list.itemSelector", "includes": "tr.team"},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 25},
+        {"item": "list-detect", "type": "field", "path": "list.records.0.values.name", "equals": "Boston Bruins"}
+      ]
+    },
+    {
+      "id": "LD04",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://news.ycombinator.com/",
+      "request": {"debug": true, "formats": [{"type": "list"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. LR06 with no itemSelector or fields: the front page's 30 story rows.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "list.itemSelector", "includes": "tr.athing"},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 30}
+      ]
+    },
+    {
+      "id": "LD05",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://www.scrapethissite.com/pages/simple/",
+      "request": {"debug": true, "formats": [{"type": "list"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. 250 countries laid out three to a row: one list across the rows, not the rows, each country with its capital.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 250},
+        {"item": "list-detect", "type": "field", "path": "list.records.0.values.country_capital", "equals": "Andorra la Vella"},
+        {"item": "list-detect", "type": "field", "path": "list.incomplete", "equals": 0}
+      ]
+    },
+    {
+      "id": "LD06",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://webscraper.io/test-sites/e-commerce/allinone/computers/laptops",
+      "request": {"debug": true, "formats": [{"type": "list", "itemSelector": "div.thumbnail"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. An itemSelector without fields: the fields of the 117 laptops are found, a price among them.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "list.itemSelector", "equals": "div.thumbnail"},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 117},
+        {"item": "list-detect", "type": "field", "path": "list.records.0.values.price", "includes": "$"}
+      ]
+    },
+    {
+      "id": "LD07",
+      "batch": "list-detect",
+      "feature": "interaction.list-detect",
+      "url": "https://example.com/",
+      "request": {"debug": true, "formats": ["markdown", {"type": "list"}]},
+      "note": "Added 2026-10-04 for the interaction group I5 (lists found without selectors), frozen before the first run. A page with no list: no records, itemSelector null and a warning, the page read as it is without the format.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-detect", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-detect", "type": "field", "path": "list.itemSelector", "equals": null},
+        {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 0},
+        {"item": "list-detect", "type": "field", "path": "warning", "includes": "No list was found"}
+      ]
     }
   ]
 }

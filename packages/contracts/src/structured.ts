@@ -89,11 +89,21 @@ export interface ListField {
  * W2L's `{ type: 'list', itemSelector, fields }`: every element `itemSelector`
  * matches is a record (one nested in another matched one is not a record of
  * its own), and each field is read from it. At most one such entry per request.
+ * Without `itemSelector` W2L finds the page's list itself, and without
+ * `fields` the fields its items hold (`fields` needs an `itemSelector`):
+ * what it chose is the result's `itemSelector` and `detected.fields`.
  */
 export interface ListFormatRequest {
   type: 'list'
-  itemSelector: string
+  itemSelector?: string
   /** 1 to 50 fields. */
+  fields?: readonly ListField[]
+}
+
+/** A list format with its items and fields named: as asked, or as W2L found them on the page. */
+export interface ListSpec {
+  type: 'list'
+  itemSelector: string
   fields: readonly ListField[]
 }
 

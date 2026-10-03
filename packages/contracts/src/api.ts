@@ -1233,7 +1233,13 @@ function readListFormat(rec: Record<string, unknown>, name: string): ListFormatR
     if (typeof value !== 'string' || value.trim().length === 0 || value.length > 200) throw new RequestError(`${at} must be a CSS selector of 1 to 200 characters`)
     return value.trim()
   }
+  // Without itemSelector the list is found on the page, and its fields with it: fields alone would name nothing to read them from.
+  if (rec.itemSelector === undefined) {
+    if (rec.fields !== undefined) throw new RequestError(`${name}.fields needs an itemSelector: without one, W2L finds the list and its fields itself`)
+    return { type: 'list' }
+  }
   const itemSelector = selectorOf(rec.itemSelector, `${name}.itemSelector`)
+  if (rec.fields === undefined) return { type: 'list', itemSelector }
   if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > 50) throw new RequestError(`${name}.fields must be an array of 1 to 50 {name, selector?, attribute?} entries`)
   const names = new Set<string>()
   const fields = rec.fields.map((value: unknown, i: number): ListField => {
