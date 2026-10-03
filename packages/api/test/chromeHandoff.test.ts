@@ -160,6 +160,28 @@ describe('the person\'s Chrome', () => {
     await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).rejects.toThrow('was closed, or Chrome quit, before W2L read it')
   })
 
+  it('a Chrome that stops answering (quit, its socket not yet closed) ends the wait within a read\'s timeout', async () => {
+    const asked: Array<number | undefined> = []
+    const frozen = async (): Promise<CdpConnection> => ({
+      async send(method, _params, _sessionId, timeoutMs) {
+        if (method === 'Browser.getVersion') return { product: 'Chrome/144' }
+        if (method === 'Target.createTarget') return { targetId: 't' }
+        if (method === 'Target.attachToTarget') return { sessionId: 's1' }
+        if (method === 'Page.navigate' || method === 'Target.closeTarget') return {}
+        if (method === 'Target.getTargetInfo') {
+          asked.push(timeoutMs)
+          // connectCdp's own words when the time runs out.
+          throw new ChromeLoginError(`Chrome did not answer Target.getTargetInfo within ${Math.round((timeoutMs ?? 30_000) / 1000)} s`)
+        }
+        throw new Error(`unexpected ${method}`)
+      },
+      close() {},
+    })
+    const reader = await openUserChrome({ userDataDir, connect: frozen })
+    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 60_000 })).rejects.toThrow('was closed, or Chrome quit, before W2L read it')
+    expect(asked).toEqual([10_000])
+  })
+
   it('a caller that went away ends the wait', async () => {
     const reader = await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', GATE)]).connect })
     const controller = new AbortController()

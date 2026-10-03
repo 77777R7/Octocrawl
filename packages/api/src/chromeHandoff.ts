@@ -65,6 +65,8 @@ const CLEAR_READS = 3
 const RETURNS = 2
 /** A document answered with one of these is a check, whatever its body. */
 const CHECK_STATUSES: ReadonlySet<number> = new Set([401, 403, 407, 429, 503])
+/** How long one read of the tab waits for Chrome: a Chrome that stopped answering this long is gone. */
+const READ_TIMEOUT_MS = 10_000
 /** W2L's own world in the page, where the page's script cannot change what it reads. */
 const WORLD = 'w2l-handoff'
 
@@ -136,7 +138,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   let sawGate: string | null = null
   // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
   const gone = (error: unknown): HandoffNotThrough | null =>
-    error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found/i.test(error.message)
+    error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer Target\.getTargetInfo/i.test(error.message)
       ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate)
       : null
   // Any other refusal from Chrome ends this page alone, not the handoff of the others.
@@ -195,7 +197,8 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       let state: PageState
       try {
         // The tab first, from the browser: one the person closed is gone however its page answers. Its address is Chrome's, which the page's script cannot change.
-        const info = await connection.send('Target.getTargetInfo', { targetId }) as { targetInfo?: { url?: string } }
+        // A Chrome that does not answer this, the browser's own lightest command, within READ_TIMEOUT_MS has quit.
+        const info = await connection.send('Target.getTargetInfo', { targetId }, undefined, READ_TIMEOUT_MS) as { targetInfo?: { url?: string } }
         const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string } }
         if (typeof answer.result?.value !== 'string') { clear = 0; continue }
         state = JSON.parse(answer.result.value) as PageState

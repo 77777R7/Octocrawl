@@ -22,8 +22,8 @@ export class ChromeLoginError extends Error {}
 
 /** One Chrome DevTools Protocol connection: a command and its answer. */
 export interface CdpConnection {
-  /** A command to the browser, or with `sessionId` to the page a `Target.attachToTarget` session reaches. */
-  send(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown>
+  /** A command to the browser, or with `sessionId` to the page a `Target.attachToTarget` session reaches; answered within `timeoutMs` (default CDP_COMMAND_TIMEOUT_MS). */
+  send(method: string, params?: Record<string, unknown>, sessionId?: string, timeoutMs?: number): Promise<unknown>
   /** Listen to an event (of the browser, or of one page's session); the answer stops listening. A connection without events has none. */
   on?(method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void): () => void
   close(): void
@@ -197,15 +197,15 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
       signal?.removeEventListener('abort', cancel)
       if (signal?.aborted === true) { socket.close(); return }
       resolve({
-        send(method, params = {}, sessionId) {
+        send(method, params = {}, sessionId, within = CDP_COMMAND_TIMEOUT_MS) {
           // A closed socket sends nothing and answers nothing: the command fails now, not never.
           if (closed) return Promise.reject(new ChromeLoginError('Chrome closed the connection'))
           const id = nextId++
           return new Promise((done, fail) => {
             const timeout = setTimeout(() => {
               pending.delete(id)
-              fail(new ChromeLoginError(`Chrome did not answer ${method} within ${CDP_COMMAND_TIMEOUT_MS / 1000} s`))
-            }, CDP_COMMAND_TIMEOUT_MS)
+              fail(new ChromeLoginError(`Chrome did not answer ${method} within ${Math.round(within / 1000)} s`))
+            }, within)
             pending.set(id, { resolve: (value) => { clearTimeout(timeout); done(value) }, reject: (error) => { clearTimeout(timeout); fail(error) } })
             socket.send(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }))
           })
@@ -234,13 +234,17 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
       if (message.error !== undefined) waiter.reject(new ChromeLoginError(`Chrome refused the request: ${message.error.message ?? 'unknown error'}`))
       else waiter.resolve(message.result)
     })
-    socket.addEventListener('close', () => {
+    // A socket that errs is as gone as one that closes: a close event may come late, or not at all, after Chrome quits.
+    const lost = () => {
+      if (closed) return
       closed = true
       clearTimeout(timer)
       for (const waiter of pending.values()) waiter.reject(new ChromeLoginError('Chrome closed the connection'))
       pending.clear()
       if (!opened) reject(new ChromeLoginError(`Chrome did not accept the connection (Allow not clicked, or remote debugging is off): ${ENABLE_HINT}`))
-    })
+    }
+    socket.addEventListener('close', lost)
+    socket.addEventListener('error', lost)
   })
 }
 
