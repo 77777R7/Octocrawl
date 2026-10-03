@@ -375,6 +375,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const userChrome: UserChromeOptions | null = options.hosted === true ? null : options.userChrome ?? null
   /** The batches being handed to the person now: one handoff of a batch at a time. */
   const handoffs = new Set<string>()
+  /** Ends every handoff when the engine closes, gracefully or not: a handoff waits on a person, not on work that will finish. */
+  const handoffClosing = new AbortController()
+  const handoffRuns = new Set<Promise<unknown>>()
   const savedLogins: SessionStore | null = options.hosted === true || (options.sessionsFile ?? null) === null ? null : readOnlySessions(new FileSessionStore(options.sessionsFile!))
   /** The saved logins a run of `mode` may use: mode `authed` alone. */
   const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
@@ -766,6 +769,76 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
+      }
+    } finally {
+      await store.close()
+    }
+  }
+
+  /** handOffBatch's work: see ApiEngine.handOffBatch. */
+  async function handOff(taskId: string, req: BatchHandoffRequest, hooks: { onWaiting?: (url: string, check: string) => void; signal?: AbortSignal }): Promise<BatchHandoffResponse | null> {
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+    const store = SqliteTaskStore.open(join(taskRoot, taskId))
+    try {
+      const task = await store.getTask(taskId)
+      if (task === null || task.batch === undefined) return null
+      if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
+      handoffs.add(taskId)
+      try {
+        const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
+        const items: BatchHandoffResponse['items'] = []
+        if (waiting.length > 0) {
+          const selection = task.batch
+          const formats = selection.formats ?? ['markdown']
+          const fetchOpts = fetchOptions(selection, selection.formats)
+          // The caller going away, or this engine shutting down, ends the handoff.
+          const signal = AbortSignal.any([...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+          let chrome
+          try { chrome = await openUserChrome(userChrome) }
+          catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
+          try {
+            for (const step of waiting) {
+              try {
+                // A caller that went away hands nothing more over: each item left keeps its stopped result.
+                if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
+                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), signal })
+                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
+                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
+                if (!CONTENTFUL_STATUS.has(result.status)) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
+                  continue
+                }
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
+                const stored: FetchResult = {
+                  ...result,
+                  markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
+                  links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
+                  ...(json === undefined ? {} : { json }),
+                }
+                // An engine shutting down writes nothing more.
+                if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'W2L shut down before the page was stored' })
+                  continue
+                }
+                // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
+                const { audit: _stoppedAudit, ...kept } = step
+                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                items.push({ id: step.id, url: step.url, through: true, status: stored.status })
+              } catch (error) {
+                if (!(error instanceof HandoffNotThrough)) throw error
+                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
+              }
+            }
+          } finally {
+            chrome.close()
+          }
+        }
+        const through = items.filter((item) => item.through).length
+        return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
+      } finally {
+        handoffs.delete(taskId)
       }
     } finally {
       await store.close()
@@ -1372,66 +1445,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
-    async handOffBatch(taskId, req, hooks = {}) {
-      if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
-      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
-      const store = SqliteTaskStore.open(join(taskRoot, taskId))
-      try {
-        const task = await store.getTask(taskId)
-        if (task === null || task.batch === undefined) return null
-        if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
-        if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
-        handoffs.add(taskId)
-        try {
-        const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
-        const items: BatchHandoffResponse['items'] = []
-        if (waiting.length > 0) {
-          const selection = task.batch
-          const formats = selection.formats ?? ['markdown']
-          const fetchOpts = fetchOptions(selection, selection.formats)
-          let chrome
-          try { chrome = await openUserChrome(userChrome) }
-          catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
-          try {
-            for (const step of waiting) {
-              try {
-                // A caller that went away hands nothing more over: each item left keeps its stopped result.
-                if (hooks.signal?.aborted === true) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
-                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.signal === undefined ? {} : { signal: hooks.signal }) })
-                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
-                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
-                if (!CONTENTFUL_STATUS.has(result.status)) {
-                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
-                  continue
-                }
-                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
-                const stored: FetchResult = {
-                  ...result,
-                  markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
-                  links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
-                  ...(json === undefined ? {} : { json }),
-                }
-                // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
-                const { audit: _stoppedAudit, ...kept } = step
-                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
-                items.push({ id: step.id, url: step.url, through: true, status: stored.status })
-              } catch (error) {
-                if (!(error instanceof HandoffNotThrough)) throw error
-                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
-              }
-            }
-          } finally {
-            chrome.close()
-          }
-        }
-        const through = items.filter((item) => item.through).length
-        return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
-        } finally {
-          handoffs.delete(taskId)
-        }
-      } finally {
-        await store.close()
-      }
+    handOffBatch(taskId, req, hooks = {}) {
+      const run = handOff(taskId, req, hooks)
+      handoffRuns.add(run)
+      void run.catch(() => {}).finally(() => handoffRuns.delete(run))
+      return run
     },
 
     async runFirecrawlMonitor(triggerKey, context) {
@@ -1527,6 +1545,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (options.cancelActive) {
         shutdownController.abort(new DOMException('service shutdown', 'ShutdownError'))
       }
+      // A handoff ends now and closes the tab it had open in the person's Chrome before the engine is gone.
+      handoffClosing.abort(new DOMException('service shutdown', 'ShutdownError'))
+      await Promise.all([...handoffRuns].map((run) => run.catch(() => {})))
       // A relaunch an append scheduled while a run was finishing is a new entry: wait until nothing is in flight.
       while (inflight.size > 0) await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))

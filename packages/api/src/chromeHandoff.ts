@@ -17,7 +17,8 @@
  * included), finds no check in it; it is on the site asked for (so a page
  * that sends the browser elsewhere is not read as that site's) and not on a
  * login path; and the person is not at a step of their own: no password or
- * one-time-code field on the page, no form field they are typing in.
+ * one-time-code field showing on the page, no form field whose value they
+ * are changing. Its address is Chrome's, not what the page's script says.
  */
 
 import { classifyGate } from '@w2l/http-core'
@@ -65,10 +66,10 @@ interface PageState {
   ready: string
   status: number | null
   html: string
-  /** A password or one-time-code field is on the page: a sign-in step. */
+  /** A password or one-time-code field shows on the page: a sign-in step. */
   secret: boolean
-  /** The person is in a form field (typing a code, an answer). */
-  typing: boolean
+  /** The form field the person is in and what it holds, or null: a value that changed between two reads is the person typing. */
+  field: string | null
 }
 
 /** What the page shows now. */
@@ -77,8 +78,8 @@ const STATE = `JSON.stringify({
   ready: document.readyState,
   status: (performance.getEntriesByType('navigation')[0] || {}).responseStatus || null,
   html: document.documentElement ? document.documentElement.outerHTML : '',
-  secret: !!document.querySelector('input[type=password], input[autocomplete="one-time-code"]'),
-  typing: !!document.activeElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable),
+  secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
+  field: (() => { const el = document.activeElement; if (!el) return null; if (el.isContentEditable) return 'edit:' + String(el.textContent).slice(0, 500); return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.tagName + ':' + String(el.value).slice(0, 500) : null })(),
 })`
 
 /** The main document's last response, as the browser received it. */
@@ -111,14 +112,19 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   const host = new URL(url).hostname
   const started = Date.now()
   let sawGate: string | null = null
+  // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
   const gone = (error: unknown): HandoffNotThrough | null =>
-    error instanceof ChromeLoginError && /closed|No session|No target|not found/i.test(error.message) ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate) : null
+    error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /No session with given id|No target with given id|closed the connection|Target closed|target not found/i.test(error.message)
+      ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate)
+      : null
+  // Any other refusal from Chrome ends this page alone, not the handoff of the others.
+  const ended = (error: unknown): unknown => gone(error) ?? (error instanceof ChromeLoginError ? new HandoffNotThrough(`${url} was not read: ${error.message}`, sawGate) : error)
   let targetId: string
   try {
     // A blank tab first, so the page's own responses are heard from its first one.
     targetId = (await connection.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }).targetId
   } catch (error) {
-    throw gone(error) ?? error
+    throw ended(error)
   }
   const stops: Array<() => void> = []
   try {
@@ -133,18 +139,25 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       }))
       await connection.send('Network.enable', {}, sessionId)
     }
-    await connection.send('Page.navigate', { url }, sessionId)
+    // Chrome answers Page.navigate when the page's response begins: a slow page is waited for in the reads, not here.
+    let navigation: unknown = null
+    void connection.send('Page.navigate', { url }, sessionId).catch((error: unknown) => { navigation = error })
     let told = false
+    let field: string | null | undefined
     let clear = 0
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       if (options.signal?.aborted === true) throw new HandoffNotThrough(`the handoff of ${url} was cancelled before W2L read it`, sawGate)
+      if (navigation !== null && gone(navigation) !== null) throw gone(navigation)
       let state: PageState
       try {
         const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string } }
         if (typeof answer.result?.value !== 'string') { clear = 0; continue }
         state = JSON.parse(answer.result.value) as PageState
+        // The address as Chrome has it, which the page's own script cannot change.
+        const info = await connection.send('Target.getTargetInfo', { targetId }) as { targetInfo?: { url?: string } }
+        if (typeof info.targetInfo?.url === 'string') state.href = info.targetInfo.url
       } catch (error) {
         // A page between two documents has no context to evaluate in; one that is gone is the person's answer.
         const left = gone(error)
@@ -161,8 +174,10 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
         sawGate ??= gate.reason
         if (!told) { told = true; options.onWaiting?.(url, gate.reason) }
       }
+      const typing = state.field !== null && field !== undefined && state.field !== field
+      field = state.field
       const through = state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
-        && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !state.typing
+        && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !typing
       clear = through ? clear + 1 : 0
       if (clear >= CLEAR_READS) {
         return {
@@ -184,7 +199,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
           : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
     throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
   } catch (error) {
-    throw gone(error) ?? error
+    throw ended(error)
   } finally {
     for (const stop of stops) stop()
     await connection.send('Target.closeTarget', { targetId }).catch(() => undefined)

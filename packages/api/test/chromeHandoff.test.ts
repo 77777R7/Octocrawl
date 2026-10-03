@@ -8,27 +8,33 @@ import { HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
 const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; typing?: boolean }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
  * one from then on ('closed': the tab is gone). It has no events, as a
  * connection without them: the document's status is the page's own report.
  */
-function fakeChrome(states: Array<State | 'closed'>) {
+function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => unknown = () => ({})) {
   const calls: string[] = []
   let read = 0
+  let shown = ''
   const connect = async (): Promise<CdpConnection> => ({
     async send(method, params, sessionId) {
       calls.push(sessionId === undefined ? method : `${method}@${sessionId}`)
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
       if (method === 'Target.createTarget') return { targetId: `tab:${String((params as { url: string }).url)}` }
       if (method === 'Target.attachToTarget') return { sessionId: 's1' }
-      if (method === 'Target.closeTarget' || method === 'Page.navigate') return {}
+      if (method === 'Target.closeTarget') return {}
+      if (method === 'Page.navigate') return navigate()
+      if (method === 'Target.getTargetInfo') return { targetInfo: { url: shown } }
       if (method === 'Runtime.evaluate') {
         const state = states[Math.min(read++, states.length - 1)]!
         if (state === 'closed') throw new ChromeLoginError('Chrome refused the request: No session with given id')
-        return { result: { value: JSON.stringify({ ready: 'complete', status: 200, secret: false, typing: false, ...state }) } }
+        if (state === 'moving') throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
+        shown = state.href
+        // The page's script says it is elsewhere: Chrome's address is the one read.
+        return { result: { value: JSON.stringify({ ready: 'complete', status: 200, secret: false, field: null, ...state, href: 'https://forged.test/' }) } }
       }
       throw new Error(`unexpected ${method}`)
     },
@@ -56,7 +62,7 @@ describe('the person\'s Chrome', () => {
     reader.close()
     expect(waiting).toEqual(['https://site.test/a captcha'])
     expect(read).toMatchObject({ requestedUrl: 'https://site.test/a', finalUrl: 'https://site.test/a', status: 200, contentType: null, html: PAGE, sawGate: 'captcha', browser: 'Chrome/144.0.7000.0' })
-    expect(chrome.calls).toEqual(['Browser.getVersion', 'Target.createTarget', 'Target.attachToTarget', 'Page.navigate@s1', ...Array(4).fill('Runtime.evaluate@s1'), 'Target.closeTarget', 'close'])
+    expect(chrome.calls).toEqual(['Browser.getVersion', 'Target.createTarget', 'Target.attachToTarget', 'Page.navigate@s1', ...Array(4).fill(['Runtime.evaluate@s1', 'Target.getTargetInfo']).flat(), 'Target.closeTarget', 'close'])
   })
 
   it('a page that still shows its check when the wait ends is not read, and its tab is closed', async () => {
@@ -68,17 +74,24 @@ describe('the person\'s Chrome', () => {
     expect(chrome.calls).toContain('Target.closeTarget')
   })
 
-  it('the person at a sign-in step of their own (a code field, a field they type in) is waited for', async () => {
+  it('the person at a sign-in step of their own (a code field showing, a field whose value they change) is waited for', async () => {
     const chrome = fakeChrome([
       at('https://site.test/a', '<form><input autocomplete="one-time-code"></form>', { secret: true }),
-      at('https://site.test/a', PAGE, { typing: true }),
-      at('https://site.test/a', PAGE, { typing: true }),
-      at('https://site.test/a', PAGE),
+      at('https://site.test/a', PAGE, { field: 'INPUT:4' }),
+      at('https://site.test/a', PAGE, { field: 'INPUT:42' }),
+      at('https://site.test/a', PAGE, { field: 'INPUT:421' }),
+      at('https://site.test/a', PAGE, { field: 'INPUT:421' }),
     ])
     const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
     await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
-    // Three sign-in reads, then three clear ones.
-    expect(chrome.calls.filter((call) => call.startsWith('Runtime.evaluate'))).toHaveLength(6)
+    // A sign-in read, three of typing (the field's value changed since the read before), then three clear: a field focused and unchanged is no step.
+    expect(chrome.calls.filter((call) => call.startsWith('Runtime.evaluate'))).toHaveLength(7)
+  })
+
+  it('a page between two documents is waited for, not taken for a closed tab; a slow navigation is waited for in the reads', async () => {
+    const chrome = fakeChrome([at('https://site.test/a', GATE), 'moving', 'moving', at('https://site.test/a', PAGE)], () => { throw new ChromeLoginError('Chrome did not answer Page.navigate within 30 s') })
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    expect(await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).toMatchObject({ html: PAGE })
   })
 
   it('a page that does not answer 2xx, or sits on a login path, is not through', async () => {

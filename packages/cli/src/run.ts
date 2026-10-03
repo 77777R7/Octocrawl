@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, HandoffUnavailableError, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -183,8 +183,8 @@ async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<Cr
       for (const item of done.items) if (!item.through) io.stderr(`w2l batch: ${item.url} not read: ${item.reason ?? 'not through'}`)
     }
   } catch (error) {
-    if (!(error instanceof HandoffUnavailableError)) throw error
-    io.stderr(`w2l batch: no handoff: ${error.message}`)
+    // The batch's results are written whatever became of the handoff.
+    io.stderr(`w2l batch: no handoff: ${error instanceof Error ? error.message : String(error)}`)
   }
   return engine.getBatch(taskId)
 }

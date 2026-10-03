@@ -35,6 +35,10 @@ beforeAll(async () => {
     if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(CAPTCHA)
     // Through the captcha, a page with nothing on it: not the page asked for.
     if (req.url === '/thin') return cookie.includes('passed=1') ? html('<p>ok</p>') : html(CAPTCHA)
+    // Behind the captcha, a page with a search box that takes the focus and a sign-in box it hides.
+    if (req.url === '/search') return cookie.includes('passed=1') ? html(`<input name="q" autofocus><div style="display:none"><input type="password"></div>${ARTICLE}`) : html(CAPTCHA)
+    // A challenge that runs its script for a moment, then reloads into the page by itself.
+    if (req.url === '/jsc') return cookie.includes('js=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>setTimeout(() => { document.cookie = "js=1; path=/"; location.reload() }, 1500)</script>')
     // A bot check that only its header says (a vendor's), never passed here.
     if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
     // A sign-in, then a one-time code, then the page.
@@ -168,6 +172,33 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       stop()
       await engine.close()
     }
+  }, 120_000)
+
+  it('a search box with the focus, a hidden sign-in box, or a challenge reloading by itself does not stop a page from being through', async () => {
+    const engine = engineFor(join(root, 'tasks-5'))
+    const stop = person(chrome, { '/search': async (page) => { await page.click('#pass') } })
+    try {
+      const taskId = await batchOf(engine, ['/search', '/jsc'])
+      const done = await engine.handOffBatch(taskId, { waitMs: 20_000 })
+      expect(done).toMatchObject({ handedOff: 2, through: 2 })
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('W2L shutting down ends a handoff waiting for the person, closes its tab and stores nothing', async () => {
+    const engine = engineFor(join(root, 'tasks-6'))
+    const taskId = await batchOf(engine, ['/dd'])
+    const started = Date.now()
+    const handing = engine.handOffBatch(taskId, { waitMs: 60_000 })
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    await engine.close()
+    const done = await handing
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect(done).toMatchObject({ through: 0, notThrough: 1, items: [{ reason: expect.stringContaining('cancelled') }] })
+    for (let i = 0; i < 40 && chrome.pages().some((page) => page.url().startsWith(base)); i++) await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(chrome.pages().some((page) => page.url().startsWith(base))).toBe(false)
   }, 120_000)
 
   it('a Chrome that quits during the wait ends the handoff, and the batch can be handed over again', async () => {
