@@ -203,7 +203,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
     case 'scrape': {
       const html = await bounded(ctx, page.content())
       const url = page.url()
-      result.scrapes.push({ url, html })
+      result.scrapes.push({ url, html, step: index })
       return { url, characters: html.length }
     }
     case 'executeJavascript': {
@@ -463,7 +463,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
       } else {
         alreadyRead = 0
         if (listed !== null) seenItems.add(listed)
-        result.scrapes.push({ url, html })
+        result.scrapes.push({ url, html, step: index })
         pages++
         if (action.itemSelector !== undefined) {
           items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())

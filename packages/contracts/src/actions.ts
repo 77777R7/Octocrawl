@@ -116,7 +116,8 @@ export interface ListRun {
 /** What the steps produced, each list in the order of its steps. */
 export interface ActionsResult {
   screenshots: ScreenshotEvidence[]
-  scrapes: { url: string; html: string }[]
+  /** Each page's HTML, with the index of the step that read it (a scrape step, or each page of a paginate step). */
+  scrapes: { url: string; html: string; step?: number }[]
   /** `type` is the JavaScript `typeof` of the value (`null` for null). */
   javascriptReturns: { type: string; value: unknown }[]
   pdfs: ActionPdf[]

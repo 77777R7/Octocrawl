@@ -23,7 +23,7 @@ import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from 
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -677,12 +677,15 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }
 
     let wholePage: string | null = null
+    // A page of the records a list format asked for is content, though no article was found in it.
+    let listPage = false
     if (extracted.escalate && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options)) {
       const formatStart = performance.now()
       wholePage = wholePageMarkdown(body, out.finalUrl, options)
       formatMs = performance.now() - formatStart
-      if (options.onlyMainContent !== false || wholePage === null) {
+      listPage = listRecordsFound(body, out.finalUrl, options)
+      if ((options.onlyMainContent !== false && !listPage) || wholePage === null) {
         const warnings = clientRenderedCaveat()
         return finish({
           ...base,
@@ -715,7 +718,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // footer kept) through the same converter and base URL. The quality
     // signal below still reads the main content, so the mode never changes
     // which lane answers.
-    const markdown = wholePageAsked(options) ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) }) : mainMarkdown
+    const markdown = wholePageAsked(options) || listPage ? wholePage ?? htmlToMarkdown(body, { baseUrl: out.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) }) : mainMarkdown
     formatMs += performance.now() - formatStart
     const contentTokens = estimateTokens(markdown)
     const mainTokens = markdown === mainMarkdown ? contentTokens : estimateTokens(mainMarkdown)

@@ -2,6 +2,7 @@ import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
   AttributesFormatRequest,
+  ListFormatRequest,
   CompactScrapeResponse,
   ExecutionContext,
   FetchResult,
@@ -912,7 +913,7 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly Scra
 }
 
 /** Whether the formats ask for one by name: a string entry, or an object entry of that `type` (a json schema request counts as `json`, a screenshot entry as `screenshot`). */
-export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'attributes' | 'screenshot'): boolean {
+export function hasFormat(formats: readonly ScrapeFormat[], name: 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'attributes' | 'screenshot' | 'list'): boolean {
   return formats.some(format => typeof format === 'string' ? format === name : format.type === name)
 }
 
@@ -924,6 +925,11 @@ export function customJsonFormat(formats: readonly ScrapeFormat[]): JsonFormatRe
 /** The attributes request, when the formats carry one. */
 export function attributesFormat(formats: readonly ScrapeFormat[]): AttributesFormatRequest | undefined {
   return formats.find((format): format is AttributesFormatRequest => typeof format === 'object' && format.type === 'attributes')
+}
+
+/** The list request, when the formats carry one. */
+export function listFormat(formats: readonly ScrapeFormat[]): ListFormatRequest | undefined {
+  return formats.find((format): format is ListFormatRequest => typeof format === 'object' && format.type === 'list')
 }
 
 /** The screenshot request, when the formats carry one: the string's defaults (`{}`), or the entry's options without its `type`. */
@@ -948,9 +954,9 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...rest } = result
       // What the actions produced travels once too, on the response.
-      const { actions: _kept, ...whole } = result
+      const { actions: _kept, list: _records, ...whole } = result
       return {
         ...attempt,
         result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1130,6 +1136,7 @@ export function compactScrapeResponse(
       ...(hasFormat(formats, 'images') ? ['images' as const] : []),
       ...(hasFormat(formats, 'tables') ? ['tables' as const] : []),
       ...(hasFormat(formats, 'attributes') ? ['attributes' as const] : []),
+      ...(hasFormat(formats, 'list') ? ['list' as const] : []),
       ...(hasFormat(formats, 'screenshot') ? ['screenshot' as const] : []),
       ...(hasFormat(formats, 'json') ? ['json' as const] : []),
     ],
@@ -1142,6 +1149,8 @@ export function compactScrapeResponse(
     ...(hasFormat(formats, 'tables') && next.tables !== undefined ? { tables: next.tables } : {}),
     ...(next.pages === undefined ? {} : { pages: next.pages }),
     ...(hasFormat(formats, 'attributes') && next.attributes !== undefined ? { attributes: next.attributes } : {}),
+    // Asked for, and the page was read: its records.
+    ...(hasFormat(formats, 'list') && next.list !== undefined ? { list: next.list } : {}),
     // Asked for: the capture, or null when the browser lane rendered no page or could not capture it.
     ...(hasFormat(formats, 'screenshot') ? { screenshot: next.screenshot ?? null } : {}),
     // What the request's actions produced, and the step that failed if one did.

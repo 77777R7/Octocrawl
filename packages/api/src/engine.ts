@@ -104,7 +104,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, FileSessionStore, SessionBroker, type SessionStore } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { attributesFormat, customJsonFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
+import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -458,6 +458,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       throw new RequestError(`attributes selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
     }
   }
+  /** The selectors of a list format, checked like includeTags: refused by name before anything is fetched or stored. */
+  const checkListSelectors = (formats: readonly ScrapeFormat[] | undefined): void => {
+    const format = listFormat(formats ?? [])
+    if (format === undefined) return
+    const at = (formats ?? []).indexOf(format)
+    const named = [{ path: 'itemSelector', selector: format.itemSelector }, ...format.fields.flatMap((field, i) => field.selector === undefined ? [] : [{ path: `fields[${i}].selector`, selector: field.selector }])]
+    let parts = 0
+    for (const { path, selector } of named) {
+      const refusal = invalidSelector(selector)
+      if (refusal === null) {
+        parts += selectorParts(selector)
+        continue
+      }
+      if (refusal.kind === 'syntax') throw new RequestError(`list ${path} is not a valid CSS selector: ${selector}`)
+      throw new RequestError(`list ${path} uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].${path}`] })
+    }
+    if (parts > MAX_SELECTOR_PARTS) throw new RequestError(`list selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts}`)
+  }
   /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
   const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
     if (options.allowRobotsOverride === false && value !== undefined) {
@@ -765,7 +783,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
@@ -882,6 +900,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkFileCap(req)
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
     const overallStart = performance.now()
@@ -1050,6 +1069,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
+      checkListSelectors(req.formats)
       checkHostedOptions(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
@@ -1138,6 +1158,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
+      checkListSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
@@ -1512,6 +1533,7 @@ function deliveryQuery<T extends DeliveryQuery>(query: T): Omit<T, 'jobId'> {
 function fetchOptions(options: PageOptions | undefined, formats: readonly ScrapeFormat[] = []): FetchOptions {
   const attributes = attributesFormat(formats)
   const screenshot = screenshotFormat(formats)
+  const list = listFormat(formats)
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
@@ -1532,6 +1554,7 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(attributes === undefined ? {} : { attributes: attributes.selectors }),
     ...(screenshot === undefined ? {} : { screenshot }),
     ...(options?.actions === undefined ? {} : { actions: options.actions }),
+    ...(list === undefined ? {} : { list }),
   }
 }
 
@@ -1793,6 +1816,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.file === undefined ? {} : { file: result.file }),
     ...(result?.actions === undefined ? {} : { actions: result.actions }),
+    ...(result?.list === undefined ? {} : { list: result.list }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,

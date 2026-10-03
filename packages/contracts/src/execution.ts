@@ -1,6 +1,6 @@
 import type { RobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
-import type { AttributeSelector, ScreenshotOptions } from './structured.js'
+import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
 import type { PageAction } from './actions.js'
 
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
@@ -151,6 +151,8 @@ export interface FetchOptions {
    * by a caller; the API has checked the selectors (`invalidSelector`).
    */
   attributes?: readonly AttributeSelector[]
+  /** The `list` format's request, set from the requested formats, not by a caller; the API has checked its selectors. */
+  list?: ListFormatRequest
   /**
    * Whether an `<img>` whose `src` is a `data:` URI is left out of the
    * Markdown, its alt text kept (Firecrawl's `removeBase64Images`). Default

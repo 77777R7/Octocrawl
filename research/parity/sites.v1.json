@@ -3048,6 +3048,93 @@
         {"item": "list-not-exhausted", "type": "field", "path": "actions.lists.0.stoppedBy", "equals": "max"},
         {"item": "list-not-exhausted", "type": "field", "path": "warning", "includes": "stopped before its end"}
       ]
+    },
+    {
+      "id": "LR01",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+      "request": {"debug": true, "timeout": 180000, "formats": ["markdown", {"type": "list", "itemSelector": "article.product_pod", "fields": [{"name": "title", "selector": "h3 a", "attribute": "title"}, {"name": "url", "selector": "h3 a", "attribute": "href"}, {"name": "price", "selector": ".price_color"}, {"name": "availability", "selector": ".availability"}]}], "actions": [{"type": "paginate", "nextSelector": "li.next > a", "itemSelector": "article.product_pod"}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. 32 books over 2 pages; every book has a title, a link, a price and an availability, so no record is incomplete.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 32},
+        {"item": "list-records", "type": "field", "path": "list.pages", "equals": 2},
+        {"item": "list-records", "type": "field", "path": "list.incomplete", "equals": 0},
+        {"item": "list-records", "type": "field", "path": "list.records.0.values.url", "includes": "https://books.toscrape.com/catalogue/"},
+        {"item": "list-records", "type": "field", "path": "list.records.20.source.page", "equals": 2}
+      ]
+    },
+    {
+      "id": "LR02",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://quotes.toscrape.com/js/",
+      "request": {"debug": true, "timeout": 180000, "formats": ["markdown", {"type": "list", "itemSelector": "div.quote", "fields": [{"name": "text", "selector": ".text"}, {"name": "author", "selector": ".author"}, {"name": "tags", "selector": ".tags"}]}], "actions": [{"type": "paginate", "nextSelector": "li.next > a", "itemSelector": "div.quote", "maxPages": 20}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. 100 quotes over 10 script-rendered pages.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 100},
+        {"item": "list-records", "type": "field", "path": "list.pages", "equals": 10},
+        {"item": "list-records", "type": "field", "path": "list.records.0.values.author", "equals": "Albert Einstein"}
+      ]
+    },
+    {
+      "id": "LR03",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://www.scrapethissite.com/pages/forms/",
+      "request": {"debug": true, "timeout": 240000, "formats": [{"type": "list", "itemSelector": "tr.team", "fields": [{"name": "name", "selector": "td.name"}, {"name": "year", "selector": "td.year"}, {"name": "wins", "selector": "td.wins"}, {"name": "losses", "selector": "td.losses"}]}], "actions": [{"type": "paginate", "nextSelector": "a[aria-label=\"Next\"]", "itemSelector": "tr.team", "maxPages": 30}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. 582 hockey team seasons over 24 pages, the first page served at two URLs (read once).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 582},
+        {"item": "list-records", "type": "field", "path": "list.pages", "equals": 24},
+        {"item": "list-records", "type": "field", "path": "list.records.0.values.name", "equals": "Boston Bruins"}
+      ]
+    },
+    {
+      "id": "LR04",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://webscraper.io/test-sites/e-commerce/ajax/computers/laptops",
+      "request": {"debug": true, "timeout": 240000, "formats": [{"type": "list", "itemSelector": "div.thumbnail", "fields": [{"name": "title", "selector": "a.title", "attribute": "title"}, {"name": "price", "selector": ".price"}, {"name": "description", "selector": ".description"}]}], "actions": [{"type": "paginate", "nextSelector": "button.next", "itemSelector": "div.thumbnail", "maxPages": 40}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. A product list paginated in place by AJAX buttons, each laptop with a title, a price and a description.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "min": 100},
+        {"item": "list-records", "type": "field", "path": "list.incomplete", "equals": 0}
+      ]
+    },
+    {
+      "id": "LR05",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://quotes.toscrape.com/",
+      "request": {"debug": true, "formats": ["markdown", {"type": "list", "itemSelector": "div.quote", "fields": [{"name": "text", "selector": ".text"}, {"name": "author", "selector": ".author"}]}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. One page of 10 quotes, no actions, the default onlyMainContent: the list format makes the page its records, not empty_unverified.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "status", "equals": "success"},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 10},
+        {"item": "list-records", "type": "markdownIncludes", "text": "Albert Einstein"}
+      ]
+    },
+    {
+      "id": "LR06",
+      "batch": "list-records",
+      "feature": "interaction.list-format",
+      "url": "https://news.ycombinator.com/",
+      "request": {"debug": true, "formats": [{"type": "list", "itemSelector": "tr.athing", "fields": [{"name": "title", "selector": ".titleline > a"}, {"name": "url", "selector": ".titleline > a", "attribute": "href"}, {"name": "site", "selector": ".sitestr"}]}]},
+      "note": "Added 2026-10-03 for the interaction group I4 (list records), frozen before the first run. The front page's 30 stories; a story without an external site (Ask HN) has no site, and its record says so in missing.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "list-records", "type": "field", "path": "list.records.length", "equals": 30},
+        {"item": "list-records", "type": "field", "path": "list.records.0.values.url", "includes": "http"}
+      ]
     }
   ]
 }

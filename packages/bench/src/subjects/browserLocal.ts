@@ -1,5 +1,5 @@
-import { CONTENTFUL_STATUS, estimateTokens, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
-import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
+import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type PageAction, fileByteCap, proxyFor, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -28,7 +28,7 @@ import { runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
@@ -321,7 +321,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       return {
-        ...withActions(result, ran.actions),
+        ...withActions(result, ran.actions, options.list),
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
         usage: {
           ...result.usage,
@@ -1144,12 +1144,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // page, not the main content, so there it is the answer; so is what
       // includeTags names, on any page that is not blocked.
       let wholePage: string | null = null
+      // A page of the records a list format asked for is content, though no article was found in it.
+      let listPage = false
       if (extracted.escalate && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
         wholePage = wholePageMarkdown(converted, pageUrl, options)
+        listPage = listRecordsFound(body, pageUrl, options)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
-        if (options.onlyMainContent !== false || wholePage === null) return {
+        if ((options.onlyMainContent !== false && !listPage) || wholePage === null) return {
           ...base,
           status: 'failed',
           failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
@@ -1173,7 +1176,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = wholePageAsked(options)
+      const markdown = wholePageAsked(options) || listPage
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
@@ -1600,8 +1603,21 @@ export class BrowserLocalSubject implements SubjectAdapter {
  * page stood: it is not the page the steps were to reach. A page that was
  * not content anyway (blocked, failed) keeps its own verdict.
  */
-function withActions(result: FetchResult, ran: ActionRun | undefined): FetchResult {
+function withActions(result: FetchResult, ran: ActionRun | undefined, list?: ListFormatRequest): FetchResult {
   if (ran === undefined) return result
+  // The list format over a paginate step: the records of every page it read, in order, not of the last page alone.
+  const paginated = list === undefined ? [] : ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index)
+  if (paginated.length > 0 && ran.result.failed === undefined) {
+    const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
+    const merged = listExtraction(list!, pages.flatMap((page, i) => extractListRecords(page.html, page.url, list!, i + 1)), pages.length)
+    const rescued = merged.records.length > 0 && result.status === 'failed' && result.failureReason === 'empty_unverified'
+    result = {
+      ...result,
+      list: merged,
+      ...(rescued ? { status: 'success' as const, failureReason: null } : {}),
+      trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.records.length, incomplete: merged.incomplete, pages: merged.pages } }],
+    }
+  }
   const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)
   // A list step that stopped before its list's end (its round limit, or the deadline) says so: what was read is not the whole list.
   const short = ran.result.lists.filter((list) => list.stoppedBy === 'max' || list.stoppedBy === 'deadline')

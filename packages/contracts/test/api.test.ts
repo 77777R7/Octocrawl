@@ -123,7 +123,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
     expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
-      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes)')
+      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes, list)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'summary' }] })).toThrow('unsupported format: summary')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
     // A crawl would follow a sign-out link with the user's live Chrome session; a batch fetches only the pages it names.
@@ -706,3 +706,24 @@ describe('actions', () => {
     expect(parseScrapeRequest({ url, maxAge: 0, storeInCache: false, actions: [{ type: 'scrape' }] }).actions).toHaveLength(1)
   })
 })
+
+describe('the list format', () => {
+  const url = 'https://example.com/'
+  it('takes itemSelector and its fields', () => {
+    const list = { type: 'list', itemSelector: ' article.card ', fields: [{ name: 'name', selector: 'h3 a' }, { name: 'url', selector: 'h3 a', attribute: 'href' }, { name: 'whole' }] }
+    expect(parseScrapeRequest({ url, formats: ['markdown', list] }).formats).toEqual(['markdown', { type: 'list', itemSelector: 'article.card', fields: [{ name: 'name', selector: 'h3 a' }, { name: 'url', selector: 'h3 a', attribute: 'href' }, { name: 'whole' }] }])
+    expect(parseBatchStartRequest({ urls: [url], formats: [list] }).formats).toHaveLength(1)
+  })
+
+  it('refuses a malformed list by name', () => {
+    const at = (list: unknown) => () => parseScrapeRequest({ url, formats: [list] })
+    expect(at({ type: 'list', fields: [{ name: 'a' }] })).toThrow('formats[0].itemSelector must be a CSS selector of 1 to 200 characters')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [] })).toThrow('formats[0].fields must be an array of 1 to 50')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }, { name: 'a' }] })).toThrow('formats[0].fields[1].name repeats a')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', attribute: 'not an attr' }] })).toThrow('formats[0].fields[0].attribute must be an HTML attribute name')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', regex: '.' }] })).toThrow('unsupported list field option: regex')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }], limit: 3 })).toThrow('unsupported list format option: limit')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }] }, { type: 'list', itemSelector: 'p', fields: [{ name: 'b' }] }] })).toThrow('formats must contain at most one list entry')
+  })
+})
+
