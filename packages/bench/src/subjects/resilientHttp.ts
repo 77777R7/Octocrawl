@@ -498,9 +498,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const finish = <T extends FetchResult>(result: T): T => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = leadWarnings()
+      // The lead warnings go before the list's, never in place of it.
+      const done = withListCaveat(result)
       return {
-        ...withListCaveat(result),
-        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
+        ...done,
+        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(done.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,

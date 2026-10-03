@@ -27,7 +27,7 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['href', 'src', 'data-src', 
  * (1 when one page is read). At most `budget.records` records and
  * `budget.chars` characters of values; `cut` says when the page had more.
  */
-export function extractListRecords(html: string, url: string, spec: ListFormatRequest, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }): ListRecord[] & { cut?: boolean } {
+export function extractListRecords(html: string, url: string, spec: ListFormatRequest, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }): ListRecord[] & { cut?: boolean; itemText?: string } {
   const doc = parse(html)
   const document = doc.document
   // Links resolve as the page resolves them: against its <base href> when it has one.
@@ -39,7 +39,9 @@ export function extractListRecords(html: string, url: string, spec: ListFormatRe
   // A record inside another record is part of it.
   const items = [...matched].filter((el) => !hasAncestorIn(el, matched)).sort(order)
   const fieldMatches = spec.fields.map((field) => (field.selector === undefined ? null : namedBy(document, [field.selector])))
-  const records: ListRecord[] & { cut?: boolean } = []
+  const records: ListRecord[] & { cut?: boolean; itemText?: string } = []
+  // The whole text of every item, not only the fields asked for: what tells this page's records from another page's.
+  Object.defineProperty(records, 'itemText', { value: items.map((item) => textOf(item) ?? '').join('\u0000'), enumerable: false })
   let chars = 0
   for (const [index, item] of items.entries()) {
     if (records.length >= budget.records) { records.cut = true; break }
@@ -84,7 +86,8 @@ function hasAncestorIn(el: Element, set: ReadonlySet<Element>): boolean {
 }
 
 /** Elements whose content is not text a reader sees. */
-const NOT_TEXT: ReadonlySet<string> = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG'])
+// An SVG's text (a rating's 4.5) is seen; its title and description are not.
+const NOT_TEXT: ReadonlySet<string> = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'script', 'style', 'title', 'desc', 'TITLE', 'DESC'])
 /** Elements that start a new line of text, so the text of two of them does not run together. */
 const BLOCK: ReadonlySet<string> = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BR', 'DD', 'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TD', 'TH', 'TR', 'UL', 'OPTION', 'BUTTON', 'LABEL'])
 

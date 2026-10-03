@@ -60,6 +60,11 @@ describe('extractListRecords, as a reader sees the page', () => {
     expect(extractListRecords(html, 'https://x.test/', { type: 'list', itemSelector: 'div.card', fields: [{ name: 'all' }] })[0]!.values.all).toBe('Kettle £19.99')
   })
 
+  it('reads an SVG\'s text (a rating), not its title', () => {
+    const html = '<div class="c"><svg><title>Rating</title><text>4.5</text></svg> stars</div>'
+    expect(extractListRecords(html, 'https://x.test/', { type: 'list', itemSelector: 'div.c', fields: [{ name: 'all' }] })[0]!.values.all).toBe('4.5 stars')
+  })
+
   it('stops at its limits and says it was cut', () => {
     const html = `<ul>${'<li>x</li>'.repeat(30)}</ul>`
     const spec: ListFormatRequest = { type: 'list', itemSelector: 'li', fields: [{ name: 't' }] }

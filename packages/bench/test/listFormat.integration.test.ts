@@ -28,6 +28,10 @@ beforeAll(async () => {
     // A paginator that answers every page past the last with the last one.
     const clamp = /^\/clamp\/(\d+)$/.exec(url)
     if (clamp !== null) { const n = Number(clamp[1]); const shown = Math.min(n, 2); return html(`${[1, 2].map((i) => card(shown * 10 + i)).join('')}<a class="next" href="/clamp/${n + 1}">Next</a>`) }
+    // One post per page, every post "In stock": the pages differ in all but the field asked for.
+    const one = /^\/one\/(\d)$/.exec(url)
+    if (one !== null) { const n = Number(one[1]); return html(`<article class="post"><h2>Post ${n}</h2><span class="stock">In stock</span></article>${n < 3 ? `<a class="next" href="/one/${n + 1}">Next</a>` : ''}`) }
+    if (url === '/many') return html(Array.from({ length: 10_005 }, (_, i) => `<div class="card"><a class="name" href="/p/${i}">I${i}</a></div>`).join(''))
     const page = /^\/pages\/(\d)$/.exec(url)
     if (page !== null) { const n = Number(page[1]); return html(`${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}${n < 3 ? `<a class="next" href="/pages/${n + 1}">Next</a>` : ''}`) }
     res.writeHead(404); res.end()
@@ -79,6 +83,26 @@ describe('list format', () => {
     expect(result.list).toMatchObject({ pages: 2 })
     expect(result.list?.records.map((record) => record.values.name)).toEqual(['Item 11', 'Item 12', 'Item 21', 'Item 22'])
   }, 60_000)
+
+  it('pages that agree only on the fields asked for are still different pages', async () => {
+    const result = await browser('/one/1', { list: { type: 'list', itemSelector: 'article.post', fields: [{ name: 'stock', selector: '.stock' }] }, actions: [{ type: 'paginate', nextSelector: 'a.next', waitMs: 200 }] })
+    expect(result.list).toMatchObject({ pages: 3 })
+    expect(result.list?.records).toHaveLength(3)
+  }, 60_000)
+
+  it('a list cut by its limits says so, beside the warnings a fetch leads with', async () => {
+    const http = new ResilientHttpSubject('standard')
+    try {
+      const result = await http.fetch(`${base}/many`, Date.now() + 30_000, undefined, {}, undefined, { list: LIST, skipTlsVerification: true })
+      expect(result.list).toMatchObject({ truncated: true })
+      expect(result.list?.records).toHaveLength(10_000)
+      expect(result.warnings?.map((warning) => warning.code)).toEqual(['tls_unverified', 'list_truncated'])
+    } finally {
+      await http.teardown()
+    }
+    const shown = await browser('/many', { list: LIST, skipTlsVerification: true })
+    expect(shown.warnings?.map((warning) => warning.code)).toEqual(['tls_unverified', 'list_truncated'])
+  }, 90_000)
 
   it('the HTTP lane reads a list the same way', async () => {
     const http = new ResilientHttpSubject('standard')

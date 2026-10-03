@@ -320,9 +320,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
     const finish = (result: FetchResult): FetchResult => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
+      // The lead warnings go before the ones the steps and the list added, never in place of them.
+      const done = withListCaveat(withActions(result, ran.actions, options.list))
       return {
-        ...withListCaveat(withActions(result, ran.actions, options.list)),
-        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(result.warnings ?? [])] }),
+        ...done,
+        ...(lead.length === 0 ? {} : { warnings: [...lead, ...(done.warnings ?? [])] }),
         usage: {
           ...result.usage,
           wallMs: totalMs,
@@ -1617,7 +1619,8 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
     for (const scrape of pages) {
       const budget = { records: MAX_LIST_RECORDS - records.length, chars: MAX_LIST_VALUE_CHARS - records.reduce((sum, record) => sum + Object.values(record.values).reduce((n, value) => n + (value?.length ?? 0), 0), 0) }
       const read = extractListRecords(scrape.html, scrape.url, list!, page + 1, budget)
-      const key = JSON.stringify(read.map((record) => record.values))
+      // The items' whole text, not only the fields asked for: two pages agreeing on a stock field are still two pages.
+      const key = read.itemText ?? JSON.stringify(read.map((record) => record.values))
       if (read.length > 0 && seen.has(key)) continue
       seen.add(key)
       page++
