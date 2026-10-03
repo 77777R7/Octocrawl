@@ -29,6 +29,10 @@ beforeAll(async () => {
     if (req.url === '/hop') { res.writeHead(302, { location: '/private/hop' }); res.end(); return }
     if (req.url === '/redirecting') return html(`<h1>Redirecting</h1>${PROSE}<a id="go" href="/go">Go</a><a id="pop" target="_blank" href="/private/popup">Pop</a><a id="popok" target="_blank" href="/more">Pop ok</a>`)
     if (req.url === '/private/x') return html(`<h1>Private x</h1>${PROSE}<p>Not for crawlers.</p><a id="back" href="/more">Back</a>`)
+    if (req.url === '/slowfont') { setTimeout(() => { res.writeHead(200, { 'content-type': 'font/woff2' }); res.end() }, 6000); return }
+    if (req.url === '/fontnav') return html(`<h1>Font</h1>${PROSE}`)
+    if (req.url === '/go3') { res.writeHead(302, { location: '/private/red' }); res.end(); return }
+    if (req.url === '/private/red') return html(`<style>body{background:rgb(255,0,0)}</style><h1>Secret red</h1>${PROSE}<p>Not for crawlers.</p><script>location.href = '/private/z'</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
     if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p><a id="real" href="/gotab">Real</a>`)
     if (req.url === '/gotab') { res.writeHead(302, { location: '/private/tab' }); res.end(); return }
@@ -153,6 +157,16 @@ describe('actions, real browser', () => {
     const result = await run('/links', [{ type: 'executeJavascript', script: 'location.href = "/slowhop"' }, { type: 'wait', milliseconds: 1500 }, { type: 'scrape' }])
     expect(result.actions?.failed).toMatchObject({ code: 'navigation_refused' })
     expect(JSON.stringify(result.actions?.scrapes)).not.toContain('Not for crawlers')
+    expect(result.markdown ?? '').not.toContain('Not for crawlers')
+  }, 60_000)
+
+  it('a step that captured a disallowed page before its navigation onward was stopped keeps nothing it captured', async () => {
+    const result = await run('/fontnav', [
+      { type: 'executeJavascript', script: 'const s = document.createElement("style"); s.textContent = "@font-face{font-family:slow;src:url(/slowfont)} p{font-family:slow}"; document.head.appendChild(s); setTimeout(() => { location.href = "/go3" }, 1500); return 1' },
+      { type: 'screenshot' },
+    ])
+    expect(result.actions?.failed).toMatchObject({ index: 1, code: 'navigation_refused' })
+    expect(result.actions?.screenshots).toEqual([])
     expect(result.markdown ?? '').not.toContain('Not for crawlers')
   }, 60_000)
 

@@ -72,38 +72,48 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   let checkedUrl = withoutHash(page.url())
   // Documents loaded before the first step are the fetch's; every one after it is checked, in order, whatever its URL.
   let checkedDocuments = ctx.loadedDocuments().length
+  /** The first document loaded since the last check that W2L does not fetch, checking (and passing) the ones before it; documents loaded during a check are checked too. A refused one stays unchecked: the page may still show it, and the check after the steps then reads nothing. */
+  const refusedDocument = async (): Promise<{ url: string; reason: string } | null> => {
+    for (let loaded = ctx.loadedDocuments(); checkedDocuments < loaded.length; loaded = ctx.loadedDocuments()) {
+      const url = loaded[checkedDocuments]!
+      const reason = await ctx.refuseLanded(url)
+      if (reason !== null) return { url, reason }
+      checkedDocuments++
+    }
+    return null
+  }
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
     const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, artifacts: artifacts.length }
     try {
       const detail = await runStep(action, ctx, result, artifacts)
-      // A navigation the step started that the guard stopped: the request never went out, and the page stayed.
+      // Every document the step loaded, a redirect's landing among them (the guard sees only a navigation's first request).
+      const landed = await refusedDocument()
+      if (landed !== null) throw new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
+      // A navigation the step started that the guard stopped: the request never went out.
       const refused = ctx.takeRefusedNavigation()
-      if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the page stayed where it was`)
+      if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the request was not sent`)
       const now = withoutHash(page.url())
       const moved = now !== checkedUrl
-      // Every document loaded since the last check, a redirect's landing among them: one W2L does not fetch fails the step, and what
-      // the step read is dropped. A check can take a while (robots.txt of a new origin), so documents loaded meanwhile are checked too.
-      for (let loaded = ctx.loadedDocuments(); checkedDocuments < loaded.length; loaded = ctx.loadedDocuments()) {
-        const landedUrl = loaded[checkedDocuments]!
-        const landed = await ctx.refuseLanded(landedUrl)
-        // A refused document stays unchecked: the page may still show it, and the check after the steps then reads nothing.
-        if (landed !== null) {
-          result.screenshots.length = before.screenshots
-          result.scrapes.length = before.scrapes
-          result.javascriptReturns.length = before.javascriptReturns
-          result.pdfs.length = before.pdfs
-          artifacts.length = before.artifacts
-          throw new StepFailure('navigation_refused', `the step led the page to ${landedUrl}, which W2L does not fetch (${landed}); it is not read`)
-        }
-        checkedDocuments++
-      }
       checkedUrl = now
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'ok', ms: Math.round(performance.now() - started), ...detail, ...(moved ? { navigatedTo: now } : {}) } })
     } catch (error) {
       if (execution.signal?.aborted) throw error
-      const failure = error instanceof StepFailure ? error : new StepFailure(deadlinePassed(ctx) ? 'deadline_exceeded' : 'action_error', message(error))
+      let failure = error instanceof StepFailure ? error : new StepFailure(deadlinePassed(ctx) ? 'deadline_exceeded' : 'action_error', message(error))
+      // Whatever made the step fail, a document it loaded that W2L does not fetch is the reason that counts.
+      if (failure.code !== 'navigation_refused') {
+        const landed = await refusedDocument().catch(() => null)
+        if (landed !== null) failure = new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
+      }
+      // A step that met a page W2L does not fetch keeps nothing it produced: it may have read that page.
+      if (failure.code === 'navigation_refused') {
+        result.screenshots.length = before.screenshots
+        result.scrapes.length = before.scrapes
+        result.javascriptReturns.length = before.javascriptReturns
+        result.pdfs.length = before.pdfs
+        artifacts.length = before.artifacts
+      }
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'failed', ms: Math.round(performance.now() - started), code: failure.code, error: failure.message } })
       result.failed = { index, type: action.type, code: failure.code, message: failure.message }
       break
