@@ -119,15 +119,29 @@ export class FileSessionStore implements SessionStore {
   }
 
   async save(snapshot: SessionSnapshot): Promise<void> {
-    let all: SessionSnapshot[] = []
+    await this.write([...(await this.list()).filter((s) => s.domain !== snapshot.domain), snapshot])
+  }
+
+  /** Every saved session; none when the file does not exist yet. */
+  async list(): Promise<SessionSnapshot[]> {
     try {
-      const raw = await readFile(this.file, 'utf8')
-      const parsed = JSON.parse(raw) as { sessions?: SessionSnapshot[] }
-      all = parsed.sessions ?? []
+      const parsed = JSON.parse(await readFile(this.file, 'utf8')) as { sessions?: SessionSnapshot[] }
+      return parsed.sessions ?? []
     } catch {
-      // First save: no file yet.
+      return []
     }
-    all = [...all.filter((s) => s.domain !== snapshot.domain), snapshot]
+  }
+
+  /** Forget the session saved for `domain`. False when there was none. */
+  async remove(domain: string): Promise<boolean> {
+    const all = await this.list()
+    const kept = all.filter((s) => s.domain !== domain)
+    if (kept.length === all.length) return false
+    await this.write(kept)
+    return true
+  }
+
+  private async write(all: readonly SessionSnapshot[]): Promise<void> {
     const tmp = `${this.file}.tmp`
     await mkdir(dirname(this.file), { recursive: true })
     await writeFile(tmp, JSON.stringify({ sessions: all }, null, 2), { mode: 0o600 })
