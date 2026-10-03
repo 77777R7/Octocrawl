@@ -55,7 +55,7 @@ export function flagName(key: string): string {
 
 /** The CLI's own flags, beside the API options. */
 export interface CliOptions {
-  /** Write each page's Markdown and each table's CSV under this directory, with `results.jsonl`. */
+  /** Write each page's Markdown and each table's CSV under this directory, with `results.jsonl` and `results.csv`. */
   out?: string
   /** scrape: print the Markdown alone. */
   markdown?: boolean

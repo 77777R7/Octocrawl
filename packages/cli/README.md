@@ -10,7 +10,7 @@ npx @w2l/cli map https://www.sitemaps.org/ --limit 50
 npx @w2l/cli serve --port 8787
 ```
 
-Every option of the W2L REST API is a flag under its kebab-case name (`maxAge` is `--max-age`, `onlyMainContent: false` is `--no-only-main-content`); `w2l <command> --help` lists them. `--out <dir>` writes `results.jsonl`, each page's Markdown and each table as CSV. The task root (tasks, saved files, the page cache) is `--task-root`, else `W2L_TASK_ROOT`, else `.w2l/cli`.
+Every option of the W2L REST API is a flag under its kebab-case name (`maxAge` is `--max-age`, `onlyMainContent: false` is `--no-only-main-content`); `w2l <command> --help` lists them. `--out <dir>` writes `results.jsonl`, `results.csv` (one row of evidence per page, failed pages included), each page's Markdown and each table as CSV. The task root (tasks, saved files, the page cache) is `--task-root`, else `W2L_TASK_ROOT`, else `.w2l/cli`.
 
 - Node.js 22.13 or later. The browser lane uses Playwright's Chromium: run `npx playwright install chromium` once; without it, pages are read over HTTP only.
 - `better-sqlite3` builds or downloads its native binding when installed. If your npm holds install scripts back, allow it (`npm install-scripts approve better-sqlite3`, or `allowScripts` in your package.json).
