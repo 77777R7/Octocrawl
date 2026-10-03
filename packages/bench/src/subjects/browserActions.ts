@@ -106,7 +106,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       const timeout = Math.min(MAX_ACTION_WAIT_MS, timeLeft(ctx))
       if (timeout <= 0) throw new StepFailure('deadline_exceeded', `the scrape's deadline came before ${action.selector} could be waited for`)
       try {
-        await raceWithSignal(page.waitForSelector(action.selector, { state: 'attached', timeout }), signal)
+        await raceWithSignal(page.waitForSelector(action.selector, { state: 'visible', timeout }), signal)
       } catch (error) {
         if (signal?.aborted) throw error
         if (isTimeout(error)) throw new StepFailure(timeout < MAX_ACTION_WAIT_MS ? 'deadline_exceeded' : 'selector_timeout', `no element matched ${action.selector} within ${timeout} ms`)

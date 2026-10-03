@@ -23,7 +23,7 @@ export type PdfPaperFormat = (typeof PDF_PAPER_FORMATS)[number]
 export type PageAction =
   /** Pause this long. */
   | { type: 'wait'; milliseconds: number }
-  /** Wait until an element matching the selector is in the page (at most MAX_ACTION_WAIT_MS). */
+  /** Wait until an element matching the selector is shown on the page (at most MAX_ACTION_WAIT_MS): one that is there but hidden does not count. */
   | { type: 'wait'; selector: string }
   /** Click the first element matching the selector; `all` (Firecrawl v1) clicks every match, in document order. */
   | { type: 'click'; selector: string; all?: boolean }
