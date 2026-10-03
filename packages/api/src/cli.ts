@@ -32,6 +32,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     allowRobotsOverride: listen.allowRobotsOverride,
     hosted: listen.mode === 'hosted',
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
+    workerCount: listen.workerCount,
   })
   const app = createApp(engine, { tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).

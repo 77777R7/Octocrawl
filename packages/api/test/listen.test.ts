@@ -16,6 +16,13 @@ describe('parseListen', () => {
     expect(listen.networkPolicy.privateAllowlist.length).toBeGreaterThan(0)
   })
 
+  it('takes the engine\'s worker count from W2L_WORKER_COUNT, 1 to 64, default 4, local and hosted', () => {
+    expect(parseListen([], {}).workerCount).toBe(4)
+    expect(parseListen([], { W2L_WORKER_COUNT: '32' }).workerCount).toBe(32)
+    expect(parseListen(['--hosted', '--token', 't'], { W2L_WORKER_COUNT: '8' }).workerCount).toBe(8)
+    for (const value of ['0', '65', '3.5', 'many']) expect(() => parseListen([], { W2L_WORKER_COUNT: value })).toThrow('W2L_WORKER_COUNT must be an integer from 1 to 64')
+  })
+
   it('serves the job stream routes unless W2L_JOB_STREAMS=off, which it says at startup', () => {
     expect(parseListen([], {}).jobStreams).toBe(true)
     expect(parseListen([], { W2L_JOB_STREAMS: 'on' }).jobStreams).toBe(true)
