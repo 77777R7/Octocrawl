@@ -450,23 +450,36 @@ export function selectCardList(doc: Document): Element | null {
 export function selectTable(doc: Document): Element | null {
   const tables = qsa(doc, 'table')
   if (tables.length === 0) return null
-  const dataTables = tables.filter((t) => {
-    const rows = qsa(t, 'tr')
-    if (rows.length < 2) return false
-    return qsa(t, 'td,th').length >= 4 && (t.textContent ?? '').trim() !== ''
-  })
+  const counts = elementCounts(doc)
+  const of = (el: Element): ElementCounts => counts.get(el)!
+  // A table's text is not all white space when what is left of it without white space is not empty.
+  const dataTables = tables.filter((t) => of(t).rows >= 2 && of(t).cells >= 4 && of(t).text > 0)
   if (dataTables.length === 0) return null
   const layoutTable = layoutTables()
   const unlaid = dataTables.filter((t) => !layoutTable(t))
-  const largest = [...(unlaid.length > 0 ? unlaid : dataTables)].sort((a, b) => qsa(b, 'td,th').length - qsa(a, 'td,th').length)[0]!
-  const length = (el: Element): number => (el.textContent ?? '').replace(/\s+/g, '').length
-  const menu = (t: Element): boolean =>
-    qsa(t, 'a').reduce((sum, a) => sum + length(a), 0) * 2 >= length(t) && !/\d/.test(textOutsideLinks(t))
+  // The first of the tables with the most cells.
+  const largest = (unlaid.length > 0 ? unlaid : dataTables).reduce((best, t) => (of(t).cells > of(best).cells ? t : best))
+  const menu = (t: Element): boolean => of(t).linkText * 2 >= of(t).text && !of(t).digitOutsideLinks
+  // Whether `a` is `b` or holds it.
+  const holds = (a: Element, b: Element): boolean => of(a).start <= of(b).start && of(b).start < of(a).end
+  // The unlaid tables around the one looked at, outermost first: tables come in document order, so one that does not hold it holds none after it.
+  const around: Element[] = []
   let region = largest
+  // The root element the region stays under: a page may have several (linkedom's parser leaves what follows </html> beside it), and one under another has no element in common with the region.
+  let root = largest
+  while (root.parentElement !== null) root = root.parentElement
   for (const t of unlaid) {
-    if (t === largest || menu(t) || unlaid.some((other) => other !== t && other.contains(t))) continue
-    // commonAncestor(table, region) is the region itself when it holds the table.
-    region = commonAncestor(t, region) ?? region
+    while (around.length > 0 && !holds(around[around.length - 1]!, t)) around.pop()
+    const nested = around.length > 0
+    around.push(t)
+    if (t === largest || menu(t) || nested) continue
+    // commonAncestor(t, region): the lowest element above t that is the region or holds it.
+    // The region only widens, so it moves up the page's depth once in all.
+    const parent = t.parentElement
+    if (parent === null || !holds(root, parent)) continue
+    let shared: Element | null = region
+    while (shared !== null && !holds(shared, parent)) shared = shared.parentElement
+    region = shared ?? region
   }
   if (region === doc.documentElement && doc.body) region = doc.body
 
@@ -476,6 +489,63 @@ export function selectTable(doc: Document): Element | null {
     if (lca && lca !== doc.body && lca !== doc.documentElement) return lca
   }
   return region
+}
+
+interface ElementCounts {
+  /** Its `<tr>`s, its `<td>`s and `<th>`s, and the text of its links (each `<a>`'s text, white space left out), as querySelectorAll finds them: not in a `<template>`. */
+  rows: number
+  cells: number
+  linkText: number
+  /** Characters of its text (its textContent), white space left out. */
+  text: number
+  /** A digit in its text outside its links (textOutsideLinks). */
+  digitOutsideLinks: boolean
+  /** Its place in document order, and that of the first element after all it holds. */
+  start: number
+  end: number
+}
+
+/**
+ * What selectTable reads of each element of the page, measured in one walk,
+ * children before parents and without recursion, so a page whose tables are
+ * nested or sit thousands of elements deep costs its size, not its size times
+ * the number of its tables.
+ */
+function elementCounts(doc: Document): Map<Element, ElementCounts> {
+  const counts = new Map<Element, ElementCounts>()
+  let order = 0
+  const starts = new Map<Element, number>()
+  const next: [Element, boolean][] = Array.from(doc.children, (el): [Element, boolean] => [el, false]).reverse()
+  while (next.length > 0) {
+    const [el, open] = next.pop()!
+    if (!open) {
+      starts.set(el, order++)
+      next.push([el, true])
+      const children = Array.from(el.children)
+      for (let i = children.length - 1; i >= 0; i--) next.push([children[i]!, false])
+      continue
+    }
+    const own: ElementCounts = { rows: 0, cells: 0, linkText: 0, text: 0, digitOutsideLinks: false, start: starts.get(el)!, end: order }
+    for (const node of Array.from(el.childNodes)) {
+      // textContent is the text of the Text and CDATA nodes under an element; textOutsideLinks reads only the Text nodes.
+      if (node.nodeType === 3 || node.nodeType === 4) {
+        const text = node.textContent ?? ''
+        own.text += text.replace(/\s+/g, '').length
+        if (node.nodeType === 3 && /\d/.test(text)) own.digitOutsideLinks = true
+      }
+      if (node.nodeType !== 1) continue
+      const child = counts.get(node as Element)!
+      const name = (node as Element).localName
+      own.text += child.text
+      if (name !== 'a' && child.digitOutsideLinks) own.digitOutsideLinks = true
+      if (name === 'template') continue
+      own.rows += child.rows + (name === 'tr' ? 1 : 0)
+      own.cells += child.cells + (name === 'td' || name === 'th' ? 1 : 0)
+      own.linkText += child.linkText + (name === 'a' ? child.text : 0)
+    }
+    counts.set(el, own)
+  }
+  return counts
 }
 
 /**
