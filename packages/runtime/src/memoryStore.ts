@@ -79,6 +79,13 @@ export class MemoryTaskStore implements TaskStore {
       .map(step => step.canonicalUrl)).size
   }
 
+  async listStepIdsWithTraceEvent(taskId: string, event: string): Promise<string[]> {
+    return [...this.steps.values()]
+      .filter((step) => step.taskId === taskId && step.result?.trace.some((item) => item.event === event) === true)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map((step) => step.id)
+  }
+
   async countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>> {
     const counts: Partial<Record<StepStatus, number>> = {}
     for (const step of this.steps.values()) {

@@ -191,6 +191,10 @@ export class DeliveryStore {
   enqueueJob(destinationId: string, eventId: string, sequence: number, payload: WebhookPayload, now = Date.now()): boolean {
     return this.db.transaction(() => enqueueJobDelivery(this.db, destinationId, eventId, sequence, payload, now)).immediate()
   }
+  /** The event versions (a job event's sequence) a destination has deliveries for, in whatever state. */
+  listEventVersions(destinationId: string): number[] {
+    return (this.db.prepare('SELECT event_version FROM webhook_deliveries WHERE destination_id=?').all(destinationId) as { event_version: number }[]).map(row => row.event_version)
+  }
   /** The event ids a destination has deliveries for, in whatever state. */
   listEventIds(destinationId: string): string[] {
     return (this.db.prepare('SELECT event_id FROM webhook_deliveries WHERE destination_id=? ORDER BY created_at,id').all(destinationId) as { event_id: string }[]).map(row => row.event_id)

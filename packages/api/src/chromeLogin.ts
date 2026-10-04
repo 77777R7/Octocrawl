@@ -187,24 +187,30 @@ async function siteStorage(connection: CdpConnection, domain: string): Promise<{
   }
   const tabs = (targetInfos ?? []).filter((target) => target.type === 'page' && target.browserContextId === defaultBrowserContextId && onSite(target.url, domain))
   if (tabs.length === 0) return null
-  const byOrigin = new Map<string, OriginStorage>()
-  const failed = new Set<string>()
-  for (const tab of tabs) {
+  // Read all at once: a tab that does not answer costs one wait of TAB_READ_TIMEOUT_MS, not one per tab.
+  const reads = await Promise.all(tabs.map(async (tab): Promise<OriginStorage | { unread: string } | null> => {
     let sessionId: string | undefined
     try {
       ;({ sessionId } = await connection.send('Target.attachToTarget', { targetId: tab.targetId, flatten: true }, undefined, TAB_READ_TIMEOUT_MS) as { sessionId: string })
       const { frameTree } = await connection.send('Page.getFrameTree', {}, sessionId, TAB_READ_TIMEOUT_MS) as { frameTree: { frame: { securityOrigin: string } } }
       const origin = frameTree.frame.securityOrigin
-      // Two tabs of one origin share its storage.
-      if (byOrigin.has(origin) || !onSite(origin, domain)) continue
+      if (!onSite(origin, domain)) return null
       const { entries } = await connection.send('DOMStorage.getDOMStorageItems', { storageId: { securityOrigin: origin, isLocalStorage: true } }, sessionId, TAB_READ_TIMEOUT_MS) as { entries: [string, string][] }
-      byOrigin.set(origin, { origin, localStorage: entries.map(([name, value]) => ({ name, value })) })
+      return { origin, localStorage: entries.map(([name, value]) => ({ name, value })) }
     } catch {
       // One tab that does not answer leaves the others, and the cookies, to be saved: its origin is said to be unread.
-      failed.add(new URL(tab.url).origin)
+      return { unread: new URL(tab.url).origin }
     } finally {
       if (sessionId !== undefined) await connection.send('Target.detachFromTarget', { sessionId }, undefined, TAB_READ_TIMEOUT_MS).catch(() => undefined)
     }
+  }))
+  // Two tabs of one origin share its storage: the first read of it, in the tabs' order, stands.
+  const byOrigin = new Map<string, OriginStorage>()
+  const failed = new Set<string>()
+  for (const read of reads) {
+    if (read === null) continue
+    if ('unread' in read) failed.add(read.unread)
+    else if (!byOrigin.has(read.origin)) byOrigin.set(read.origin, read)
   }
   return { origins: [...byOrigin.values()], unread: [...failed].filter((origin) => !byOrigin.has(origin)).sort() }
 }
