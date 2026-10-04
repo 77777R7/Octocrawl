@@ -21,6 +21,9 @@ import type {
   BatchStatusResponse,
   BatchHandoffRequest,
   BatchHandoffResponse,
+  LoginImportRequest,
+  LoginImportResponse,
+  SavedLogin,
   CompactScrapeResponse,
   FetchResult,
   MapRecord,
@@ -59,6 +62,9 @@ function environmentToken(): string | undefined {
     return undefined
   }
 }
+
+/** A scrape's options as a caller sends them: `handoff` as `true` or `{ waitMs }` (the API reads `true` as `{}`). */
+export type ScrapeOptions = Omit<ScrapeRequest, 'url' | 'handoff'> & { handoff?: boolean | { waitMs?: number } }
 
 /** How long past a scrape's own deadline (its `timeout`, 300 000 ms by default) the SDK waits for the API's answer. */
 const SCRAPE_ANSWER_MARGIN_MS = 30_000
@@ -263,7 +269,7 @@ export class W2LError extends Error {
     message: string,
     readonly status: number,
     readonly code: ApiErrorCode | typeof RATE_LIMITED_CODE | undefined,
-    readonly method: 'GET' | 'POST',
+    readonly method: 'GET' | 'POST' | 'DELETE',
     readonly path: string,
     readonly body: unknown,
     /** The response's Retry-After in milliseconds; null when it sent none or one that does not parse. */
@@ -276,7 +282,7 @@ export class W2LError extends Error {
 }
 
 /** Reads a failed response; the message defaults to `<METHOD> <path> failed: <status> <body>`. */
-async function responseError(method: 'GET' | 'POST', path: string, res: Response, message?: string): Promise<W2LError> {
+async function responseError(method: 'GET' | 'POST' | 'DELETE', path: string, res: Response, message?: string): Promise<W2LError> {
   const text = await res.text()
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
@@ -342,13 +348,15 @@ export class W2L {
     this.platformFetch = options.fetch === undefined
   }
 
-  async scrape(url: string, opts: Omit<ScrapeRequest, 'url'> & { debug: false }, request?: RequestOptions): Promise<CompactScrapeResponse>
-  async scrape(url: string, opts?: Omit<ScrapeRequest, 'url'>, request?: RequestOptions): Promise<ScrapeResponse>
-  async scrape(url: string, opts: Omit<ScrapeRequest, 'url'> = {}, request: RequestOptions = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+  async scrape(url: string, opts: ScrapeOptions & { debug: false }, request?: RequestOptions): Promise<CompactScrapeResponse>
+  async scrape(url: string, opts?: ScrapeOptions, request?: RequestOptions): Promise<ScrapeResponse>
+  async scrape(url: string, opts: ScrapeOptions = {}, request: RequestOptions = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
     // wait that long plus a margin, and no longer.
     const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
-    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
+    // A scrape handed to the person waits for them as well: as long as they take (undici reads 0 as no limit); request.signal ends it.
+    const handedOver = opts.handoff !== undefined && opts.handoff !== false
+    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, handedOver ? 0 : deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
   }
 
   /** The record of one scrape call, by the `scrapeId` its response carried (`metadata.scrapeId`); a W2LError with code `not_found` for an id the server has no record of. */
@@ -478,6 +486,31 @@ export class W2L {
     const items: CrawlPage[] = []
     for await (const item of this.listBatchItems(taskId, { limit: 50 }, wait)) items.push(item)
     return { taskId, report, items }
+  }
+
+  /**
+   * Save the person's login to a site (a domain or a page URL) from the
+   * Chrome they use, as `w2l login import` does, on a server on their
+   * machine. Chrome asks them "Allow remote debugging?": the answer comes
+   * once they click Allow (within `approveTimeoutMs`, default 2 minutes).
+   * The saved login's cookies never leave the server: the answer names the
+   * domain, how many cookies and their hash.
+   */
+  async importLogin(site: string, opts: Omit<LoginImportRequest, 'site'> = {}, request: RequestOptions = {}): Promise<LoginImportResponse> {
+    return this.post<LoginImportResponse>('/v1/logins/import', { ...opts, site }, 200, request, (opts.approveTimeoutMs ?? 120_000) + 30_000)
+  }
+
+  /** The person's saved logins, without their cookies. */
+  async listLogins(request: RequestOptions = {}): Promise<{ logins: SavedLogin[] }> {
+    return this.get<{ logins: SavedLogin[] }>('/v1/logins', request)
+  }
+
+  /** Forget a saved login; a W2LError with code `not_found` when none was saved for the site. */
+  async removeLogin(site: string, request: RequestOptions = {}): Promise<{ site: string; removed: true }> {
+    const path = `/v1/logins/${encodeURIComponent(site)}`
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: 'DELETE', headers: this.headers(), signal: request.signal })
+    if (!res.ok) throw await responseError('DELETE', path, res, res.status === 404 ? `no login saved for ${site}` : undefined)
+    return (await res.json()) as { site: string; removed: true }
   }
 
   /**

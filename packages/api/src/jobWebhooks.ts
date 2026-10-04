@@ -64,11 +64,19 @@ function displayUrl(url: string): string {
   return `${parsed.origin}${parsed.pathname}`
 }
 
-/** The page and terminal counts a job's event numbering runs on (see JobWebhookEnvelope.sequence). */
+/** The page, terminal and handoff counts a job's event numbering runs on (see JobWebhookEnvelope.sequence). */
 interface Counters {
   pages: number
   terminals: number
+  /** Items a handoff replaced, each one `page` event of its own (see JobWebhooks.replaced). */
+  handoffs: number
 }
+
+/** `<taskId>:handoff:<stepId>`: the page a handoff put in place of an item's stopped result. */
+const isHandoffEventId = (taskId: string, eventId: string): boolean => eventId.startsWith(`${taskId}:handoff:`)
+
+/** The number the next event of a job takes: one more than every event numbered before it. */
+const nextSequence = (counters: Counters): number => counters.pages + counters.terminals + counters.handoffs
 
 export class JobWebhooks {
   private readonly counters = new Map<string, Counters>()
@@ -113,7 +121,7 @@ export class JobWebhooks {
       ...(config.secretEnv === undefined ? {} : { secretEnv: config.secretEnv }),
       ...(payloadFormat === undefined ? {} : { payloadFormat }),
     }, Date.now(), { allowHttpLoopback: this.options.allowHttpLoopback && !this.options.hosted })
-    this.counters.set(taskId, { pages: 0, terminals: 0 })
+    this.counters.set(taskId, { pages: 0, terminals: 0, handoffs: 0 })
     return {
       url: config.url,
       events,
@@ -142,7 +150,23 @@ export class JobWebhooks {
     const counters = await this.countersFor(task, stored, taskStore, true)
     counters.pages++
     if (!stored.events.includes('page')) return
-    this.enqueue(task, stored, 'page', `${task.id}:page:${step.id}`, counters.pages + counters.terminals, { page }, step.result)
+    this.enqueue(task, stored, 'page', `${task.id}:page:${step.id}`, nextSequence(counters), { page }, step.result)
+  }
+
+  /**
+   * An item whose stopped result a handoff replaced with the page the person
+   * got through to: a `page` event of its own, `<taskId>:handoff:<stepId>`,
+   * numbered after every event before it (the terminal one included), when
+   * the job's events include `page`. Its `page` is the item as it now stands.
+   */
+  async replaced(task: Task, step: StepRecord, page: CrawlPage, taskStore: TaskStore): Promise<void> {
+    const stored = webhookOf(task)
+    if (stored === undefined || !stored.events.includes('page')) return
+    const eventId = `${task.id}:handoff:${step.id}`
+    if (this.store.getDeliveryByEvent(stored.destinationId, eventId) !== null) return
+    const counters = await this.countersFor(task, stored, taskStore, false)
+    counters.handoffs++
+    this.enqueue(task, stored, 'page', eventId, nextSequence(counters), { page }, step.result)
   }
 
   /**
@@ -161,10 +185,12 @@ export class JobWebhooks {
     const eventId = first ? `${task.id}:${status}` : `${task.id}:${status}:${report.attemptId}`
     if (this.terminalsSeen.has(eventId) || this.store.getDeliveryByEvent(stored.destinationId, eventId) !== null) return
     this.terminalsSeen.add(eventId)
+    // Numbered only when sent: after a restart the numbering is rebuilt from the deliveries stored, and a terminal event the
+    // job's events leave out has none, so counting it here would number the next event twice.
+    if (!stored.events.includes(status)) return
     const counters = await this.countersFor(task, stored, taskStore, false)
     counters.terminals++
-    if (!stored.events.includes(status)) return
-    this.enqueue(task, stored, status, eventId, counters.pages + counters.terminals, { report, ...(error === undefined ? {} : { error }) })
+    this.enqueue(task, stored, status, eventId, nextSequence(counters), { report, ...(error === undefined ? {} : { error }) })
   }
 
   /**
@@ -184,7 +210,8 @@ export class JobWebhooks {
     const existing = new Set(this.store.listEventIds(stored.destinationId))
     const total = Object.values(await taskStore.countSteps(task.id)).reduce((sum, count) => sum + (count ?? 0), 0)
     const terminals = [...existing].filter((eventId) => isTerminalEventId(task.id, eventId)).length
-    const counters: Counters = { pages: total, terminals }
+    const handoffs = [...existing].filter((eventId) => isHandoffEventId(task.id, eventId)).length
+    const counters: Counters = { pages: total, terminals, handoffs }
     this.counters.set(task.id, counters)
     if (stored.events.includes('started') && !existing.has(`${task.id}:started`)) this.enqueue(task, stored, 'started', `${task.id}:started`, 0, {})
     if (!stored.events.includes('page')) return
@@ -193,7 +220,7 @@ export class JobWebhooks {
     const steps = await taskStore.listSteps(task.id)
     steps.forEach((step, index) => {
       const eventId = `${task.id}:page:${step.id}`
-      if (!existing.has(eventId)) this.enqueue(task, stored, 'page', eventId, index + 1 + terminals, { page: pageOf(step) }, step.result)
+      if (!existing.has(eventId)) this.enqueue(task, stored, 'page', eventId, index + 1 + terminals + handoffs, { page: pageOf(step) }, step.result)
     })
   }
 
@@ -210,8 +237,10 @@ export class JobWebhooks {
     const existing = this.counters.get(task.id)
     if (existing !== undefined) return existing
     const total = Object.values(await taskStore.countSteps(task.id)).reduce((sum, count) => sum + (count ?? 0), 0)
-    const terminals = this.store.listEventIds(stored.destinationId).filter((eventId) => isTerminalEventId(task.id, eventId)).length
-    const counters: Counters = { pages: Math.max(0, total - (excludeCurrent ? 1 : 0)), terminals }
+    const eventIds = this.store.listEventIds(stored.destinationId)
+    const terminals = eventIds.filter((eventId) => isTerminalEventId(task.id, eventId)).length
+    const handoffs = eventIds.filter((eventId) => isHandoffEventId(task.id, eventId)).length
+    const counters: Counters = { pages: Math.max(0, total - (excludeCurrent ? 1 : 0)), terminals, handoffs }
     this.counters.set(task.id, counters)
     return counters
   }
