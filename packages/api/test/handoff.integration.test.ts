@@ -53,6 +53,8 @@ beforeAll(async () => {
     if (req.url === '/single') return cookie.includes('single=1') ? html(ARTICLE.replace('The member page', 'The single page')) : html(captcha('single'))
     // A page that keeps the widget's script once the person is through it (as a Turnstile page does).
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
+    // Behind its captcha, a page that keeps the widget's script and has its prose in what blockAds takes for an ad.
+    if (req.url === '/inad') return cookie.includes('inad=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script><div class="ad">${ARTICLE.replace('The member page', 'The page in an ad box')}</div>`) : html(captcha('inad'))
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
     if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
     if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
@@ -257,6 +259,19 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
       expect(response.channelsTried).toEqual(['http'])
       expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed to the person is through as its own options read the page: blockAds false keeps what an ad box holds', async () => {
+    const engine = engineFor(join(root, 'tasks-12'))
+    const stop = person(chrome, { '/inad': async (page) => { await page.click('#pass') } })
+    try {
+      const response = await engine.scrape({ url: `${base}/inad`, blockAds: false, handoff: { waitMs: 15_000 } } as never, {}, {}) as Record<string, any>
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed' })
+      expect(response.markdown).toContain('The page in an ad box')
     } finally {
       stop()
       await engine.close()

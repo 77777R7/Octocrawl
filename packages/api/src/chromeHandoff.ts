@@ -58,6 +58,10 @@ export interface UserChromeReadOptions {
   onConfirm?: (url: string) => void
   /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
   signal?: AbortSignal
+  /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
+  includeTags?: readonly string[]
+  excludeTags?: readonly string[]
+  blockAds?: boolean
 }
 
 /** Reads in a row a page must pass to count as through: about 1.5 s at the default poll. */
@@ -227,7 +231,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       const response: DocumentResponse | null = heard.document !== null && sameDocument(heard.document.url, state.href) ? heard.document : null
       const status = response?.status ?? state.status
       last = { state, response }
-      const { full, decisive, gate } = checksOf(state, response, status)
+      const { full, decisive, gate } = checksOf(state, response, status, options)
       // What the page showed, as evidence: a generic bot check only on decisive markers, not a loading page's weak ones.
       if (full !== null && (full.reason !== 'bot_detected_generic' || decisive !== null)) sawGate ??= full.reason
       if (gate !== null && !told) { told = true; options.onWaiting?.(url, gate.reason) }
@@ -269,7 +273,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     }
     const where = last === null ? 'it never loaded'
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
-        : stillGated(last) !== null ? `it still showed a check (${stillGated(last)!.reason}: ${stillGated(last)!.signals.join(', ')})`
+        : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
           : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (W2L reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through w2l login import and mode authed)'
             : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
     throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
@@ -286,19 +290,21 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
  * the evidence that names a check on a page with content; `gate`, the one
  * that holds the page, as W2L's own lanes judge it: a page with content (an
  * article that embeds a captcha widget, a page that keeps the widget's
- * script once passed) by decisive evidence alone, one without by any.
+ * script once passed) by decisive evidence alone, one without by any. What
+ * has content is found as the read finds it, with the request's tags and
+ * blockAds.
  */
-function checksOf(state: PageState, response: DocumentResponse | null, status: number | null): { full: GateVerdict | null; decisive: GateVerdict | null; gate: GateVerdict | null } {
+function checksOf(state: PageState, response: DocumentResponse | null, status: number | null, options: UserChromeReadOptions): { full: GateVerdict | null; decisive: GateVerdict | null; gate: GateVerdict | null } {
   const header = (name: string) => response?.headers[name.toLowerCase()] ?? null
   const full = classifyGate({ status: status ?? 200, header, body: state.html })
   const decisive = classifyGate({ status: status ?? 200, header, body: state.html, contentful: true })
-  const gate = full === null || decisive !== null || state.ready !== 'complete' ? full ?? decisive : extractTf.extract(state.html, { url: state.href }).escalate ? full : null
+  const gate = full === null || decisive !== null || state.ready !== 'complete' ? full ?? decisive : extractTf.extract(state.html, { url: state.href, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds }).escalate ? full : null
   return { full, decisive, gate }
 }
 
 /** The check that held the page as last read, with what it was read from. */
-function stillGated(last: { state: PageState; response: DocumentResponse | null }): GateVerdict | null {
-  return checksOf(last.state, last.response, last.response?.status ?? last.state.status).gate
+function stillGated(last: { state: PageState; response: DocumentResponse | null }, options: UserChromeReadOptions): GateVerdict | null {
+  return checksOf(last.state, last.response, last.response?.status ?? last.state.status, options).gate
 }
 
 /** Whether a page's address is on the site asked for: the same host, a subdomain of it, or a parent domain of it. */

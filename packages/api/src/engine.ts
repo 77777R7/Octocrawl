@@ -814,7 +814,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function readThrough(chrome: UserChrome, url: string, prior: FetchResult, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal): Promise<{ result: FetchResult } | { reason: string }> {
     try {
-      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
+      // The page is through as the read below judges it: with the request's tags and blockAds.
+      const judged = { ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }), ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }), ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }) }
+      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal, ...judged })
       const result = pageFromUserBrowser(read, prior, fetchOpts)
       if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
       return { result }
