@@ -1125,6 +1125,12 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(asks('# Help forum\n\n### Chrome keeps saying "please log in" on every site')).toBe(false)
     expect(asks('# Account\n\n- Wholesale catalogue: Log in to view prices with a trade account')).toBe(false)
     expect(asks(['# Orders', ...Array.from({ length: 10 }, (_, i) => `Order ${i + 1} shipped.`), 'Sign in to view older orders'].join('\n\n'))).toBe(false)
+    // A page whose own subject begins with the words, named so in its title: an issue, a ticket, a question.
+    const titled = (title: string, markdown: string) => sessionRejection('https://example.com/x', { ...page(markdown), metadata: { ...page(markdown).metadata!, title } }) !== null
+    expect(titled('Login required to access main menu · Issue #77 · Markusmph/FinanceAdmin', '[Skip to content](#start-of-content)\n\n# Login required to access main menu #77\n\nOpen')).toBe(false)
+    expect(titled('Please log in again · Issue #1411 · sinProject-Inc/talk', '# Please log in again #1411\n\nOpen')).toBe(false)
+    expect(titled('django - You must be logged in to view this page error - Stack Overflow', '# You must be logged in to view this page error in Django')).toBe(false)
+    expect(titled('Wishlists - Airbnb', '# Wishlists\n\n## Log in to view your wishlists')).toBe(true)
     // The page's own prompt near its top, after a skip link (onlyMainContent: false).
     expect(asks('[Skip to content](#site-content) [https://www.airbnb.com.sg/](https://www.airbnb.com.sg/)\n\n# Wishlists\n\n## Log in to view your wishlists')).toBe(true)
   })

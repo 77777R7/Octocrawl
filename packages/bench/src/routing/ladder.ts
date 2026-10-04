@@ -447,7 +447,7 @@ export class LadderRunner {
       const rejected = channel === sessionFirst ? sessionRejection(url, result) : null
       if (rejected !== null) {
         // How the site refused it: a block, a redirect to its login page, or a sign-in asked for in place.
-        const how = rejected === result ? {} : redirectedToLogin(url, result) ? { redirectedTo: rejected.evidence.finalUrl } : { signInPrompt: signInPrompt(result.markdown) }
+        const how = rejected === result ? {} : redirectedToLogin(url, result) ? { redirectedTo: rejected.evidence.finalUrl } : { signInPrompt: signInPrompt(result.markdown, result.metadata?.title) }
         ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...how } })
         return finish(rejected, false)
       }
@@ -1075,13 +1075,19 @@ const SIGN_IN_PROMPT_MAX_LINE = 120
  * SIGN_IN_PROMPT_LINES counts, and it must begin with the request: a table
  * row, a list item, a quote or a line with a link is the page's content (an
  * issue titled "Login required error", an email asking to sign in, an offer
- * for another area), never its request to the reader.
+ * for another area), never its request to the reader; so is a line its
+ * `title` names (the heading of one issue, ticket or question whose subject
+ * begins with the words, "Please log in again #1411").
  */
-export function signInPrompt(markdown: string | null | undefined): string | null {
+export function signInPrompt(markdown: string | null | undefined, title?: string | null): string | null {
+  const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const named = ` ${words(title ?? '')} `
   const lines = (markdown ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0).slice(0, SIGN_IN_PROMPT_LINES)
   for (const raw of lines) {
     if (/^(?:\||[-*+]\s|\d+[.)]\s|>)/.test(raw) || raw.includes('](')) continue
     const line = raw.replace(/^#{1,6}\s+/, '')
+    // The page's subject, as its title names it (its first words, an issue's number dropped, in the title in order): not a request to the reader.
+    if (named.trim() !== '' && named.includes(` ${words(line.replace(/\s+#\d+$/, '')).split(' ').slice(0, 6).join(' ')} `)) continue
     if (line.length <= SIGN_IN_PROMPT_MAX_LINE && SIGN_IN_PROMPT.test(line)) return line
   }
   return null
@@ -1109,6 +1115,6 @@ function redirectedToLogin(url: string, result: FetchResult): boolean {
 export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
   if (result.status === 'blocked' && result.blockReason === 'login_wall') return result
   if (!CONTENTFUL_STATUS.has(result.status)) return null
-  if (!redirectedToLogin(url, result) && signInPrompt(result.markdown) === null) return null
+  if (!redirectedToLogin(url, result) && signInPrompt(result.markdown, result.metadata?.title) === null) return null
   return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }
