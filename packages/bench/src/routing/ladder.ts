@@ -1082,7 +1082,13 @@ const SIGN_IN_PROMPT_MAX_LINE = 120
 export function signInPrompt(markdown: string | null | undefined, title?: string | null): string | null {
   const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   const named = ` ${words(title ?? '')} `
-  const lines = (markdown ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0).slice(0, SIGN_IN_PROMPT_LINES)
+  // The page's own lines: not those of a code block, nor a list item's indented continuation.
+  let fenced = false
+  const own = (markdown ?? '').split('\n').filter((line) => {
+    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; return false }
+    return !fenced && !/^(?: {2,}|\t)/.test(line)
+  })
+  const lines = own.map((line) => line.trim()).filter((line) => line.length > 0).slice(0, SIGN_IN_PROMPT_LINES)
   for (const raw of lines) {
     if (/^(?:\||[-*+]\s|\d+[.)]\s|>)/.test(raw) || raw.includes('](')) continue
     const line = raw.replace(/^#{1,6}\s+/, '')

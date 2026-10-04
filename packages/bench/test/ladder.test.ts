@@ -1125,6 +1125,9 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(asks('# Help forum\n\n### Chrome keeps saying "please log in" on every site')).toBe(false)
     expect(asks('# Account\n\n- Wholesale catalogue: Log in to view prices with a trade account')).toBe(false)
     expect(asks(['# Orders', ...Array.from({ length: 10 }, (_, i) => `Order ${i + 1} shipped.`), 'Sign in to view older orders'].join('\n\n'))).toBe(false)
+    // A code block's line, and a list item's indented continuation: the page's content.
+    expect(asks('# Issue body\n\n```\nLogin required\n```')).toBe(false)
+    expect(asks('# Account\n\n- ### Wholesale\n  Log in to view prices with a trade account')).toBe(false)
     // A page whose own subject begins with the words, named so in its title: an issue, a ticket, a question.
     const titled = (title: string, markdown: string) => sessionRejection('https://example.com/x', { ...page(markdown), metadata: { ...page(markdown).metadata!, title } }) !== null
     expect(titled('Login required to access main menu · Issue #77 · Markusmph/FinanceAdmin', '[Skip to content](#start-of-content)\n\n# Login required to access main menu #77\n\nOpen')).toBe(false)
