@@ -57,6 +57,9 @@ beforeAll(async () => {
     if (req.url === '/inad') return cookie.includes('inad=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script><div class="ad">${ARTICLE.replace('The member page', 'The page in an ad box')}</div>`) : html(captcha('inad'))
     // A batch item behind its captcha, whose replacement the batch's webhook hears of.
     if (req.url === '/hooked') return cookie.includes('hooked=1') ? html(ARTICLE.replace('The member page', 'The hooked page')) : html(captcha('hooked'))
+    // A scrape's page behind its captcha, asked for with a cache lookup; and one nobody gets through.
+    if (req.url === '/cached') return cookie.includes('cached=1') ? html(ARTICLE.replace('The member page', 'The cached page')) : html(captcha('cached'))
+    if (req.url === '/never') return html(captcha('never'))
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
     if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
     if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
@@ -286,6 +289,11 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(response.metadata.timezone).toBeNull()
       // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
       expect(response.channelsTried).toEqual(['http'])
+      // The call's totals count the read too, as one more attempt: never less than the read alone.
+      expect(response.summary.attempts.map((attempt: { channel: string }) => attempt.channel)).toEqual(['http', 'browser_local_authed'])
+      expect(response.summary).toMatchObject({ requestCount: 1, attemptCount: 1 })
+      expect(response.summary.browserMs).toBe(response.usage.browserMs)
+      expect(response.summary.bytesDecompressed).toBeGreaterThan(response.usage.bytesDecompressed)
       expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
     } finally {
       stop()
@@ -300,6 +308,22 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       const response = await engine.scrape({ url: `${base}/inad`, blockAds: false, handoff: { waitMs: 15_000 } } as never, {}, {}) as Record<string, any>
       expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed' })
       expect(response.markdown).toContain('The page in an ad box')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed over keeps what the cache said of the call, and one not read there is told it can be handed over again', async () => {
+    const engine = engineFor(join(root, 'tasks-14'))
+    const stop = person(chrome, { '/cached': async (page) => { await page.click('#pass') } })
+    try {
+      const read = await engine.scrape({ url: `${base}/cached`, maxAge: 60_000, handoff: { waitMs: 20_000 } } as never, {}, {}) as Record<string, any>
+      expect(read).toMatchObject({ status: 'success', lane: 'browser_local_authed', metadata: { cacheState: 'miss' } })
+      const notRead = await engine.scrape({ url: `${base}/never`, handoff: { waitMs: 1_000 } } as never, {}, {}) as Record<string, any>
+      expect(notRead.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
+      expect(notRead.handoff.rationale).toContain('it was not read there')
+      expect(notRead.handoff.rationale).not.toContain('handoff: true (w2l scrape --handoff)')
     } finally {
       stop()
       await engine.close()

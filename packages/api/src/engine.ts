@@ -21,6 +21,7 @@ import {
   prepareHttpIdentity,
   RobotsOriginCache,
   pageFromUserBrowser,
+  summarize,
   type Channel,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -849,11 +850,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
-  /** A result as a server that hands pages to the person answers it: one a check stopped says so, and how (`handoff: true`). */
-  function withHandoffHint(result: FetchResult, req: ScrapeRequest): FetchResult {
+  /**
+   * A result as a server that hands pages to the person answers it: one a check stopped says so, and how (`handoff: true`);
+   * one already handed over and not read there (`tried`), that the request may hand it over again.
+   */
+  function withHandoffHint(result: FetchResult, req: ScrapeRequest, tried = false): FetchResult {
     if (userChrome === null || !handoffResult(result) || unreadByPerson(fetchOptions(req, req.formats)) !== null) return result
     const blockReason = result.blockReason!
-    return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale: `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there` } }
+    const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass`
+    const rationale = tried
+      ? `${stopped}, and handed to you in your own Chrome it was not read there (the handoff_not_through warning says why): send the request again with handoff to try once more, with a longer handoff.waitMs if you needed more time`
+      : `${stopped}: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
+    return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale } }
   }
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
@@ -1122,16 +1130,20 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.
       const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null
+      const read = handed !== null && 'result' in handed ? handed.result : null
+      // A page read in the person's Chrome keeps what the cache said of this call (a lookup that missed); it is never stored.
       const result: FetchResult = handed === null
         ? withHandoffHint(run.result, req)
-        : 'result' in handed ? handed.result : withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req)
+        : 'reason' in handed ? withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req, true)
+          : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
-      const agentHints = handed !== null && 'result' in handed ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
+      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
       const full: ScrapeRun = {
         ...result,
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
-        summary: run.summary,
+        // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
+        summary: read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) },
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
       // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
