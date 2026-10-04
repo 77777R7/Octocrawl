@@ -70,9 +70,18 @@ export interface ImportedLogin {
   localStorageRead: boolean
   /** The origins of the site's open tabs whose localStorage Chrome did not give (a tab that crashed or was discarded): saved without it. */
   localStorageUnread: string[]
+  /** Why each of localStorageUnread was not read, a tab at a time: the request to Chrome that failed and Chrome's answer, or the wait that ran out. */
+  localStorageUnreadReasons: UnreadStorage[]
   /** SHA-256 of the saved session, the only trace of it a record carries. */
   sessionSha256: string
   sessionsFile: string
+}
+
+/** A tab of the site whose localStorage Chrome did not give: its origin, the request that failed, and why. */
+export interface UnreadStorage {
+  origin: string
+  step: 'Target.attachToTarget' | 'Page.getFrameTree' | 'DOMStorage.getDOMStorageItems'
+  error: string
 }
 
 /** One origin's localStorage, as Playwright's storageState keeps it. */
@@ -170,11 +179,11 @@ const TAB_READ_TIMEOUT_MS = 5_000
  * read through DOMStorage, which loads nothing and runs no script in the
  * page. A frame of another origin inside a tab is not read. Null when no tab
  * of the site is open: Chrome reads an origin's storage only through a frame
- * that shows it, so none could be. `unread`: the origins of tabs Chrome did
- * not give the storage of (a tab that crashed, was discarded or closed
- * meanwhile), which the import saves without.
+ * that shows it, so none could be. `unread`: the tabs Chrome did not give
+ * the storage of (a tab that crashed, was discarded or closed meanwhile), by
+ * origin, which the import saves without, each with the request that failed.
  */
-async function siteStorage(connection: CdpConnection, domain: string): Promise<{ origins: OriginStorage[]; unread: string[] } | null> {
+async function siteStorage(connection: CdpConnection, domain: string): Promise<{ origins: OriginStorage[]; unread: UnreadStorage[] } | null> {
   let defaultBrowserContextId: string | undefined
   let targetInfos: { targetId: string; type: string; url: string; browserContextId?: string }[] | undefined
   try {
@@ -189,31 +198,34 @@ async function siteStorage(connection: CdpConnection, domain: string): Promise<{
   const tabs = (targetInfos ?? []).filter((target) => target.type === 'page' && target.browserContextId === defaultBrowserContextId && onSite(target.url, domain))
   if (tabs.length === 0) return null
   // Read all at once: a tab that does not answer costs one wait of TAB_READ_TIMEOUT_MS, not one per tab.
-  const reads = await Promise.all(tabs.map(async (tab): Promise<OriginStorage | { unread: string } | null> => {
+  const reads = await Promise.all(tabs.map(async (tab): Promise<OriginStorage | { unread: UnreadStorage } | null> => {
     let sessionId: string | undefined
+    let step: UnreadStorage['step'] = 'Target.attachToTarget'
     try {
       ;({ sessionId } = await connection.send('Target.attachToTarget', { targetId: tab.targetId, flatten: true }, undefined, TAB_READ_TIMEOUT_MS) as { sessionId: string })
+      step = 'Page.getFrameTree'
       const { frameTree } = await connection.send('Page.getFrameTree', {}, sessionId, TAB_READ_TIMEOUT_MS) as { frameTree: { frame: { securityOrigin: string } } }
       const origin = frameTree.frame.securityOrigin
       if (!onSite(origin, domain)) return null
+      step = 'DOMStorage.getDOMStorageItems'
       const { entries } = await connection.send('DOMStorage.getDOMStorageItems', { storageId: { securityOrigin: origin, isLocalStorage: true } }, sessionId, TAB_READ_TIMEOUT_MS) as { entries: [string, string][] }
       return { origin, localStorage: entries.map(([name, value]) => ({ name, value })) }
-    } catch {
-      // One tab that does not answer leaves the others, and the cookies, to be saved: its origin is said to be unread.
-      return { unread: new URL(tab.url).origin }
+    } catch (error) {
+      // One tab that does not answer leaves the others, and the cookies, to be saved: its origin is said to be unread, and why.
+      return { unread: { origin: new URL(tab.url).origin, step, error: (error instanceof Error ? error.message : String(error)).slice(0, 300) } }
     } finally {
       if (sessionId !== undefined) await connection.send('Target.detachFromTarget', { sessionId }, undefined, TAB_READ_TIMEOUT_MS).catch(() => undefined)
     }
   }))
   // Two tabs of one origin share its storage: the first read of it, in the tabs' order, stands.
   const byOrigin = new Map<string, OriginStorage>()
-  const failed = new Set<string>()
+  const failed: UnreadStorage[] = []
   for (const read of reads) {
     if (read === null) continue
-    if ('unread' in read) failed.add(read.unread)
+    if ('unread' in read) failed.push(read.unread)
     else if (!byOrigin.has(read.origin)) byOrigin.set(read.origin, read)
   }
-  return { origins: [...byOrigin.values()], unread: [...failed].filter((origin) => !byOrigin.has(origin)).sort() }
+  return { origins: [...byOrigin.values()], unread: failed.filter((read) => !byOrigin.has(read.origin)).sort((a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0)) }
 }
 
 /** What a saved login's storageState holds: its origins with localStorage, and how many items; null for none. */
@@ -234,7 +246,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
   const endpoint = await chromeEndpoint(options.userDataDir ?? chromeUserDataDir())
   const connection = await (options.connect ?? connectCdp)(endpoint, timeoutMs)
   let all: CdpCookie[]
-  let storage: { origins: OriginStorage[]; unread: string[] } | null
+  let storage: { origins: OriginStorage[]; unread: UnreadStorage[] } | null
   try {
     const answer = await connection.send('Storage.getCookies') as { cookies?: CdpCookie[] }
     all = answer.cookies ?? []
@@ -248,7 +260,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
     const below = hostsBelow(all, domain)
     if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. w2l login import ${below[0]}`)
     const tabs = storage === null ? `, and no tab of ${domain} is open to read its localStorage from`
-      : storage.unread.length > 0 ? `, and Chrome did not give the localStorage of its open tabs (${storage.unread.join(', ')}; reload them)`
+      : storage.unread.length > 0 ? `, and Chrome did not give the localStorage of its open tabs (${storage.unread.map((read) => `${read.origin}: ${read.error}`).join(', ')}; reload them)`
         : `, and its open tabs hold no localStorage`
     throw new ChromeLoginError(`Chrome has no cookies for ${domain}${tabs}: sign in to ${domain} in Chrome's default profile, in a normal (not Incognito) window, leave a tab of it open, then run this again. Remote debugging reaches the default profile only`)
   }
@@ -263,7 +275,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
     statement: `${storageState === undefined ? 'cookies' : 'cookies and localStorage'} for ${domain} taken from the user's own Chrome, with their approval in Chrome's remote debugging dialog`,
   }
   await new FileSessionStore(options.sessionsFile).save(snapshot)
-  return { domain, cookieCount: cookies.length, localStorage: loginStorage(storageState), localStorageRead: storage !== null, localStorageUnread: storage?.unread ?? [], sessionSha256: recordedSha256(snapshot), sessionsFile: options.sessionsFile }
+  return { domain, cookieCount: cookies.length, localStorage: loginStorage(storageState), localStorageRead: storage !== null, localStorageUnread: [...new Set((storage?.unread ?? []).map((read) => read.origin))], localStorageUnreadReasons: storage?.unread ?? [], sessionSha256: recordedSha256(snapshot), sessionsFile: options.sessionsFile }
 }
 
 function localUser(): string {
