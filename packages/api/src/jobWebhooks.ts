@@ -212,7 +212,8 @@ export class JobWebhooks {
    * numbering from what is persisted, and offer `started` and every step
    * without a delivery again. Already-enqueued events are ignored by their
    * ids, so a resume or a restart sends nothing twice; steps are read only
-   * when their count and the page deliveries' differ.
+   * when their count and the page deliveries' differ, and a batch item a
+   * handoff replaced only when its event is missing (found by id first).
    */
   async reconcile(task: Task, taskStore: TaskStore, pageOf: (step: StepRecord) => CrawlPage): Promise<void> {
     const stored = webhookOf(task)
@@ -234,10 +235,11 @@ export class JobWebhooks {
     }
     if (!stored.events.includes('page')) return
     const pageDeliveries = [...existing].filter((eventId) => eventId.startsWith(`${task.id}:page:`)).length
-    // A batch's items a handoff replaced may lack their event too (the process stopped between the write and the enqueue).
-    if (pageDeliveries >= total && task.batch === undefined) return
-    const steps = await taskStore.listSteps(task.id)
+    // A batch's items a handoff replaced may lack their event too (the process stopped between the write and the enqueue):
+    // found by their ids alone, so a job with every event enqueued reads no step.
+    const unsentHandoffs = task.batch === undefined ? [] : (await taskStore.listStepIdsWithTraceEvent(task.id, 'handoff_from')).filter((id) => !existing.has(`${task.id}:handoff:${id}`))
     if (pageDeliveries < total) {
+      const steps = await taskStore.listSteps(task.id)
       steps.forEach((step, index) => {
         const eventId = `${task.id}:page:${step.id}`
         if (existing.has(eventId)) return
@@ -249,11 +251,11 @@ export class JobWebhooks {
         this.enqueue(task, stored, 'page', eventId, sequence, { page: pageOf(step) }, step.result)
       })
     }
-    for (const step of steps) {
-      const eventId = `${task.id}:handoff:${step.id}`
-      if (!replacedByHandoff(step) || existing.has(eventId)) continue
+    for (const id of unsentHandoffs) {
+      const step = await taskStore.getStep(id)
+      if (step === null || !replacedByHandoff(step)) continue
       counters.handoffs++
-      this.enqueue(task, stored, 'page', eventId, nextSequence(counters), { page: pageOf(step) }, step.result)
+      this.enqueue(task, stored, 'page', `${task.id}:handoff:${id}`, nextSequence(counters), { page: pageOf(step) }, step.result)
     }
   }
 
