@@ -5,13 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { localNetworkPolicy, type BatchStartRequest, type FirecrawlWebhookPayload, type JobWebhookEnvelope, type WebhookDelivery } from '@w2l/contracts'
+import { localNetworkPolicy, type BatchStartRequest, type CrawlPage, type FirecrawlWebhookPayload, type JobWebhookEnvelope, type StepRecord, type Task, type WebhookDelivery } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
-import { DeliveryStore, DeliveryWorker, SqliteTaskStore, verifyWebhookSignature } from '@w2l/runtime'
+import { DeliveryStore, DeliveryWorker, SqliteTaskStore, verifyWebhookSignature, type TaskStore } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
 import { JobEventHub } from '../src/jobEvents.js'
+import { JobWebhooks } from '../src/jobWebhooks.js'
 
 const ITEMS = [1, 2, 3, 4, 5]
 const HOOK = 'http://127.0.0.1:8828/hook'
@@ -356,6 +357,30 @@ describe('job webhooks', () => {
     expect(payloads.map((p) => Number(p.headers['x-w2l-event-version'])).sort((a, b) => a - b)).toEqual([0, 1, 2, 3])
     expect(await w2l.listDeliveryDestinations({ jobId: id })).toMatchObject([{ payloadFormat: 'firecrawl', headerNames: ['x-run'] }])
     expect(JSON.stringify(payloads.map((p) => p.body))).not.toContain('w2l.job-event')
+  })
+
+  it('numbers a job\'s events the same after a restart, a terminal event its events leave out included: a later handoff takes no number already sent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-webhooks-numbering-'))
+    const store = DeliveryStore.open(join(root, 'section-b-control.sqlite'))
+    try {
+      const hooks = () => new JobWebhooks(store, { hosted: false, allowHttpLoopback: true })
+      const first = hooks()
+      const webhook = first.register('t1', { url: HOOK, events: ['page'] })
+      const task = { id: 't1', batch: { urls: ['https://a.test/1', 'https://a.test/2'], formats: ['markdown'], includeLinks: false, webhook } } as unknown as Task
+      const steps = [{ id: 's1', result: null }, { id: 's2', result: null }] as unknown as StepRecord[]
+      const taskStore = { countSteps: async () => ({ success: 2 }), listAttempts: async () => [], listSteps: async () => steps } as unknown as TaskStore
+      const page = (id: string) => ({ id }) as unknown as CrawlPage
+      for (const step of steps) await first.page(task, step, page(step.id), taskStore)
+      await first.terminal(task, { status: 'completed', attemptId: '' } as never, taskStore)
+      await first.replaced(task, steps[0]!, page('s1'), taskStore)
+      // The API restarts: a new instance numbers from what the control database holds.
+      await hooks().replaced(task, steps[1]!, page('s2'), taskStore)
+      const sent = store.listDeliveries({ destinationId: 'job:t1' }).map((delivery) => [delivery.eventId, delivery.eventVersion]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      expect(sent).toEqual([['t1:handoff:s1', 3], ['t1:handoff:s2', 4], ['t1:page:s1', 1], ['t1:page:s2', 2]])
+    } finally {
+      store.close()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('fans a job event out to every hub listener and isolates a listener that throws', async () => {

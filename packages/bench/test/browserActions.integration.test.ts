@@ -170,6 +170,24 @@ describe('actions, real browser', () => {
     expect(result.markdown ?? '').not.toContain('Not for crawlers')
   }, 60_000)
 
+  it('a disallowed page the page reaches only after the last step keeps nothing that step captured', async () => {
+    // The screenshot's own viewport is put back once it is taken, and that resize sends the page to a disallowed page: after the
+    // step's checks, while the fetch takes its own full-page screenshot of a long page.
+    const send = 'const tall = document.createElement("div"); tall.style.cssText = "height:30000px;background:repeating-linear-gradient(45deg,#036,#036 3px,#fc0 3px,#fc0 7px)"; document.body.appendChild(tall); let resized = 0; addEventListener("resize", () => { if (++resized === 2) location.href = "/private/after" }); return 1'
+    const browser = new BrowserLocalSubject('standard')
+    try {
+      const result = await browser.fetch(`${base}/fontnav`, Date.now() + 45_000, undefined, undefined, {
+        actions: [{ type: 'executeJavascript', script: send }, { type: 'screenshot', viewport: { width: 800, height: 600 } }],
+        screenshot: { fullPage: true },
+      })
+      expect(result.actions?.failed).toMatchObject({ index: 1, code: 'navigation_refused' })
+      expect(result.actions?.failed?.message).toContain('after the steps')
+      expect(result.actions?.screenshots).toEqual([])
+    } finally {
+      await browser.teardown()
+    }
+  }, 60_000)
+
   it('a redirect of the requested URL itself is the fetch\'s, not the steps\'', async () => {
     const result = await run('/hop', [{ type: 'wait', milliseconds: 10 }])
     expect(result.actions?.failed).toBeUndefined()
