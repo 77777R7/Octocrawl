@@ -15,7 +15,7 @@ export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane
 
 /** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance. */
 export function lowContentYieldHint(browserTried: boolean): string {
-  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet`
+  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction`
 }
 
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
@@ -46,7 +46,7 @@ export interface HintedAttempt {
 }
 
 /** The run a hint is read from: the lanes tried, the result, and the summary's attempts when the run has them (a stored step's audit, a scrape's ladder run). */
-export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & { result: HintedResult; summary?: { attempts: readonly HintedAttempt[] } }
+export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<LadderRunAudit, 'ladderTrace'>> & { result: HintedResult; summary?: { attempts: readonly HintedAttempt[] } }
 
 /** The most hints one result carries; the table's order decides which stay. */
 export const MAX_AGENT_HINTS = 5
@@ -148,10 +148,14 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
     hints.push('lockdown answers from stored results only and none of this page fits the request (same options, within maxAge and minAge); send it without lockdown to fetch the page')
   }
   if (result.status === 'blocked' && result.blockReason === 'login_wall') {
-    hints.push('the page asks for a login; W2L does not create accounts; use mode authed with your own session')
+    // A saved login was used and the site refused it: it expired or was signed out.
+    const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
+    hints.push(rejected === undefined
+      ? 'the page asks for a login; W2L does not create accounts; use mode authed with your own session'
+      : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run w2l login import ${String(rejected.detail?.domain ?? host)}`)
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
-    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route`)
+    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, for a batch run on your own machine, getting through the check yourself in your own Chrome (w2l batch --handoff, POST /v1/batches/:id/handoff)`)
   }
   const escalated = laneEscalatedHint(run, host)
   if (escalated !== null) hints.push(escalated)

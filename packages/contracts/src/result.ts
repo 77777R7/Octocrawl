@@ -1,8 +1,9 @@
 import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from './status.js'
 import type { ComplianceRecord } from './compliance.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
-import type { StructuredExtractionResult } from './structured.js'
+import type { ListField, StructuredExtractionResult } from './structured.js'
 import type { FileDescription } from './file.js'
+import type { ActionsResult } from './actions.js'
 
 export interface ResourceTimings {
   /** Every wait in the origin scheduler but a cooldown: the concurrency ceiling and the minimum interval between requests. */
@@ -116,6 +117,15 @@ export interface Evidence {
   contentType: string | null
   /** sha256 of the raw response body. Null only when no body was read. */
   rawBodySha256: string | null
+  /**
+   * The `content-encoding` of the response `httpStatus` is from, as the HTTP
+   * lane received it (lower-cased codings in applied order, `x-gzip` read as
+   * `gzip`), or `identity` when it had none. The lane decodes gzip, deflate
+   * and br, so the body behind `rawBodySha256` is the decoded one; any other
+   * coding fails with `unsupported_content_encoding`. Absent when no response
+   * body was read, and in lanes that do not report it (browser, provider).
+   */
+  contentEncoding?: string
   /** Relative artifact paths (raw body, screenshot, DOM snapshot). */
   artifacts: readonly string[]
   /**
@@ -354,6 +364,12 @@ export interface FetchResult {
    */
   tables?: readonly PageTable[]
   /**
+   * The `list` format, when asked for and the page was read: its records,
+   * one per element `itemSelector` matched, from every page a paginate step
+   * read when one ran, else from the page as it stands.
+   */
+  list?: ListExtraction
+  /**
    * A PDF's pages, each as the Markdown has it (without its marker), when a
    * `pdf` parser entry asked for them (`pages: true`) and the text layer was
    * read; absent otherwise.
@@ -378,6 +394,12 @@ export interface FetchResult {
    * travels once.
    */
   screenshot?: ScreenshotEvidence | null
+  /**
+   * What the request's `actions` produced (screenshots, HTML snapshots,
+   * script returns, PDFs) and the step that failed, if one did. Present on
+   * every result of the browser lane that ran the steps; absent otherwise.
+   */
+  actions?: ActionsResult
   /**
    * The fetch's caveats, present only when it has any: a `robots_overridden`
    * warning first when a recorded override set a robots.txt rule aside, then
@@ -412,6 +434,45 @@ export interface FetchResult {
  * that spans rows or columns gives its value to every slot it covers, so
  * every row has `columns` cells and none is shifted.
  */
+/** One record of the `list` format. */
+export interface ListRecord {
+  /** Each field's value, by name: the text (whitespace collapsed) or the attribute; null when the record has none. */
+  values: Record<string, string | null>
+  /** The fields that are null, in field order: what this record lacks, never filled in. */
+  missing: string[]
+  /** Where it was read: the page's URL, the page's number (1 for the page read, or each page a paginate step read, in order), and the record's place on it (0-based, document order). */
+  source: { url: string; page: number; index: number }
+}
+
+/** The `list` format: the records of the page, or of every page a paginate step read. */
+export interface ListExtraction {
+  /** The items' selector: as asked, or the one W2L found (`detected`); null when it found no list on the page (a `list_not_detected` warning). */
+  itemSelector: string | null
+  fields: string[]
+  /**
+   * Present when W2L chose the itemSelector or the fields: the fields as a
+   * request names them, to send back as they are or changed, and the other
+   * lists it found on the page, best first.
+   */
+  detected?: ListDetection
+  records: ListRecord[]
+  /** Pages the records were read from. */
+  pages: number
+  /** Records with at least one field missing. */
+  incomplete: number
+  /** True when a limit cut the list (10,000 records, 5,000,000 characters of values): the page had more records than these. */
+  truncated: boolean
+  /** The records as RFC 4180 CSV: the fields, then source_url, page and index. */
+  csv: string
+  /** SHA-256 (hex) of the UTF-8 bytes of `csv`. */
+  csvSha256: string
+}
+
+export interface ListDetection {
+  fields: ListField[]
+  alternatives: Array<{ itemSelector: string; count: number }>
+}
+
 export interface PageTable {
   tableIndex: number
   /** The table's `<caption>` as plain text; null when it has none (a title written above the table is not one). */

@@ -12,6 +12,7 @@
     { "path": "packages/api" },
     { "path": "packages/sdk" },
     { "path": "packages/mcp" },
+    { "path": "packages/cli" },
     { "path": "packages/public-preview" }
   ]
 }

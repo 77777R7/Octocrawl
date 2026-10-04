@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-/** The files W2L_CAPTURE_RAW_DIR takes: a page's HTML, and the screenshot format's PNG or JPEG. */
-export type ArtifactExtension = 'html' | 'png' | 'jpg'
+/** The files W2L_CAPTURE_RAW_DIR takes: a page's HTML, a screenshot's PNG or JPEG, and a pdf step's PDF. */
+export type ArtifactExtension = 'html' | 'png' | 'jpg' | 'pdf'
 
 /**
  * Opt-in capture of what a lane received or produced, for reproducible

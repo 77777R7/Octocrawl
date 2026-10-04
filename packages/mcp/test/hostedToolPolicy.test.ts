@@ -32,6 +32,9 @@ describe('single-owner hosted workflow policy', () => {
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],robotsOverrides:[{url:'https://www.amazon.sg/dp/B000VW9PIK',reason:'r'}]})).toThrow('unsupported remote tool option')
     // The reviewed batch shape is fixed: the batch's own cap and the invalid-URL skip are refused too, and nothing is loosened.
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],maxConcurrency:1})).toThrow('unsupported remote tool option')
+    // Page actions run clicks and scripts in the operator's browser: the hosted host takes none.
+    expect(() => call('scrape',{url:'https://www.amazon.sg/dp/B000VW9PIK',actions:[{type:'scrape'}]})).toThrow('unsupported remote tool option')
+    expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],actions:[{type:'executeJavascript',script:'return 1'}]})).toThrow('unsupported remote tool option')
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],ignoreInvalidURLs:true})).toThrow('unsupported remote tool option')
     // So are a retry key and an append: the hosted batch is one reviewed job per call.
     expect(() => call('batch_scrape',{urls:['https://www.amazon.sg/dp/B000VW9PIK'],idempotencyKey:'nightly-1'})).toThrow('unsupported remote tool option')

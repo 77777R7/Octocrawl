@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "w2l"
+version = "0.3.0"
+description = "Python client for the W2L API: web pages as Markdown, tables and JSON, each with its Evidence Record, into pandas."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["httpx>=0.27"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=1.5"]
+test = ["pytest>=7", "pandas>=1.5"]
+
+[project.urls]
+Homepage = "https://github.com/77777R7/w2l"
+Source = "https://github.com/77777R7/w2l/tree/main/python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/w2l"]

@@ -44,9 +44,12 @@ describe('agent hints', () => {
   it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
     const wall = result({ status: 'blocked', blockReason: 'login_wall', markdown: null })
     expect(hints(wall)).toEqual(['the page asks for a login; W2L does not create accounts; use mode authed with your own session'])
+    // The saved login was used and refused: the fix is a fresh import, not mode authed.
+    const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
+    expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run w2l login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
-        'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route',
+        'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, for a batch run on your own machine, getting through the check yourself in your own Chrome (w2l batch --handoff, POST /v1/batches/:id/handoff)',
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
@@ -84,7 +87,7 @@ describe('agent hints', () => {
     const thin = (message: string) => result({ warnings: [{ code: 'low_content_yield', message }], trace: [{ at: 1, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 20, confidence: 0.1 } }] })
     expect(hints(thin('The http lane extracted 20 tokens at confidence 0.1; the browser lane did not improve it.'), ['http', 'browser_local'])).toEqual([lowContentYieldHint(true)])
     expect(hints(thin('The http lane extracted 20 tokens at confidence 0.1; the browser lane was not available to this request.'), ['http'])).toEqual([lowContentYieldHint(false)])
-    expect(lowContentYieldHint(false)).toBe("the http lane's content was thin and the browser lane was not available; pass waitFor (up to 60000 ms) or a longer timeout with the browser lane available; page actions (click, scroll) are not offered yet")
+    expect(lowContentYieldHint(false)).toBe("the http lane's content was thin and the browser lane was not available; pass waitFor (up to 60000 ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction")
     // Under fastMode the one fastMode sentence says what was declined; the warning's own hint is left out.
     expect(hints(thin('…'), ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
     // A shell carries the client-rendered sentence first, then the thin-content one.

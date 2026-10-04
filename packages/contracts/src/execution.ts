@@ -1,6 +1,7 @@
 import type { RobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
-import type { AttributeSelector, ScreenshotOptions } from './structured.js'
+import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
+import type { PageAction } from './actions.js'
 
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 export interface ExecutionContext {
@@ -150,6 +151,8 @@ export interface FetchOptions {
    * by a caller; the API has checked the selectors (`invalidSelector`).
    */
   attributes?: readonly AttributeSelector[]
+  /** The `list` format's request, set from the requested formats, not by a caller; the API has checked its selectors. */
+  list?: ListFormatRequest
   /**
    * Whether an `<img>` whose `src` is a `data:` URI is left out of the
    * Markdown, its alt text kept (Firecrawl's `removeBase64Images`). Default
@@ -170,6 +173,13 @@ export interface FetchOptions {
    * requested formats (a `screenshot` entry), not by a caller.
    */
   screenshot?: ScreenshotOptions
+  /**
+   * Steps the local browser runs on the page after load, stability and
+   * `waitFor`, and before the screenshot format and the DOM are read
+   * (`actions`). The local browser lanes alone run them; the API selects
+   * those lanes alone for such a request.
+   */
+  actions?: readonly PageAction[]
 }
 
 /** The largest `maxPages` a pdf parser entry may ask for. */

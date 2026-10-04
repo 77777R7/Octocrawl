@@ -1,9 +1,10 @@
 import './styles.css'
 import { mountHeroAscii } from './ascii'
 import { mountHeroClick } from './heroClick'
+import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
-import { whenVisible } from './motion'
 import { track, trackLinkClicks, trackPageView } from './analytics'
+import { mountWaitlist } from './waitlist'
 import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -99,81 +100,7 @@ try {
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
-// The recorded-runs ticker scrolls only while it is on screen; the class keeps it still otherwise.
-const ticker = document.querySelector<HTMLElement>('#ticker')!
-whenVisible(ticker, () => ticker.classList.add('is-moving'), () => ticker.classList.remove('is-moving'))
-// Anyone can stop it, from a keyboard or a touch screen too, and it stays stopped until they start it again.
-const tickerToggle = document.querySelector<HTMLButtonElement>('#ticker-toggle')!
-tickerToggle.addEventListener('click', () => {
-  const paused = ticker.classList.toggle('is-paused')
-  tickerToggle.setAttribute('aria-pressed', String(paused))
-  tickerToggle.setAttribute('aria-label', paused ? 'Play the recorded runs' : 'Pause the recorded runs')
-  tickerToggle.firstElementChild!.textContent = paused ? '▶' : '❚❚'
-})
-
-// Section backgrounds load as their section comes near, not with the first screen.
-const nearSections = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (!entry.isIntersecting) continue
-    entry.target.classList.add('is-near')
-    nearSections.unobserve(entry.target)
-  }
-}, { rootMargin: '800px 0px' })
-for (const section of document.querySelectorAll('[data-lazy-bg]')) nearSections.observe(section)
-
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-/** Calls `run` once, the first time `el` is a third on screen. */
-const onFirstView = (el: Element, run: () => void): void => {
-  const observer = new IntersectionObserver((entries) => {
-    if (!entries.some(entry => entry.isIntersecting)) return
-    observer.disconnect()
-    run()
-  }, { threshold: 0.3 })
-  observer.observe(el)
-}
-
-// The navy band's caret and flow dots play once, for a few seconds, when the band is first seen.
-const countBand = document.querySelector<HTMLElement>('.count-band')!
-if (!reducedMotion.matches) onFirstView(countBand, () => countBand.classList.add('is-live'))
-
-// The benchmark bars fill once, the first time they are seen; the prerendered page shows them full.
-const bench = document.querySelector<HTMLElement>('.bench')!
-if (!reducedMotion.matches) {
-  bench.classList.add('is-armed')
-  onFirstView(bench, () => bench.classList.add('is-shown'))
-}
-
-// "103 of 106" counts up from zero the first time it is seen.
-for (const counter of document.querySelectorAll<HTMLElement>('.count-up')) {
-  const target = Number(counter.dataset.to)
-  if (reducedMotion.matches || !Number.isFinite(target)) continue
-  counter.textContent = '0'
-  onFirstView(counter, () => {
-    const started = performance.now()
-    const step = (now: number) => {
-      const t = Math.min(1, (now - started) / 1200)
-      counter.textContent = String(Math.round(target * (1 - (1 - t) ** 3)))
-      if (t < 1) requestAnimationFrame(step)
-    }
-    requestAnimationFrame(step)
-  })
-}
-
-// The run grid and the formats grid name the cell under the pointer.
-const hoverLabel = (grid: HTMLElement, cellSelector: string, label: HTMLElement, data: string, idle: string): void => {
-  let active: HTMLElement | null = null
-  const show = (cell: HTMLElement | null) => {
-    active?.classList.remove('is-active')
-    active = cell
-    active?.classList.add('is-active')
-    label.textContent = cell?.dataset[data] ?? idle
-  }
-  grid.addEventListener('pointerover', (event) => show((event.target as Element).closest<HTMLElement>(cellSelector)))
-  grid.addEventListener('pointerleave', () => show(null))
-}
-hoverLabel(document.querySelector<HTMLElement>('.run-grid')!, '.run-cell', document.querySelector<HTMLElement>('#run-label')!, 'label', 'Hover a case')
-const formatNote = document.querySelector<HTMLElement>('#format-note')!
-hoverLabel(document.querySelector<HTMLElement>('.formats-grid')!, '.format-cell', formatNote, 'note', formatNote.textContent ?? '')
+for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
 const input = document.querySelector<HTMLInputElement>('#url-input')!
@@ -193,6 +120,14 @@ const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label'
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
+const waitlist = mountWaitlist()
+/** After the daily previews run out: a link to the hosted early-access form. */
+function waitlistLink(className: string): HTMLAnchorElement {
+  const link = textElement('a', 'Get early access to hosted ↓', className)
+  link.href = '#waitlist'
+  link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
+  return link
+}
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
 const formatLabel = document.querySelector<HTMLElement>('#format-label')!
 const formatPanel = document.querySelector<HTMLElement>('#format-panel')!
@@ -439,10 +374,11 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
     content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
   })
   const docs = result.status === 'quota_exceeded'
-    ? textElement('a', 'Run it yourself ↓', 'guidance-link')
+    ? textElement('a', 'Run it yourself ↗', 'guidance-link')
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
-  docs.href = result.status === 'quota_exceeded' ? '#run-it-yourself' : '/docs/limits/'
+  docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/w2l' : '/docs/limits/'
   actions.append(json, docs)
+  if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
   panel.append(actions)
   return panel
 }
@@ -1024,17 +960,20 @@ function renderDetail(run: Run): void {
  * prerendered "3 free previews a day" in place: the page never guesses a number. */
 async function refreshQuota(): Promise<void> {
   let text = QUOTA_NOTE
+  let usedUp = false
   try {
     const response = await fetch('/api/quota', { credentials: 'same-origin' })
     const quota = response.ok ? await response.json() as { enabled?: boolean; state?: QuotaDecision; limit?: number; remaining?: number } : null
     if (quota?.enabled === false) text = 'Previews are paused right now'
     else if (quota?.enabled === true && typeof quota.remaining === 'number' && typeof quota.limit === 'number') {
+      usedUp = quota.state === 'global_limited' || quota.state === 'visitor_limited'
       text = quota.state === 'global_limited' ? 'Today’s public previews are used up · resets 00:00 UTC'
         : quota.state === 'visitor_limited' ? 'No previews left today · resets 00:00 UTC'
           : `${quota.remaining} of ${quota.limit} free previews left today`
     }
   } catch { /* An unreadable count shows the static note, never an older number. */ }
   quotaNote.textContent = text
+  if (usedUp) quotaNote.append(' · ', waitlistLink('url-help-link'))
 }
 type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 void refreshQuota()
@@ -1397,31 +1336,6 @@ codeCopy.addEventListener('click', async () => {
   } catch { codeStatus.textContent = 'Copy failed. Select the text manually.' }
 })
 
-// Run it yourself: the open tab's terminal lines, copied as one script.
-const selfhostCopy = document.querySelector<HTMLButtonElement>('#selfhost-copy')!
-const selfhostStatus = document.querySelector<HTMLElement>('#selfhost-status')!
-selfhostCopy.addEventListener('click', async () => {
-  const panel = document.querySelector<HTMLElement>('.selfhost-panel:not([hidden])')!
-  track('get_code_copy', { tab: `selfhost-${panel.id.replace('sh-panel-', '')}` })
-  const lines = [...panel.querySelectorAll<HTMLElement>('.code-text')].map(line => line.textContent ?? '')
-  try {
-    await navigator.clipboard.writeText(lines.join('\n'))
-    selfhostCopy.textContent = 'Copied ✓'
-    selfhostStatus.textContent = 'Copied to the clipboard.'
-    window.setTimeout(() => { selfhostCopy.textContent = 'Copy' }, 2200)
-  } catch { selfhostStatus.textContent = 'Copy failed. Select the text manually.' }
-})
-
-// The second form near the end hands its URL to the hero form, so the preview, its quota and its errors are the same.
-const ctaForm = document.querySelector<HTMLFormElement>('#cta-form')!
-const ctaInput = document.querySelector<HTMLInputElement>('#cta-url')!
-ctaForm.addEventListener('submit', (event) => {
-  event.preventDefault()
-  input.value = ctaInput.value
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  document.querySelector('#top')!.scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' })
-  form.requestSubmit()
-})
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()

@@ -1,5 +1,5 @@
-import type { AttributeExtraction, FetchOptions, FetchResult, Lane, PageTable, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractTf, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import type { AttributeExtraction, FetchOptions, FetchResult, FetchWarning, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
+import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /**
@@ -73,8 +73,15 @@ export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'd
  * response body on the HTTP lane, the rendered DOM on a browser lane) like
  * `links`, with their trace events (`images_collected`, `attributes_extracted`).
  */
-export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes'> {
-  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[] } = {}
+export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list'> {
+  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction } = {}
+  if (options.list !== undefined) {
+    const { spec, detected } = resolveListSpec(raw, options.list)
+    const records = spec === null ? [] : extractListRecords(raw, url, spec)
+    const list = listExtraction(spec, records, 1, 'cut' in records && records.cut === true, detected)
+    trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated, ...(detected === undefined ? {} : { detected: list.itemSelector }) } })
+    out.list = list
+  }
   if (options.includeImages === true) {
     const collected = collectImages(raw, url)
     trace.push({ at, lane, event: 'images_collected', detail: { count: collected.images.length, srcsetCandidates: collected.srcsetCandidates, lazy: collected.lazy, dataUrisDropped: collected.dataUrisDropped } })
@@ -109,6 +116,30 @@ export function tablesFormat(source: { html: string; options: MarkdownOptions },
 export function tableCsv(rows: readonly (readonly string[])[]): string {
   const field = (value: string): string => /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
   return rows.map((row) => row.map(field).join(',')).join('\r\n') + (rows.length > 0 ? '\r\n' : '')
+}
+
+/** A result whose list a limit cut, or that found no list on the page, with the warning that says so (`list_truncated`, `list_not_detected`). */
+export function withListCaveat<T extends FetchResult>(result: T): T {
+  const list = result.list
+  if (list === undefined) return result
+  const has = (code: string) => result.warnings?.some((warning) => warning.code === code) === true
+  const caveats: FetchWarning[] = []
+  if (list.truncated && !has('list_truncated')) caveats.push({ code: 'list_truncated', message: `The list stopped at ${list.records.length} records: the page had more than the list format carries (${MAX_LIST_RECORDS} records, ${MAX_LIST_VALUE_CHARS} characters of values).` })
+  if (list.itemSelector === null && !has('list_not_detected')) caveats.push({ code: 'list_not_detected', message: 'No list was found on the page: no elements repeat beside each other with text in them. Name the items with itemSelector to read them.' })
+  return caveats.length === 0 ? result : { ...result, warnings: [...(result.warnings ?? []), ...caveats] }
+}
+
+/**
+ * Whether the page holds records of the `list` format asked for: a page of
+ * records is not empty though its extractor finds no article in it (a list
+ * of products, of quotes, of teams), so it is not failed as
+ * `empty_unverified`, and its Markdown is the whole page.
+ */
+export function listRecordsFound(raw: string, url: string, options: FetchOptions): boolean {
+  // A record with a value read: elements that matched but hold nothing (a loading skeleton) are not content.
+  if (options.list === undefined) return false
+  const { spec } = resolveListSpec(raw, options.list)
+  return spec !== null && extractListRecords(raw, url, spec).some((record) => record.missing.length < spec.fields.length)
 }
 
 /**

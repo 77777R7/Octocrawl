@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildChannels,
@@ -19,6 +20,7 @@ import {
   OriginScheduler,
   prepareHttpIdentity,
   RobotsOriginCache,
+  pageFromUserBrowser,
   type Channel,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -46,6 +48,11 @@ import {
   type BatchErrorsQuery,
   type BatchErrorsResponse,
   type BatchStatusResponse,
+  type BatchHandoffRequest,
+  type BatchHandoffResponse,
+  HANDOFF_REASONS,
+  CONTENTFUL_STATUS,
+  stepStatusFromResult,
   type ParsedBatchStartRequest,
   BATCH_ERRORS_MAX_LIMIT,
   RequestError,
@@ -96,14 +103,15 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
+import { HandoffNotThrough, openUserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, SessionBroker } from '@w2l/bench'
+import { FileSessionBrokerStore, FileSessionStore, SessionBroker, type SessionStore } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { attributesFormat, customJsonFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
+import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -122,6 +130,20 @@ export interface CrawlStatusPage {
   counts: Partial<Record<StepStatus, number>>
   /** Pages the crawl will still record, when this process runs it; null when it does not. */
   ahead: number | null
+}
+
+/** What a handoff tells its caller while it waits, and what ends it. */
+export interface HandoffHooks {
+  /** A page shows a check the person has to pass. */
+  onWaiting?: (url: string, check: string) => void
+  /** A page shows no check: it is read once the person clicks on it. */
+  onConfirm?: (url: string) => void
+  signal?: AbortSignal
+}
+
+/** A handoff this server does not offer (a hosted server, or one not serving its person's machine), or Chrome could not be reached: the message says why. */
+export class HandoffUnavailableError extends Error {
+  override readonly name = 'HandoffUnavailableError'
 }
 
 /** The crawl's state does not allow the request (HTTP 409 `conflict`). */
@@ -205,6 +227,17 @@ export interface ApiEngine {
    * CrawlStateError when it is completed, cancelled, running or a batch.
    */
   resumeCrawl(taskId: string): Promise<CrawlAccepted | null>
+  /**
+   * Hand a finished batch's items that a check stopped (a captcha, a
+   * challenge, a login wall) to the person, in their own Chrome: each is
+   * opened there in turn, read once they are through, and its result
+   * replaces the stopped one. Null when there is no such batch; a
+   * CrawlStateError while it runs; a HandoffUnavailableError on a server
+   * that does not offer it, or when Chrome cannot be reached.
+   */
+  handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: HandoffHooks): Promise<BatchHandoffResponse | null>
+  /** End every handoff now, closing the tabs they have open, and wait until they have; close() does this first. No handoff starts after. */
+  endHandoffs(): Promise<void>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -262,6 +295,22 @@ export interface ApiEngineOptions {
    */
   hosted?: boolean
   /**
+   * The file of the user's saved logins (`w2l login import`), read by mode
+   * `authed` to fetch a page with the session saved for its domain. The
+   * engine only reads it; a run never writes a session there. Absent or
+   * null: no saved logins, and mode `authed` has no session to use. A
+   * hosted engine never reads one, whatever is passed: a token holder must
+   * not browse with the operator's accounts.
+   */
+  sessionsFile?: string | null
+  /**
+   * The person's own Chrome, where a batch item a check stopped can be
+   * handed to them (`handOffBatch`): present on an engine that runs on their
+   * machine and answers them alone. Absent: no handoff is offered. A hosted
+   * engine never offers one, whatever is passed.
+   */
+  userChrome?: UserChromeOptions | null
+  /**
    * The receivers a job `webhook` may name beyond https: with
    * `allowHttpLoopback` (the default off a hosted engine) a plain-http
    * receiver on loopback is taken, for a local developer's receiver. A hosted
@@ -289,6 +338,13 @@ export interface ApiEngineOptions {
   mapMaxLimit?: number
   /** The largest map `timeout` this engine takes. Default MAX_MAP_TIMEOUT_MS (300 000) locally, HOSTED_MAP_MAX_TIMEOUT_MS (60 000) on a hosted engine. */
   mapMaxTimeoutMs?: number
+  /**
+   * Whether the engine, as it opens, resumes the batches and crawls of its
+   * task root that no process finished, and re-offers finished jobs'
+   * webhooks. Default true: the API server. A one-off command (`w2l scrape`)
+   * passes false, so it neither runs nor waits for earlier jobs.
+   */
+  resumeOnStart?: boolean
 }
 
 
@@ -327,6 +383,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const shutdownController = new AbortController()
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
+  const userChrome: UserChromeOptions | null = options.hosted === true ? null : options.userChrome ?? null
+  /** The batches being handed to the person now: one handoff of a batch at a time. */
+  const handoffs = new Set<string>()
+  /** Ends every handoff when the engine closes, gracefully or not: a handoff waits on a person, not on work that will finish. */
+  const handoffClosing = new AbortController()
+  const handoffRuns = new Set<Promise<unknown>>()
+  const savedLogins: SessionStore | null = options.hosted === true || (options.sessionsFile ?? null) === null ? null : readOnlySessions(new FileSessionStore(options.sessionsFile!))
+  /** The saved logins a run of `mode` may use: mode `authed` alone. */
+  const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
   const headed = options.headed === true
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
@@ -355,6 +420,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const cachePlanFor = (url: string, mode: 'standard' | 'research' | 'authed', page: PageOptions, formats: readonly ScrapeFormat[] | undefined, channels: readonly Channel[], robotsOverride?: RobotsOverride): CachePlan | null => {
     if (mode === 'authed') return null
+    // A page after actions is that run's page alone (the parser refuses the cache options with them).
+    if (page.actions !== undefined) return null
     const lookup = cacheLookupRequested(page)
     const customHeaders = page.headers !== undefined && Object.keys(page.headers).length > 0
     const store = customHeaders ? page.storeInCache === true : page.storeInCache !== false
@@ -436,6 +503,24 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       throw new RequestError(`attributes selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
     }
   }
+  /** The selectors of a list format, checked like includeTags: refused by name before anything is fetched or stored. */
+  const checkListSelectors = (formats: readonly ScrapeFormat[] | undefined): void => {
+    const format = listFormat(formats ?? [])
+    if (format === undefined) return
+    const at = (formats ?? []).indexOf(format)
+    const named = [...(format.itemSelector === undefined ? [] : [{ path: 'itemSelector', selector: format.itemSelector }]), ...(format.fields ?? []).flatMap((field, i) => field.selector === undefined ? [] : [{ path: `fields[${i}].selector`, selector: field.selector }])]
+    let parts = 0
+    for (const { path, selector } of named) {
+      const refusal = invalidSelector(selector)
+      if (refusal === null) {
+        parts += selectorParts(selector)
+        continue
+      }
+      if (refusal.kind === 'syntax') throw new RequestError(`list ${path} is not a valid CSS selector: ${selector}`)
+      throw new RequestError(`list ${path} uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].${path}`] })
+    }
+    if (parts > MAX_SELECTOR_PARTS) throw new RequestError(`list selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts}`)
+  }
   /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
   const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
     if (options.allowRobotsOverride === false && value !== undefined) {
@@ -446,6 +531,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
+    // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
+    if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run W2L locally to use them')
   }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
@@ -549,6 +636,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (dropped.length > 0) filtered.push({ reason: 'screenshot', dropped })
       selected = kept
     }
+    // Steps run in a browser: the local browser rungs alone take them.
+    if (page.actions !== undefined && page.actions.length > 0) {
+      if (page.fastMode === true) throw new RequestError('actions require the browser lane, which fastMode declines')
+      const kept = selected.filter(channel => BROWSER_RUNGS.has(channel.id))
+      if (kept.length === 0) throw new RequestError('actions require the browser lane, which this deployment does not offer')
+      const dropped = selected.filter(channel => !BROWSER_RUNGS.has(channel.id)).map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'actions', dropped })
+      selected = kept
+    }
     if (page.fastMode === true) {
       if (policy === 'browser_only') throw new RequestError('fastMode is not available for this URL: it is served by the browser lane only')
       const kept = selected.filter(channel => channel.id === 'http')
@@ -605,6 +701,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
+      const waitingForPerson = userChrome === null || handoffUnread(task) !== null ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -613,6 +710,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // The cap in force: the batch's own, never above this service's worker count.
         maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
+        ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(webhook === undefined ? {} : { webhook }),
       }
     } finally { await store.close() }
@@ -679,9 +777,82 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && handoffUnread(task) === null)),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
+      }
+    } finally {
+      await store.close()
+    }
+  }
+
+  /** handOffBatch's work: see ApiEngine.handOffBatch. */
+  async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
+    if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+    const store = SqliteTaskStore.open(join(taskRoot, taskId))
+    try {
+      const task = await store.getTask(taskId)
+      if (task === null || task.batch === undefined) return null
+      if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
+      const unread = handoffUnread(task)
+      if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
+      handoffs.add(taskId)
+      try {
+        const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
+        const items: BatchHandoffResponse['items'] = []
+        if (waiting.length > 0) {
+          const selection = task.batch
+          const formats = selection.formats ?? ['markdown']
+          const fetchOpts = fetchOptions(selection, selection.formats)
+          // The caller going away, or this engine shutting down, ends the handoff.
+          const signal = AbortSignal.any([...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+          let chrome
+          try { chrome = await openUserChrome(userChrome, signal) }
+          catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
+          try {
+            for (const step of waiting) {
+              try {
+                // A caller that went away hands nothing more over: each item left keeps its stopped result.
+                if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
+                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
+                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
+                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
+                if (!CONTENTFUL_STATUS.has(result.status)) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
+                  continue
+                }
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
+                const stored: FetchResult = {
+                  ...result,
+                  markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
+                  links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
+                  ...(json === undefined ? {} : { json }),
+                }
+                // An engine shutting down writes nothing more.
+                if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'W2L shut down before the page was stored' })
+                  continue
+                }
+                // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
+                const { audit: _stoppedAudit, ...kept } = step
+                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                items.push({ id: step.id, url: step.url, through: true, status: stored.status })
+              } catch (error) {
+                if (!(error instanceof HandoffNotThrough)) throw error
+                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
+              }
+            }
+          } finally {
+            chrome.close()
+          }
+        }
+        const through = items.filter((item) => item.through).length
+        return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
+      } finally {
+        handoffs.delete(taskId)
       }
     } finally {
       await store.close()
@@ -698,8 +869,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
+    // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
+    // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -725,12 +898,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
-        // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null.
+        // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null; what actions produced is stored once, on the result.
         const audit = outcome.audit === undefined ? undefined : {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
@@ -819,7 +992,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   // A crawl paused by shutdown or left running by a crash resumes the same
   // way, with the options stored at its start; one stored before they were
   // kept stays as it is rather than run with guessed limits.
-  for (const name of existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
+  for (const name of options.resumeOnStart !== false && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
@@ -847,6 +1020,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkFileCap(req)
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
     const overallStart = performance.now()
@@ -865,7 +1039,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
     }
-    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride) : null
     const operation = (async () => {
@@ -1015,6 +1189,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
+      checkListSelectors(req.formats)
       checkHostedOptions(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
@@ -1103,6 +1278,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkFileCap(req)
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
+      checkListSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
@@ -1283,6 +1459,18 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
+    async endHandoffs() {
+      handoffClosing.abort(new DOMException('service shutdown', 'ShutdownError'))
+      await Promise.all([...handoffRuns].map((run) => run.catch(() => {})))
+    },
+
+    handOffBatch(taskId, req, hooks = {}) {
+      const run = handOff(taskId, req, hooks)
+      handoffRuns.add(run)
+      void run.catch(() => {}).finally(() => handoffRuns.delete(run))
+      return run
+    },
+
     async runFirecrawlMonitor(triggerKey, context) {
       initializeFirecrawlMonitor(monitorStore)
       return this.runMonitor(FIRECRAWL_MONITOR_ID, triggerKey, context)
@@ -1376,6 +1564,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (options.cancelActive) {
         shutdownController.abort(new DOMException('service shutdown', 'ShutdownError'))
       }
+      // A handoff ends now and closes the tab it had open in the person's Chrome before the engine is gone.
+      await this.endHandoffs()
       // A relaunch an append scheduled while a run was finishing is a new entry: wait until nothing is in flight.
       while (inflight.size > 0) await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))
@@ -1477,6 +1667,7 @@ function deliveryQuery<T extends DeliveryQuery>(query: T): Omit<T, 'jobId'> {
 function fetchOptions(options: PageOptions | undefined, formats: readonly ScrapeFormat[] = []): FetchOptions {
   const attributes = attributesFormat(formats)
   const screenshot = screenshotFormat(formats)
+  const list = listFormat(formats)
   return {
     ...(options?.onlyMainContent === undefined ? {} : { onlyMainContent: options.onlyMainContent }),
     ...(options?.waitFor === undefined ? {} : { waitFor: options.waitFor }),
@@ -1496,6 +1687,8 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(formats.includes('tables') ? { includeTables: true } : {}),
     ...(attributes === undefined ? {} : { attributes: attributes.selectors }),
     ...(screenshot === undefined ? {} : { screenshot }),
+    ...(options?.actions === undefined ? {} : { actions: options.actions }),
+    ...(list === undefined ? {} : { list }),
   }
 }
 
@@ -1693,6 +1886,45 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
   return [...new Set([host, ...(twin === null ? [] : [twin]), ...allowlistedDomains, ...(scope.allowSubdomains ? [`*.${apex}`] : [])])]
 }
 
+/**
+ * What a batch asked for that a page read in the person's Chrome cannot give,
+ * or null: steps on the page (`actions`) and a screenshot are W2L's browser's
+ * to take, so such a batch's stopped items are not handed over.
+ */
+function handoffUnread(task: Task): string | null {
+  const options = task.batch === undefined ? undefined : fetchOptions(task.batch, task.batch.formats)
+  if (options?.actions !== undefined && options.actions.length > 0) return 'page actions'
+  if (options?.screenshot !== undefined) return 'a screenshot'
+  return null
+}
+
+/** Whether a step was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */
+function handoffNeeded(step: StepRecord): boolean {
+  return step.status === 'blocked' && step.result !== null && step.result.blockReason !== null && HANDOFF_REASONS[step.result.blockReason] !== undefined
+}
+
+/** How a step a check stopped is handed to the person. */
+function handoffRequestOf(step: StepRecord): { reason: string; liveViewUrl: null; rationale: string } {
+  const blockReason = step.result!.blockReason!
+  return {
+    reason: HANDOFF_REASONS[blockReason]!,
+    liveViewUrl: null,
+    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or w2l batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
+  }
+}
+
+/** Every step of a task, or its error steps, in the order recorded. */
+async function stepsOf(store: SqliteTaskStore, taskId: string, kind: StepPageQuery['kind']): Promise<StepRecord[]> {
+  const steps: StepRecord[] = []
+  let cursor: string | undefined
+  for (;;) {
+    const page = await store.listStepsPage(taskId, { cursor, limit: BATCH_ERRORS_MAX_LIMIT, kind })
+    steps.push(...page.steps)
+    if (!page.hasMore || page.nextCursor === null) return steps
+    cursor = page.nextCursor
+  }
+}
+
 /** Why a crawl cannot be resumed now, or null when it can. */
 function resumeRefusal(task: Task, running: boolean): string | null {
   if (task.batch !== undefined) return `task ${task.id} is a batch; a batch resumes when the service starts`
@@ -1736,11 +1968,12 @@ function compactPage(step: StepRecord, task: Task): CrawlPage {
   return { ...page, trace: [] }
 }
 
-function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): CrawlPage {
+function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handoffOffered = false): CrawlPage {
   const result = step.result
+  const handoff = handoffOffered && handoffNeeded(step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary }) })
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
   return {
     id: step.id,
     url: step.url,
@@ -1752,10 +1985,13 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task): Crawl
     ...askedHtmlFormats(task, result),
     ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings, warning: warningOf(result.warnings) }),
     ...(agentHints.length === 0 ? {} : { agentHints }),
+    ...(handoff === null ? {} : { handoff }),
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
     ...(result?.file === undefined ? {} : { file: result.file }),
+    ...(result?.actions === undefined ? {} : { actions: result.actions }),
+    ...(result?.list === undefined ? {} : { list: result.list }),
     failureReason: result?.failureReason ?? null,
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,
@@ -1822,4 +2058,18 @@ async function markCrawlFailed(store: SqliteTaskStore, taskId: string): Promise<
       await store.putAttempt({ ...latest, status: 'failed', endedAt: now })
     }
   } catch {}
+}
+
+/**
+ * Where a local W2L keeps the user's saved logins: `W2L_SESSIONS_FILE`, else
+ * `~/.w2l/sessions.json`. One file for the API server, the command line and
+ * the local MCP service, so a login imported once is seen by all three.
+ */
+export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): string {
+  return env.W2L_SESSIONS_FILE ?? join(homedir(), '.w2l', 'sessions.json')
+}
+
+/** A session store the engine reads but never writes: saved logins come from `w2l login import` alone. */
+function readOnlySessions(store: SessionStore): SessionStore {
+  return { load: (domain) => store.load(domain), save: async () => {} }
 }

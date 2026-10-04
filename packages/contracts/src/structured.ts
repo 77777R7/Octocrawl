@@ -75,6 +75,38 @@ export interface AttributesFormatRequest {
   selectors: readonly AttributeSelector[]
 }
 
+/** One column of a `list` format: what to read from each record. */
+export interface ListField {
+  /** The column's name: 1 to 64 characters, unique within the format. */
+  name: string
+  /** A selector matched within the record (the first match, in document order); omitted, the record element itself. */
+  selector?: string
+  /** An HTML attribute to read instead of the text (`href`, `src`, `data-sku`, ...); a link or source is made absolute. */
+  attribute?: string
+}
+
+/**
+ * W2L's `{ type: 'list', itemSelector, fields }`: every element `itemSelector`
+ * matches is a record (one nested in another matched one is not a record of
+ * its own), and each field is read from it. At most one such entry per request.
+ * Without `itemSelector` W2L finds the page's list itself, and without
+ * `fields` the fields its items hold (`fields` needs an `itemSelector`):
+ * what it chose is the result's `itemSelector` and `detected.fields`.
+ */
+export interface ListFormatRequest {
+  type: 'list'
+  itemSelector?: string
+  /** 1 to 50 fields. */
+  fields?: readonly ListField[]
+}
+
+/** A list format with its items and fields named: as asked, or as W2L found them on the page. */
+export interface ListSpec {
+  type: 'list'
+  itemSelector: string
+  fields: readonly ListField[]
+}
+
 /** The window a screenshot is taken at, in CSS pixels: integers within the declared screen (`readFormats` checks 320..1920 by 240..1080, the desktop identity's 1920x1080 screen). */
 export interface ScreenshotViewport {
   width: number
@@ -111,7 +143,7 @@ export interface ScreenshotFormatRequest extends ScreenshotOptions {
  * elements its selectors match, and `screenshot` (or a screenshot entry)
  * captures the rendered page as an image on the browser lane.
  */
-export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'screenshot' | JsonFormatRequest | AttributesFormatRequest | ScreenshotFormatRequest
+export type ScrapeFormat = 'markdown' | 'links' | 'json' | 'html' | 'rawHtml' | 'images' | 'tables' | 'screenshot' | JsonFormatRequest | AttributesFormatRequest | ScreenshotFormatRequest | ListFormatRequest
 
 export interface StructuredFieldEvidence {
   path: string

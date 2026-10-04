@@ -123,9 +123,12 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('names unsupported formats instead of capping the count, and still rejects duplicates', () => {
     const url = 'https://example.com/'
     expect(() => parseScrapeRequest({ url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
-      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes)')
+      .toThrow('unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes, list)')
     expect(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', { type: 'summary' }] })).toThrow('unsupported format: summary')
     expect(() => parseCrawlStartRequest({ url, formats: ['links', 'links'] })).toThrow('formats must not contain duplicates')
+    // A crawl would follow a sign-out link with the user's live Chrome session; a batch fetches only the pages it names.
+    expect(() => parseCrawlStartRequest({ url, mode: 'authed' })).toThrow(/not available for crawl.*batch in mode authed/)
+    expect(parseBatchStartRequest({ urls: [url], mode: 'authed' }).mode).toBe('authed')
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
   })
 
@@ -290,7 +293,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('rejects unknown request keys by name for scrape, batch and crawl', () => {
     const url = 'https://example.com/'
-    expect(() => parseScrapeRequest({ url, actions: [], location: {} })).toThrow('unsupported parameters: actions, location')
+    expect(() => parseScrapeRequest({ url, location: {}, zeroDataRetention: true })).toThrow('unsupported parameters: location, zeroDataRetention')
     expect(() => parseBatchStartRequest({ urls: [url], proxy: 'auto' })).toThrow('unsupported parameter: proxy')
     expect(() => parseCrawlStartRequest({ url, limit: 5 })).toThrow('unsupported parameter: limit')
   })
@@ -436,7 +439,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
     const url = 'https://example.com/'
-    expect(thrown(() => parseScrapeRequest({ url, actions: [], proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['actions', 'proxy'] } })
+    expect(thrown(() => parseScrapeRequest({ url, location: {}, proxy: 'stealth' }))).toMatchObject({ status: 400, code: 'unsupported_parameter', details: { parameters: ['location', 'proxy'] } })
     expect(thrown(() => parseCrawlStartRequest({ url, limit: 5 }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['limit'] } })
     expect(thrown(() => parseBatchStartRequest({ urls: [url], formats: ['markdown', 'summary', { type: 'changeTracking' }] }))).toMatchObject({ code: 'unsupported_format', details: { formats: ['summary', 'changeTracking'] } })
     const invalid = thrown(() => parseScrapeRequest({ url: 'ftp://example.com/' }))
@@ -513,7 +516,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'stealth' }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
     expect(thrown(() => parseCrawlStartRequest({ url, proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
     expect((thrown(() => parseScrapeRequest({ url, proxy: 'basic' })) as RequestError).agentHints).toBeUndefined()
-    expect((thrown(() => parseScrapeRequest({ url, actions: [] })) as RequestError).agentHints).toBeUndefined()
+    expect((thrown(() => parseScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
+    // A crawl or a map takes no actions; the refusal names where they run.
+    expect(thrown(() => parseCrawlStartRequest({ url, actions: [{ type: 'scrape' }] }))).toMatchObject({ details: { parameters: ['actions'] }, agentHints: [REFUSAL_HINTS.actions] })
     expect(refusalHint('scrapeOptions.proxy', 'stealth')).toBe(REFUSAL_HINTS.stealth)
     expect(refusalHint('scrapeOptions.location', {})).toBeNull()
     // The 429 answer is not a request error: its code stays outside the set, and its body names the wait.
@@ -623,3 +628,109 @@ describe('parseMapRequest', () => {
     expect(() => parseMapRequest({})).toThrow('url is required')
   })
 })
+
+describe('actions', () => {
+  const url = 'https://example.com/'
+  it('takes Firecrawl\'s steps on scrape and batch, as given', () => {
+    const actions = [
+      { type: 'wait', milliseconds: 1000 },
+      { type: 'click', selector: ' li.next > a ' },
+      { type: 'wait', selector: '.quote' },
+      { type: 'write', text: 'firecrawl' },
+      { type: 'press', key: 'Enter' },
+      { type: 'scroll', direction: 'up', selector: '#feed' },
+      { type: 'scroll' },
+      { type: 'screenshot', fullPage: true, quality: 80 },
+      { type: 'scrape' },
+      { type: 'executeJavascript', script: 'return document.title' },
+      { type: 'pdf', format: 'A4', landscape: true, scale: 0.8 },
+      { type: 'click', selector: '.more', all: true },
+    ]
+    expect(parseScrapeRequest({ url, actions }).actions).toEqual([
+      { type: 'wait', milliseconds: 1000 },
+      { type: 'click', selector: 'li.next > a' },
+      { type: 'wait', selector: '.quote' },
+      { type: 'write', text: 'firecrawl' },
+      { type: 'press', key: 'Enter' },
+      { type: 'scroll', direction: 'up', selector: '#feed' },
+      { type: 'scroll', direction: 'down' },
+      { type: 'screenshot', fullPage: true, quality: 80 },
+      { type: 'scrape' },
+      { type: 'executeJavascript', script: 'return document.title' },
+      { type: 'pdf', format: 'A4', landscape: true, scale: 0.8 },
+      { type: 'click', selector: '.more', all: true },
+    ])
+    expect(parseBatchStartRequest({ urls: [url], actions: [{ type: 'scrape' }] }).actions).toEqual([{ type: 'scrape' }])
+    expect(parseScrapeRequest({ url }).actions).toBeUndefined()
+  })
+
+  it('refuses a malformed step by its index before anything is fetched', () => {
+    expect(() => parseScrapeRequest({ url, actions: [] })).toThrow('actions must be an array of 1 to 50 steps')
+    expect(() => parseScrapeRequest({ url, actions: Array.from({ length: 51 }, () => ({ type: 'scrape' })) })).toThrow('1 to 50 steps')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrape' }, { type: 'hover', selector: 'a' }] })).toThrow('actions[1].type must be one of wait, click, write, press, scroll, screenshot, scrape, executeJavascript, pdf, scrollToEnd, loadMore, paginate')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait' }] })).toThrow('actions[0]: wait takes milliseconds or a selector, one of them')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 500, selector: 'a' }] })).toThrow('one of them')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'wait', milliseconds: 60_001 }] })).toThrow('actions[0].milliseconds must be an integer number of milliseconds from 1 to 60000')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'click' }] })).toThrow('actions[0].selector must be a CSS selector of 1 to 200 characters')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'click', selector: 'a', text: 'x' }] })).toThrow('actions[0]: click takes no text')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scroll', direction: 'left' }] })).toThrow('actions[0].direction must be up or down')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'executeJavascript', script: ' ' }] })).toThrow('actions[0].script')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'pdf', format: 'B5' }] })).toThrow('actions[0].format must be one of')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'pdf', scale: 3 }] })).toThrow('actions[0].scale must be a number from 0.1 to 2')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'screenshot', quality: 0 }] })).toThrow('screenshot quality must be an integer between 1 and 100')
+    expect(() => parseScrapeRequest({ url, mobile: true, actions: [{ type: 'screenshot', viewport: { width: 1280, height: 800 } }] })).toThrow('not within the declared mobile screen')
+  })
+
+  it('takes W2L\'s list steps, with their limits checked', () => {
+    expect(parseScrapeRequest({ url, actions: [
+      { type: 'scrollToEnd', itemSelector: '.item', maxScrolls: 30, waitMs: 500 },
+      { type: 'loadMore', selector: 'button.more', maxClicks: 5 },
+      { type: 'paginate', nextSelector: 'li.next a', itemSelector: '.quote', maxPages: 20 },
+      { type: 'scrollToEnd', selector: '#feed' },
+    ] }).actions).toEqual([
+      { type: 'scrollToEnd', itemSelector: '.item', maxScrolls: 30, waitMs: 500 },
+      { type: 'loadMore', selector: 'button.more', maxClicks: 5 },
+      { type: 'paginate', nextSelector: 'li.next a', itemSelector: '.quote', maxPages: 20 },
+      { type: 'scrollToEnd', selector: '#feed' },
+    ])
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'loadMore' }] })).toThrow('actions[0].selector must be a CSS selector')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'paginate', selector: 'a' }] })).toThrow('actions[0]: paginate takes no selector')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'paginate', nextSelector: 'a', maxPages: 101 }] })).toThrow('actions[0].maxPages must be an integer from 1 to 100')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'scrollToEnd', maxScrolls: 0 }] })).toThrow('actions[0].maxScrolls must be an integer from 1 to 200')
+    expect(() => parseScrapeRequest({ url, actions: [{ type: 'loadMore', selector: 'b', waitMs: 50 }] })).toThrow('actions[0].waitMs must be an integer number of milliseconds from 100 to 10000')
+  })
+
+  it('a page after actions is never stored or answered from the cache', () => {
+    expect(() => parseScrapeRequest({ url, maxAge: 60_000, actions: [{ type: 'scrape' }] })).toThrow('the cache is not available with actions')
+    expect(() => parseScrapeRequest({ url, storeInCache: true, actions: [{ type: 'scrape' }] })).toThrow('the cache is not available with actions')
+    expect(parseScrapeRequest({ url, maxAge: 0, storeInCache: false, actions: [{ type: 'scrape' }] }).actions).toHaveLength(1)
+  })
+})
+
+describe('the list format', () => {
+  const url = 'https://example.com/'
+  it('takes itemSelector and its fields', () => {
+    const list = { type: 'list', itemSelector: ' article.card ', fields: [{ name: 'name', selector: 'h3 a' }, { name: 'url', selector: 'h3 a', attribute: 'href' }, { name: 'whole' }] }
+    expect(parseScrapeRequest({ url, formats: ['markdown', list] }).formats).toEqual(['markdown', { type: 'list', itemSelector: 'article.card', fields: [{ name: 'name', selector: 'h3 a' }, { name: 'url', selector: 'h3 a', attribute: 'href' }, { name: 'whole' }] }])
+    expect(parseBatchStartRequest({ urls: [url], formats: [list] }).formats).toHaveLength(1)
+  })
+
+  it('without itemSelector, or without fields, leaves them to W2L', () => {
+    expect(parseScrapeRequest({ url, formats: [{ type: 'list' }] }).formats).toEqual([{ type: 'list' }])
+    expect(parseScrapeRequest({ url, formats: [{ type: 'list', itemSelector: ' li.card ' }] }).formats).toEqual([{ type: 'list', itemSelector: 'li.card' }])
+  })
+
+  it('refuses a malformed list by name', () => {
+    const at = (list: unknown) => () => parseScrapeRequest({ url, formats: [list] })
+    expect(at({ type: 'list', fields: [{ name: 'a' }] })).toThrow('formats[0].fields needs an itemSelector')
+    expect(at({ type: 'list', itemSelector: ' ' })).toThrow('formats[0].itemSelector must be a CSS selector of 1 to 200 characters')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [] })).toThrow('formats[0].fields must be an array of 1 to 50')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }, { name: 'a' }] })).toThrow('formats[0].fields[1].name repeats a')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', attribute: 'not an attr' }] })).toThrow('formats[0].fields[0].attribute must be an HTML attribute name')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a', regex: '.' }] })).toThrow('unsupported list field option: regex')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'page' }] })).toThrow('formats[0].fields[0].name page is the name of a column the list adds')
+    expect(at({ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }], limit: 3 })).toThrow('unsupported list format option: limit')
+    expect(() => parseScrapeRequest({ url, formats: [{ type: 'list', itemSelector: 'li', fields: [{ name: 'a' }] }, { type: 'list', itemSelector: 'p', fields: [{ name: 'b' }] }] })).toThrow('formats must contain at most one list entry')
+  })
+})
+

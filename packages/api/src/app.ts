@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
-import { CrawlStateError, TaskNotFoundError, type ApiEngine } from './engine.js'
+import { CrawlStateError, HandoffUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
 import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
@@ -20,6 +20,7 @@ import {
   parseCrawlStartRequest,
   parseBatchErrorsQuery,
   parseBatchStartRequest,
+  parseBatchHandoffRequest,
   parseCrawlPageQuery,
   firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
@@ -68,6 +69,26 @@ export interface AppOptions {
    * 404 on all four, and clients poll the status and listing routes instead.
    */
   jobStreams?: boolean
+  /**
+   * Answer only requests addressed to this machine by a loopback name
+   * (`Host` 127.0.0.1, localhost or [::1]) and, when a browser sends an
+   * `Origin`, from a loopback page. A local server that reads the user's
+   * saved logins sets it: a web page the user opens must not reach it
+   * through a rebound DNS name and read pages signed in as them.
+   */
+  loopbackOnly?: boolean
+}
+
+const LOOPBACK_NAMES: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/** Whether a `Host` value or an `Origin` URL names this machine by a loopback name. */
+export function isLoopbackAuthority(value: string, origin: boolean): boolean {
+  try {
+    const url = new URL(origin ? value : `http://${value}`)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && LOOPBACK_NAMES.has(url.hostname.toLowerCase())
+  } catch {
+    return false
+  }
 }
 
 /** The WebSocket injectors of the apps that serve stream routes, for injectJobWebSockets. */
@@ -153,6 +174,17 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   const app = new Hono()
   const tokens = [...(options.tokens ?? []), ...(options.token ? [options.token] : [])].filter((token) => token.length > 0)
 
+  if (options.loopbackOnly === true) {
+    app.use('*', async (c, next) => {
+      const host = c.req.header('host')
+      const origin = c.req.header('origin')
+      if (host === undefined || !isLoopbackAuthority(host, false) || (origin !== undefined && !isLoopbackAuthority(origin, true))) {
+        return fail(c, 'unauthorized', 'this local server answers requests addressed to 127.0.0.1, localhost or [::1] from this machine only')
+      }
+      await next()
+    })
+  }
+
   if (tokens.length > 0) {
     const accepts = bearerTokenMatcher(tokens)
     app.use('*', async (c, next) => {
@@ -223,6 +255,25 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     if (query.limit !== undefined && query.limit > 50) throw new RequestError('batch item limit must be at most 50')
     const page = await engine.getBatchItems(c.req.param('id'), query)
     return page ? c.json(page) : fail(c, 'not_found', 'not found')
+  })
+
+  /**
+   * The items a check stopped (a captcha, a challenge, a login wall), handed
+   * to the person in their own Chrome, one at a time, and read there once
+   * they are through: the answer comes when every item is read or given up.
+   * Offered by a local server on loopback alone; another answers 409, as does one that cannot reach Chrome.
+   */
+  app.post('/v1/batches/:id/handoff', async (c) => {
+    const raw = await c.req.text()
+    const req = parseBatchHandoffRequest(raw.trim() === '' ? undefined : JSON.parse(raw))
+    try {
+      const done = await engine.handOffBatch(c.req.param('id'), req, { signal: c.req.raw.signal })
+      return done === null ? fail(c, 'not_found', 'not found') : c.json(done, 200)
+    } catch (error) {
+      if (error instanceof CrawlStateError) return fail(c, 'conflict', error.message)
+      if (error instanceof HandoffUnavailableError) return fail(c, 'conflict', error.message)
+      throw error
+    }
   })
 
   /** The batch's errors across every attempt, with the URLs robots.txt refused; no bodies, so pages of up to 1000. */

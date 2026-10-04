@@ -13,8 +13,9 @@ import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './re
 import { unsafeRegexReason } from './regexSafety.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
-import type { AttributeSelector, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
+import type { AttributeSelector, ListField, ListFormatRequest, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
 import { MAX_FILE_BYTES_CEILING } from './file.js'
+import { LIST_WAIT_MS, MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, MAX_LIST_PAGES, MAX_LIST_ROUNDS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 
 export const CRAWL_MODES = ['research', 'standard', 'authed'] as const
@@ -33,7 +34,7 @@ export const MAX_WAIT_FOR_MS = 60_000
  * `screenshot`: the `html`, `rawHtml`, `images`, `attributes` and `screenshot`
  * formats ask for those.
  */
-export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot'> {
+export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot' | 'list'> {
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -251,7 +252,7 @@ export interface CompactScrapeResponse {
   budgetExceeded: FetchResult['budgetExceeded']
   retryAt?: number
   lane: FetchResult['lane']
-  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'tables' | 'attributes' | 'screenshot')[]
+  formats: readonly ('markdown' | 'html' | 'rawHtml' | 'links' | 'json' | 'images' | 'tables' | 'attributes' | 'screenshot' | 'list')[]
   markdown?: string | null
   /** Present when `html` was asked for, as on the full response; null when the result carries none (a file, a page that was not read as content). */
   html?: string | null
@@ -266,8 +267,12 @@ export interface CompactScrapeResponse {
   pages?: FetchResult['pages']
   /** Present when an `attributes` entry was asked for and the page was read as content, as on the full response. */
   attributes?: FetchResult['attributes']
+  /** Present when a `list` entry was asked for and the page was read: its records. */
+  list?: FetchResult['list']
   /** Present when a `screenshot` entry was asked for, as on the full response: the capture, or null when the browser lane rendered no page or could not capture it. */
   screenshot?: FetchResult['screenshot']
+  /** Present when the request ran `actions`: what the steps produced, and the step that failed if one did. */
+  actions?: FetchResult['actions']
   document?: Pick<DocumentExtraction, 'title' | 'pageType' | 'strategy' | 'confidence' | 'adapter' | 'adapterValidation'> | null
   /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
   metadata: ScrapeResponseMetadata
@@ -455,7 +460,7 @@ export interface MapRequest extends RequestAttribution {
   excludePaths?: readonly string[]
   regexOnFullURL?: boolean
   crawlEntireDomain?: boolean
-  /** Default true, as on a crawl. */
+  /** Default true, as on a crawl; a returned http link gives way to its https variant when that comes too, on an origin whose robots.txt the map read anyway and which allows it. */
   deduplicateSimilarURLs?: boolean
 }
 
@@ -590,6 +595,53 @@ export interface BatchStatusResponse extends CrawlReport {
   maxConcurrency: number
   /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
   invalidURLs?: readonly string[]
+  /** Items stopped at a check a person can get through in their own Chrome (`POST /v1/batches/:id/handoff`); present on a server that offers the handoff. */
+  waitingForPerson?: number
+}
+
+/**
+ * The checks a batch item can be handed to a person for, and the routing
+ * reason each is handed over as: a captcha, a bot check or challenge, a
+ * login wall. A rate limit or a region block is not something a person gets
+ * through in a browser.
+ */
+export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_gate' | 'login_required'>> = {
+  captcha: 'captcha_required',
+  cloudflare_challenge: 'bot_gate',
+  bot_detected_generic: 'bot_gate',
+  login_wall: 'login_required',
+}
+
+/** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
+export interface BatchHandoffRequest {
+  waitMs?: number
+}
+
+export const MAX_HANDOFF_WAIT_MS = 1_800_000
+
+export function parseBatchHandoffRequest(body: unknown): BatchHandoffRequest {
+  if (body === undefined || body === null) return {}
+  if (typeof body !== 'object' || Array.isArray(body)) throw new RequestError('body must be a JSON object')
+  const rec = body as Record<string, unknown>
+  for (const key of Object.keys(rec)) if (key !== 'waitMs') throw new RequestError(`unsupported handoff option: ${key}`)
+  if (rec.waitMs === undefined) return {}
+  if (typeof rec.waitMs !== 'number' || !Number.isInteger(rec.waitMs) || rec.waitMs < 10_000 || rec.waitMs > MAX_HANDOFF_WAIT_MS) throw new RequestError(`waitMs must be an integer from 10000 to ${MAX_HANDOFF_WAIT_MS}`)
+  return { waitMs: rec.waitMs }
+}
+
+/**
+ * What a handoff did: each item it handed over, in order, and whether the
+ * person got it through. An item that was through is read in their browser
+ * and its result replaces the stopped one (`status`, the item's new one); an
+ * item that was not (they did not get through in time, closed its tab, or it
+ * ended off its site) keeps its stopped result, with `reason` saying why.
+ */
+export interface BatchHandoffResponse {
+  id: string
+  handedOff: number
+  through: number
+  notThrough: number
+  items: Array<{ id: string; url: string; through: boolean; status: string; reason?: string }>
 }
 
 /** The step statuses `GET /v1/batches/:id/errors` lists: the same ones `/v1/crawl/:id/errors` does. */
@@ -774,6 +826,7 @@ export const REFUSAL_HINTS = {
   ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
   useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
+  actions: 'actions run on scrape and batch, where each page named gets the same steps; a crawl or a map does not take them',
 } as const
 
 /** The hint for a refused request key, or null when the key has none (an option W2L simply does not know). */
@@ -782,6 +835,7 @@ export function refusalHint(key: string, value: unknown): string | null {
   if (name === 'stealth' || (name === 'proxy' && (value === 'stealth' || value === 'enhanced'))) return REFUSAL_HINTS.stealth
   if (name === 'ignoreRobotsTxt') return REFUSAL_HINTS.ignoreRobotsTxt
   if (name === 'useIndex') return REFUSAL_HINTS.useIndex
+  if (name === 'actions') return REFUSAL_HINTS.actions
   return null
 }
 
@@ -792,19 +846,19 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
-const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
-const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
+export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
+export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
-const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
+export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 /** The scope options a map takes under their crawl names; allowSubdomains is includeSubdomains on a map, and allowExternalLinks is not offered. */
-const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
+export const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
 /** What a map takes. No page option (headers, mobile, skipTlsVerification, formats, ...): a map has nothing to loosen. */
 export const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', 'search', 'sitemap', ...MAP_SCOPE_KEYS, 'includePaths', 'excludePaths', ...ATTRIBUTION_KEYS] as const
 
@@ -1191,7 +1245,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
 
 /** The formats a request names as strings; `attributes` carries its selectors and is named as an object. */
 const STRING_FORMATS: readonly string[] = ['markdown', 'links', 'json', 'html', 'rawHtml', 'images', 'tables', 'screenshot']
-const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes']
+const FORMAT_NAMES: readonly string[] = [...STRING_FORMATS, 'attributes', 'list']
 /** Firecrawl v1's spelling of a full-page screenshot: `{ type: 'screenshot', fullPage: true }`. */
 const SCREENSHOT_FULL_PAGE_ALIAS = 'screenshot@fullPage'
 const JSON_FORMAT_KEYS: readonly string[] = ['type', 'schema', 'prompt', 'modelFallback']
@@ -1215,6 +1269,47 @@ const FORMAT_ENTRY_MESSAGE = 'formats entries must be markdown, links, json, htm
  * API engine as for `includeTags`) and each attribute an HTML attribute name
  * of at most 100 characters.
  */
+const LIST_FORMAT_KEYS: readonly string[] = ['type', 'itemSelector', 'fields']
+const LIST_FIELD_KEYS: readonly string[] = ['name', 'selector', 'attribute']
+const LIST_ATTRIBUTE = /^[A-Za-z_][A-Za-z0-9_:.-]{0,99}$/
+
+/** `{ type: 'list', itemSelector, fields }`: the selectors' syntax is checked by the engine (invalidSelector), like includeTags. */
+function readListFormat(rec: Record<string, unknown>, name: string): ListFormatRequest {
+  for (const key of Object.keys(rec)) if (!LIST_FORMAT_KEYS.includes(key)) throw new RequestError(`unsupported list format option: ${key}`)
+  const selectorOf = (value: unknown, at: string): string => {
+    if (typeof value !== 'string' || value.trim().length === 0 || value.length > 200) throw new RequestError(`${at} must be a CSS selector of 1 to 200 characters`)
+    return value.trim()
+  }
+  // Without itemSelector the list is found on the page, and its fields with it: fields alone would name nothing to read them from.
+  if (rec.itemSelector === undefined) {
+    if (rec.fields !== undefined) throw new RequestError(`${name}.fields needs an itemSelector: without one, W2L finds the list and its fields itself`)
+    return { type: 'list' }
+  }
+  const itemSelector = selectorOf(rec.itemSelector, `${name}.itemSelector`)
+  if (rec.fields === undefined) return { type: 'list', itemSelector }
+  if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > 50) throw new RequestError(`${name}.fields must be an array of 1 to 50 {name, selector?, attribute?} entries`)
+  const names = new Set<string>()
+  const fields = rec.fields.map((value: unknown, i: number): ListField => {
+    const at = `${name}.fields[${i}]`
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${at} must be {name, selector?, attribute?}`)
+    const field = value as Record<string, unknown>
+    for (const key of Object.keys(field)) if (!LIST_FIELD_KEYS.includes(key)) throw new RequestError(`${at}: unsupported list field option: ${key}`)
+    if (typeof field.name !== 'string' || field.name.trim().length === 0 || field.name.length > 64) throw new RequestError(`${at}.name must be a name of 1 to 64 characters`)
+    const fieldName = field.name.trim()
+    if (names.has(fieldName)) throw new RequestError(`${at}.name repeats ${fieldName}: field names must be unique`)
+    // The CSV adds these columns after the fields: a field of the same name would be shadowed by one of them.
+    if (['source_url', 'page', 'index'].includes(fieldName)) throw new RequestError(`${at}.name ${fieldName} is the name of a column the list adds (source_url, page, index): choose another`)
+    names.add(fieldName)
+    if (field.attribute !== undefined && (typeof field.attribute !== 'string' || !LIST_ATTRIBUTE.test(field.attribute))) throw new RequestError(`${at}.attribute must be an HTML attribute name`)
+    return {
+      name: fieldName,
+      ...(field.selector === undefined ? {} : { selector: selectorOf(field.selector, `${at}.selector`) }),
+      ...(field.attribute === undefined ? {} : { attribute: field.attribute as string }),
+    }
+  })
+  return { type: 'list', itemSelector, fields }
+}
+
 function readAttributeSelectors(value: unknown): readonly AttributeSelector[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 50) throw new RequestError(ATTRIBUTES_SELECTORS_MESSAGE)
   return value.map((entry, index) => {
@@ -1264,10 +1359,11 @@ function readScreenshotViewport(value: unknown): ScreenshotViewport | undefined 
  * identity's 412x915. A window larger than the screen would contradict the
  * identity (identityBundleIssues), so it is refused before anything is fetched.
  */
-function checkScreenshotViewport(mobile: boolean | undefined, formats: readonly ScrapeFormat[] | undefined): void {
+function checkScreenshotViewport(mobile: boolean | undefined, formats: readonly ScrapeFormat[] | undefined, actions?: readonly PageAction[]): void {
   if (mobile !== true) return
   const screen = browserFingerprintFor('mobile').screen
-  for (const format of formats ?? []) {
+  // A screenshot step takes a viewport as the screenshot format does.
+  for (const format of [...(formats ?? []), ...(actions ?? [])]) {
     if (typeof format !== 'object' || format.type !== 'screenshot' || format.viewport === undefined) continue
     if (format.viewport.width > screen.width || format.viewport.height > screen.height) {
       throw new RequestError(`screenshot viewport ${format.viewport.width}x${format.viewport.height} is not within the declared mobile screen ${screen.width}x${screen.height}`)
@@ -1314,6 +1410,12 @@ function readFormats(value: unknown): readonly ScrapeFormat[] | undefined {
       if (logical.has('attributes')) throw new RequestError('formats must contain at most one attributes entry')
       logical.add('attributes')
       formats.push({ type: 'attributes', selectors: readAttributeSelectors(rec.selectors) })
+      continue
+    }
+    if (rec.type === 'list') {
+      if (logical.has('list')) throw new RequestError('formats must contain at most one list entry')
+      logical.add('list')
+      formats.push(readListFormat(rec, `formats[${index}]`))
       continue
     }
     if (rec.type === 'screenshot') {
@@ -1566,6 +1668,10 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
   const blockAds = readBoolean(rec.blockAds, 'blockAds')
   const removeBase64Images = readBoolean(rec.removeBase64Images, 'removeBase64Images')
   const parsers = readParsers(rec.parsers)
+  const actions = readActions(rec.actions)
+  const cache = readCacheOptions(rec, mode)
+  // A page after actions is that run's page: it is never stored, and never answered from a page stored without them.
+  if (actions !== undefined && (cacheLookupRequested(cache) || cache.storeInCache === true)) throw new RequestError('the cache is not available with actions: a page after actions is never stored or reused')
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -1580,7 +1686,110 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
     ...(blockAds === undefined ? {} : { blockAds }),
     ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
     ...(parsers === undefined ? {} : { parsers }),
-    ...readCacheOptions(rec, mode),
+    ...(actions === undefined ? {} : { actions }),
+    ...cache,
+  }
+}
+
+const ACTION_KEYS: Readonly<Record<PageAction['type'], readonly string[]>> = {
+  wait: ['milliseconds', 'selector'],
+  click: ['selector', 'all'],
+  write: ['text'],
+  press: ['key'],
+  scroll: ['direction', 'selector'],
+  screenshot: ['fullPage', 'quality', 'viewport'],
+  scrape: [],
+  executeJavascript: ['script'],
+  pdf: ['format', 'landscape', 'scale'],
+  scrollToEnd: ['selector', 'itemSelector', 'maxScrolls', 'waitMs'],
+  loadMore: ['selector', 'itemSelector', 'maxClicks', 'waitMs'],
+  paginate: ['nextSelector', 'itemSelector', 'maxPages', 'waitMs'],
+}
+
+/** `actions`: 1 to MAX_ACTIONS steps, each Firecrawl's shape, checked before anything is fetched. */
+function readActions(value: unknown): readonly PageAction[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ACTIONS) throw new RequestError(`actions must be an array of 1 to ${MAX_ACTIONS} steps`)
+  return value.map((item, index) => readAction(item, `actions[${index}]`))
+}
+
+function readAction(value: unknown, name: string): PageAction {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${name} must be an object with a type`)
+  const rec = value as Record<string, unknown>
+  const type = rec.type
+  if (typeof type !== 'string' || !Object.hasOwn(ACTION_KEYS, type)) throw new RequestError(`${name}.type must be one of ${Object.keys(ACTION_KEYS).join(', ')}`)
+  const allowed = ACTION_KEYS[type as PageAction['type']]
+  for (const key of Object.keys(rec)) if (key !== 'type' && !allowed.includes(key)) throw new RequestError(`${name}: ${type} takes no ${key}`)
+  const selector = (key: string, required: boolean): string | undefined => {
+    const raw = rec[key]
+    if (raw === undefined && !required) return undefined
+    if (typeof raw !== 'string' || raw.trim().length === 0 || raw.length > 200) throw new RequestError(`${name}.${key} must be a CSS selector of 1 to 200 characters`)
+    return raw.trim()
+  }
+  switch (type) {
+    case 'wait': {
+      if ((rec.milliseconds === undefined) === (rec.selector === undefined)) throw new RequestError(`${name}: wait takes milliseconds or a selector, one of them`)
+      if (rec.selector !== undefined) return { type, selector: selector('selector', true)! }
+      return { type, milliseconds: readMilliseconds(rec.milliseconds, `${name}.milliseconds`, 1, MAX_ACTION_WAIT_MS)! }
+    }
+    case 'click': {
+      const all = readBoolean(rec.all, `${name}.all`)
+      return { type, selector: selector('selector', true)!, ...(all === undefined ? {} : { all }) }
+    }
+    case 'write':
+      if (typeof rec.text !== 'string' || rec.text.length === 0 || rec.text.length > MAX_ACTION_TEXT_CHARS) throw new RequestError(`${name}.text must be a string of 1 to ${MAX_ACTION_TEXT_CHARS} characters`)
+      return { type, text: rec.text }
+    case 'press':
+      if (typeof rec.key !== 'string' || rec.key.trim().length === 0 || rec.key.length > 64) throw new RequestError(`${name}.key must be a key name of 1 to 64 characters (Enter, Tab, ArrowDown, a, ...)`)
+      return { type, key: rec.key.trim() }
+    case 'scroll': {
+      // Firecrawl v1 left the direction out for down; v2 requires it.
+      const direction = rec.direction ?? 'down'
+      if (direction !== 'up' && direction !== 'down') throw new RequestError(`${name}.direction must be up or down`)
+      const within = selector('selector', false)
+      return { type, direction, ...(within === undefined ? {} : { selector: within }) }
+    }
+    case 'screenshot': {
+      const shot = readScreenshotFormat({ ...rec, type: 'screenshot' })
+      const { type: _type, ...options } = shot
+      return { type: 'screenshot', ...options }
+    }
+    case 'scrape':
+      return { type }
+    case 'executeJavascript':
+      if (typeof rec.script !== 'string' || rec.script.trim().length === 0 || rec.script.length > MAX_ACTION_SCRIPT_CHARS) throw new RequestError(`${name}.script must be a script of 1 to ${MAX_ACTION_SCRIPT_CHARS} characters`)
+      return { type, script: rec.script }
+    case 'scrollToEnd':
+    case 'loadMore':
+    case 'paginate': {
+      const count = (key: string, max: number): number | undefined => {
+        const value = rec[key]
+        if (value === undefined) return undefined
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) throw new RequestError(`${name}.${key} must be an integer from 1 to ${max}`)
+        return value
+      }
+      const waitMs = readMilliseconds(rec.waitMs, `${name}.waitMs`, LIST_WAIT_MS.min, LIST_WAIT_MS.max)
+      const itemSelector = selector('itemSelector', false)
+      const common = { ...(itemSelector === undefined ? {} : { itemSelector }), ...(waitMs === undefined ? {} : { waitMs }) }
+      if (type === 'scrollToEnd') {
+        const within = selector('selector', false)
+        const maxScrolls = count('maxScrolls', MAX_LIST_ROUNDS)
+        return { type, ...(within === undefined ? {} : { selector: within }), ...common, ...(maxScrolls === undefined ? {} : { maxScrolls }) }
+      }
+      if (type === 'loadMore') {
+        const maxClicks = count('maxClicks', MAX_LIST_ROUNDS)
+        return { type, selector: selector('selector', true)!, ...common, ...(maxClicks === undefined ? {} : { maxClicks }) }
+      }
+      const maxPages = count('maxPages', MAX_LIST_PAGES)
+      return { type: 'paginate', nextSelector: selector('nextSelector', true)!, ...common, ...(maxPages === undefined ? {} : { maxPages }) }
+    }
+    default: {
+      // pdf
+      if (rec.format !== undefined && !(PDF_PAPER_FORMATS as readonly unknown[]).includes(rec.format)) throw new RequestError(`${name}.format must be one of ${PDF_PAPER_FORMATS.join(', ')}`)
+      const landscape = readBoolean(rec.landscape, `${name}.landscape`)
+      if (rec.scale !== undefined && (typeof rec.scale !== 'number' || !Number.isFinite(rec.scale) || rec.scale < 0.1 || rec.scale > 2)) throw new RequestError(`${name}.scale must be a number from 0.1 to 2`)
+      return { type: 'pdf', ...(rec.format === undefined ? {} : { format: rec.format as PdfPaperFormat }), ...(landscape === undefined ? {} : { landscape }), ...(rec.scale === undefined ? {} : { scale: rec.scale as number }) }
+    }
   }
 }
 
@@ -1604,7 +1813,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
     ...readAttribution(rec),
   }
-  checkScreenshotViewport(req.mobile, req.formats)
+  checkScreenshotViewport(req.mobile, req.formats, req.actions)
   return req
 }
 
@@ -1617,6 +1826,10 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   }
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const mode = readMode(rec.mode)
+  // A crawl follows every link it finds, a sign-out link included, and the
+  // saved login is the user's live Chrome session: one such fetch would
+  // sign them out there too. A batch fetches only the pages it names.
+  if (mode === 'authed') throw new RequestError('mode authed is not available for crawl: a crawl follows every link, and a sign-out link would end your session in Chrome too; list the pages and send them as a batch in mode authed')
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const allowlistedDomains = readAllowlist(rec.allowlistedDomains)
@@ -1769,7 +1982,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(webhook === undefined ? {} : { webhook }),
     ...readAttribution(rec),
   }
-  checkScreenshotViewport(req.mobile, req.formats)
+  checkScreenshotViewport(req.mobile, req.formats, req.actions)
   return req
 }
 

@@ -148,6 +148,20 @@ gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project
 
 That first deploy sets every variable. For a later release, deploy the new image with only `--update-env-vars=W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}`: `--set-env-vars` replaces all variables, and losing `W2L_PUBLIC_ORIGIN` makes every preview on the domain fail its origin check.
 
+The service routes traffic to tagged revisions, so a later `gcloud run deploy` creates a revision that serves nothing until traffic moves to it. Deploy without traffic, move all of it to the new revision under a new tag, and keep the previous tag as the rollback:
+
+```sh
+export W2L_REVISION_SUFFIX=landing   # names the revision w2l-public-preview-landing
+export W2L_TAG=r17landing            # one tag per release; the previous tag stays as the rollback
+gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
+gcloud run services update-traffic w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --to-revisions="w2l-public-preview-${W2L_REVISION_SUFFIX}=100" --update-tags="${W2L_TAG}=w2l-public-preview-${W2L_REVISION_SUFFIX}"
+gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='yaml(status.traffic)'
+```
+
+Confirm that the new revision has `percent: 100`, and that `https://octocrawl.dev/` serves the new build. To roll back, run `update-traffic` with `--to-tags=<previous tag>=100`.
+
 The `--allow-unauthenticated` flag is intentional for this limited, public trial. The Secret Manager grants are restricted to the dedicated runtime service account. Secret versions referenced as environment variables are resolved at instance startup; after rotating those secrets, deploy a new revision so every instance uses the new value. Verify the actual `/api/health` and preview behavior on the returned HTTPS URL before sharing it.
 
 The initial Cloud Run settings are:
@@ -189,7 +203,7 @@ Mail for `hello@octocrawl.dev`, the address on the Contact, Privacy and Acceptab
 
 ### Search engines
 
-The home page carries `WebSite` and `SoftwareApplication` structured data and every docs page `TechArticle` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
+The home page carries `WebSite`, `Organization` and `SoftwareApplication` structured data and every docs page `TechArticle` and `BreadcrumbList` (JSON-LD, absolute URLs written in from `W2L_PUBLIC_ORIGIN` like the rest). After a deploy that adds or changes pages, tell IndexNow engines (Bing and others) with `node scripts/public-preview/indexnow.mjs`; it submits the live sitemap and proves ownership with `/indexnow-key.txt`. Google reads the sitemap through Search Console, where `octocrawl.dev` is a domain property verified by a DNS TXT record.
 
 ### Refresh the Amazon.sg state
 
@@ -227,6 +241,17 @@ The page sends first-party events to `POST /api/events` (same origin only; fixed
 ```sh
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="w2l-public-preview" AND (jsonPayload.event="w2l_web_event" OR jsonPayload.event="w2l_preview") AND jsonPayload.automated=false' \
   --project="$W2L_PROJECT_ID" --freshness=7d --format=json
+```
+
+### Hosted waitlist
+
+The home page footer carries a hidden-until-scripted early-access form; it opens from there, from the link shown once a visitor's daily previews run out, and from the Limits page (`/?from=limits#waitlist`). It posts to `POST /api/waitlist` (same origin only, 2 KB, fixed roles and needs, a hidden honeypot field, five sign-ups per visitor per UTC day per instance). Each address is one document in the Firestore `waitlist` collection, with an HMAC of the address under `W2L_QUOTA_HASH_KEY` as its id, so a repeat sign-up replaces the answers and keeps the first sign-up time (`createdAtMs`, epoch milliseconds, because Firestore's `minimum` transform takes numbers only); no cookie, IP address or preview is stored with it, and nothing about it is logged. The runtime service account's `roles/datastore.user` covers the new collection. Read and maintain it as the owner:
+
+```sh
+node scripts/public-preview/waitlist.mjs            # counts by role, need, entry point and referrer
+node scripts/public-preview/waitlist.mjs --emails   # plus every entry as CSV
+node scripts/public-preview/waitlist.mjs --delete someone@example.org
+node scripts/public-preview/waitlist.mjs --expire   # entries older than 12 months, as the privacy page promises
 ```
 
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.

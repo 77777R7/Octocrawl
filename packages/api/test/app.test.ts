@@ -756,8 +756,9 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
     const url = `${server.url}/crawl/listing`
     expect(await post('/v1/scrape', { url, formats: ['markdown', 'links', 'summary', 'changeTracking'] }))
-      .toEqual({ status: 400, error: 'unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes)' })
-    expect(await post('/v1/scrape', { url, actions: [] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
+      .toEqual({ status: 400, error: 'unsupported formats: summary, changeTracking (supported: markdown, links, json, html, rawHtml, images, tables, screenshot, attributes, list)' })
+    expect(await post('/v1/scrape', { url, location: {} })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: location') })
+    expect(await post('/v1/crawl', { url, actions: [{ type: 'scrape' }] })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: actions') })
     expect(await post('/v1/batches', { urls: [url], proxy: 'auto' })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: proxy') })
     expect(await post('/v1/crawl', { url, limit: 2 })).toMatchObject({ status: 400, error: expect.stringContaining('unsupported parameter: limit') })
   })

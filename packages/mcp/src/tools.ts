@@ -3,12 +3,12 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors',
+export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -59,7 +59,7 @@ const INTEGRATION_PROPERTY = {
   integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your own label for the integration or workflow this request belongs to (1 to 100 printable characters, no spaces). Stored in W2L\'s records (the scrape record, the task status), never sent to the target.' },
 } as const
 /** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then; screenshot is null then. */
-const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. tables gives every data table of the content the Markdown was written from, in the Markdown\'s order: { tableIndex, caption, sourceUrl, headerRows, columns, rows, csv, csvSha256 }, cells as plain text, a spanned cell repeated in every slot it covers. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules. screenshot (or screenshot@fullPage, or one { type: "screenshot", fullPage, quality, viewport } entry) captures the rendered page on the browser rung alone, which the request then selects (no http attempt; a server without a browser rung refuses it): a PNG, or a JPEG at quality 1 to 100, CSS-pixel sized at the declared 1280x800 viewport or the viewport asked for (320..1920 by 240..1080), of the viewport or the whole document (fullPage, without scrolling), returned as { contentType, width, height, fullPage, viewport, deviceScaleFactor, quality, bytes, sha256, path, base64 }, null when the page could not be captured.'
+const FORMATS_DESCRIPTION = 'What to return. html is the cleaned HTML the Markdown is written from (the main content, the whole page when onlyMainContent is false, or the includeTags selection). rawHtml is the page as received: the response body on the HTTP rung, the rendered DOM on a browser rung. images lists every image URL of the whole page (img src and srcset, picture sources, lazy data-src, video posters, og:image), absolute and deduplicated, in document order. tables gives every data table of the content the Markdown was written from, in the Markdown\'s order: { tableIndex, caption, sourceUrl, headerRows, columns, rows, csv, csvSha256 }, cells as plain text, a spanned cell repeated in every slot it covers. An { type: "attributes", selectors: [{ selector, attribute }] } entry (one per request, 1 to 50 selectors) returns, per selector, the named attribute\'s values as written on the elements it matches; the selectors follow the includeTags rules. A { type: "list", itemSelector, fields: [{ name, selector?, attribute? }] } entry (one per request) returns the page\'s records: every element itemSelector matches is a record (one inside another is part of it), each field read from it (the text of its first match within the record, or the record itself without a selector, or the attribute; href/src made absolute), as { itemSelector, fields, records: [{ values, missing, source: { url, page, index } }], pages, incomplete, csv, csvSha256 }; a missing value is null and named in missing, never filled in; with a paginate action, the records of every page it read; a page of records is not failed as having no main content. Without itemSelector W2L finds the page\'s list (repeated elements with text) and its fields itself, and without fields the fields of the items named: list.detected then holds { fields, alternatives: [{ itemSelector, count }] } to check and send back; no list found answers itemSelector null and a list_not_detected warning. screenshot (or screenshot@fullPage, or one { type: "screenshot", fullPage, quality, viewport } entry) captures the rendered page on the browser rung alone, which the request then selects (no http attempt; a server without a browser rung refuses it): a PNG, or a JPEG at quality 1 to 100, CSS-pixel sized at the declared 1280x800 viewport or the viewport asked for (320..1920 by 240..1080), of the viewport or the whole document (fullPage, without scrolling), returned as { contentType, width, height, fullPage, viewport, deviceScaleFactor, quality, bytes, sha256, path, base64 }, null when the page could not be captured.'
 /** One entry of `formats`: a format name, a json schema request, an attributes request or a screenshot request. */
 const FORMAT_ITEMS = {
   anyOf: [
@@ -90,6 +90,19 @@ const FORMAT_ITEMS = {
     {
       type: 'object',
       properties: {
+        type: { const: 'list' },
+        itemSelector: { type: 'string', minLength: 1, maxLength: 200 },
+        fields: {
+          type: 'array', minItems: 1, maxItems: 50,
+          items: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: 64 }, selector: { type: 'string', minLength: 1, maxLength: 200 }, attribute: { type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_:.-]*$' } }, required: ['name'], additionalProperties: false },
+        },
+      },
+      required: ['type'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
         type: { const: 'screenshot' },
         fullPage: { type: 'boolean' },
         quality: { type: 'integer', minimum: 1, maximum: 100 },
@@ -110,6 +123,41 @@ const ROBOTS_OVERRIDE_PROPERTIES = {
   reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Why this URL may be fetched despite the rule, e.g. the publisher links the file publicly and the host rule addresses crawlers.' },
   recordedBy: { type: 'string', minLength: 1, maxLength: 200, description: 'Who recorded the decision.' },
 } as const
+/** `actions`: steps the local browser runs on the page before it is read (scrape and batch_scrape). */
+const ACTIONS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: MAX_ACTIONS,
+  description: `Steps the local browser runs on the page after it loads and before it is read, in order (Firecrawl's actions): wait {milliseconds | selector}, click {selector, all?}, write {text} (into the focused element: click it first), press {key}, scroll {direction up|down, selector?}, screenshot {fullPage?, quality?, viewport?}, scrape (the HTML at that point), executeJavascript {script} (a function body; return gives the value) and pdf {format?, landscape?, scale?}; and W2L's own list steps, which stop by themselves at the list's end: scrollToEnd {selector?, itemSelector?, maxScrolls?, waitMs?}, loadMore {selector, itemSelector?, maxClicks?, waitMs?} and paginate {nextSelector, itemSelector?, maxPages?, waitMs?} (each page's HTML in actions.scrapes; actions.lists says why each stopped, and a list_not_exhausted warning when one stopped at its limit or the deadline). At most ${MAX_ACTIONS}. The result's actions holds what they produced; a step that fails stops the rest, and the result is failed with action_failed, actions.failed naming the step, the page as it stood. A step that leads to a page robots.txt or the egress policy refuses fails with navigation_refused. Not with fastMode or the cache options.`,
+  items: {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['wait', 'click', 'write', 'press', 'scroll', 'screenshot', 'scrape', 'executeJavascript', 'pdf', 'scrollToEnd', 'loadMore', 'paginate'] },
+      milliseconds: { type: 'integer', minimum: 1, maximum: 60000 },
+      selector: { type: 'string' },
+      all: { type: 'boolean' },
+      text: { type: 'string' },
+      key: { type: 'string' },
+      direction: { type: 'string', enum: ['up', 'down'] },
+      fullPage: { type: 'boolean' },
+      quality: { type: 'integer', minimum: 1, maximum: 100 },
+      viewport: { type: 'object', properties: { width: { type: 'integer' }, height: { type: 'integer' } }, required: ['width', 'height'], additionalProperties: false },
+      script: { type: 'string' },
+      format: { type: 'string', enum: [...PDF_PAPER_FORMATS] },
+      landscape: { type: 'boolean' },
+      scale: { type: 'number', minimum: 0.1, maximum: 2 },
+      itemSelector: { type: 'string' },
+      nextSelector: { type: 'string' },
+      maxScrolls: { type: 'integer', minimum: 1, maximum: 200 },
+      maxClicks: { type: 'integer', minimum: 1, maximum: 200 },
+      maxPages: { type: 'integer', minimum: 1, maximum: 100 },
+      waitMs: { type: 'integer', minimum: 100, maximum: 10000 },
+    },
+    required: ['type'],
+    additionalProperties: false,
+  },
+} as const
+
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
   description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API refuses this field.',
@@ -165,6 +213,7 @@ export const TOOLS = [
         includeLinks: { type: 'boolean', description: 'Include outbound links. Defaults to false.' },
         debug: { type: 'boolean', description: 'Include trace, ladderTrace, and full attempt audit.' },
         ...PAGE_OPTION_PROPERTIES,
+        actions: ACTIONS_SCHEMA,
         robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
         ...INTEGRATION_PROPERTY,
       },
@@ -227,7 +276,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         url: { type: 'string' },
-        mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
+        mode: { type: 'string', enum: ['standard', 'research'], description: 'authed is not offered: a crawl follows every link, and a sign-out link would end the user\'s session in Chrome too; send the pages as a batch in mode authed.' },
         maxPages: { type: ['number', 'null'] },
         maxDepth: { type: ['number', 'null'] },
         useCached: { type: 'boolean' },
@@ -334,6 +383,7 @@ export const TOOLS = [
         formats: { type: 'array', minItems: 1, description: FORMATS_DESCRIPTION, items: FORMAT_ITEMS },
         includeLinks: { type: 'boolean' },
         ...PAGE_OPTION_PROPERTIES,
+        actions: ACTIONS_SCHEMA,
         robotsOverrides: {
           type: 'array', maxItems: 1000,
           description: 'Recorded robots overrides, each for one URL of urls (see robotsOverride on scrape).',
@@ -360,6 +410,11 @@ export const TOOLS = [
     name: 'get_batch_errors',
     description: 'The items of a batch that did not succeed, across every attempt (a resumed batch keeps its earlier failures): errors [{ id, timestamp, url, status, code, error, httpStatus }] in pages of up to 1000 (cursor, limit), and robotsBlocked, every URL robots.txt refused (policy_denied by a robots_disallowed trace event with no recorded override; a governance or SSRF refusal is not robots and stays in errors only).',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'hand_off_batch',
+    description: "Hand a finished batch's items that a check stopped (a captcha, a challenge, a login wall: items whose handoff field is set, get_batch's waitingForPerson) to the person in their own Chrome, on a server running on their machine: each opens in a new Chrome tab, one at a time, the person gets through it there, and W2L reads the page once it is through and replaces the stopped result with it (lane browser_local_authed, mode authed). W2L passes no check itself. Chrome must have remote debugging on (chrome://inspect/#remote-debugging) and the person clicks Allow once. Returns when every item is read or given up: { id, handedOff, through, notThrough, items: [{ id, url, through, status, reason? }] }. Tell the person before calling it: it waits for them, up to waitMs per page (default 600000). W2L reads a page only after the person clicked or typed in its tab: tell them that a page showing no check is read once they click on it.",
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, waitMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, required: ['id'], additionalProperties: false },
   },
   ...MONITOR_TOOLS,
 ] as const
@@ -413,6 +468,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...executionOptions(req),
       ...cacheOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
+      ...(req.actions === undefined ? {} : { actions: req.actions }),
       ...integrationOf(req),
     }, request)
   }
@@ -483,7 +539,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)
@@ -496,6 +552,12 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const input = readCrawlQuery(args)
     if (input.maxResults !== undefined) return client.collectBatchItems(input.id, { ...input.options, maxResults: input.maxResults }, request)
     return client.getBatchItems(input.id, input.options, request)
+  }
+  if (name === 'hand_off_batch') {
+    const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null
+    if (typeof rec?.id !== 'string' || !rec.id) throw new RequestError('id is required')
+    const { id, ...body } = rec
+    return client.handOffBatch(id, parseBatchHandoffRequest(body), request)
   }
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null

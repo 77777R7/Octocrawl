@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import type { Dispatcher } from 'undici'
 
@@ -581,7 +581,7 @@ export class ProviderSubject implements SubjectAdapter {
     const tables = tablesFormat(wholePageAsked(options)
       ? { html: res.body, options: { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
       : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, res.finalUrl, options, trace, 'provider', wallMs)
-    return {
+    return withListCaveat({
       ...base,
       status: 'success',
       failureReason: null,
@@ -607,7 +607,7 @@ export class ProviderSubject implements SubjectAdapter {
       ...extra,
       ...tables,
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-    }
+    })
   }
 
   /**

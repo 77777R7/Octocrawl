@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
+import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
@@ -25,6 +26,7 @@ const server = createPreviewServer({
   publicOrigin: process.env.W2L_PUBLIC_ORIGIN || undefined,
   // Shared with the Cloudflare Worker, so only it can name the domain and the visitor's address.
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
+  waitlist: firestoreWaitlistFromEnv(),
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))

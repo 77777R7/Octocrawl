@@ -36,6 +36,8 @@ export const FAILURE_REASON = [
   'body_too_large',
   'decompressed_too_large',
   'unsupported_content_type',
+  /** The response's Content-Encoding names a coding W2L does not decode (it decodes gzip, deflate and br); the trace names it. */
+  'unsupported_content_encoding',
   'parse_error',
   'loop_detected',
   'policy_denied',
@@ -50,6 +52,11 @@ export const FAILURE_REASON = [
   'internal_error',
   /** A cache-only request (`lockdown`) found no stored result for the page, so nothing was fetched. */
   'cache_miss',
+  /**
+   * A step of the request's `actions` failed (`actions.failed` names it): the
+   * steps after it did not run, and the result keeps the page as it stood.
+   */
+  'action_failed',
 ] as const
 
 export type FailureReason = (typeof FAILURE_REASON)[number]

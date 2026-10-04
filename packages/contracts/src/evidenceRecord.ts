@@ -1,3 +1,4 @@
+import type { PageActionType } from './actions.js'
 /**
  * Evidence Record v1: the evidence every result carries, stated the same way
  * whichever lane produced it. The published JSON Schema is
@@ -131,6 +132,18 @@ export interface EvidenceRequestHeader {
   valueSha256: string
 }
 
+/** The steps a request ran on the page before it was read. */
+export interface EvidencePageActions {
+  steps: readonly EvidencePageActionStep[]
+  /** Whether an `executeJavascript` step ran in the page. */
+  scriptRan: boolean
+}
+
+export interface EvidencePageActionStep {
+  type: PageActionType
+  outcome: 'ok' | 'failed'
+}
+
 export interface EvidenceRecord {
   schemaVersion: typeof EVIDENCE_SCHEMA_VERSION
   requestedUrl: string
@@ -148,6 +161,14 @@ export interface EvidenceRecord {
   robotsDecision: EvidenceRobotsDecision | null
   /** `evidence.rawBodySha256`: the body W2L read (see the schema for what each lane reads). */
   rawSha256: string | null
+  /**
+   * The Content-Encoding the body was read from, as the HTTP lane received it
+   * (lower-cased codings in applied order, `x-gzip` read as `gzip`), or
+   * `identity` when it had none: what was decoded before `rawSha256` was
+   * taken. Null when no body was read, and in the browser and provider lanes.
+   * Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  contentEncoding: string | null
   outputSha256: EvidenceOutputSha256
   extractor: EvidenceExtractor
   /** JSON Pointer into `json.data` → where that value was read; null when JSON was not requested. */
@@ -156,6 +177,13 @@ export interface EvidenceRecord {
   /** `host:port` of the operator's environment proxy the request went through; null when it went direct or the lane does not report its route. */
   proxy: string | null
   identity: EvidenceIdentity
+  /**
+   * The request's `actions` that ran on the page before it was read, in order,
+   * with their outcome; null when the request had none. The hashes above are
+   * of the page as the steps left it, and `scriptRan` says when a script of
+   * the caller's ran in it, so its content may be the script's.
+   */
+  pageActions: EvidencePageActions | null
 }
 
 /** The argument must list every key of T once: a missing or unknown key fails to compile. */
@@ -165,7 +193,7 @@ const keysOf = <T>() => <const K extends readonly (keyof T)[]>(keys: K & EveryKe
 
 /** Field order of the record and of each nested object, as in the schema file. */
 export const EVIDENCE_RECORD_KEYS = {
-  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity']),
+  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions']),
   redirectChain: keysOf<EvidenceRedirectChain>()(['urls', 'complete']),
   robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
@@ -173,6 +201,8 @@ export const EVIDENCE_RECORD_KEYS = {
   fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
   artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256', 'bytes', 'contentType']),
   identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact', 'device', 'requestHeaders']),
+  pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
+  pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
 } as const
 
@@ -181,6 +211,7 @@ export const EVIDENCE_RECORD_KEYS = {
  * that records written before them stay valid, though W2L always writes them.
  */
 export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
+  record: ['contentEncoding', 'pageActions'],
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
 }

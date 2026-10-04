@@ -37,6 +37,8 @@ export interface TaskStore {
   countCompletedSteps(taskId: string): Promise<number>
   /** How many of an attempt's steps (every attempt's without attemptId) have each status, without reading their bodies. */
   countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>>
+  /** How many of a task's `blocked` steps have each block reason, every attempt counted, without reading their bodies' text. */
+  countBlockReasons(taskId: string): Promise<Record<string, number>>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
   /**
    * Latest step for this canonical URL on the task (any attempt).

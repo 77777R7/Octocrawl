@@ -276,6 +276,54 @@ describe('MapRunner', () => {
     expect(map.warnings.map((warning) => warning.code)).toEqual(['robots_host_cap'])
   })
 
+  it('keeps the https variant of a link seen first over http, when the https origin\'s robots.txt allows it', async () => {
+    const HTTP = 'http://site.test'
+    const sitemap = fakeSitemap([{ url: `${SITE}/docs/b` }])
+    // robots.txt is per scheme: the https origin locks a path the http one allows.
+    const { wired, robotsAsked } = sources(startPage([
+      link(`${HTTP}/docs/a`, 'Alpha'), link(`${HTTP}/docs/b`), link(`${HTTP}/docs/locked`), link(`${SITE}/docs/a`), link(`${SITE}/docs/locked`),
+    ]), sitemap.source, async (url) => (url.startsWith('https:') && url.includes('locked') ? { disallowed: true } : 'allowed'))
+    const map = await new MapRunner(wired).run({ id: 'm-https', url: START })
+    expect(map.links).toEqual([
+      { url: START, title: 'Docs home', description: 'All the docs', titleSource: 'page', via: ['start'], robots: 'allowed' },
+      { url: `${SITE}/docs/a`, title: 'Alpha', titleSource: 'anchor', via: ['link'], robots: 'allowed' },
+      // Upgraded by the sitemap's https entry, which it also merges.
+      { url: `${SITE}/docs/b`, via: ['link', 'sitemap'], sitemapFile: FILE, robots: 'allowed' },
+      // The https origin disallows it: the http link stays, under its own origin's verdict.
+      { url: `${HTTP}/docs/locked`, via: ['link'], robots: 'allowed' },
+    ])
+    expect(map.refused).toMatchObject({ collapsed: 3, robots: 0, samples: { collapsed: [
+      { url: `${HTTP}/docs/a`, into: `${SITE}/docs/a` },
+      { url: `${SITE}/docs/locked`, into: `${HTTP}/docs/locked` },
+      { url: `${HTTP}/docs/b`, into: `${SITE}/docs/b` },
+    ], robots: [] } })
+    expect(robotsAsked).toEqual(expect.arrayContaining([`${SITE}/docs/a`, `${SITE}/docs/b`, `${SITE}/docs/locked`]))
+    expect(map).toMatchObject({ status: 'completed', warnings: [] })
+    // A search the http URL matches and the https one does not keeps the http link.
+    const searched = await new MapRunner(sources(startPage([link(`${HTTP}/docs/a`), link(`${SITE}/docs/a`)]), fakeSitemap([]).source).wired).run({ id: 'm-https-search', url: START, search: 'http://site.test/docs/a' })
+    expect(searched.links.map((l) => l.url)).toEqual([`${HTTP}/docs/a`])
+    // Without folding, both variants are links of their own.
+    const apart = await new MapRunner(sources(startPage([link(`${HTTP}/docs/a`), link(`${SITE}/docs/a`)]), fakeSitemap([]).source).wired).run({ id: 'm-https-apart', url: START, deduplicateSimilarURLs: false })
+    expect(apart.links.map((l) => l.url)).toEqual([START, `${HTTP}/docs/a`, `${SITE}/docs/a`])
+  })
+
+  it('switches to https only on an origin whose robots.txt the map read anyway, so a later host keeps its slot under the cap', async () => {
+    const HTTP_START = 'http://site.test/docs/'
+    const { wired, robotsAsked } = sources(startPage([link('http://site.test/docs/a'), link('https://site.test/docs/a'), link('http://docs.site.test/x')]), fakeSitemap([]).source)
+    const map = await new MapRunner(wired).run({ id: 'm-https-slot', url: HTTP_START, includeSubdomains: true, maxRobotsHosts: 1 })
+    expect(map.links.map((l) => l.url)).toEqual([HTTP_START, 'http://site.test/docs/a', 'http://docs.site.test/x'])
+    expect(robotsAsked.some((url) => url.startsWith('https://'))).toBe(false)
+    expect(map).toMatchObject({ status: 'completed', warnings: [], refused: { robotsUnchecked: 0, collapsed: 1, samples: { collapsed: [{ url: 'https://site.test/docs/a', into: 'http://site.test/docs/a' }] } } })
+  })
+
+  it('does not spend a robots.txt read past the host cap on an https variant, and keeps the http link without a warning', async () => {
+    const { wired, robotsAsked } = sources(startPage([link('http://docs.site.test/docs/x'), link('https://docs.site.test/docs/x')]), fakeSitemap([]).source)
+    const map = await new MapRunner(wired).run({ id: 'm-https-cap', url: START, includeSubdomains: true, maxRobotsHosts: 1 })
+    expect(map.links.map((l) => l.url)).toEqual([START, 'http://docs.site.test/docs/x'])
+    expect(robotsAsked.some((url) => url.startsWith('https://docs.site.test'))).toBe(false)
+    expect(map).toMatchObject({ status: 'completed', warnings: [], refused: { robotsUnchecked: 0, collapsed: 1 } })
+  })
+
   it('folds query variants with ignoreQueryParameters and reports each merge; without it they stay apart, tracking parameters dropped either way', async () => {
     const page = startPage([link('/docs/list?page=1'), link('/docs/list?page=2'), link('/docs/list?page=3'), link('/docs/item?utm_source=x'), link('/docs/item?utm_campaign=y')])
     const run = (spec: Record<string, unknown>) => new MapRunner(sources(page, fakeSitemap([]).source).wired).run({ id: 'm-query', url: START, ...spec })
