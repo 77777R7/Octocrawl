@@ -183,6 +183,27 @@ describe('HttpSitemapSource', () => {
       const last = files[files.length - 1]!.ms
       await scheduler.beforeRequest(slowOrigin)
       expect(performance.now() - last).toBeLessThan(900)
+      // Nor do another job's requests to the host, coming more often than the delay, hold the load's files back: the delay counts from
+      // the load's own last request.
+      at.length = 0
+      let running = true
+      const other = (async () => {
+        while (running) {
+          const permit = await scheduler.acquire(slowOrigin)
+          try { await scheduler.beforeRequest(slowOrigin) } finally { permit.release() }
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      })()
+      const again = new HttpSitemapSource({ networkPolicy: policy, scheduler })
+      try {
+        const began = performance.now()
+        expect((await again.load({ seedUrl: `${slowOrigin}/`, maxUrls: 50, maxFiles: 20 })).files.map((file) => file.kind)).toEqual(['index', 'urlset', 'urlset'])
+        expect(performance.now() - began).toBeLessThan(4_000)
+      } finally {
+        running = false
+        await other
+        await again.close()
+      }
     } finally {
       await source.close()
       slow.closeAllConnections()

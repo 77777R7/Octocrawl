@@ -64,17 +64,12 @@ export class OriginScheduler {
     return until > Date.now() ? until : undefined
   }
 
-  /**
-   * Pace the actual transport/navigation start, including retries.
-   * `minIntervalMs`: a longer interval this request keeps after the origin's
-   * last one (a robots.txt Crawl-delay its caller honours), for this request
-   * alone.
-   */
-  async beforeRequest(origin: string, signal?: AbortSignal, onWait?: (intervalMs: number, cooldownMs: number) => void, minIntervalMs = 0): Promise<void> {
+  /** Pace the actual transport/navigation start, including retries. */
+  async beforeRequest(origin: string, signal?: AbortSignal, onWait?: (intervalMs: number, cooldownMs: number) => void): Promise<void> {
     const state = this.state(origin)
     for (;;) {
       signal?.throwIfAborted()
-      const intervalRemaining = Math.max(0, state.lastRequestAtMono + Math.max(this.minDelayMs, minIntervalMs) - performance.now())
+      const intervalRemaining = Math.max(0, state.lastRequestAtMono + this.minDelayMs - performance.now())
       const cooldownRemaining = Math.max(0, state.cooldownUntil - Date.now())
       const wait = Math.max(intervalRemaining, cooldownRemaining)
       if (wait <= 0) {

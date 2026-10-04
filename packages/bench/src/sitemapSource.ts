@@ -9,9 +9,10 @@
  * pacing, the policy's redirect limit and its 10 MiB wire cap. The file's own
  * URL is judged by its host's robots.txt under the same identity before it is
  * requested, and an unreachable robots.txt refuses it as it would a page; a
- * Crawl-delay there is kept between the load's requests to that host (and
- * after the scheduler's last request to it), for this load alone: the
- * scheduler is shared by every job of the process, and the pages after the
+ * Crawl-delay there is kept between this source's own requests to that host,
+ * waited before it asks the scheduler for its turn: the scheduler is shared
+ * by every job of the process, so the delay neither slows another job's
+ * requests to the host nor waits for a gap in them, and the pages after the
  * files are paced by the crawl's own frontier.
  * A Content-Encoding (gzip, deflate or br) is undone whether or not it was
  * asked for, then a gzip file (`.gz`, or the magic number) is inflated, both
@@ -28,7 +29,7 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import type { CrawlMode, ExecutionContext, IdentityDevice, NetworkPolicy, SitemapEntry, SitemapFileRecord, SitemapLoadRequest, SitemapLoadResult, SitemapSource } from '@w2l/contracts'
-import { createExecutionScope, isGzipBytes, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
+import { abortableSleep, createExecutionScope, isGzipBytes, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
 import { request } from 'undici'
 import { ContentDecodingError, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from './contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, readCappedBody, SsrfDeniedError } from './egress.js'
@@ -72,6 +73,8 @@ export class HttpSitemapSource implements SitemapSource {
   private readonly ownRobots: boolean
   /** The Crawl-delay of each origin whose robots.txt a file of this source was judged by (the strictest one seen). */
   private readonly crawlDelays = new Map<string, number>()
+  /** When this source's last request to each origin left (monotonic). */
+  private readonly lastRequestAt = new Map<string, number>()
   private closing: Promise<void> | null = null
 
   constructor(options: HttpSitemapSourceOptions = {}) {
@@ -247,9 +250,14 @@ export class HttpSitemapSource implements SitemapSource {
     for (let hop = 0; ; hop++) {
       await raceWithSignal(this.route.assertUrl(current), scope.signal)
       const origin = new URL(current).origin
+      // The host's Crawl-delay after this source's own last request to it, before taking a turn (and a slot) on the shared scheduler.
+      const last = this.lastRequestAt.get(origin)
+      const wait = last === undefined ? 0 : last + (this.crawlDelays.get(origin) ?? 0) - performance.now()
+      if (wait > 0) await abortableSleep(Math.ceil(wait), scope.signal)
       const permit = await this.scheduler.acquire(origin, scope.signal)
       try {
-        await this.scheduler.beforeRequest(origin, scope.signal, undefined, this.crawlDelays.get(origin) ?? 0)
+        await this.scheduler.beforeRequest(origin, scope.signal)
+        this.lastRequestAt.set(origin, performance.now())
         const response = await request(current, {
           dispatcher: this.route.dispatcherFor(current),
           method: 'GET',
