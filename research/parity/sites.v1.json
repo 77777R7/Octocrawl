@@ -3235,6 +3235,148 @@
         {"item": "list-detect", "type": "field", "path": "list.records.length", "equals": 0},
         {"item": "list-detect", "type": "field", "path": "warning", "includes": "No list was found"}
       ]
+    },
+    {
+      "id": "AR01",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://ourworldindata.org/grapher/life-expectancy",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "[role=tab][id$=\"-tab-Table\"]"}, {"type": "wait", "selector": "table tr"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A chart page whose data table is drawn only when its Table tab is clicked (no table on the page before). Probed before freezing: without steps the markdown has no table row.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 0, "detail.outcome": "ok"}},
+        {"item": "action-tab-table", "type": "markdownMatches", "pattern": "^\\| Afghanistan \\|.*years", "flags": "m"}
+      ]
+    },
+    {
+      "id": "AR02",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://hub.docker.com/_/nginx",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "[role=tab]:has-text('Tags')"}, {"type": "wait", "selector": "table"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. An image page whose Tags tab is drawn by its app when clicked (no table before). Probed before freezing: without steps the markdown has no linux/amd64 row.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 0, "detail.outcome": "ok"}},
+        {"item": "action-tab-table", "type": "markdownIncludes", "text": "linux/amd64"}
+      ]
+    },
+    {
+      "id": "AR03",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.npmjs.com/package/react",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "#package-tab-versions"}, {"type": "wait", "selector": "table"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A package page whose Versions tab draws its version tables when clicked (no table before). Probed before freezing: without steps the markdown has no download column.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 0, "detail.outcome": "ok"}},
+        {"item": "action-tab-table", "type": "markdownIncludes", "text": "Downloads (Last 7 Days)"}
+      ]
+    },
+    {
+      "id": "AR04",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.jsdelivr.com/package/npm/react",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "#tabRouteFiles"}, {"type": "wait", "milliseconds": 3000}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A package page whose Files tab lists the package's files when clicked. Probed before freezing: without steps the markdown has no file path.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 0, "detail.outcome": "ok"}},
+        {"item": "action-tab", "type": "markdownMatches", "pattern": "/npm/react@[0-9][^/ ]*/index\\.js"}
+      ]
+    },
+    {
+      "id": "AR05",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://github.com/topics/javascript",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\"article\").length"}, {"type": "loadMore", "selector": ".ajax-pagination-btn", "maxClicks": 2, "itemSelector": "article"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A topic page whose \"Load more\" button adds repositories in place. Probed before freezing: 20 before, 60 after two clicks.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-load-more", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AR06",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.aljazeera.com/news/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\"article\").length"}, {"type": "loadMore", "selector": ".show-more-button", "maxClicks": 2, "itemSelector": "article"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A news section whose \"Show more\" button adds stories in place. Probed before freezing: 19 before, 39 after two clicks.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-load-more", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AR07",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.npr.org/sections/news/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\"article.item\").length"}, {"type": "loadMore", "selector": ".options__load-more", "maxClicks": 2, "itemSelector": "article.item"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A news section whose \"Load more stories\" button adds stories in place. Probed before freezing: the button is hidden for a moment after load, and W2L's loadMore read it as the list's end (0 rounds); after a fixed wait its click timed out, while a script's click loaded 24 more.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-load-more", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AR08",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://dev.to/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\"article\").length"}, {"type": "scrollToEnd", "maxScrolls": 3, "itemSelector": "article"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A feed that adds posts as it is scrolled. Probed before freezing: 0 articles counted right after load, 42 after three scrolls.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-scroll", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
+      ]
+    },
+    {
+      "id": "AR09",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.gov.uk/find-local-council",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "input#postcode"}, {"type": "write", "text": "SW1A 1AA"}, {"type": "press", "key": "Enter"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A form whose answer is a page reached by submitting a postcode. Probed before freezing: without steps the markdown does not name Westminster.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 2, "detail.outcome": "ok"}},
+        {"item": "action-write-press", "type": "traceEvent", "match": {"event": "action", "detail.index": 2, "detail.navigatedTo": "https://www.gov.uk/find-local-council/westminster"}},
+        {"item": "action-write-press", "type": "markdownIncludes", "text": "Westminster"}
+      ]
+    },
+    {
+      "id": "AR10",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://hn.algolia.com/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".Story\").length"}, {"type": "click", "selector": "input.SearchInput"}, {"type": "write", "text": "sqlite"}, {"type": "wait", "selector": ".Story"}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".Story\").length"}]},
+      "note": "Added 2026-10-04 for the P5 browser actions acceptance on real pages of sites not made for scraping practice, frozen before the first run. A search app that draws its results in place as a query is typed. Probed before freezing: no story before, 30 after; without steps the markdown has no sqlite.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 3, "detail.outcome": "ok"}},
+        {"item": "action-write", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"},
+        {"item": "action-write", "type": "markdownMatches", "pattern": "sqlite", "flags": "i"}
+      ]
     }
   ]
 }

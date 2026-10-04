@@ -1049,14 +1049,54 @@ export function commonAncestor(a: Element, b: Element): Element | null {
   return null
 }
 
+interface TextMeasure {
+  /** Characters of the element's text (its textContent), white space left out. */
+  text: number
+  /** Those of the tables nested in it at the first level, not counting a <template>'s (querySelectorAll does not find them); null when there is none. */
+  tables: number | null
+}
+
 /**
- * A table that lays out other tables: the tables nested in it hold at least
- * half of its text (Hacker News puts its header, story list and footer in
- * one). A data table with a small table in one of its cells is not one.
+ * Whether a table lays out other tables: the tables nested in it hold at
+ * least half of its text (Hacker News puts its header, story list and footer
+ * in one). A data table with a small table in one of its cells is not one.
+ * The test is for the tables of a tree that does not change while it is
+ * asked: each element is measured once, children before parents and without
+ * recursion, so asking about every table of a page costs the page's size,
+ * not its size times the depth of its tables (a chain of nested tables
+ * thousands deep).
  */
-export function isLayoutTable(table: Element): boolean {
-  const nested = qsa(table, 'table').filter((inner) => inner.parentElement?.closest('table') === table)
-  if (nested.length === 0) return false
-  const length = (el: Element): number => (el.textContent ?? '').replace(/\s+/g, '').length
-  return nested.reduce((sum, inner) => sum + length(inner), 0) * 2 >= length(table)
+export function layoutTables(): (table: Element) => boolean {
+  const measured = new Map<Element, TextMeasure>()
+  return (table) => {
+    const own = measured.get(table) ?? measure(table, measured)
+    return own.tables !== null && own.tables * 2 >= own.text
+  }
+}
+
+function measure(top: Element, measured: Map<Element, TextMeasure>): TextMeasure {
+  const next: [Element, boolean][] = [[top, false]]
+  while (next.length > 0) {
+    const [el, open] = next.pop()!
+    if (!open) {
+      next.push([el, true])
+      for (const child of Array.from(el.children)) if (!measured.has(child)) next.push([child, false])
+      continue
+    }
+    let text = 0
+    let tables: number | null = null
+    for (const node of Array.from(el.childNodes)) {
+      // textContent is the text of the Text and CDATA nodes under an element.
+      if (node.nodeType === 3 || node.nodeType === 4) text += (node.textContent ?? '').replace(/\s+/g, '').length
+      if (node.nodeType !== 1) continue
+      const child = measured.get(node as Element)!
+      text += child.text
+      const name = (node as Element).localName
+      if (name === 'template') continue
+      const inner = name === 'table' ? child.text : child.tables
+      if (inner !== null) tables = (tables ?? 0) + inner
+    }
+    measured.set(el, { text, tables })
+  }
+  return measured.get(top)!
 }
