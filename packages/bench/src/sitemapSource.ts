@@ -9,8 +9,10 @@
  * pacing, the policy's redirect limit and its 10 MiB wire cap. The file's own
  * URL is judged by its host's robots.txt under the same identity before it is
  * requested, and an unreachable robots.txt refuses it as it would a page; a
- * Crawl-delay there paces the host's requests from then on, the files' and
- * the pages' after them on the shared scheduler.
+ * Crawl-delay there is kept between the load's requests to that host (and
+ * after the scheduler's last request to it), for this load alone: the
+ * scheduler is shared by every job of the process, and the pages after the
+ * files are paced by the crawl's own frontier.
  * A Content-Encoding (gzip, deflate or br) is undone whether or not it was
  * asked for, then a gzip file (`.gz`, or the magic number) is inflated, both
  * under the policy's decompression cap. A `<sitemapindex>` is followed one level, its children in
@@ -68,6 +70,8 @@ export class HttpSitemapSource implements SitemapSource {
   private readonly route: EgressRoute
   private readonly robots: RobotsOriginCache
   private readonly ownRobots: boolean
+  /** The Crawl-delay of each origin whose robots.txt a file of this source was judged by (the strictest one seen). */
+  private readonly crawlDelays = new Map<string, number>()
   private closing: Promise<void> | null = null
 
   constructor(options: HttpSitemapSourceOptions = {}) {
@@ -172,7 +176,10 @@ export class HttpSitemapSource implements SitemapSource {
       const cached = await this.robots.lookup(url, identity.userAgent, scope)
       const decision = this.robots.decision(cached, url, identity.userAgent)
       // The group that decided, as for a page (its Crawl-delay is what the page's record states).
-      if (typeof decision.crawlDelayMs === 'number') this.scheduler.setMinInterval(new URL(url).origin, decision.crawlDelayMs)
+      if (typeof decision.crawlDelayMs === 'number') {
+        const origin = new URL(url).origin
+        this.crawlDelays.set(origin, Math.max(this.crawlDelays.get(origin) ?? 0, decision.crawlDelayMs))
+      }
       record.robots = decision.decision === 'allowed' ? 'allowed' : decision.decision === 'no_robots' ? 'no_robots' : 'disallowed'
       if (decision.decision === 'disallowed') {
         return { record: { ...record, kind: 'refused', error: decision.unreachable === undefined ? null : `robots_unreachable_${decision.unreachable}` }, locs: null }
@@ -242,7 +249,7 @@ export class HttpSitemapSource implements SitemapSource {
       const origin = new URL(current).origin
       const permit = await this.scheduler.acquire(origin, scope.signal)
       try {
-        await this.scheduler.beforeRequest(origin, scope.signal)
+        await this.scheduler.beforeRequest(origin, scope.signal, undefined, this.crawlDelays.get(origin) ?? 0)
         const response = await request(current, {
           dispatcher: this.route.dispatcherFor(current),
           method: 'GET',

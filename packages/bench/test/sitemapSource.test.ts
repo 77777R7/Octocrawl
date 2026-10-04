@@ -158,7 +158,7 @@ describe('HttpSitemapSource', () => {
     }
   })
 
-  it('waits the Crawl-delay of the file\'s host between its requests, and the scheduler keeps it for the pages after', async () => {
+  it('waits the Crawl-delay of the file\'s host between its requests, for its own load alone', async () => {
     // A host whose robots.txt asks for a second between requests, and names an index of two files.
     const at: Array<{ path: string; ms: number }> = []
     const slow = createServer((req, res) => {
@@ -179,10 +179,10 @@ describe('HttpSitemapSource', () => {
       expect(files.map((entry) => entry.path)).toEqual(['/index.xml', '/one.xml', '/two.xml'])
       // (A little under a second, for the timer's rounding; the policy's own interval is 0 here.)
       for (let i = 1; i < files.length; i++) expect(files[i]!.ms - files[i - 1]!.ms).toBeGreaterThanOrEqual(950)
-      // A page fetched next on the host, through the same scheduler, waits it too.
+      // The scheduler is the whole process's: another job's request to the host next keeps the policy's interval, not this load's Crawl-delay.
       const last = files[files.length - 1]!.ms
       await scheduler.beforeRequest(slowOrigin)
-      expect(performance.now() - last).toBeGreaterThanOrEqual(950)
+      expect(performance.now() - last).toBeLessThan(900)
     } finally {
       await source.close()
       slow.closeAllConnections()
