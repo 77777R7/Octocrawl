@@ -42,6 +42,8 @@ beforeAll(async () => {
     if (req.url === '/disabled') return html(`<h1>Disabled</h1>${PROSE}<button id="go" disabled>Go</button>`)
     // A button shown 8 s after load under a banner that goes 4 s later: covered for less than a try, though a try ends covered.
     if (req.url === '/late-cover') return html(`<h1>Late cover</h1>${PROSE}<button id="go" style="display:none" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => { document.getElementById('go').style.display = ''; document.getElementById('banner').style.display = '' }, 8000); setTimeout(() => document.getElementById('banner').remove(), 12000)</script>`)
+    // /covered on a long page that scrolls smoothly (as many site themes set): the button moves while Playwright scrolls to it.
+    if (req.url === '/covered-smooth') return html(`<style>html{scroll-behavior:smooth}</style><h1>Covered smooth</h1>${PROSE}<button id="go">Go</button><div style="height:3000px"></div><div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
     // A banner over the button for 2 s, then gone: a click waits it out.
     if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
@@ -273,6 +275,13 @@ describe('actions, real browser', () => {
       await browser.teardown()
     }
   }, 60_000)
+
+  it('a covered control on a page that scrolls smoothly fails its click within seconds too', async () => {
+    const started = Date.now()
+    const result = await run('/covered-smooth', [{ type: 'click', selector: '#go' }])
+    expect(Date.now() - started).toBeLessThan(20_000)
+    expect(result.actions?.failed?.message).toMatch(/could not reach it: <div class="modal-backdrop"/)
+  }, 120_000)
 
   it('a control covered for less than 5 s is clicked, even when the cover came late in a try', async () => {
     const result = await run('/late-cover', [{ type: 'click', selector: '#go' }])

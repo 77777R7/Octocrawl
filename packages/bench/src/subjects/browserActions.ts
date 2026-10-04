@@ -621,25 +621,32 @@ async function clickControl(ctx: ActionRunContext, control: Locator, selector: s
   }
 }
 
-/**
- * What covered the control in a trial click that timed out, from Playwright's call log: `last`, what covered it at its last
- * check (null when that check saw something else, or there was none); `whole`, the same when every check of the try saw
- * it covered.
- */
-function coverOf(error: unknown): { last: string | null; whole: string | null } {
+/** A Playwright error's call log, line by line, without the colour codes a terminal that takes colour gets, nor the list marks. */
+function callLog(error: unknown): string[] {
   const text = error instanceof Error ? error.message : String(error)
-  const outcomes = text.split('\n').map((line) => line.trim().replace(/^- /, '')).filter((line) => /intercepts pointer events$|^element is not (visible|stable|enabled)|^element is outside of the viewport/.test(line))
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;]*m/g, '').split('\n').map((line) => line.trim().replace(/^- /, ''))
+}
+
+/**
+ * What covered the control in a trial click that timed out, from Playwright's
+ * call log: `last`, what covered it at its last check (null when that check
+ * found it hidden, disabled or out of view, or there was none); `whole`, the
+ * same when no check of the try found it any of those. A check that found it
+ * moving ("not stable", as when a page scrolls smoothly to it) says neither.
+ */
+export function coverOf(error: unknown): { last: string | null; whole: string | null } {
+  const outcomes = callLog(error).filter((line) => /intercepts pointer events$|^element is not (visible|enabled)|^element is outside of the viewport/.test(line))
   const covered = (line: string | undefined) => line !== undefined && line.endsWith('intercepts pointer events')
   const last = covered(outcomes.at(-1)) ? outcomes.at(-1)!.slice(0, 300) : null
   return { last, whole: last !== null && outcomes.every(covered) ? last : null }
 }
 
 function message(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error)
   // Playwright appends a call log; the first line says what happened, and a click that never landed says why: what covers
   // the control (a modal, a banner), its last report of it.
-  const lines = text.split('\n')
-  const covered = lines.map((line) => line.trim().replace(/^- /, '')).filter((line) => line.endsWith('intercepts pointer events')).at(-1)
+  const lines = callLog(error)
+  const covered = lines.filter((line) => line.endsWith('intercepts pointer events')).at(-1)
   return `${lines[0]!.slice(0, 300)}${covered === undefined ? '' : ` (${covered.slice(0, 300)})`}`
 }
 
