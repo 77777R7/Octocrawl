@@ -829,7 +829,26 @@ export function parse(html: string, fragment = false): DomDoc {
       ? `<html><head></head>${body !== null ? `<body${body[1]}>${body[2]}</body>` : `<body>${html}</body>`}</html>`
       : /<html[\s>]/i.test(html) ? html : /<body[\s>]/i.test(html) ? `<html>${html}</html>` : `<html><head></head><body>${html}</body></html>`
     const { document } = parseHTML(page) as unknown as { document: Document }
+    unwrapStrayHeads(document)
     return { document, close: () => {} }
+  }
+}
+
+/**
+ * For linkedom's own parser: a browser ignores a <head> tag inside the body,
+ * where linkedom makes it an element, and since `<head/>` is an open tag (a
+ * slash closes only void elements) everything after it up to its parent's
+ * end went inside it, where the Markdown skips it. Each such element is
+ * replaced by its children. The document's own head, a child of <html> or
+ * the root itself, stays. (parse5 builds these as a browser does.)
+ */
+function unwrapStrayHeads(document: Document): void {
+  const root = document.documentElement
+  for (const head of Array.from(document.querySelectorAll('head'))) {
+    const parent = head.parentNode
+    if (!parent || head === root || (parent === root && root.tagName === 'HTML')) continue
+    while (head.firstChild) parent.insertBefore(head.firstChild, head)
+    parent.removeChild(head)
   }
 }
 

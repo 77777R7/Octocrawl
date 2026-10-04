@@ -557,6 +557,16 @@ describe('extractTf selection and whole page', () => {
 })
 
 describe('parse', () => {
+  it('reads a <head> inside the body as a browser does also on a page past the parse5 budget, read by linkedom', async () => {
+    const { htmlToMarkdown: markdown } = await import('../src/index.js')
+    // One tag of 300 attributes sends the page to linkedom's parser.
+    const wide = `<div ${Array.from({ length: 300 }, (_, k) => `data-k${k}="v"`).join(' ')}>config</div>`
+    expect(markdown(`<head/><p>Some text</p>${wide}`)).toBe('Some text\n\nconfig')
+    expect(markdown(`<head><title>T</title><p>Para one.</p>${wide}`)).toBe('Para one.\n\nconfig')
+    expect(markdown(`<!doctype html><head><title>T</title><p>Para one.</p>${wide}`)).toBe('Para one.\n\nconfig')
+    expect(markdown(`<!doctype html><html><body><article><p>a<head/>b</p><p>c</p></article>${wide}</body></html>`)).toBe('ab\n\nc\n\nconfig')
+  })
+
   it('copies a page parsed again from the tree it built, each document its own', async () => {
     const { parse } = await import('../src/dom.js')
     const page = '<!doctype html><html><body><b>1<p>2</b>3</p><table><tr><td>a</td></tr></table></body></html>'
