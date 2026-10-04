@@ -47,7 +47,9 @@ npm run typecheck
 npm test
 ```
 
-Two tests call live websites (`packages/api/test/monitor.test.ts`, `packages/api/test/session.test.ts`) and can fail without network access; say so when reporting results rather than treating it as a regression.
+`npm test` passes offline. Tests that call live websites are named `*.live.test.ts` and run under `npm run test:live` (today `packages/api/test/monitor.live.test.ts`); they need the network and can fail when a site changes or is down, so say so when reporting their results rather than treating a failure as a regression.
+
+A test that bounds elapsed time goes in a `*.perf.test.ts` file (or, for a real browser or HTTP wait, a file `vitest.config.ts` runs in its timed group), not among the parallel tests; see the Testing section of [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Branches
 

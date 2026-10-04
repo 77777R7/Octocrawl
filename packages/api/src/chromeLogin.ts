@@ -17,7 +17,8 @@ import { readFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { LoginStorage } from '@w2l/contracts'
-import { FileSessionStore, sessionCoversHost, sessionFingerprint, type SessionSnapshot, type StoredCookie } from '@w2l/bench'
+import { FileSessionStore, sessionCoversHost, type SessionSnapshot, type StoredCookie } from '@w2l/bench'
+import { sessionSha256 } from '@w2l/http-core'
 
 /** A refusal or failure the person can act on; the message says how. */
 export class ChromeLoginError extends Error {}
@@ -262,7 +263,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
     statement: `${storageState === undefined ? 'cookies' : 'cookies and localStorage'} for ${domain} taken from the user's own Chrome, with their approval in Chrome's remote debugging dialog`,
   }
   await new FileSessionStore(options.sessionsFile).save(snapshot)
-  return { domain, cookieCount: cookies.length, localStorage: loginStorage(storageState), localStorageRead: storage !== null, localStorageUnread: storage?.unread ?? [], sessionSha256: sessionFingerprint(snapshot), sessionsFile: options.sessionsFile }
+  return { domain, cookieCount: cookies.length, localStorage: loginStorage(storageState), localStorageRead: storage !== null, localStorageUnread: storage?.unread ?? [], sessionSha256: recordedSha256(snapshot), sessionsFile: options.sessionsFile }
 }
 
 function localUser(): string {
@@ -281,7 +282,10 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
     // Cancelled while Chrome waits for Allow: the connection is dropped, and an Allow clicked later attaches to nothing.
     const cancel = () => { reject(new ChromeLoginError('the connection to Chrome was cancelled')); socket.close() }
     signal?.addEventListener('abort', cancel, { once: true })
-    const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+    const pending = new Map<number, { sessionId: string | undefined; resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+    // Sessions Chrome detached (their tab closed): it answers none of their commands again, so none is waited for.
+    const detached = new Set<string>()
+    const tabClosed = () => new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
     const listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
     let nextId = 1
     let opened = false
@@ -299,13 +303,14 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
         send(method, params = {}, sessionId, within = CDP_COMMAND_TIMEOUT_MS) {
           // A closed socket sends nothing and answers nothing: the command fails now, not never.
           if (closed) return Promise.reject(new ChromeLoginError('Chrome closed the connection'))
+          if (sessionId !== undefined && detached.has(sessionId)) return Promise.reject(tabClosed())
           const id = nextId++
           return new Promise((done, fail) => {
             const timeout = setTimeout(() => {
               pending.delete(id)
               fail(new ChromeLoginError(`Chrome did not answer ${method} within ${Math.round(within / 1000)} s`))
             }, within)
-            pending.set(id, { resolve: (value) => { clearTimeout(timeout); done(value) }, reject: (error) => { clearTimeout(timeout); fail(error) } })
+            pending.set(id, { sessionId, resolve: (value) => { clearTimeout(timeout); done(value) }, reject: (error) => { clearTimeout(timeout); fail(error) } })
             socket.send(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }))
           })
         },
@@ -324,6 +329,12 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string; result?: unknown; error?: { message?: string } }
       if (message.id === undefined && message.method !== undefined) {
+        // A tab closed (or W2L let it go): its session's commands in flight fail now, not after their timeout.
+        const gone = message.method === 'Target.detachedFromTarget' && message.sessionId === undefined ? message.params?.sessionId : undefined
+        if (typeof gone === 'string') {
+          detached.add(gone)
+          for (const [id, waiter] of pending) if (waiter.sessionId === gone) { pending.delete(id); waiter.reject(tabClosed()) }
+        }
         for (const listener of listeners.get(`${message.sessionId ?? ''}|${message.method}`) ?? []) listener(message.params ?? {})
         return
       }
@@ -347,11 +358,16 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
   })
 }
 
+/** A saved login's SHA-256 as the records of its reads carry it: of the cookies and storageState the authed rung hands the browser. */
+function recordedSha256(snapshot: SessionSnapshot): string {
+  return sessionSha256({ ...(snapshot.cookies === undefined ? {} : { cookies: snapshot.cookies }), ...(snapshot.storageState === undefined ? {} : { storageState: snapshot.storageState }) })
+}
+
 /** The saved logins, by domain, without their cookies or storage values: what `w2l login list` shows. */
 export async function listSavedLogins(sessionsFile: string): Promise<{ domain: string; savedAt: string; cookieCount: number; localStorage: LoginStorage | null; sessionSha256: string }[]> {
   return (await new FileSessionStore(sessionsFile).list())
     .filter((s) => s.vendor === 'browser_local_authed')
-    .map((s) => ({ domain: s.domain, savedAt: s.attestedAt, cookieCount: s.cookies?.length ?? 0, localStorage: loginStorage(s.storageState), sessionSha256: sessionFingerprint(s) }))
+    .map((s) => ({ domain: s.domain, savedAt: s.attestedAt, cookieCount: s.cookies?.length ?? 0, localStorage: loginStorage(s.storageState), sessionSha256: recordedSha256(s) }))
 }
 
 /** Forget a saved login. False when none was saved for `site`. */

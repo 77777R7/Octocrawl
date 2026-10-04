@@ -17,6 +17,7 @@ Dockerfile
 .dockerignore
 .gitignore
 vitest.config.ts
+vitest.live.config.ts
 LICENSE
 research/*
 !research/amazon-product-schema.v1.json

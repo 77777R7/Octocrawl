@@ -12,6 +12,7 @@
   "scripts": {
     "typecheck": "tsc --build",
     "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "build:public": "tsc --build && npm run build --workspace @w2l/public-web",
     "public:preview": "npm run build:public && node packages/public-preview/dist/cli.js",
     "public:preview:local": "npm run build:public && node scripts/section-c/public-preview-local.mjs",

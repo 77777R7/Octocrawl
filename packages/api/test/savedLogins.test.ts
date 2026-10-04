@@ -63,7 +63,8 @@ describe('saved logins in the API engine', () => {
 
   it('a crawl never carries a saved login, even one stored in mode authed before crawl refused it', async () => {
     const { seen } = await setup()
-    const accepted = await engine!.startCrawl({ url: URL_, mode: 'authed', maxDepth: 0, maxPages: 1 } as Parameters<ApiEngine['startCrawl']>[0])
+    // (No sitemap read: it would request the page's host for real, and the pages here are stubbed.)
+    const accepted = await engine!.startCrawl({ url: URL_, mode: 'authed', maxDepth: 0, maxPages: 1, sitemap: 'skip' } as Parameters<ApiEngine['startCrawl']>[0])
     for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes((await engine!.getCrawl(accepted.taskId))?.status ?? ""); i++) await new Promise((resolve) => setTimeout(resolve, 20))
     expect(seen.every((session) => session === null || session === undefined)).toBe(true)
   })

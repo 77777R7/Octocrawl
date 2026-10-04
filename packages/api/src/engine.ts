@@ -148,6 +148,8 @@ export interface HandoffHooks {
   onWaiting?: (url: string, check: string) => void
   /** A page shows no check: it is read once the person clicks on it. */
   onConfirm?: (url: string) => void
+  /** The tab W2L opened has stayed out of sight: the person is to switch to it. */
+  onHidden?: (url: string) => void
   signal?: AbortSignal
 }
 
@@ -818,7 +820,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try {
       // The page is through as the read below judges it: with the request's tags and blockAds.
       const judged = { ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }), ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }), ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }) }
-      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal, ...judged })
+      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }), signal, ...judged })
       const result = pageFromUserBrowser(read, prior, fetchOpts)
       if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
       return { result }
