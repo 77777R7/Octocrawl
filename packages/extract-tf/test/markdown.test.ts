@@ -294,6 +294,24 @@ describe('htmlToMarkdown', () => {
     expect(page('<p><b>Note:</p><p>read this</p>')).toBe('**Note:**\n\n**read this**')
   })
 
+  it('follows a browser\'s form element pointer: a nested <form> is ignored, and </form> leaves what is open in the form open', () => {
+    // Chromium's document.body.innerHTML of each page, its implied <tbody> left out.
+    const body = (html: string) => parse(`<!doctype html><html><body>${html}</body></html>`).document.body.innerHTML.replace(/<\/?tbody>/g, '')
+    expect(body('<form><form>x</form>y</form>z')).toBe('<form>x</form>yz')
+    expect(body('<form><div>a</form>b</div>c')).toBe('<form><div>ab</div></form>c')
+    expect(body('<form><div><div>a</form>b</div>c</div>d')).toBe('<form><div><div>ab</div>c</div></form>d')
+    expect(body('<div><form></div><form>x</form>y')).toBe('<div><form></form></div>xy')
+    expect(body('<table><form><tr><td>a</td></tr></table><form>b</form>')).toBe('<table><form></form><tr><td>a</td></tr></table>b')
+    // A form in a <noscript> (text to a browser) neither sets nor clears it.
+    expect(body('<noscript><form>a</form></noscript><form>b</form>')).toBe('<noscript><form>a</form></noscript><form>b</form>')
+    expect(body('<form>a<noscript><form>b</form></noscript>c</form>d')).toBe('<form>a<noscript><form>b</form></noscript>c</form>d')
+    // In a <template> the pointer is not used.
+    expect(body('<template><form><form>x</form></form></template>y')).toBe('<template><form><form>x</form></form></template>y')
+    // Directly in a template, an end tag but its own is ignored.
+    expect(body('<template></p><div>x</div></template>')).toBe('<template><div>x</div></template>')
+    expect(body('<template><div></div></p></template>')).toBe('<template><div></div><p></p></template>')
+  })
+
   it('reads a table cell by the same body rules, the cell ending what is open in it', () => {
     // Chromium's document.body.innerHTML of each page, its implied <tbody> left out.
     const body = (html: string) => parse(`<!doctype html><html><body>${html}</body></html>`).document.body.innerHTML
