@@ -1,8 +1,35 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 const root = dirname(fileURLToPath(import.meta.url))
+
+const TESTS = ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'cloudflare/*/test/**/*.test.ts']
+/**
+ * Tests that bound the CPU time of a piece of code (`*.perf.test.ts`): run
+ * last, one file at a time, so no other test file shares the machine with
+ * them. On CI the files run side by side on a few cores, and such bounds
+ * failed there by 5 to 10 percent, or more, when another heavy file ran
+ * beside them.
+ */
+const PERF = TESTS.map((glob) => glob.replace(/\.test\.ts$/, '.perf.test.ts'))
+/**
+ * Test files that drive a real browser or real HTTP and bound how long a
+ * wait or a cancellation takes: run after the rest, two at a time, so a
+ * browser start or a deadline is not stretched by a full machine.
+ */
+const TIMED = [
+  'packages/*/test/**/*.integration.test.ts',
+  'packages/api/test/chromeHandoff.test.ts',
+  'packages/api/test/chromeLogin.test.ts',
+  'packages/api/test/handoffRoute.test.ts',
+  'packages/api/test/map.test.ts',
+  'packages/api/test/pageOptions.test.ts',
+  'packages/bench/test/browserLocal.test.ts',
+  'packages/bench/test/originScheduler.test.ts',
+  'packages/bench/test/sitemapSource.test.ts',
+  'packages/mcp/test/httpCancellation.test.ts',
+]
 
 export default defineConfig({
   // Workspace packages resolve to source, not dist: a stale build must never
@@ -23,8 +50,14 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'cloudflare/*/test/**/*.test.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // The rest in parallel first, then the timed files two at a time, then the perf files one at a time (a group runs
+    // once the one before it is done).
+    projects: [
+      { extends: true, test: { name: 'unit', include: TESTS, exclude: [...configDefaults.exclude, ...PERF, ...TIMED] } },
+      { extends: true, test: { name: 'timed', include: TIMED, exclude: [...configDefaults.exclude, ...PERF], maxWorkers: 2, sequence: { groupOrder: 1 } } },
+      { extends: true, test: { name: 'perf', include: PERF, fileParallelism: false, sequence: { groupOrder: 2 } } },
+    ],
   },
 })
