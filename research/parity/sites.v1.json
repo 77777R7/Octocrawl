@@ -2954,6 +2954,20 @@
       ]
     },
     {
+      "id": "AC24",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://the-internet.herokuapp.com/key_presses",
+      "request": {"debug": true, "actions": [{"type": "click", "selector": "#target"}, {"type": "press", "key": "Escape"}]},
+      "note": "Added 2026-10-05, frozen before its first run. AC04's key press with a key that does not submit the field's form: AC04 presses Enter in #target, which sits in a <form>, so the page reloads without the line it showed. AC04 stays as it was.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-press", "type": "markdownIncludes", "text": "You entered: ESCAPE"}
+      ]
+    },
+    {
       "id": "LS01",
       "batch": "lists",
       "feature": "interaction.list-steps",
@@ -3394,6 +3408,51 @@
         {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 3, "detail.outcome": "ok"}},
         {"item": "action-write", "type": "field", "path": "actions.javascriptReturns.1.value", "abovePath": "actions.javascriptReturns.0.value"},
         {"item": "action-write", "type": "markdownMatches", "pattern": "sqlite", "flags": "i"}
+      ]
+    },
+    {
+      "id": "AR11",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://www.gov.uk/find-local-council",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "input#postcode"}, {"type": "write", "text": "SW1A 1AA"}, {"type": "press", "key": "Enter"}, {"type": "wait", "selector": "h1"}]},
+      "note": "Added 2026-10-05, frozen before its first run. AR09's form, judged by the page it reached rather than by which step's trace records the navigation: in the 2026-10-04 proxied run on 82d166b the navigation landed after the press step had settled, so AR09's navigatedTo check failed though the page was right. AR09 stays as it was.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 2, "detail.outcome": "ok"}},
+        {"item": "action-write-press", "type": "field", "path": "metadata.url", "equals": "https://www.gov.uk/find-local-council/westminster"},
+        {"item": "action-write-press", "type": "markdownIncludes", "text": "Westminster"}
+      ]
+    },
+    {
+      "id": "AR12",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://hn.algolia.com/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "click", "selector": "input.SearchInput"}, {"type": "write", "text": "sqlite"}, {"type": "wait", "milliseconds": 2500}, {"type": "executeJavascript", "script": "return document.querySelectorAll(\".Story\").length"}]},
+      "note": "Added 2026-10-05, frozen before its first run. AR10's search, judged by its results alone: AR10 also counts the stories before the query, which some loads draw before the count (30 before in the 2026-10-04 proxied run on 82d166b). The app changes its URL with pushState, which metadata.url does not follow, so the URL is not checked. AR10 stays as it was.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 3, "detail.outcome": "ok"}},
+        {"item": "action-write", "type": "field", "path": "actions.javascriptReturns.0.value", "min": 10},
+        {"item": "action-write", "type": "markdownMatches", "pattern": "sqlite", "flags": "i"}
+      ]
+    },
+    {
+      "id": "AR13",
+      "batch": "actions-real",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://dev.to/",
+      "request": {"debug": true, "onlyMainContent": false, "timeout": 90000, "actions": [{"type": "executeJavascript", "script": "return document.querySelectorAll(\".crayons-story\").length"}, {"type": "scrollToEnd", "maxScrolls": 3, "itemSelector": ".crayons-story"}]},
+      "note": "Added 2026-10-05, frozen before its first run. AR08's feed counted by every story, the ones the page is served with (div.crayons-story) and the ones scrolling adds (article.crayons-story): probed before freezing, 19 before and 60 after three scrolls. AR08 counts article elements, which only scrolling adds. AR08 stays as it was.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "action-step", "type": "field", "path": "status", "equals": "success"},
+        {"item": "action-step", "type": "traceEvent", "match": {"event": "action", "detail.index": 1, "detail.outcome": "ok"}},
+        {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.0.value", "min": 1},
+        {"item": "action-scroll", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
       ]
     }
   ]
