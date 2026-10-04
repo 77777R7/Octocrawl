@@ -1,0 +1,23 @@
+# Real-site run 2026-10-04
+
+Command: `node research/parity/run-sites.mjs --batch 1 --record research/parity/runs/2026-10-05-1-proxied-d35dbce.md`
+Source commit: `d35dbce2e07fbbf435f635410eeef9d2e3feab52`
+Run: 2026-10-04T18:33:07.812Z → 2026-10-04T18:33:59.885Z against http://127.0.0.1:8787
+Network: HTTPS_PROXY, HTTP_PROXY, NO_PROXY set in the runner's environment; 12 of 12 cases' responses record an environment proxy in evidence.envProxy (127.0.0.1:7890).
+
+Cases fully passing: 12/12; checks passing: 44/44.
+
+| Case | URL | Checks | Failed checks (P1 item) |
+| --- | --- | --- | --- |
+| S01 | https://books.toscrape.com/ | 7/7 | — |
+| S02 | https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html | 4/4 | — |
+| S03 | https://books.toscrape.com/catalogue/does-not-exist-w2l/index.html | 3/3 | — |
+| S04 | https://quotes.toscrape.com/ | 6/6 | — |
+| S05 | https://quotes.toscrape.com/js/ | 3/3 | — |
+| S06 | https://quotes.toscrape.com/js-delayed/ | 2/2 | — |
+| S07 | https://www.scrapethissite.com/pages/simple/ | 4/4 | — |
+| S08 | https://www.scrapethissite.com/pages/forms/ | 3/3 | — |
+| S09 | https://docs.github.com/en/get-started/git-basics/setting-your-username-in-git | 5/5 | — |
+| S10 | https://en.wikipedia.org/wiki/List_of_countries_and_dependencies_by_population | 4/4 | — |
+| S11 | https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901 | 2/2 | — |
+| S12 | https://www.bls.gov/news.release/empsit.nr0.htm | 1/1 | — |
