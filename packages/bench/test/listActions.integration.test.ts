@@ -89,6 +89,10 @@ beforeAll(async () => {
     if (many !== null) { const n = Number(many[1]); return html(`<h1>Many ${n}</h1>${PROSE}<div id="all"></div>${n < 2 ? `<a class="next" href="/many/${n + 1}">Next</a>` : ''}<script>document.getElementById('all').innerHTML = Array.from({ length: 20000 }, (_, i) => '<a href="/wiki/Page_${n}_' + i + '">Page ' + i + '</a>').join(' ')</script>`) }
     const api = /^\/api\?page=(\d)$/.exec(url)
     if (api !== null) { const n = Number(api[1]); setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify([1, 2, 3, 4].map((i) => `Reading ${n * 10 + i}`))) }, 2400); return }
+    // The same app drawing each page's 8 rows one by one, 100 ms apart, over the old ones: a page read while it draws is half one page and half the next.
+    if (url === '/draw' || url.startsWith('/draw?')) return html(`<h1>App</h1>${PROSE}<ul id="l">${rows(1, 8)}</ul><button id="next">Next</button><script>let p = 1; document.getElementById('next').onclick = () => { p++; history.pushState({}, '', '/draw?page=' + p); const asked = p; fetch('/api8?page=' + p).then((r) => r.json()).then((list) => { const rows = document.querySelectorAll('#l > li'); list.forEach((t, i) => setTimeout(() => { if (asked === p) rows[i].textContent = t }, i * 100)); setTimeout(() => { if (asked === p && p >= 3) document.getElementById('next').remove() }, list.length * 100) }) }</script>`)
+    const api8 = /^\/api8\?page=(\d)$/.exec(url)
+    if (api8 !== null) { const n = Number(api8[1]); setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8].map((i) => `Reading ${n * 10 + i}`))) }, 1500); return }
     // Item links whose query changes on every load (a search id), on an alias first page and a clamping paginator.
     const qrows = (from: number) => [0, 1].map((i) => `<li class="row"><a href="/item/${from + i}?qid=${Date.now()}${Math.random()}">Reading ${from + i}</a></li>`).join('')
     if (url === '/qalias' || url === '/qalias?page=1') return html(`<h1>Q 1</h1>${PROSE}<ul>${qrows(1)}</ul><a class="next" href="/qalias?page=${url === '/qalias' ? '1' : '2'}">Next</a>`)
@@ -249,6 +253,13 @@ describe('list steps, real browser', () => {
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2 })
     // Comparing each link with the ones read before, link by link, took seconds a read on these pages.
     expect(Date.now() - started).toBeLessThan(15_000)
+  }, 90_000)
+
+  it('paginate reads a page the app is still drawing only once it has drawn it', async () => {
+    const result = await run('/draw', [{ type: 'paginate', nextSelector: '#next', itemSelector: 'li.row', waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 24 })
+    expect(result.actions?.scrapes.map((scrape) => /Reading (\d+)<\/li><\/ul>/.exec(scrape.html)?.[1])).toEqual(['8', '28', '38'])
+    expect(result.actions?.scrapes[1]?.html).not.toMatch(/Reading [1-8]</)
   }, 90_000)
 
   it('item links whose query changes on every load do not make a page read before look new', async () => {
