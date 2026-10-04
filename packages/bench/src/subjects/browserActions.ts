@@ -58,6 +58,28 @@ export interface ActionRun {
   checkedDocuments: number
   /** Files written under W2L_CAPTURE_RAW_DIR, for `evidence.artifacts`. */
   artifacts: string[]
+  /** How much of each output there was before the last step that ran, for dropLastStep. */
+  lastStepFrom: OutputCounts
+}
+
+/** How many screenshots, scrapes, script returns, PDFs, lists and files the steps had produced at some point. */
+export interface OutputCounts { screenshots: number; scrapes: number; javascriptReturns: number; pdfs: number; lists: number; artifacts: number }
+
+const outputCounts = (result: ActionsResult, artifacts: readonly string[]): OutputCounts => ({ screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, lists: result.lists.length, artifacts: artifacts.length })
+
+/** Everything produced since `from`: a step that met a page W2L does not fetch keeps nothing it produced, as it may have read that page. */
+function dropSince(result: ActionsResult, artifacts: string[], from: OutputCounts): void {
+  result.screenshots.length = from.screenshots
+  result.scrapes.length = from.scrapes
+  result.javascriptReturns.length = from.javascriptReturns
+  result.pdfs.length = from.pdfs
+  result.lists.length = from.lists
+  artifacts.length = from.artifacts
+}
+
+/** What the last step that ran produced, dropped: a page W2L does not fetch, found after the steps, is that step's. */
+export function dropLastStep(run: ActionRun): void {
+  dropSince(run.result, run.artifacts, run.lastStepFrom)
 }
 
 /** How long the page may take to settle after a step that can change it. */
@@ -76,6 +98,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   let checkedUrl = withoutHash(page.url())
   // Documents loaded before the first step are the fetch's; every one after it is checked, in order, whatever its URL.
   let checkedDocuments = ctx.loadedDocuments().length
+  let lastStepFrom = outputCounts(result, artifacts)
   /** The first document loaded since the last check that W2L does not fetch, checking (and passing) the ones before it; documents loaded during a check are checked too. A refused one stays unchecked: the page may still show it, and the check after the steps then reads nothing. */
   const refusedDocument = async (): Promise<{ url: string; reason: string } | null> => {
     for (let loaded = ctx.loadedDocuments(); checkedDocuments < loaded.length; loaded = ctx.loadedDocuments()) {
@@ -89,7 +112,8 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
-    const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, lists: result.lists.length, artifacts: artifacts.length }
+    const before = outputCounts(result, artifacts)
+    lastStepFrom = before
     // Every document loaded so far, a redirect's landing among them (the guard sees only a navigation's first request), and a
     // navigation the guard stopped: either fails the step. A paginate step checks between its pages, the runner after every step.
     const guard = async (): Promise<void> => {
@@ -113,21 +137,13 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
         const landed = await refusedDocument().catch(() => null)
         if (landed !== null) failure = new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
       }
-      // A step that met a page W2L does not fetch keeps nothing it produced: it may have read that page.
-      if (failure.code === 'navigation_refused') {
-        result.screenshots.length = before.screenshots
-        result.scrapes.length = before.scrapes
-        result.javascriptReturns.length = before.javascriptReturns
-        result.pdfs.length = before.pdfs
-        result.lists.length = before.lists
-        artifacts.length = before.artifacts
-      }
+      if (failure.code === 'navigation_refused') dropSince(result, artifacts, before)
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'failed', ms: Math.round(performance.now() - started), code: failure.code, error: failure.message } })
       result.failed = { index, type: action.type, code: failure.code, message: failure.message }
       break
     }
   }
-  return { result, artifacts, checkedDocuments }
+  return { result, artifacts, checkedDocuments, lastStepFrom }
 }
 
 async function runStep(action: PageAction, ctx: ActionRunContext, result: ActionsResult, artifacts: string[], index: number, guard: () => Promise<void>): Promise<Record<string, unknown>> {
