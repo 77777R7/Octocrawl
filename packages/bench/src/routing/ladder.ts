@@ -199,9 +199,9 @@ function withLowContentYield(result: FetchResult, channelsTried: readonly string
 /**
  * A rendered answer (any lane but http) that its own extraction found thin
  * and low-confidence, with the `low_content_yield` warning: it is the run's
- * answer and no lane above it is left, so the caveat is what tells the reader
- * that `success` holds little (a page whose data its scripts draw, a listing
- * of navigation links). The status stands.
+ * answer, so the caveat is what tells the reader that `success` holds little
+ * (a page whose data its scripts draw, a listing of navigation links). The
+ * status stands.
  */
 function withRenderedLowYield(result: FetchResult): FetchResult {
   if (!CONTENTFUL_STATUS.has(result.status) || result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
@@ -211,7 +211,7 @@ function withRenderedLowYield(result: FetchResult): FetchResult {
   if (confidence === null || tokens === null || confidence > QUALITY_ESCALATION_MAX_CONFIDENCE || tokens > RENDERED_LOW_YIELD_MAX_TOKENS) return result
   return {
     ...result,
-    warnings: [...(result.warnings ?? []), { code: 'low_content_yield', message: `The ${result.lane} lane extracted ${tokens} tokens at confidence ${confidence}; no lane after it was left to try.` }],
+    warnings: [...(result.warnings ?? []), { code: 'low_content_yield', message: `The ${result.lane} lane rendered the page and extracted ${tokens} tokens at confidence ${confidence}; that is the answer.` }],
   }
 }
 

@@ -91,7 +91,7 @@ describe('agent hints', () => {
     // Under fastMode the one fastMode sentence says what was declined; the warning's own hint is left out.
     expect(hints(thin('…'), ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
     // A thin rendered answer: the browser lane's own extraction found it thin, so the hint is about the rendered page.
-    const rendered = result({ lane: 'browser_local', warnings: [{ code: 'low_content_yield', message: 'The browser_local lane extracted 226 tokens at confidence 0; no lane after it was left to try.' }], trace: [{ at: 1, lane: 'browser_local', event: 'extract', detail: { confidence: 0 } }] })
+    const rendered = result({ lane: 'browser_local', warnings: [{ code: 'low_content_yield', message: 'The browser_local lane rendered the page and extracted 226 tokens at confidence 0; that is the answer.' }], trace: [{ at: 1, lane: 'browser_local', event: 'extract', detail: { confidence: 0 } }] })
     expect(hints(rendered, ['http', 'browser_local'])).toEqual([RENDERED_LOW_YIELD_HINT])
     // A shell carries the client-rendered sentence first, then the thin-content one.
     const shell = result({ status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'low_content_yield', message: 'thin' }], trace: [{ at: 1, lane: 'http', event: 'quality_client_rendered' }] })

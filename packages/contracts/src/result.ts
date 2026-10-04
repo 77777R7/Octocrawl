@@ -256,7 +256,7 @@ export interface FetchWarning {
    * `low_content_yield`: a thin answer stayed the run's answer: the http
    * lane's, which the browser lane did not improve on or was not offered,
    * or a rendered one (the browser or a provider lane's) its own extraction
-   * found thin and low-confidence, with no lane after it.
+   * found thin and low-confidence.
    * `screenshot_unavailable`: the `screenshot` format was asked for and the
    * browser lane rendered the page but could not capture it
    * (`screenshot_failed` in the trace); `screenshot` is null and the page

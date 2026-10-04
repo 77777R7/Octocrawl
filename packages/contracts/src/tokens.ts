@@ -56,8 +56,8 @@ export const QUALITY_ESCALATION_MAX_CONFIDENCE = 0.3
 /**
  * A rendered answer (the browser or a provider lane's) at or below this many
  * main-content tokens, extracted at or below QUALITY_ESCALATION_MAX_CONFIDENCE,
- * carries the `low_content_yield` warning: no lane above it is left to offer
- * it to, so the caveat is all the reader gets. Set from the browser lane's
+ * carries the `low_content_yield` warning: it is the run's answer, so the
+ * caveat is what tells the reader it holds little. Set from the browser lane's
  * yield on the real-site set (research/parity/runs/2026-10-04-rendered-yield-
  * calibration-b9dd658.md): IMF's datamapper renders 226 tokens of social and
  * navigation links at confidence 0 while its figures are drawn by script; the

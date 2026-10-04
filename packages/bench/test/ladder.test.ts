@@ -577,7 +577,7 @@ describe('LadderRunner — a thin rendered answer', () => {
   it('carries low_content_yield when its own extraction found it thin and unsure, and stays success', async () => {
     const thin = await run(rendered(RENDERED_LOW_YIELD_MAX_TOKENS, 0))
     expect(thin.result).toMatchObject({ status: 'success', lane: 'browser_local' })
-    expect(thin.result.warnings).toEqual([{ code: 'low_content_yield', message: `The browser_local lane extracted ${RENDERED_LOW_YIELD_MAX_TOKENS} tokens at confidence 0; no lane after it was left to try.` }])
+    expect(thin.result.warnings).toEqual([{ code: 'low_content_yield', message: `The browser_local lane rendered the page and extracted ${RENDERED_LOW_YIELD_MAX_TOKENS} tokens at confidence 0; that is the answer.` }])
   })
 
   it('carries none when it holds more, or its extraction is sure of it', async () => {
