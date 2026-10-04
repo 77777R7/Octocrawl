@@ -35,6 +35,8 @@ beforeAll(async () => {
     if (req.url === '/private/red') return html(`<style>body{background:rgb(255,0,0)}</style><h1>Secret red</h1>${PROSE}<p>Not for crawlers.</p><script>location.href = '/private/z'</script>`)
     // A button an overlay covers (a subscription modal, as NPR's is): a click cannot reach it.
     if (req.url === '/covered') return html(`<h1>Covered</h1>${PROSE}<button id="go">Go</button><div class="tp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
+    // A banner over the button for 2 s, then gone: a click waits it out.
+    if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
     if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p><a id="real" href="/gotab">Real</a>`)
     if (req.url === '/gotab') { res.writeHead(302, { location: '/private/tab' }); res.end(); return }
@@ -218,6 +220,22 @@ describe('actions, real browser', () => {
     const result = await run('/covered', [{ type: 'click', selector: '#go' }], 10_000)
     expect(result.actions?.failed).toMatchObject({ index: 0, type: 'click' })
     expect(result.actions?.failed?.message).toMatch(/<div class="tp-modal"[^]*intercepts pointer events/)
+  }, 60_000)
+
+  it('a control an overlay keeps covering fails its click or loadMore within seconds, not the step\'s whole time, naming what covers it', async () => {
+    for (const step of [{ type: 'click', selector: '#go' }, { type: 'loadMore', selector: '#go' }] as PageAction[]) {
+      const started = Date.now()
+      const result = await run('/covered', [step])
+      expect(Date.now() - started).toBeLessThan(15_000)
+      expect(result.actions?.failed).toMatchObject({ index: 0, type: step.type, code: 'action_error' })
+      expect(result.actions?.failed?.message).toMatch(/the click on #go could not reach it: <div class="tp-modal"[^]*intercepts pointer events \(still covered after 5 s\)/)
+    }
+  }, 120_000)
+
+  it('a control covered for a moment is clicked once the cover goes', async () => {
+    const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The button was clicked.')
   }, 60_000)
 
   it('a step that hangs fails as deadline_exceeded within the deadline, keeping what the steps before it produced and the page', async () => {

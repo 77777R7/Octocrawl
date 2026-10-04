@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { Page } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import {
   LIST_DEFAULTS,
   LIST_WAIT_MS,
@@ -177,7 +177,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       if (count === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
       const targets = action.all === true ? count : 1
       for (let i = 0; i < targets; i++) {
-        await raceWithSignal(matches.nth(i).click({ timeout: stepTimeout(ctx) }), signal)
+        await clickControl(ctx, matches.nth(i), action.selector)
       }
       await documentLoaded(ctx)
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
@@ -453,7 +453,7 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
       }
       if (rounds >= max) { stoppedBy = 'max'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
-      await raceWithSignal(ctx.page.locator(action.selector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      await clickControl(ctx, ctx.page.locator(action.selector).first(), action.selector)
       rounds++
       await afterRound(ctx, waitMs)
       // Many sites hide or disable the control while the items it asked for load: the round is judged once it is back or the
@@ -526,7 +526,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
       if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
       loadsAtClick = ctx.loadedDocuments().length
-      await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      await clickControl(ctx, ctx.page.locator(action.nextSelector).first(), action.nextSelector)
       await afterRound(ctx, waitMs)
       // The next page goes through the same checks as any page a step reaches, before it is read.
       await guard()
@@ -577,6 +577,39 @@ function deadlinePassed(ctx: ActionRunContext): boolean {
 
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && error.name === 'TimeoutError'
+}
+
+/** How long a click waits on a control something else covers (a modal, a consent banner) before the step gives it up. */
+const COVERED_GIVE_UP_MS = 5_000
+
+/**
+ * A click on the control, within the step's time, in tries of at most
+ * COVERED_GIVE_UP_MS: one that timed out because something still covered the
+ * control at its last try fails the step at once, naming what covers it,
+ * instead of waiting out the step's whole time; one that timed out for any
+ * other reason (not shown yet, still moving) is tried again. A try that times
+ * out has clicked nothing, so none lands after the step has failed.
+ */
+async function clickControl(ctx: ActionRunContext, control: Locator, selector: string): Promise<void> {
+  for (;;) {
+    const left = stepTimeout(ctx)
+    try {
+      await raceWithSignal(control.click({ timeout: Math.min(left, COVERED_GIVE_UP_MS) }), ctx.execution.signal)
+      return
+    } catch (error) {
+      if (!isTimeout(error) || left <= COVERED_GIVE_UP_MS) throw error
+      const covered = coveredBy(error)
+      if (covered !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${covered} (still covered after ${COVERED_GIVE_UP_MS / 1000} s)`)
+    }
+  }
+}
+
+/** What covered the control at a click's last try, from Playwright's call log; null when its last try saw something else. */
+function coveredBy(error: unknown): string | null {
+  const text = error instanceof Error ? error.message : String(error)
+  const outcomes = text.split('\n').map((line) => line.trim().replace(/^- /, '')).filter((line) => /intercepts pointer events$|^element is not (visible|stable|enabled)|^element is outside of the viewport/.test(line))
+  const last = outcomes.at(-1)
+  return last !== undefined && last.endsWith('intercepts pointer events') ? last.slice(0, 300) : null
 }
 
 function message(error: unknown): string {
