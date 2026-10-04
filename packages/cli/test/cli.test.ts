@@ -22,10 +22,12 @@ describe('flags', () => {
     }
   })
 
-  it('takes --handoff on a batch alone', () => {
+  it('takes --handoff on a batch and a scrape, not on a crawl', () => {
     expect(parseCommandLine('batch', ['https://example.com/', '--handoff']).cli).toEqual({ handoff: true })
-    expect(() => parseCommandLine('scrape', ['https://example.com/', '--handoff'])).toThrow('unknown flag --handoff')
+    expect(parseCommandLine('scrape', ['https://example.com/', '--handoff']).body).toEqual({ handoff: true })
+    expect(() => parseCommandLine('crawl', ['https://example.com/', '--handoff'])).toThrow('unknown flag --handoff')
     expect(usage('batch')).toContain('--handoff')
+    expect(usage('scrape')).toContain('--handoff')
   })
 
   it('reads booleans, integers, lists, repeated patterns, formats, parsers and headers into the API body', () => {

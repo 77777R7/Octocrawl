@@ -58,6 +58,28 @@ export interface ActionRun {
   checkedDocuments: number
   /** Files written under W2L_CAPTURE_RAW_DIR, for `evidence.artifacts`. */
   artifacts: string[]
+  /** How much of each output there was before the last step that ran, for dropLastStep. */
+  lastStepFrom: OutputCounts
+}
+
+/** How many screenshots, scrapes, script returns, PDFs, lists and files the steps had produced at some point. */
+export interface OutputCounts { screenshots: number; scrapes: number; javascriptReturns: number; pdfs: number; lists: number; artifacts: number }
+
+const outputCounts = (result: ActionsResult, artifacts: readonly string[]): OutputCounts => ({ screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, lists: result.lists.length, artifacts: artifacts.length })
+
+/** Everything produced since `from`: a step that met a page W2L does not fetch keeps nothing it produced, as it may have read that page. */
+function dropSince(result: ActionsResult, artifacts: string[], from: OutputCounts): void {
+  result.screenshots.length = from.screenshots
+  result.scrapes.length = from.scrapes
+  result.javascriptReturns.length = from.javascriptReturns
+  result.pdfs.length = from.pdfs
+  result.lists.length = from.lists
+  artifacts.length = from.artifacts
+}
+
+/** What the last step that ran produced, dropped: a page W2L does not fetch, found after the steps, is that step's. */
+export function dropLastStep(run: ActionRun): void {
+  dropSince(run.result, run.artifacts, run.lastStepFrom)
 }
 
 /** How long the page may take to settle after a step that can change it. */
@@ -76,6 +98,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   let checkedUrl = withoutHash(page.url())
   // Documents loaded before the first step are the fetch's; every one after it is checked, in order, whatever its URL.
   let checkedDocuments = ctx.loadedDocuments().length
+  let lastStepFrom = outputCounts(result, artifacts)
   /** The first document loaded since the last check that W2L does not fetch, checking (and passing) the ones before it; documents loaded during a check are checked too. A refused one stays unchecked: the page may still show it, and the check after the steps then reads nothing. */
   const refusedDocument = async (): Promise<{ url: string; reason: string } | null> => {
     for (let loaded = ctx.loadedDocuments(); checkedDocuments < loaded.length; loaded = ctx.loadedDocuments()) {
@@ -89,7 +112,8 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
   for (const [index, action] of actions.entries()) {
     throwIfExecutionStopped(execution)
     const started = performance.now()
-    const before = { screenshots: result.screenshots.length, scrapes: result.scrapes.length, javascriptReturns: result.javascriptReturns.length, pdfs: result.pdfs.length, lists: result.lists.length, artifacts: artifacts.length }
+    const before = outputCounts(result, artifacts)
+    lastStepFrom = before
     // Every document loaded so far, a redirect's landing among them (the guard sees only a navigation's first request), and a
     // navigation the guard stopped: either fails the step. A paginate step checks between its pages, the runner after every step.
     const guard = async (): Promise<void> => {
@@ -113,21 +137,13 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
         const landed = await refusedDocument().catch(() => null)
         if (landed !== null) failure = new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
       }
-      // A step that met a page W2L does not fetch keeps nothing it produced: it may have read that page.
-      if (failure.code === 'navigation_refused') {
-        result.screenshots.length = before.screenshots
-        result.scrapes.length = before.scrapes
-        result.javascriptReturns.length = before.javascriptReturns
-        result.pdfs.length = before.pdfs
-        result.lists.length = before.lists
-        artifacts.length = before.artifacts
-      }
+      if (failure.code === 'navigation_refused') dropSince(result, artifacts, before)
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'failed', ms: Math.round(performance.now() - started), code: failure.code, error: failure.message } })
       result.failed = { index, type: action.type, code: failure.code, message: failure.message }
       break
     }
   }
-  return { result, artifacts, checkedDocuments }
+  return { result, artifacts, checkedDocuments, lastStepFrom }
 }
 
 async function runStep(action: PageAction, ctx: ActionRunContext, result: ActionsResult, artifacts: string[], index: number, guard: () => Promise<void>): Promise<Record<string, unknown>> {
@@ -264,9 +280,11 @@ const STEADY_TEXT_GAP_MS = 300
  *   null without `itemSelector`;
  * - `state`: the URL with the items, or without `itemSelector` with the
  *   page's steady words and every link and source in it, which says whether
- *   the page is one already read at that URL.
+ *   the page is one already read at that URL;
+ * - `changing`: whether the two reads differed at all, by a ticking word or
+ *   by a page drawn between them (see steadyPageState).
  */
-async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; items: string | null }> {
+async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<PageState> {
   await documentLoaded(ctx)
   const read = () => bounded(ctx, ctx.page.evaluate((selector) => {
     // A link or source by its path: a query that changes on every load (a search id, a tracking token) does not make a record new.
@@ -287,13 +305,38 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
   // Word by word: a row whose price ticks keeps its name.
   const steady = (a: string, b: string) => { const before = new Set(a.split(/\s+/)); return b.split(/\s+/).filter((word) => before.has(word)).join(' ') }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const changing = JSON.stringify(first) !== JSON.stringify(second)
   if (second.items !== null) {
     const items = hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
-    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items }
+    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items, changing }
   }
   const stillThere = new Set(first.refs)
   const page = hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => stillThere.has(ref)).join(' ')}`)
-  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null }
+  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null, changing }
+}
+
+interface PageState { html: string; url: string; state: string; items: string | null; changing: boolean }
+
+/** How long paginate reads a page that changed while it was read, waiting for two reads in a row that agree. */
+const STEADY_READ_WAIT_MS = 3_000
+
+/**
+ * The page once it reads the same twice in a row. Two reads that differ are
+ * a page that ticks (a clock, a price; its steady words read the same next
+ * time) or a page drawn between them (an app swapping its rows in): a read
+ * that straddles the swap is half one page and half the next, a list no page
+ * ever showed, and is read again. Within STEADY_READ_WAIT_MS and the time a
+ * round leaves; past it, the last read stands.
+ */
+async function steadyPageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<PageState> {
+  let read = await pageState(ctx, itemSelector)
+  const until = Date.now() + Math.min(STEADY_READ_WAIT_MS, Math.max(0, timeLeft(ctx) - ROUND_OVERHEAD_MS))
+  while (read.changing && Date.now() < until) {
+    const again = await pageState(ctx, itemSelector)
+    if (again.state === read.state) return again
+    read = again
+  }
+  return read
 }
 
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
@@ -438,7 +481,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   let stoppedBy: ListStop
   try {
     for (;;) {
-      let { html, url, state, items: listed } = await pageState(ctx, action.itemSelector)
+      let { html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector)
       // Next clicked and the page unchanged, or showing the records it showed before under a URL changed within the page (an app
       // that changes the URL first and loads its rows after, keeping the old ones meanwhile): its page may be on the way, and gets
       // COME_BACK_WAIT_MS. A new document with the same records (a first page under two URLs) has arrived, and is not waited for.
@@ -447,7 +490,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         const until = comeBackUntil(ctx)
         while (unchanged() && Date.now() < until) {
           await abortableSleep(250, ctx.execution.signal)
-          ;({ html, url, state, items: listed } = await pageState(ctx, action.itemSelector))
+          ;({ html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector))
         }
       }
       lastState = state

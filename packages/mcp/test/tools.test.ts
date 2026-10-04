@@ -9,7 +9,7 @@ import { parseBaseUrl, parseToken } from '../src/stdio.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch',
+    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'import_login', 'list_logins', 'remove_login',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -441,6 +441,34 @@ describe('MCP tools', () => {
     await expect(callTool(client, 'get_batch_errors', { id: 'batch-1', limit: 1001 })).rejects.toThrow('limit must be an integer between 1 and 1000')
     await expect(callTool(client, 'get_batch_errors', {})).rejects.toThrow('id is required')
     expect(calls).toHaveLength(2)
+  })
+
+  it('a scrape asks for its page to be handed to the person when the call does', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); return json({ status: 'success' }) }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/', handoff: true })
+    await callTool(client, 'scrape', { url: 'https://example.com/', handoff: { waitMs: 60_000 } })
+    expect(bodies.map((body) => (body as { handoff?: unknown }).handoff)).toEqual([{}, { waitMs: 60_000 }])
+  })
+
+  it('imports, lists and forgets the person\'s saved logins through the API, never a cookie', async () => {
+    const calls: string[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)} ${init?.body ?? ''}`)
+      if (String(input).endsWith('/v1/logins')) return json({ logins: [] })
+      if (init?.method === 'DELETE') return json({ site: 'example.com', removed: true })
+      return json({ domain: 'example.com', savedAt: '2026-10-04T00:00:00.000Z', cookieCount: 3, sessionSha256: 'a'.repeat(64) })
+    }) as typeof fetch })
+    expect(await callTool(client, 'import_login', { site: ' example.com ', approveTimeoutMs: 60_000 })).toMatchObject({ domain: 'example.com', cookieCount: 3 })
+    expect(await callTool(client, 'list_logins', {})).toEqual({ logins: [] })
+    expect(await callTool(client, 'remove_login', { site: 'example.com' })).toEqual({ site: 'example.com', removed: true })
+    expect(calls).toEqual([
+      'POST http://127.0.0.1:8787/v1/logins/import {"approveTimeoutMs":60000,"site":"example.com"}',
+      'GET http://127.0.0.1:8787/v1/logins ',
+      'DELETE http://127.0.0.1:8787/v1/logins/example.com ',
+    ])
+    await expect(callTool(client, 'import_login', {})).rejects.toThrow('site must be a domain or a page URL')
+    await expect(callTool(client, 'remove_login', {})).rejects.toThrow('site is required')
   })
 
   it('hands a batch\'s stopped items to the person through the API, with how long to wait for them', async () => {

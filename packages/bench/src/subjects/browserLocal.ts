@@ -24,7 +24,7 @@ import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
-import { runPageActions, type ActionRun } from './browserActions.js'
+import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -632,6 +632,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // the context API rather than a header so the browser scopes them the
       // way the origin expects.
       const userCookies = this.accessConfig?.session?.cookies ?? []
+      // The origins whose localStorage the session's storageState restored above (a login some sites keep there).
+      const storedOrigins = this.accessConfig?.session?.storageState === undefined ? 0 : ((JSON.parse(this.accessConfig.session.storageState) as { origins?: { localStorage?: unknown[] }[] }).origins ?? []).filter((origin) => (origin.localStorage?.length ?? 0) > 0).length
       if (userCookies.length > 0) {
         // The cookie's own attributes go with it: Chromium refuses a
         // `__Secure-` or `__Host-` cookie without `secure`, and many logins
@@ -645,13 +647,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
             ...(c.sameSite === undefined ? {} : { sameSite: c.sameSite }),
           })),
         )
+      }
+      if (userCookies.length > 0 || storedOrigins > 0) {
         trace.push({
           at: Date.now() - start,
           lane: 'browser_local',
           event: 'session_attached',
-          // Count and scope only. A trace that printed cookie values would
-          // leak the user's account into every bench artifact.
-          detail: { cookieCount: userCookies.length, sessionSha256: this.access.sessionSha256 },
+          // Count and scope only. A trace that printed cookie or storage values
+          // would leak the user's account into every bench artifact.
+          detail: { cookieCount: userCookies.length, ...(storedOrigins === 0 ? {} : { localStorageOrigins: storedOrigins }), sessionSha256: this.access.sessionSha256 },
         })
       }
       throwIfExecutionStopped(execution)
@@ -954,7 +958,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // A navigation stopped after the last step (a late script redirect) is the steps' too.
         const late = refusedNavigations.shift()
         const last = options.actions!.length - 1
-        if (late !== undefined && ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
+        // Either is the last step's, which keeps nothing it produced: what it captured may show that page, the page having moved on
+        // before the step's checks saw it.
+        if (late !== undefined && ran.actions.result.failed === undefined) {
+          ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
+          dropLastStep(ran.actions)
+        }
         // Documents the page loaded after the steps were checked (a late redirect the guard does not see) are checked as the steps' were:
         // a refused one means the page read now may be it, so nothing is read. A redirect of the requested URL is the fetch's, and
         // pushState loads no document.
@@ -962,7 +971,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
           const landed = await this.refuseNavigation(loadedUrl, identity, execution, relaxedRoutes, overriddenUrl)
           if (landed === null) continue
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: loadedUrl, reason: landed } })
-          if (ran.actions.result.failed === undefined) ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which W2L does not fetch (${landed}); it is not read` }
+          if (ran.actions.result.failed === undefined) {
+            ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which W2L does not fetch (${landed}); it is not read` }
+            dropLastStep(ran.actions)
+          }
           return this.notRead(url, start, trace, finalUrl)
         }
       }
@@ -1658,5 +1670,5 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
 
 /** Steps that could not run on the page at all, reported as the first one failing. */
 function stepsNotRun(actions: readonly PageAction[], why: string): ActionRun {
-  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0 }
+  return { result: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists: [], failed: { index: 0, type: actions[0]!.type, code: 'action_error', message: why } }, artifacts: [], checkedDocuments: 0, lastStepFrom: { screenshots: 0, scrapes: 0, javascriptReturns: 0, pdfs: 0, lists: 0, artifacts: 0 } }
 }

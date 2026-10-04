@@ -186,6 +186,15 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    * (`unsupported_parameter`).
    */
   robotsOverride?: RobotsOverride
+  /**
+   * When W2L is stopped at a check it does not pass (a captcha, a challenge,
+   * a login wall), hand the page to the person in their own Chrome and answer
+   * with the page they get through to (`true`, or `{ waitMs }`: how long to
+   * wait for them, 10 s to 30 min, default 10 min). Offered only by a server
+   * on the person's own machine; refused elsewhere, and with `actions` or a
+   * screenshot (`unsupported_parameter`).
+   */
+  handoff?: { waitMs?: number }
 }
 
 /** A recorded robots override for one URL of a batch. */
@@ -285,6 +294,8 @@ export interface CompactScrapeResponse {
   warning?: string
   /** Present when the request itself left something on the table (`fastMode` declined a browser hop the http lane asked for), as on the full response. */
   agentHints?: AgentHints
+  /** A page stopped at a check a person can get through, on a server that hands pages to them: why, and how (`handoff: true`), as on the full response. */
+  handoff?: FetchResult['handoff']
   truncated: boolean
   truncatedAt: number | null
   usage: FetchResult['usage'] & { totalMs: number }
@@ -612,6 +623,49 @@ export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_
   login_wall: 'login_required',
 }
 
+/**
+ * `POST /v1/logins/import`: save the person's login to `site` (a domain or a
+ * page URL) from the Chrome they use, as `w2l login import` does, on a server
+ * on their machine. `approveTimeoutMs`: how long to wait for them to click
+ * Allow in Chrome, 10 s to 10 min; default 2 min.
+ */
+export interface LoginImportRequest {
+  site: string
+  approveTimeoutMs?: number
+}
+
+export function parseLoginImportRequest(body: unknown): LoginImportRequest {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new RequestError('body must be a JSON object')
+  const rec = body as Record<string, unknown>
+  for (const key of Object.keys(rec)) if (key !== 'site' && key !== 'approveTimeoutMs') throw new RequestError(`unsupported login import option: ${key}`)
+  if (typeof rec.site !== 'string' || rec.site.trim() === '' || rec.site.length > 2048) throw new RequestError('site must be a domain or a page URL')
+  if (rec.approveTimeoutMs !== undefined && (typeof rec.approveTimeoutMs !== 'number' || !Number.isInteger(rec.approveTimeoutMs) || rec.approveTimeoutMs < 10_000 || rec.approveTimeoutMs > 600_000)) throw new RequestError('approveTimeoutMs must be an integer from 10000 to 600000')
+  return { site: rec.site.trim(), ...(rec.approveTimeoutMs === undefined ? {} : { approveTimeoutMs: rec.approveTimeoutMs }) }
+}
+
+/** The localStorage a saved login holds: the origins, and how many items in all; never a value. */
+export interface LoginStorage {
+  origins: string[]
+  itemCount: number
+}
+
+/** A login saved for a domain: never its cookies or storage values, only how many and the hash a record names it by. */
+export interface SavedLogin {
+  domain: string
+  savedAt: string
+  cookieCount: number
+  /** The localStorage saved with it, read from the site's tabs open in Chrome when it was imported; null for none. */
+  localStorage: LoginStorage | null
+  sessionSha256: string
+}
+
+/** What an import saved, and whether the site's localStorage was read: false when no tab of the site was open in Chrome. */
+export interface LoginImportResponse extends SavedLogin {
+  localStorageRead: boolean
+  /** The origins of the site's open tabs whose localStorage Chrome did not give (a tab that crashed or was discarded): saved without it. */
+  localStorageUnread: string[]
+}
+
 /** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
 export interface BatchHandoffRequest {
   waitMs?: number
@@ -848,7 +902,7 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
@@ -1799,6 +1853,8 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
+  if (rec.handoff !== undefined && typeof rec.handoff !== 'boolean' && (rec.handoff === null || typeof rec.handoff !== 'object' || Array.isArray(rec.handoff))) throw new RequestError('handoff must be true or { waitMs }')
+  const handoff = rec.handoff === undefined || rec.handoff === false ? undefined : rec.handoff === true ? {} : parseBatchHandoffRequest(rec.handoff)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
@@ -1811,6 +1867,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     debug: rec.debug as boolean | undefined,
     ...page,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
+    ...(handoff === undefined ? {} : { handoff }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)

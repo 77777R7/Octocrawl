@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -98,7 +98,11 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
   switch (command) {
     case 'scrape': {
       const req = parseScrapeRequest({ debug: false, ...body, url: one(), origin: ORIGIN })
-      const response = await engine.scrape(req, io.signal === undefined ? {} : { signal: io.signal })
+      const response = await engine.scrape(req, io.signal === undefined ? {} : { signal: io.signal }, handoffPrompts('scrape', io))
+      if (req.handoff !== undefined && response.handoff !== undefined) {
+        const missed = response.warnings?.find((warning) => warning.code === 'handoff_not_through')
+        io.stderr(`w2l scrape: ${missed?.message ?? 'not handed over'}`)
+      }
       if (cli.out !== undefined) await writeOut(cli.out, [response], null, io)
       if (cli.markdown) io.stdout(response.markdown ?? '')
       else if (cli.out === undefined) io.stdout(JSON.stringify(response, null, 2))
@@ -170,6 +174,15 @@ async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string
   return report.status === 'completed' ? 0 : 1
 }
 
+/** What a handoff tells the person on the terminal while it waits for them. */
+function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
+  return {
+    onWaiting: (url, check) => io.stderr(`w2l ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
+    onConfirm: (url) => io.stderr(`w2l ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (W2L reads it only once you act in its tab)`),
+    ...(io.signal === undefined ? {} : { signal: io.signal }),
+  }
+}
+
 /** The batch's items a check stopped, handed to the person in their Chrome; the batch's report after, or null when nothing was handed over. */
 async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<CrawlReport | null> {
   const before = await engine.getBatch(taskId)
@@ -177,11 +190,7 @@ async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<Cr
   if (waiting === 0) return null
   io.stderr(`w2l batch: ${waiting} page${waiting === 1 ? '' : 's'} stopped at a check; opening ${waiting === 1 ? 'it' : 'them'} in your Chrome, one at a time (click Allow if Chrome asks)`)
   try {
-    const done = await engine.handOffBatch(taskId, {}, {
-      onWaiting: (url, check) => io.stderr(`w2l batch: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened`),
-      onConfirm: (url) => io.stderr(`w2l batch: ${url} shows no check in your Chrome: click on the page if it is the one to read (W2L reads it only once you act in its tab)`),
-      ...(io.signal === undefined ? {} : { signal: io.signal }),
-    })
+    const done = await engine.handOffBatch(taskId, {}, handoffPrompts('batch', io))
     if (done !== null) {
       io.stderr(`w2l batch: ${done.through} of ${done.handedOff} read in your Chrome`)
       for (const item of done.items) if (!item.through) io.stderr(`w2l batch: ${item.url} not read: ${item.reason ?? 'not through'}`)
