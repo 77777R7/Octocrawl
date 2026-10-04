@@ -18,6 +18,8 @@ interface OriginState {
   lastStartedAt: number
   lastRequestAtMono: number
   cooldownUntil: number
+  /** The least interval between this origin's requests its robots.txt asked for (Crawl-delay), beside the policy's; 0 for none. */
+  minIntervalMs: number
   waiters: Waiter[]
   timer?: ReturnType<typeof setTimeout>
 }
@@ -59,6 +61,16 @@ export class OriginScheduler {
     this.pump(origin, state)
   }
 
+  /**
+   * The origin's robots.txt asks for `ms` between requests (Crawl-delay):
+   * every request to it after this one waits at least that long after the one
+   * before, whichever lane makes it. The strictest one seen holds.
+   */
+  setMinInterval(origin: string, ms: number): void {
+    const state = this.state(origin)
+    if (Number.isFinite(ms) && ms > state.minIntervalMs) state.minIntervalMs = ms
+  }
+
   retryAt(origin: string): number | undefined {
     const until = this.origins.get(origin)?.cooldownUntil ?? 0
     return until > Date.now() ? until : undefined
@@ -69,7 +81,7 @@ export class OriginScheduler {
     const state = this.state(origin)
     for (;;) {
       signal?.throwIfAborted()
-      const intervalRemaining = Math.max(0, state.lastRequestAtMono + this.minDelayMs - performance.now())
+      const intervalRemaining = Math.max(0, state.lastRequestAtMono + Math.max(this.minDelayMs, state.minIntervalMs) - performance.now())
       const cooldownRemaining = Math.max(0, state.cooldownUntil - Date.now())
       const wait = Math.max(intervalRemaining, cooldownRemaining)
       if (wait <= 0) {
@@ -108,7 +120,7 @@ export class OriginScheduler {
   private state(origin: string): OriginState {
     let state = this.origins.get(origin)
     if (!state) {
-      state = { active: 0, lastStartedAt: -Infinity, lastRequestAtMono: -Infinity, cooldownUntil: 0, waiters: [] }
+      state = { active: 0, lastStartedAt: -Infinity, lastRequestAtMono: -Infinity, cooldownUntil: 0, minIntervalMs: 0, waiters: [] }
       this.origins.set(origin, state)
     }
     return state

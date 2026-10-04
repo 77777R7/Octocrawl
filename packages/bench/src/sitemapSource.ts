@@ -8,7 +8,9 @@
  * agent or the operator's environment proxy, the origin scheduler's permit and
  * pacing, the policy's redirect limit and its 10 MiB wire cap. The file's own
  * URL is judged by its host's robots.txt under the same identity before it is
- * requested, and an unreachable robots.txt refuses it as it would a page.
+ * requested, and an unreachable robots.txt refuses it as it would a page; a
+ * Crawl-delay there paces the host's requests from then on, the files' and
+ * the pages' after them on the shared scheduler.
  * A Content-Encoding (gzip, deflate or br) is undone whether or not it was
  * asked for, then a gzip file (`.gz`, or the magic number) is inflated, both
  * under the policy's decompression cap. A `<sitemapindex>` is followed one level, its children in
@@ -169,6 +171,8 @@ export class HttpSitemapSource implements SitemapSource {
       await raceWithSignal(this.route.assertUrl(url), scope.signal)
       const cached = await this.robots.lookup(url, identity.userAgent, scope)
       const decision = this.robots.decision(cached, url, identity.userAgent)
+      // The group that decided, as for a page (its Crawl-delay is what the page's record states).
+      if (typeof decision.crawlDelayMs === 'number') this.scheduler.setMinInterval(new URL(url).origin, decision.crawlDelayMs)
       record.robots = decision.decision === 'allowed' ? 'allowed' : decision.decision === 'no_robots' ? 'no_robots' : 'disallowed'
       if (decision.decision === 'disallowed') {
         return { record: { ...record, kind: 'refused', error: decision.unreachable === undefined ? null : `robots_unreachable_${decision.unreachable}` }, locs: null }

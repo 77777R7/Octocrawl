@@ -6,6 +6,7 @@ import { localNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
 import { prepareHttpIdentity } from '../src/httpIdentity.js'
 import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { HttpSitemapSource } from '../src/sitemapSource.js'
+import { OriginScheduler } from '../src/subjects/originScheduler.js'
 
 const urlset = (locs: string[]) => `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${locs.map((loc) => `<url><loc>${loc}</loc></url>`).join('')}</urlset>`
 const index = (locs: string[]) => `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${locs.map((loc) => `<sitemap><loc>${loc}</loc></sitemap>`).join('')}</sitemapindex>`
@@ -154,6 +155,38 @@ describe('HttpSitemapSource', () => {
       await source.close()
       dated.closeAllConnections()
       await new Promise<void>((resolve) => dated.close(() => resolve()))
+    }
+  })
+
+  it('waits the Crawl-delay of the file\'s host between its requests, and the scheduler keeps it for the pages after', async () => {
+    // A host whose robots.txt asks for a second between requests, and names an index of two files.
+    const at: Array<{ path: string; ms: number }> = []
+    const slow = createServer((req, res) => {
+      const path = req.url ?? '/'
+      at.push({ path, ms: performance.now() })
+      if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nCrawl-delay: 1\nSitemap: ${slowOrigin}/index.xml\n`); return }
+      if (path === '/index.xml') { res.writeHead(200, { 'content-type': 'application/xml' }).end(index([`${slowOrigin}/one.xml`, `${slowOrigin}/two.xml`])); return }
+      res.writeHead(200, { 'content-type': 'application/xml' }).end(urlset([`${slowOrigin}${path}-page`]))
+    })
+    await new Promise<void>((resolve) => slow.listen(0, '127.0.0.1', resolve))
+    const slowOrigin = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`
+    const scheduler = new OriginScheduler(policy)
+    const source = new HttpSitemapSource({ networkPolicy: policy, scheduler })
+    try {
+      const loaded = await source.load({ seedUrl: `${slowOrigin}/`, maxUrls: 50, maxFiles: 20 })
+      expect(loaded.files.map((file) => file.kind)).toEqual(['index', 'urlset', 'urlset'])
+      const files = at.filter((entry) => entry.path.endsWith('.xml'))
+      expect(files.map((entry) => entry.path)).toEqual(['/index.xml', '/one.xml', '/two.xml'])
+      // (A little under a second, for the timer's rounding; the policy's own interval is 0 here.)
+      for (let i = 1; i < files.length; i++) expect(files[i]!.ms - files[i - 1]!.ms).toBeGreaterThanOrEqual(950)
+      // A page fetched next on the host, through the same scheduler, waits it too.
+      const last = files[files.length - 1]!.ms
+      await scheduler.beforeRequest(slowOrigin)
+      expect(performance.now() - last).toBeGreaterThanOrEqual(950)
+    } finally {
+      await source.close()
+      slow.closeAllConnections()
+      await new Promise<void>((resolve) => slow.close(() => resolve()))
     }
   })
 
