@@ -1541,8 +1541,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(userChrome.connect === undefined ? {} : { connect: userChrome.connect }),
         ...(req.approveTimeoutMs === undefined ? {} : { timeoutMs: req.approveTimeoutMs }),
       })
-      return (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
-        ?? { domain: imported.domain, savedAt: new Date().toISOString(), cookieCount: imported.cookieCount, sessionSha256: imported.sessionSha256 }
+      const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
+      if (saved === undefined) throw new Error(`the login to ${imported.domain} was not found in the sessions file after it was saved`)
+      return saved
     },
 
     async listLogins() {

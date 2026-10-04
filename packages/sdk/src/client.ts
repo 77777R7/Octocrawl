@@ -488,15 +488,6 @@ export class W2L {
   }
 
   /**
-   * Hands a finished batch's items that a check stopped (a captcha, a
-   * challenge, a login wall) to the person in their own Chrome, on a local
-   * server: each opens in a new tab, they get through it, and W2L reads the
-   * page there. Answers when every item is read or given up, so it waits for
-   * the person: `waitMs` is how long, per page (default 10 minutes). On
-   * Node the SDK waits for the answer as long as that takes (no 300 s limit
-   * on the response headers); `request.signal` ends the wait.
-   */
-  /**
    * Save the person's login to a site (a domain or a page URL) from the
    * Chrome they use, as `w2l login import` does, on a server on their
    * machine. Chrome asks them "Allow remote debugging?": the answer comes
@@ -521,6 +512,15 @@ export class W2L {
     return (await res.json()) as { site: string; removed: true }
   }
 
+  /**
+   * Hands a finished batch's items that a check stopped (a captcha, a
+   * challenge, a login wall) to the person in their own Chrome, on a local
+   * server: each opens in a new tab, they get through it, and W2L reads the
+   * page there. Answers when every item is read or given up, so it waits for
+   * the person: `waitMs` is how long, per page (default 10 minutes). On
+   * Node the SDK waits for the answer as long as that takes (no 300 s limit
+   * on the response headers); `request.signal` ends the wait.
+   */
   async handOffBatch(id: string, body: BatchHandoffRequest = {}, request: RequestOptions = {}): Promise<BatchHandoffResponse> {
     // undici reads a headers timeout of 0 as none: the answer comes when the person is done with every page.
     return this.post<BatchHandoffResponse>(`/v1/batches/${encodeURIComponent(id)}/handoff`, body, 200, request, 0)

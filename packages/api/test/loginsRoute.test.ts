@@ -52,6 +52,18 @@ describe('saved logins through the API', () => {
     expect((await call(app, 'GET', '/v1/logins')).body).toEqual({ logins: [] })
   })
 
+  it('imports and forgets at once, as an agent calling in parallel would, without one undoing another', async () => {
+    const app = await setup('local')
+    const sites = ['a.example.com', 'b.example.com', 'c.example.com', 'd.example.com']
+    // The fake Chrome's cookies are on example.com and www.example.com: every one of these sites takes the parent's.
+    const imports = await Promise.all(sites.map((site) => call(app, 'POST', '/v1/logins/import', { site })))
+    expect(imports.map((res) => [res.status, res.body.domain])).toEqual(sites.map((site) => [200, site]))
+    expect((await call(app, 'GET', '/v1/logins')).body.logins.map((login: { domain: string }) => login.domain).sort()).toEqual(sites)
+    const removals = await Promise.all(sites.slice(0, 3).map((site) => call(app, 'DELETE', `/v1/logins/${site}`)))
+    expect(removals.map((res) => res.status)).toEqual([200, 200, 200])
+    expect((await call(app, 'GET', '/v1/logins')).body.logins.map((login: { domain: string }) => login.domain)).toEqual(['d.example.com'])
+  })
+
   it('refuses what is not a site, by name, before Chrome is asked', async () => {
     const app = await setup('local')
     expect(await call(app, 'POST', '/v1/logins/import', { site: 'localhost' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('is not a domain') } })
