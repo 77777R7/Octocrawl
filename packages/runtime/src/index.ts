@@ -1,6 +1,6 @@
 export type { TaskStore } from './taskStore.js'
 export type { StepPage, StepPageKind, StepPageQuery } from './taskStore.js'
-export { decodeStepCursor, encodeStepCursor } from './taskStore.js'
+export { decodeStepCursor, encodeStepCursor, InvalidCursorError } from './taskStore.js'
 export { MemoryTaskStore } from './memoryStore.js'
 export { CHECKPOINT_FILENAME, SqliteTaskStore } from './sqliteStore.js'
 export { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
