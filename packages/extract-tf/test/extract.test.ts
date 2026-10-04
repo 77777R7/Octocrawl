@@ -101,11 +101,78 @@ ${card('ways-of-seeing_94', 'Ways of Seeing', '£44.46')}
     expect(out.escalate).toBe(false)
     expect(out.strategy).toBe('list')
     expect(out.mainHtml).toContain('<h1>Art</h1>')
+    expect(out.lastResort).toBeUndefined()
     expect(out.mainHtml).toContain('This is a demo website')
     expect(out.mainHtml).toContain('Wall and Piece')
     expect(out.mainHtml).toContain('£44.46')
     expect(out.mainHtml).not.toContain('Mystery')
     expect(out.mainHtml).not.toContain('We love being scraped')
+  })
+
+  it('keeps a list of items that carry no link, which the card fallback cannot see', () => {
+    // quotes.toscrape.com/js/ after its script ran: each quote is its text, its author and tags without a target, so no item
+    // carries a link; a list of quotes is the page's content, though no block of it is prose the cascade keeps.
+    const quote = (text: string, author: string, tags: string[]) => `<div class="quote"><span class="text">“${text}”</span><span>by <small class="author">${author}</small></span><div class="tags">Tags: ${tags.map((tag) => `<a class="tag">${tag}</a>`).join(' ')}</div></div>`
+    const html = `<!doctype html><html lang="en"><head><title>Quotes to Scrape</title></head><body>
+<div class="container">
+<div class="row header-box"><div class="col-md-8"><h1><a href="/" style="text-decoration: none">Quotes to Scrape</a></h1></div><div class="col-md-4"><p><a href="/login">Login</a></p></div></div>
+${quote('This life is what you make it. No matter what, you\'re going to mess up sometimes, it\'s a universal truth.', 'Marilyn Monroe', ['friends', 'life'])}
+${quote('It takes a great deal of bravery to stand up to our enemies, but just as much to stand up to our friends.', 'J.K. Rowling', ['courage', 'friends'])}
+${quote('If you can\'t explain it to a six year old, you don\'t understand it yourself.', 'Albert Einstein', ['simplicity', 'understand'])}
+${quote('You may not be her first, her last, or her only. She loved before she may love again.', 'Bob Marley', ['love'])}
+<nav><ul class="pager"><li class="previous"><a href="/js/"><span aria-hidden="true">&larr;</span> Previous</a></li><li class="next"><a href="/js/page/3/">Next <span aria-hidden="true">&rarr;</span></a></li></ul></nav>
+</div>
+<footer class="footer"><div class="container"><p class="text-muted">Quotes by: <a href="https://www.goodreads.com/quotes">GoodReads.com</a></p></div></footer>
+</body></html>`
+    const out = extractTf.extract(html, { url: 'https://quotes.toscrape.com/js/page/2/' })
+    expect(out.escalate).toBe(false)
+    expect(out.strategy).toBe('list')
+    expect(out.mainHtml).toContain('This life is what you make it')
+    expect(out.mainHtml).toContain('Bob Marley')
+    expect(out.mainHtml).not.toContain('GoodReads.com')
+    // Found only by the last resort: the lanes still look for a wall on the page, as on one with nothing found.
+    expect(out.lastResort).toBe(true)
+  })
+
+  it('keeps a grid of product cards on a page with two h1s', () => {
+    // webscraper.io's test e-commerce laptops: a hero h1 above the page's own h1, a category menu beside the cards, and each
+    // card declared a schema.org Product, so the page routes as one product and no product region is found.
+    const card = (id: number, title: string, price: string, about: string, reviews: number) => `<div class="col-md-4 col-xl-4 col-lg-4"><div class="card thumbnail" itemscope="" itemtype="https://schema.org/Product"><div class="product-wrapper card-body"><img class="img-fluid card-img-top image img-responsive" alt="item" src="/images/test-sites/e-commerce/items/cart2.png" itemprop="image"><div class="caption"><h4 class="price float-end pull-right" itemprop="offers" itemscope="" itemtype="https://schema.org/Offer">${price}</h4><h4><a href="/test-sites/e-commerce/more/product/${id}" class="title" itemprop="name" title="${title}">${title.slice(0, 16)}</a></h4><p class="card-text description" itemprop="description">${about}</p></div><div class="ratings" itemprop="aggregateRating" itemscope="" itemtype="https://schema.org/AggregateRating"><p class="review-count float-end pull-right"><span itemprop="reviewCount">${reviews}</span> reviews</p><p><span class="ws-icon ws-icon-star"></span></p></div></div></div></div>`
+    const html = `<!doctype html><html lang="en"><head><title>Web Scraper Test Sites</title></head><body class="ws-v2">
+<header class="v2-header"><nav class="v2-navbar"><a href="/" class="v2-navbar__logo">Web Scraper</a><ul class="v2-navbar__menu"><li><a href="/documentation">Documentation</a></li><li><a href="/test-sites">Test Sites</a></li></ul></nav></header>
+<div><main>
+<div class="container-fluid blog-hero"><div class="container"><div class="row"><div class="col-lg-12"><h1>Test Sites</h1></div></div></div></div>
+<div class="container test-site"><div class="row">
+<div class="col-lg-3 sidebar"><div class="navbar-light sidebar" role="navigation"><ul class="nav flex-column" id="side-menu"><li class="nav-item"><a href="/test-sites/e-commerce/more" class="nav-link">Home</a></li><li class="nav-item"><a href="/test-sites/e-commerce/more/computers/tablets" class="nav-link subcategory-link">Tablets</a></li><li class="nav-item"><a href="/test-sites/e-commerce/more/phones" class="nav-link">Phones</a></li></ul></div></div>
+<div class="col-lg-9">
+<h1 class="page-header">Computers / Laptops</h1>
+<p class="item-count">117 items</p>
+<div class="row ecomerce-items ecomerce-items-more" data-type="more">
+${card(60, 'Asus VivoBook X441NA-GA190', '$295.99', 'Asus VivoBook X441NA-GA190 Chocolate Black, 14", Celeron N3450, 4GB, 128GB SSD, Endless OS, ENG kbd', 1)}
+${card(61, 'Prestigio SmartBook 133S Dark Grey', '$299', 'Prestigio SmartBook 133S Dark Grey, 13.3" FHD IPS, Celeron N3350 1.1GHz, 4GB, 32GB, Windows 10 Pro + Office 365 1 gadam', 9)}
+${card(62, 'Prestigio SmartBook 133S Gold', '$299', 'Prestigio SmartBook 133S Gold, 13.3" FHD IPS, Celeron N3350 1.1GHz, 4GB, 32GB, Windows 10 Pro + Office 365 1 gadam', 12)}
+${card(63, 'Aspire E1-510', '$306.99', '15.6", Pentium N3520 2.16GHz, 4GB, 500GB, Linux', 2)}
+</div>
+<a class="btn btn-lg btn-block btn-primary ecomerce-items-scroll-more">More</a>
+</div></div></div>
+</main></div>
+<footer class="v2-footer"><div class="container"><h2 class="v2-footer__heading">Company</h2><a href="/about-us">About us</a> <a href="/contact">Contact</a></div></footer>
+</body></html>`
+    const out = extractTf.extract(html, { url: 'https://webscraper.io/test-sites/e-commerce/more/computers/laptops' })
+    expect(out.escalate).toBe(false)
+    expect(out.strategy).toBe('list')
+    expect(out.mainHtml).toContain('Computers / Laptops')
+    expect(out.mainHtml).toContain('$295.99')
+    expect(out.mainHtml).toContain('Aspire E1-510')
+    expect(out.mainHtml).not.toContain('Tablets')
+    expect(out.mainHtml).not.toContain('About us')
+  })
+
+  it('still finds no content in a page of placeholders that repeat the same text', () => {
+    // An application shell drawing loading rows before its data: alike, but they say nothing.
+    const row = '<div class="row-skeleton"><span class="line">Loading the latest results for you, please wait…</span></div>'
+    const out = extractTf.extract(`<!doctype html><html><head><title>Results</title></head><body><div id="root"><h1>Results</h1><div class="results">${row.repeat(8)}</div></div></body></html>`)
+    expect(out.escalate).toBe(true)
   })
 
   it('keeps a home page of linked cards with short descriptions', () => {

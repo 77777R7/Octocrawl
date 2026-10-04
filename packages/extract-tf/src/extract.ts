@@ -19,7 +19,7 @@ import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
-import { pageSignalsFor, routePage, selectCardList, selectList, selectTable } from './route.js'
+import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
@@ -183,8 +183,13 @@ export class ExtractTf implements Extractor {
     }
     // A listing of cards has no text block for the cascade to find. Before
     // the page is reported empty, look for one.
+    let lastResort = false
     if (main === null) {
       main = selectCardList(doc.document)
+      if (main === null) {
+        main = selectDetectedList(doc.document)
+        lastResort = main !== null
+      }
       if (main !== null) strategy = 'list'
     }
 
@@ -233,6 +238,7 @@ export class ExtractTf implements Extractor {
       // Escalate only when a strategy produced nothing at all. Routing to a
       // non-article strategy is not by itself an escalation reason.
       escalate: main === null,
+      ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
       product,

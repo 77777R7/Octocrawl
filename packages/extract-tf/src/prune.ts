@@ -122,7 +122,7 @@ const RECOMMENDATION_TOKENS = [
  * Token match tolerant of the three casings storefronts actually ship:
  * space-separated classes, hyphen/underscore compounds, and camelCase.
  */
-function hasRecommendationToken(attr: string): boolean {
+export function hasRecommendationToken(attr: string): boolean {
   const normalized = attr
     .toLowerCase()
     .replace(/([a-z])([A-Z])/g, '$1-$2')
@@ -134,7 +134,7 @@ function hasRecommendationToken(attr: string): boolean {
   return RECOMMENDATION_TOKENS.some((t) => all.has(t))
 }
 
-function isRecommendationHeading(text: string): boolean {
+export function isRecommendationHeading(text: string): boolean {
   const t = text.trim()
   if (t.length === 0 || t.length > 120) return false
   return RECOMMENDATION_HEADINGS.some((re) => re.test(t))

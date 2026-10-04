@@ -72,6 +72,12 @@ const GATES: ReadonlyArray<{
     why: '200 with a password field behind a sign-in-to-continue heading',
     evidence: null,
   },
+  {
+    path: '/block/login-wall-benefits',
+    reason: 'login_wall',
+    why: '200 with a password field and a list beside it the extractor takes only as a last resort',
+    evidence: null,
+  },
 ]
 
 describe.each([

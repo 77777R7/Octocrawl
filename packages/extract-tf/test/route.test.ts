@@ -178,6 +178,41 @@ describe('routePage', () => {
     doc.close()
   })
 
+  it('routes a grid of alike microdata Product cards to collection, and a product page beside such cards to product', () => {
+    const card = (n: number) => `<div class="card thumbnail" itemscope itemtype="https://schema.org/Product"><h4 itemprop="offers" itemscope itemtype="https://schema.org/Offer">$${n}99</h4><a href="/p/${n}" itemprop="name">Teapot ${n}</a></div>`
+    const grid = Array.from({ length: 4 }, (_, i) => card(i + 1)).join('')
+    const listing = parse(wrap(`<main><h1>Teapots</h1><div class="row">${grid}</div></main>`))
+    expect(routePage(listing.document)).toEqual({ type: 'collection', strategy: 'article' })
+    listing.close()
+    // The page's own product is a scope of another shape, holding its h1: the cards beside it are its recommendations.
+    const pdp = parse(wrap(`<main><div class="product-main" itemscope itemtype="https://schema.org/Product"><h1 itemprop="name">Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><div class="row">${grid}</div></main>`))
+    expect(routePage(pdp.document).type).toBe('product')
+    pdp.close()
+    // Two cards are not yet a listing; a page declaring its product in JSON-LD stays a product page.
+    const two = parse(wrap(`<main><h1>Teapots</h1><div class="row">${card(1)}${card(2)}</div></main>`))
+    expect(routePage(two.document).type).toBe('product')
+    two.close()
+    const declared = parse(wrap(`<main><h1>Teapots</h1><div class="row">${grid}</div></main>`, PRODUCT_LD()))
+    expect(routePage(declared.document).type).toBe('product')
+    declared.close()
+    // A product page that marks up only the cards beside it: its buy box, the heading over the cards, a container named for
+    // recommendations, or cards with no class to tell them from the page's own product keep it a product page.
+    const priced = grid.replace(/<h4 itemprop="offers"[^>]*>(\$\d+)<\/h4>/g, '<span class="price">$1</span>')
+    expect(priced).toContain('class="price"')
+    const unmarked = (cards: string) => parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><span class="price">$49.00</span><button>Add to cart</button><p>Hand-thrown stoneware.</p></div>${cards}</main>`))
+    for (const page of [
+      unmarked(`<div class="row">${grid}</div>`),
+      // Cards that show their prices as the page's own price is shown: the page still has a price of its own beside its h1.
+      unmarked(`<div class="row">${priced}</div>`),
+      parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><section><h2>You may also like</h2><div class="row">${grid}</div></section></main>`)),
+      parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><div class="related-products">${grid}</div></main>`)),
+      parse(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p><div>${grid.replaceAll(' class="card thumbnail"', '')}</div></main>`)),
+    ]) {
+      expect(routePage(page.document).type).toBe('product')
+      page.close()
+    }
+  })
+
   it('does not route an article with JSON-LD comments to forum', () => {
     const doc = parse(
       wrap('<article><h1>Essay</h1>' +

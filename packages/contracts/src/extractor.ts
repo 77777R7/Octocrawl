@@ -313,6 +313,13 @@ export interface ExtractorOutput {
    * The escalation target is intentionally unimplemented in v0.
    */
   escalate: boolean
+  /**
+   * True when mainHtml came only from the last resort, a list the page repeats
+   * (`selectDetectedList`), after every strategy found nothing. A lane still
+   * checks such a page for a wall (a login form, a challenge) as it does one
+   * with nothing found, since a list sits beside many walls.
+   */
+  lastResort?: boolean
   /** Page type the router detected. */
   pageType: PageType
   /**

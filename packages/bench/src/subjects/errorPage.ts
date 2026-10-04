@@ -40,8 +40,8 @@ export function errorPageEvidence(status: number | null, contentType: string | n
     const extracted = extractTf.extract(body, { url, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
     // Error pages are often too small for main-content extraction; then the
     // whole body is what the server said, unless the caller named the
-    // elements to keep.
-    markdown = extracted.escalate && !selectionAsked(options) ? wholePageMarkdown(body, url, options) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
+    // elements to keep. A list taken only as a last resort is not all it said.
+    markdown = (extracted.escalate || extracted.lastResort === true) && !selectionAsked(options) ? wholePageMarkdown(body, url, options) : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
   }
   return markdown === null || markdown === '' ? null : { markdown, links: collectLinks(body, url) }
 }

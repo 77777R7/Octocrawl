@@ -96,7 +96,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
   trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
   let wholePage: string | null = null
   let listPage = false
-  if (extracted.escalate && gate !== null) return blocked(gate)
+  // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
+  if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
   if (extracted.escalate && !selectionAsked(options)) {
     wholePage = wholePageMarkdown(body, finalUrl, options)
     listPage = listRecordsFound(body, finalUrl, options)

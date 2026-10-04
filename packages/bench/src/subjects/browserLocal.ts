@@ -1160,7 +1160,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let wholePage: string | null = null
       // A page of the records a list format asked for is content, though no article was found in it.
       let listPage = false
-      if (extracted.escalate && gate !== null) return blocked(gate)
+      // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
+      if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
         wholePage = wholePageMarkdown(converted, pageUrl, options)
         listPage = listRecordsFound(body, pageUrl, options)

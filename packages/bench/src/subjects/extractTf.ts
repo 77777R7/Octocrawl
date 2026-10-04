@@ -54,6 +54,7 @@ export class ExtractTfSubject implements SubjectAdapter {
       let markdown: string | null = null
       let document: DocumentExtraction | null = null
       let escalated = false
+      let lastResort = false
       let routeEvidence: {
         pageType: string
         strategy: string
@@ -79,6 +80,7 @@ export class ExtractTfSubject implements SubjectAdapter {
           confidence: out.confidence,
           escalate: out.escalate,
         }
+        lastResort = out.lastResort === true
         if (out.escalate) {
           escalated = true
         } else {
@@ -91,9 +93,11 @@ export class ExtractTfSubject implements SubjectAdapter {
         return typeof v === 'string' ? v : Array.isArray(v) ? (v[0] ?? null) : null
       }
       const gate = classifyGate({ status, header, body })
+      // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
+      const unsure = escalated || lastResort
       const decisive =
-        status === 200 && !escalated ? classifyGate({ status, header, body, contentful: true }) : null
-      const verdict = status !== 200 || escalated ? gate : decisive
+        status === 200 && !unsure ? classifyGate({ status, header, body, contentful: true }) : null
+      const verdict = status !== 200 || unsure ? gate : decisive
       const blockEscalation =
         verdict === null ? null : escalationForBlock(verdict.reason, 'http')
 

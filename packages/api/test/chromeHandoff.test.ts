@@ -119,6 +119,10 @@ describe('the person\'s Chrome', () => {
     // Its content in what blockAds takes for an ad: held by the check, unless the request keeps ads.
     expect(await readOf(inAd, {})).toMatchObject({ message: expect.stringContaining('still showed a check') })
     expect(await readOf(inAd, { blockAds: false })).toMatchObject({ html: inAd })
+    // A check with a list beside it that the extractor takes only as a last resort: still the check, as the lanes judge it.
+    const row = (text: string) => `<div class="r"><span>${text}</span></div>`
+    const listed = `<html><body><h1>One more step</h1><div class="g-recaptcha" data-sitekey="k"></div><div class="why">${row('Requests from your network looked automated to our systems today')}${row('Complete the check above to continue to the page you asked for')}${row('If this keeps happening, contact the site owner with the reference')}</div></body></html>`
+    expect(await readOf(listed, {})).toMatchObject({ message: expect.stringContaining('still showed a check (captcha') })
   })
 
   it('the person at a sign-in step of their own (a code field showing, a field whose value they change) is waited for', async () => {
