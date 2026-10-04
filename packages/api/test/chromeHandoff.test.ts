@@ -86,7 +86,7 @@ describe('the person\'s Chrome', () => {
     const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
     const failure = await reader.read('https://site.test/a', { pollMs: 1, waitMs: 50 }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(HandoffNotThrough)
-    expect(failure).toMatchObject({ check: 'captcha', message: expect.stringContaining('still showed a check (captcha)') })
+    expect(failure).toMatchObject({ check: 'captcha', message: expect.stringContaining('still showed a check (captcha: widget_recaptcha') })
     expect(chrome.calls).toContain('Target.closeTarget')
   })
 

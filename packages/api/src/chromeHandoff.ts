@@ -267,7 +267,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     }
     const where = last === null ? 'it never loaded'
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
-        : classifyGate({ status: last.response?.status ?? last.state.status ?? 200, header: (name) => last!.response?.headers[name.toLowerCase()] ?? null, body: last.state.html }) !== null ? `it still showed a check (${sawGate ?? 'on the page'})`
+        : stillGated(last) !== null ? `it still showed a check (${stillGated(last)!.reason}: ${stillGated(last)!.signals.join(', ')})`
           : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (W2L reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through w2l login import and mode authed)'
             : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
     throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
@@ -277,6 +277,11 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     for (const stop of stops) stop()
     await connection.send('Target.closeTarget', { targetId }).catch(() => undefined)
   }
+}
+
+/** The check W2L's gate still reads on the page as last read, with what it read it from. */
+function stillGated(last: { state: PageState; response: DocumentResponse | null }): { reason: string; signals: readonly string[] } | null {
+  return classifyGate({ status: last.response?.status ?? last.state.status ?? 200, header: (name) => last.response?.headers[name.toLowerCase()] ?? null, body: last.state.html })
 }
 
 /** Whether a page's address is on the site asked for: the same host, a subdomain of it, or a parent domain of it. */
