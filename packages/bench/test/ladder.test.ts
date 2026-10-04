@@ -1091,6 +1091,53 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(sessionRejection('https://example.com/admin', at('https://example.com/login.php'))).not.toBeNull()
   })
 
+  it('a page that asks for a sign-in in place, at the URL asked for, under the saved login is login_wall too', async () => {
+    const url = 'https://example.com/wishlists'
+    const asksToSignIn: FetchResult = { ...contentfulResult(url, 'browser_local_authed'), markdown: '# Wishlists\n\n## Log in to view your wishlists\n\nYou can create, view, or edit wishlists once you have logged in.\n\n## Support\n\n- [Help Centre](https://example.com/help)' }
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [asksToSignIn])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.result).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+    expect(http.calls).toEqual([])
+    expect(run.ladderTrace.find((t) => t.event === 'ladder_session_rejected')?.detail).toMatchObject({ domain: 'example.com', signInPrompt: 'Log in to view your wishlists' })
+  })
+
+  it('reads a sign-in prompt only where a page asks for one, not a link or a sentence that mentions signing in', () => {
+    const page = (markdown: string): FetchResult => ({ ...contentfulResult('https://example.com/x', 'browser_local_authed'), markdown })
+    const asks = (markdown: string) => sessionRejection('https://example.com/x', page(markdown)) !== null
+    expect(asks('## Please sign in to continue')).toBe(true)
+    expect(asks('You must be logged in to see this page.')).toBe(true)
+    expect(asks('# Orders\n\nSign in to view your orders')).toBe(true)
+    expect(asks('Login required')).toBe(true)
+    // A signed-in page: a header link, a bare heading, prose that mentions signing in, a sign-out link.
+    expect(asks('[Sign in](https://example.com/login) · [Help](https://example.com/help)\n\n# Your orders\n\n- Order 1')).toBe(false)
+    expect(asks('# Sign in\n\nWelcome back, Jane.')).toBe(false)
+    expect(asks('Our guide explains how admins sign in to view the audit log, and why the log in to view step needs two-factor codes on every device you own.')).toBe(false)
+    expect(asks('[Log out](https://example.com/logout)')).toBe(false)
+    // Signed-in pages whose own items, rows or titles mention a sign-in: an issue list, an inbox, an error table, a tutorial,
+    // a forum post, another area's offer; and a prompt far down the page, below its own content.
+    expect(asks('# Issues\n\n- [Login required error after upgrading to v2](https://github.com/acme/app/issues/412)')).toBe(false)
+    expect(asks('# Inbox\n\n| From | Subject | Date |\n| --- | --- | --- |\n| Acme Security | Please sign in to confirm your new device | Oct 3 |')).toBe(false)
+    expect(asks('# Errors\n\n| Code | Meaning |\n| --- | --- |\n| 401 | Login required |')).toBe(false)
+    expect(asks('# Getting started\n\n## Step 2: Sign in to continue')).toBe(false)
+    expect(asks('# Help forum\n\n### Chrome keeps saying "please log in" on every site')).toBe(false)
+    expect(asks('# Account\n\n- Wholesale catalogue: Log in to view prices with a trade account')).toBe(false)
+    expect(asks(['# Orders', ...Array.from({ length: 10 }, (_, i) => `Order ${i + 1} shipped.`), 'Sign in to view older orders'].join('\n\n'))).toBe(false)
+    // A code block's line, and a list item's indented continuation: the page's content.
+    expect(asks('# Issue body\n\n```\nLogin required\n```')).toBe(false)
+    expect(asks('# Account\n\n- ### Wholesale\n  Log in to view prices with a trade account')).toBe(false)
+    // A page whose own subject begins with the words, named so in its title: an issue, a ticket, a question.
+    const titled = (title: string, markdown: string) => sessionRejection('https://example.com/x', { ...page(markdown), metadata: { ...page(markdown).metadata!, title } }) !== null
+    expect(titled('Login required to access main menu · Issue #77 · Markusmph/FinanceAdmin', '[Skip to content](#start-of-content)\n\n# Login required to access main menu #77\n\nOpen')).toBe(false)
+    expect(titled('Please log in again · Issue #1411 · sinProject-Inc/talk', '# Please log in again #1411\n\nOpen')).toBe(false)
+    expect(titled('django - You must be logged in to view this page error - Stack Overflow', '# You must be logged in to view this page error in Django')).toBe(false)
+    expect(titled('Wishlists - Airbnb', '# Wishlists\n\n## Log in to view your wishlists')).toBe(true)
+    // The page's own prompt near its top, after a skip link (onlyMainContent: false).
+    expect(asks('[Skip to content](#site-content) [https://www.airbnb.com.sg/](https://www.airbnb.com.sg/)\n\n# Wishlists\n\n## Log in to view your wishlists')).toBe(true)
+  })
+
   it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {
     const url = 'https://other.org/p'
     const store = new MemorySessionStore()
