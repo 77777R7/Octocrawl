@@ -49,6 +49,8 @@ npm test
 
 Two tests call live websites (`packages/api/test/monitor.test.ts`, `packages/api/test/session.test.ts`) and can fail without network access; say so when reporting results rather than treating it as a regression.
 
+A test that bounds elapsed time goes in a `*.perf.test.ts` file (or, for a real browser or HTTP wait, a file `vitest.config.ts` runs in its timed group), not among the parallel tests; see the Testing section of [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Branches
 
 - Start every task with `git fetch` and a branch from current `origin/main`. Do not keep building on a long-lived branch: one PR per work group, and no branch more than one group behind main. A branch that drifted 223 commits behind main once needed a 62-file merge and was abandoned.
