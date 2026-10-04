@@ -252,6 +252,8 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(response.markdown).toContain('The single page')
       expect(response.handoff).toBeUndefined()
       expect(response.evidenceRecord).toMatchObject({ lane: 'browser_local_authed', identity: { mode: 'authed', userAgent: null } })
+      // The person's Chrome's time zone is not W2L's to state.
+      expect(response.metadata.timezone).toBeNull()
       // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
       expect(response.channelsTried).toEqual(['http'])
       expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')

@@ -1056,9 +1056,10 @@ function proxyUsedOf(result: Pick<FetchResult, 'compliance' | 'evidence' | 'trac
   return null
 }
 
-/** The time zone the browser lane declared (its fingerprint's, for the identity it declared); null elsewhere, where none goes on the wire. */
+/** The time zone the browser lane declared (its fingerprint's, for the identity it declared); null elsewhere, where none goes on the wire, and for a page read in the person's own browser, whose time zone W2L does not know. */
 function timezoneOf(result: Pick<FetchResult, 'lane' | 'trace'>): string | null {
   if (!BROWSER_LANES.has(result.lane)) return null
+  if (result.trace.some((event) => event.event === 'identity_sent' && event.detail?.by === 'user_browser')) return null
   const device = result.trace.find((event) => event.event === 'identity_declared')?.detail?.device
   return browserFingerprintFor(device === 'mobile' ? 'mobile' : 'desktop').timezoneId
 }
