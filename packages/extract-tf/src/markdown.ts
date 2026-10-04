@@ -483,6 +483,12 @@ interface InlineResult {
   /** How much of the text's start and end was written from text, not Markdown of the walk's own (a link, code, an image, emphasis). */
   textLead: number
   textTrail: number
+  /**
+   * For text ending with an emphasis run that a letter after it would make
+   * write otherwise (see closedBeforeLetter): the text so written, without
+   * the punctuation moved after the run, and that punctuation.
+   */
+  closedBeforeLetter?: { text: string; moved: string }
 }
 
 /**
@@ -507,7 +513,7 @@ class Inline {
    * and punctuation ending it moves after its closing marker when a letter
    * follows (see emphasize).
    */
-  private lastEmphasis: { marker: string; pieces: string[]; textTrail: number; plain: boolean } | null = null
+  private lastEmphasis: Emphasis | null = null
   /** Text not yet written (see text), in pieces, and whether the last ends in a space. */
   private pendingText: string[] = []
   private pendingEndsSpace = false
@@ -598,23 +604,12 @@ class Inline {
    * the marker (`**"x**"b`), and a run of punctuation alone loses its markers.
    */
   private closeEmphasisBefore(next: string): void {
-    const { marker, pieces, textTrail } = this.lastEmphasis!
     if (FLANK_NEUTRAL.test(next[0]!)) return
-    const core = pieces.join('')
-    // The punctuation, and white space before it (a marker after a space reads as text too), of the text ending the run:
-    // never Markdown of the walk's own, such as a link's closing parenthesis. Scanned from the end, so a long run costs one pass.
-    const limit = core.length - textTrail
-    let start = core.length
-    while (start > limit && FLANK_NEUTRAL.test(core[start - 1]!)) start--
-    const trailing = start < core.length && !/[\s\p{Zs}]/u.test(core[core.length - 1]!) ? core.slice(start) : ''
-    const rest = core.slice(0, core.length - trailing.length)
-    // An underscore run (see emphasize) does not close before a letter: it is written with stars again, unless punctuation now follows it.
-    const written = trailing === '' ? marker.replace(/_/g, '*') : marker
-    if (trailing === '' && written === marker) return
+    const closed = closedBeforeLetter(this.lastEmphasis!)
+    if (closed === null) return
     // Punctuation now next to what follows is escaped where it would pair with it: a `<`, `&` or `&#` (a tag or an entity).
     // (Not a `!`: before a link, which would make it an image, nothing moves, as a `[` is punctuation.)
-    const moved = escapeMovedEnd(trailing)
-    this.parts[this.parts.length - 1] = rest ? written + rest + written + moved : moved
+    this.parts[this.parts.length - 1] = closed.run + escapeMovedEnd(closed.moved)
     this.unwritten = null
   }
 
@@ -667,6 +662,10 @@ class Inline {
     const parts = emphasisParts(inner.text.replace(/\n{2,}/g, '\n'))
     const { before, after } = parts
     let { core } = parts
+    // Content ending with a run of other emphasis whose punctuation moves after it before a letter: this run's core then
+    // (the same start, white space and punctuation moved from it alike), for this run to move that punctuation after its own marker.
+    const inside = inner.closedBeforeLetter
+    let nestedCore = inside !== undefined && after === '' ? inside.text.replace(/\n{2,}/g, '\n').slice(before.length) : undefined
     // How much of the run's start and end is text: only that may move outside the markers.
     const textLead = Math.max(0, inner.textLead - before.length)
     const textTrail = Math.max(0, inner.textTrail - after.length)
@@ -691,12 +690,14 @@ class Inline {
         // punctuation), a `<`, `&` or `&#` ending it would pair with what follows (a tag, an entity): escaped.
         // (As text: a run this one starts moves it before its own marker too.)
         this.content(core === '' ? escapeMovedEnd(escapeLastBackslash(leading)) : escapeLastBackslash(leading), true)
+        if (nestedCore !== undefined) nestedCore = nestedCore.slice(leading.length)
       }
       if (core) {
         // Right after a run of the other emphasis, its stars would join this one's (`**x***.y*`): this one is written with underscores.
         const written = previous !== null && this.parts[this.parts.length - 1]?.endsWith('*') && !this.pendingSpace ? marker.replace(/\*/g, '_') : marker
         this.content(written + core + written)
         this.lastEmphasis = { marker: written, pieces: [core], textTrail: Math.min(textTrail, core.length), plain }
+        if (nestedCore !== undefined) this.lastEmphasis.nested = { core: nestedCore, moved: inside!.moved }
       }
     }
     if (after) this.content(after)
@@ -758,7 +759,12 @@ class Inline {
     while (end > 0 && this.parts[end - 1] === '\n') end--
     let textTrail = 0
     for (let i = end - 1; i >= 0 && this.fromText[i]; i--) textTrail += this.parts[i]!.length
+    // (The run is the last part while it is the last emphasis: anything written after it ends that.)
+    const closed = this.lastEmphasis === null ? null : closedBeforeLetter(this.lastEmphasis)
     return {
+      ...(closed !== null && closed.moved !== '' && end === this.parts.length
+        ? { closedBeforeLetter: { text: this.parts.slice(0, -1).join('') + closed.run, moved: closed.moved } }
+        : {}),
       text,
       lead: this.lead,
       trail: this.pendingSpace,
@@ -877,6 +883,44 @@ function escapeLineStart(line: string): string {
   if (/^(?:=+|-+|(?:-[ \t]*){3,})[ \t]*$/.test(line)) return `\\${line}`
   if (/^\[(?:[^\]\\]|\\.)*\]:/.test(line)) return `\\${line}`
   return line
+}
+
+/**
+ * An emphasis run written last: its marker and what is between the markers
+ * (in pieces, as adjacent runs join it), how much of its end is text, whether
+ * it is plain text (see emphasize), and for a run whose content ends with
+ * another emphasis run, how that ends before a letter (see closedBeforeLetter).
+ */
+interface Emphasis {
+  marker: string
+  pieces: string[]
+  textTrail: number
+  plain: boolean
+  nested?: { core: string; moved: string }
+}
+
+/**
+ * How an emphasis run is written where a letter follows it, which CommonMark
+ * reads its closing marker with: the punctuation ending it after the marker
+ * (`**"x**"b`), a run of punctuation alone without markers, an underscore run
+ * with stars; or null when it reads as written. `run` is the run as written
+ * then, `moved` the punctuation after it. A run ending with another run
+ * (`***"y"***`) moves that one's punctuation after both markers.
+ */
+function closedBeforeLetter({ marker, pieces, textTrail, nested }: Emphasis): { run: string; moved: string } | null {
+  const core = pieces.join('')
+  // The punctuation, and white space before it (a marker after a space reads as text too), of the text ending the run:
+  // never Markdown of the walk's own, such as a link's closing parenthesis. Scanned from the end, so a long run costs one pass.
+  const limit = core.length - textTrail
+  let start = core.length
+  while (start > limit && FLANK_NEUTRAL.test(core[start - 1]!)) start--
+  const trailing = start < core.length && !/[\s\p{Zs}]/u.test(core[core.length - 1]!) ? core.slice(start) : ''
+  if (trailing === '' && nested !== undefined) return { run: nested.core ? marker + nested.core + marker : '', moved: nested.moved }
+  const rest = core.slice(0, core.length - trailing.length)
+  // An underscore run (see emphasize) does not close before a letter: it is written with stars again, unless punctuation now follows it.
+  const written = trailing === '' ? marker.replace(/_/g, '*') : marker
+  if (trailing === '' && written === marker) return null
+  return { run: rest ? written + rest + written : '', moved: trailing }
 }
 
 /**

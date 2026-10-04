@@ -384,6 +384,16 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(md('x <i><b>"y"</b></i>')).toBe('x ***"y"***')
     expect(md('x<i> <b>"y"</b></i>')).toBe('x ***"y"***')
     expect(md('x<a href="/u"><b>"y"</b></a>')).toBe('x[**"y"**](/u)')
+    // Ending in punctuation before a letter: the punctuation goes after the closing markers of both.
+    expect(md('<i><b>"y"</b></i>z')).toBe('***"y***"z')
+    expect(md('<i>a<b>"y"</b></i>z')).toBe('*a"**y***"z')
+    expect(md('<i><b>y.</b></i>z')).toBe('***y***.z')
+    expect(md('x<i><b>"y"</b></i>z')).toBe('x"***y***"z')
+    expect(md('<b>a<i>b.</i></b>c')).toBe('**a*b***.c')
+    expect(md('<i><b>"</b></i>z')).toBe('"z')
+    expect(md('<i><b>y&amp;#</b></i>39;')).toBe('***y***\\&#39;')
+    // Before a space nothing moves.
+    expect(md('<b><i>"y"</i></b> z')).toBe('***"y"*** z')
     // Punctuation moved out of the markers is escaped where it would pair with what follows: a tag, an entity, or an image
     // where a link follows (a run that ends in one, before a link, keeps it).
     expect(md('x<b>&lt;</b>span&gt;')).toBe('x\\<span>')
