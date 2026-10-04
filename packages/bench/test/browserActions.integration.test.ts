@@ -38,6 +38,8 @@ beforeAll(async () => {
     // A link whose page answers 8 s after it is asked for (a slow search or "Next").
     if (req.url === '/slowlink') return html(`<h1>Slow link</h1>${PROSE}<a id="go" href="/slowpage">Go</a>`)
     if (req.url === '/slowpage') { setTimeout(() => html(`<h1>Slow page</h1>${PROSE}<p>The slow page arrived.</p>`), 8000); return }
+    // A button that stays disabled: a click can never reach it.
+    if (req.url === '/disabled') return html(`<h1>Disabled</h1>${PROSE}<button id="go" disabled>Go</button>`)
     // A banner over the button for 2 s, then gone: a click waits it out.
     if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
@@ -242,6 +244,14 @@ describe('actions, real browser', () => {
     expect(result.markdown).toContain('The slow page arrived.')
     expect(requested.filter((url) => url === '/slowpage')).toHaveLength(1)
   }, 90_000)
+
+  it('a click that can never land still gives up after the step\'s own 60 s, as action_error, however long the scrape may run', async () => {
+    const started = Date.now()
+    const result = await run('/disabled', [{ type: 'click', selector: '#go' }], 100_000)
+    expect(Date.now() - started).toBeLessThan(75_000)
+    expect(result.actions?.failed).toMatchObject({ index: 0, code: 'action_error' })
+    expect(result.actions?.failed?.message).toMatch(/the click on #go did not land within 60 s/)
+  }, 150_000)
 
   it('a control covered for a moment is clicked once the cover goes', async () => {
     const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])
