@@ -132,13 +132,23 @@ describe('htmlToMarkdown', () => {
   })
 
   it('counts rowspans stacked over the same columns without visiting every one in every row', () => {
-    // ~2 MB: 300 rowspans a thousand columns wide stacked over 100 empty rows, 90 times.
+    // 300 rowspans a thousand columns wide stacked over 100 empty rows, 30 and 60 times (~0.7 and ~1.4 MB). Twice the
+    // tables take about twice the time where each rowspan is counted once, four times where every row visits them all:
+    // the ratio holds on a slow or busy machine, where a fixed limit in seconds does not. The faster of two runs counts.
     let stacked = '<table>'
     for (let i = 0; i < 300; i++) stacked += `<tr>${i < 299 ? `<td colspan="${299 - i}"></td>` : ''}<td colspan="1000" rowspan="60000"></td></tr>`
     stacked += `${'<tr></tr>'.repeat(100)}</table>`
-    const started = Date.now()
-    expect(htmlToMarkdown(stacked.repeat(90)).length).toBeLessThan(2 * stacked.length * 90)
-    expect(Date.now() - started).toBeLessThan(5_000)
+    const time = (copies: number): number => {
+      let best = Infinity
+      for (let run = 0; run < 2; run++) {
+        const started = performance.now()
+        expect(htmlToMarkdown(stacked.repeat(copies)).length).toBeLessThan(2 * stacked.length * copies)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    const once = time(30)
+    expect(time(60) / once).toBeLessThan(3)
   })
 
   it('writes a table whose padded grid would be too large as its rows of cells, still one GFM table', () => {
