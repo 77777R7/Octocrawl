@@ -40,6 +40,8 @@ beforeAll(async () => {
     if (req.url === '/slowpage') { setTimeout(() => html(`<h1>Slow page</h1>${PROSE}<p>The slow page arrived.</p>`), 8000); return }
     // A button that stays disabled: a click can never reach it.
     if (req.url === '/disabled') return html(`<h1>Disabled</h1>${PROSE}<button id="go" disabled>Go</button>`)
+    // A button shown 8 s after load under a banner that goes 4 s later: covered for less than a try, though a try ends covered.
+    if (req.url === '/late-cover') return html(`<h1>Late cover</h1>${PROSE}<button id="go" style="display:none" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => { document.getElementById('go').style.display = ''; document.getElementById('banner').style.display = '' }, 8000); setTimeout(() => document.getElementById('banner').remove(), 12000)</script>`)
     // A banner over the button for 2 s, then gone: a click waits it out.
     if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
@@ -233,7 +235,7 @@ describe('actions, real browser', () => {
       const result = await run('/covered', [step])
       expect(Date.now() - started).toBeLessThan(15_000)
       expect(result.actions?.failed).toMatchObject({ index: 0, type: step.type, code: 'action_error' })
-      expect(result.actions?.failed?.message).toMatch(/the click on #go could not reach it: <div class="tp-modal"[^]*intercepts pointer events \(still covered after 5 s\)/)
+      expect(result.actions?.failed?.message).toMatch(/the click on #go could not reach it: <div class="tp-modal"[^]*intercepts pointer events \(covered for 5 s and more\)/)
     }
   }, 120_000)
 
@@ -271,6 +273,12 @@ describe('actions, real browser', () => {
       await browser.teardown()
     }
   }, 60_000)
+
+  it('a control covered for less than 5 s is clicked, even when the cover came late in a try', async () => {
+    const result = await run('/late-cover', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The button was clicked.')
+  }, 90_000)
 
   it('a control covered for a moment is clicked once the cover goes', async () => {
     const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])

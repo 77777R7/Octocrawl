@@ -587,10 +587,11 @@ const COVERED_GIVE_UP_MS = 5_000
  * once: at most MAX_ACTION_WAIT_MS, as a click always had). Its checks come
  * first, alone (Playwright's trial: the control's own handlers get no click;
  * a listener the page puts on window ahead of them can still see the trial's
- * mouse events), in tries of at most COVERED_GIVE_UP_MS: one that timed out
- * because something still covered the control at its last try fails the step
- * at once, naming what covers it, instead of waiting out the step's time; one
- * that timed out for any other reason (not shown yet, still moving) is tried
+ * mouse events), in tries of at most COVERED_GIVE_UP_MS. A try that saw the
+ * control covered at every check, after one that ended covered, fails the
+ * step at once, naming what covers it: covered for a whole try, the control
+ * is not waited for through the rest of the step's time. Any other timed-out
+ * try (not shown yet, still moving, a cover that came late in it) is tried
  * again. Then the click itself, once, with the time left: it waits for a
  * navigation it starts (a slow next page), as a click always did, and is
  * never sent twice.
@@ -598,6 +599,7 @@ const COVERED_GIVE_UP_MS = 5_000
 async function clickControl(ctx: ActionRunContext, control: Locator, selector: string): Promise<void> {
   const started = Date.now()
   const until = started + stepTimeout(ctx)
+  let endedCovered = false
   while (until - Date.now() > COVERED_GIVE_UP_MS) {
     try {
       await raceWithSignal(control.click({ trial: true, timeout: COVERED_GIVE_UP_MS }), ctx.execution.signal)
@@ -605,8 +607,9 @@ async function clickControl(ctx: ActionRunContext, control: Locator, selector: s
     } catch (error) {
       // A stopped fetch stops here, whatever its reason (a batch's spent budget is a TimeoutError too): never tried again.
       if (ctx.execution.signal?.aborted === true || !isTimeout(error)) throw error
-      const covered = coveredBy(error)
-      if (covered !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${covered} (still covered after ${COVERED_GIVE_UP_MS / 1000} s)`)
+      const cover = coverOf(error)
+      if (endedCovered && cover.whole !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${cover.whole} (covered for ${COVERED_GIVE_UP_MS / 1000} s and more)`)
+      endedCovered = cover.last !== null
     }
   }
   try {
@@ -618,12 +621,17 @@ async function clickControl(ctx: ActionRunContext, control: Locator, selector: s
   }
 }
 
-/** What covered the control at a click's last try, from Playwright's call log; null when its last try saw something else. */
-function coveredBy(error: unknown): string | null {
+/**
+ * What covered the control in a trial click that timed out, from Playwright's call log: `last`, what covered it at its last
+ * check (null when that check saw something else, or there was none); `whole`, the same when every check of the try saw
+ * it covered.
+ */
+function coverOf(error: unknown): { last: string | null; whole: string | null } {
   const text = error instanceof Error ? error.message : String(error)
   const outcomes = text.split('\n').map((line) => line.trim().replace(/^- /, '')).filter((line) => /intercepts pointer events$|^element is not (visible|stable|enabled)|^element is outside of the viewport/.test(line))
-  const last = outcomes.at(-1)
-  return last !== undefined && last.endsWith('intercepts pointer events') ? last.slice(0, 300) : null
+  const covered = (line: string | undefined) => line !== undefined && line.endsWith('intercepts pointer events')
+  const last = covered(outcomes.at(-1)) ? outcomes.at(-1)!.slice(0, 300) : null
+  return { last, whole: last !== null && outcomes.every(covered) ? last : null }
 }
 
 function message(error: unknown): string {
