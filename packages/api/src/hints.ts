@@ -155,7 +155,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
       : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run w2l login import ${String(rejected.detail?.domain ?? host)}`)
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
-    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, for a batch run on your own machine, getting through the check yourself in your own Chrome (w2l batch --handoff, POST /v1/batches/:id/handoff)`)
+    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (w2l scrape --handoff), or a batch handoff (w2l batch --handoff, POST /v1/batches/:id/handoff)`)
   }
   const escalated = laneEscalatedHint(run, host)
   if (escalated !== null) hints.push(escalated)

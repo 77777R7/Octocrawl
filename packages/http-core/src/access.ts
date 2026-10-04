@@ -163,6 +163,14 @@ function sessionMaterial(session: AccessSessionConfig): string {
   return parts.join('\u0001')
 }
 
+/**
+ * The SHA-256 a record names a session by (its access fact's `sessionSha256`):
+ * what a saved login is shown with too, so a record can be matched to it.
+ */
+export function sessionSha256(session: AccessSessionConfig): string {
+  return hash(sessionMaterial(session))
+}
+
 function hasSessionMaterial(session: AccessSessionConfig): boolean {
   return (session.cookies?.length ?? 0) > 0 || (session.storageState ?? '').length > 0
 }
@@ -224,7 +232,7 @@ export function normalizeAccessConfig(config: AccessConfigInput | null | undefin
     proxyEndpoint,
     proxyCredentialSha256,
     sessionOwner: session !== null ? 'user' : 'none',
-    sessionSha256: session !== null ? hash(sessionMaterial(session)) : null,
+    sessionSha256: session !== null ? sessionSha256(session) : null,
     attestedBy: attestation.principal,
     attestedAt: attestation.at,
     attestationStatement: attestation.statement,

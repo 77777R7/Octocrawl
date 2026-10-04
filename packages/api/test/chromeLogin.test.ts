@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileSessionStore } from '@w2l/bench'
+import { normalizeAccessConfig } from '@w2l/http-core'
 import { ChromeLoginError, chromeEndpoint, chromeUserDataDir, cookiesForDomain, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin, type CdpConnection } from '../src/chromeLogin.js'
 
 const COOKIES = [
@@ -153,6 +154,16 @@ describe('w2l login import from the user\'s Chrome', () => {
     expect(Date.now() - started).toBeLessThan(8_000)
     expect(imported).toMatchObject({ localStorage: { origins: ['https://app.example.com'], itemCount: 1 }, localStorageUnread: ['https://a.example.com', 'https://b.example.com', 'https://c.example.com'] })
   }, 30_000)
+
+  it('names a saved login by the SHA-256 the records of its reads carry', async () => {
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9333\n/devtools/browser/abc\n')
+    const imported = await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: fakeChrome(COOKIES, [{ url: 'https://app.example.com/', storage: [['token', 'storage-value-1']] }]).connect })
+    // The session as the authed rung hands it to the browser: the saved cookies and storageState.
+    const saved = (await new FileSessionStore(sessionsFile).load('example.com'))!
+    const recorded = normalizeAccessConfig({ session: { cookies: saved.cookies, storageState: saved.storageState }, attestation: { principal: saved.attestedBy, at: saved.attestedAt, statement: saved.statement ?? '' } }).sessionSha256
+    expect(imported.sessionSha256).toBe(recorded)
+    expect((await listSavedLogins(sessionsFile))[0]!.sessionSha256).toBe(recorded)
+  })
 
   it('a site that keeps its login in localStorage alone is saved; with no tab of it open, the refusal says to open one', async () => {
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9333\n/devtools/browser/abc\n')
