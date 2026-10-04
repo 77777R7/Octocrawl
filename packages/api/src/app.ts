@@ -3,6 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
+import { InvalidCursorError } from '@w2l/runtime'
 import { CrawlStateError, HandoffUnavailableError, LoginsUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
@@ -600,6 +601,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     if (err instanceof RequestError) return fail(c, err.code, err.message, err.details, err.agentHints)
     if (err instanceof CrawlStateError) return fail(c, 'conflict', err.message)
     if (err instanceof TaskNotFoundError) return fail(c, 'not_found', 'not found')
+    // A cursor a client made up or truncated, on any route that pages through a task's steps.
+    if (err instanceof InvalidCursorError) return fail(c, 'invalid_request', 'cursor is not one this API issued')
     if (err instanceof SyntaxError) return fail(c, 'invalid_json', 'body must be JSON')
     if (options.exposeInternalErrors === true) return fail(c, 'internal_error', err.message)
     console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err.stack ?? String(err) }))
