@@ -64,12 +64,20 @@ export function encodeStepCursor(createdAt: string, id: string): string {
   return Buffer.from(JSON.stringify({ createdAt, id }), 'utf8').toString('base64url')
 }
 
+/** A step cursor that does not parse: one this API did not issue (a client's error, never the store's). */
+export class InvalidCursorError extends Error {
+  constructor() {
+    super('invalid crawl cursor')
+    this.name = 'InvalidCursorError'
+  }
+}
+
 export function decodeStepCursor(cursor: string): { createdAt: string; id: string } {
   try {
     const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt?: unknown; id?: unknown }
     if (typeof value.createdAt !== 'string' || typeof value.id !== 'string' || value.id.length === 0) throw new Error()
     return { createdAt: value.createdAt, id: value.id }
   } catch {
-    throw new Error('invalid crawl cursor')
+    throw new InvalidCursorError()
   }
 }

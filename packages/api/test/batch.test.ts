@@ -353,6 +353,24 @@ describe('persistent URL-array batch', () => {
     await expect(w2l.getBatchErrors('nothing')).rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
+  it('answers a cursor this API did not issue with 400 on every route that pages through steps, not a 500', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { app, client: w2l } = client(engine)
+    const batch = await w2l.batchScrape([`${f.origin}/item/1`])
+    await w2l.waitBatch(batch.taskId)
+    const crawl = await engine.startCrawl({ url: `${f.origin}/item/1`, maxPages: 1, sitemap: 'skip' })
+    for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes((await engine.getCrawl(crawl.taskId))?.status ?? ''); i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    for (const path of [`/v1/batches/${batch.taskId}/errors`, `/v1/batches/${batch.taskId}/items`, `/v1/crawl/${crawl.taskId}/pages`, `/v1/crawl/${crawl.taskId}/errors`, `/fc/v1/crawl/${crawl.taskId}`]) {
+      for (const cursor of ['not-a-cursor', Buffer.from('{"createdAt":1}').toString('base64url')]) {
+        const res = await app.request(`${path}?cursor=${cursor}`)
+        expect(res.status, `${path} ${cursor}`).toBe(400)
+        expect(await res.json(), path).toMatchObject({ code: 'invalid_request', error: 'cursor is not one this API issued' })
+      }
+    }
+  })
+
   it('keeps an earlier attempt\'s failure on /errors after an interrupted batch resumes', async () => {
     const f = await fixture()
     f.setSlow(true)
