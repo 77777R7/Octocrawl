@@ -21,6 +21,8 @@ import type {
   BatchStatusResponse,
   BatchHandoffRequest,
   BatchHandoffResponse,
+  LoginImportRequest,
+  SavedLogin,
   CompactScrapeResponse,
   FetchResult,
   MapRecord,
@@ -266,7 +268,7 @@ export class W2LError extends Error {
     message: string,
     readonly status: number,
     readonly code: ApiErrorCode | typeof RATE_LIMITED_CODE | undefined,
-    readonly method: 'GET' | 'POST',
+    readonly method: 'GET' | 'POST' | 'DELETE',
     readonly path: string,
     readonly body: unknown,
     /** The response's Retry-After in milliseconds; null when it sent none or one that does not parse. */
@@ -279,7 +281,7 @@ export class W2LError extends Error {
 }
 
 /** Reads a failed response; the message defaults to `<METHOD> <path> failed: <status> <body>`. */
-async function responseError(method: 'GET' | 'POST', path: string, res: Response, message?: string): Promise<W2LError> {
+async function responseError(method: 'GET' | 'POST' | 'DELETE', path: string, res: Response, message?: string): Promise<W2LError> {
   const text = await res.text()
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
@@ -494,6 +496,31 @@ export class W2L {
    * Node the SDK waits for the answer as long as that takes (no 300 s limit
    * on the response headers); `request.signal` ends the wait.
    */
+  /**
+   * Save the person's login to a site (a domain or a page URL) from the
+   * Chrome they use, as `w2l login import` does, on a server on their
+   * machine. Chrome asks them "Allow remote debugging?": the answer comes
+   * once they click Allow (within `approveTimeoutMs`, default 2 minutes).
+   * The saved login's cookies never leave the server: the answer names the
+   * domain, how many cookies and their hash.
+   */
+  async importLogin(site: string, opts: Omit<LoginImportRequest, 'site'> = {}, request: RequestOptions = {}): Promise<SavedLogin> {
+    return this.post<SavedLogin>('/v1/logins/import', { ...opts, site }, 200, request, (opts.approveTimeoutMs ?? 120_000) + 30_000)
+  }
+
+  /** The person's saved logins, without their cookies. */
+  async listLogins(request: RequestOptions = {}): Promise<{ logins: SavedLogin[] }> {
+    return this.get<{ logins: SavedLogin[] }>('/v1/logins', request)
+  }
+
+  /** Forget a saved login; a W2LError with code `not_found` when none was saved for the site. */
+  async removeLogin(site: string, request: RequestOptions = {}): Promise<{ site: string; removed: true }> {
+    const path = `/v1/logins/${encodeURIComponent(site)}`
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: 'DELETE', headers: this.headers(), signal: request.signal })
+    if (!res.ok) throw await responseError('DELETE', path, res, res.status === 404 ? `no login saved for ${site}` : undefined)
+    return (await res.json()) as { site: string; removed: true }
+  }
+
   async handOffBatch(id: string, body: BatchHandoffRequest = {}, request: RequestOptions = {}): Promise<BatchHandoffResponse> {
     // undici reads a headers timeout of 0 as none: the answer comes when the person is done with every page.
     return this.post<BatchHandoffResponse>(`/v1/batches/${encodeURIComponent(id)}/handoff`, body, 200, request, 0)
