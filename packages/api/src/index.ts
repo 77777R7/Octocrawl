@@ -7,7 +7,7 @@ export { ChromeLoginError, chromeEndpoint, chromeUserDataDir, connectCdp, cookie
 export type { CdpConnection, ImportChromeLoginOptions, ImportedLogin } from './chromeLogin.js'
 export { HandoffNotThrough, openUserChrome } from './chromeHandoff.js'
 export type { UserChrome, UserChromeOptions, UserChromeReadOptions } from './chromeHandoff.js'
-export type { ApiEngine, ApiEngineOptions, CrawlWithSteps } from './engine.js'
+export type { ApiEngine, ApiEngineOptions, CrawlWithSteps, HandoffHooks } from './engine.js'
 export { compactScrapeResponse, extractStructured } from './structured.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
 export { runApiServer } from './cli.js'

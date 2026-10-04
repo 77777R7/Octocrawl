@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -47,6 +47,10 @@ beforeAll(async () => {
     }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
     if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
+    // A page whose own data is not on it: the JSON format asks the model.
+    if (req.url === '/slowpass') return cookie.includes('slowpass=1') ? html(ARTICLE) : html(captcha('slowpass'))
+    // A scrape's page, behind its own captcha.
+    if (req.url === '/single') return cookie.includes('single=1') ? html(ARTICLE.replace('The member page', 'The single page')) : html(captcha('single'))
     // A page that keeps the widget's script once the person is through it (as a Turnstile page does).
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
@@ -233,6 +237,55 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(done!.items.every((item) => item.reason?.includes('you did not click on it to have it read'))).toBe(true)
     } finally {
       await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed to the person answers with the page they got through to', async () => {
+    const engine = engineFor(join(root, 'tasks-10'))
+    // The person reads the check before passing it, as a person does.
+    const stop = person(chrome, { '/single': async (page) => { await page.waitForTimeout(1_500); await page.click('#pass') } })
+    const told: string[] = []
+    try {
+      const response = await engine.scrape({ url: `${base}/single`, handoff: { waitMs: 20_000 } } as never, {}, { onWaiting: (url, check) => told.push(`${new URL(url).pathname} ${check}`) }) as Record<string, any>
+      expect(told).toEqual(['/single captcha'])
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', blockReason: null })
+      expect(response.markdown).toContain('The single page')
+      expect(response.handoff).toBeUndefined()
+      expect(response.evidenceRecord).toMatchObject({ lane: 'browser_local_authed', identity: { mode: 'authed', userAgent: null } })
+      // The person's Chrome's time zone is not W2L's to state.
+      expect(response.metadata.timezone).toBeNull()
+      // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
+      expect(response.channelsTried).toEqual(['http'])
+      expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape the person takes longer than its timeout over still gets its JSON from the model', async () => {
+    let calls = 0
+    const model = createServer((req, res) => {
+      calls++
+      req.resume()
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"secret":"from-model"}' } }] }))
+    })
+    await new Promise<void>((resolve) => model.listen(0, '127.0.0.1', resolve))
+    vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(model.address() as AddressInfo).port}`)
+    vi.stubEnv('W2L_EXTRACT_MODEL', 'stub-model')
+    const engine = engineFor(join(root, 'tasks-11'))
+    // The person passes the check after the scrape's 3 s timeout.
+    const stop = person(chrome, { '/slowpass': async (page) => { await page.waitForTimeout(5_000); await page.click('#pass') } })
+    try {
+      const formats = [{ type: 'json', schema: { type: 'object', properties: { secret: { type: 'string' } }, required: ['secret'] }, modelFallback: true }]
+      const response = await engine.scrape({ url: `${base}/slowpass`, timeout: 3_000, formats, handoff: { waitMs: 30_000 } } as never) as Record<string, any>
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', json: { status: 'complete', data: { secret: 'from-model' } } })
+      expect(calls).toBe(1)
+    } finally {
+      stop()
+      vi.unstubAllEnvs()
+      await engine.close()
+      await new Promise<void>((resolve) => model.close(() => resolve()))
     }
   }, 120_000)
 

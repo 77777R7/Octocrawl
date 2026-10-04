@@ -203,6 +203,7 @@ export const TOOLS = [
       properties: {
         url: { type: 'string', description: 'http(s) URL' },
         mode: { type: 'string', enum: ['standard', 'research', 'authed'] },
+        handoff: { description: "On a server running on the person's machine: when W2L is stopped at a captcha, a challenge or a login wall, open the page in the person's own Chrome (remote debugging on, they click Allow), wait for them to get through it and click on the page, and answer with that page (lane browser_local_authed, mode authed). true, or { waitMs } (10000 to 1800000, default 600000): the call waits for the person, so tell them first. Refused on other servers, and with actions or a screenshot.", oneOf: [{ type: 'boolean' }, { type: 'object', properties: { waitMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, additionalProperties: false }] },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },
         formats: {
           type: 'array',
@@ -469,6 +470,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...cacheOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
       ...(req.actions === undefined ? {} : { actions: req.actions }),
+      ...(req.handoff === undefined ? {} : { handoff: req.handoff }),
       ...integrationOf(req),
     }, request)
   }
