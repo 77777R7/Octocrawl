@@ -255,6 +255,9 @@ const ROUND_OVERHEAD_MS = SETTLE_AFTER_STEP_MS + 1_500
 /** How far apart the two reads of a page's text are, to tell its steady text from what changes by itself (a clock, a ticker). */
 const STEADY_TEXT_GAP_MS = 300
 
+/** How many more reads pageState takes, at most, to see a page that changed between two reads settle. */
+const MAX_EXTRA_READS = 4
+
 /**
  * The page as it stands, read twice STEADY_TEXT_GAP_MS apart so that what
  * changes by itself (a clock, a ticker, a price that moves) does not make a
@@ -265,6 +268,10 @@ const STEADY_TEXT_GAP_MS = 300
  * - `state`: the URL with the items, or without `itemSelector` with the
  *   page's steady words and every link and source in it, which says whether
  *   the page is one already read at that URL.
+ * A page that changed between the two reads (an app swapping its rows in) is
+ * read again, until two pairs of reads in a row say the same, up to
+ * MAX_EXTRA_READS more: read mid-swap, it would hash as neither the rows it
+ * had nor the rows it got, and look like a page of its own.
  */
 async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; items: string | null }> {
   await documentLoaded(ctx)
@@ -278,22 +285,34 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
       items: selector === null ? null : Array.from(document.querySelectorAll(selector)).map((item) => ({ refs: refs(item).join(' '), text: (item as HTMLElement).innerText })),
     }
   }, itemSelector ?? null))
-  const first = await read()
-  await abortableSleep(Math.min(STEADY_TEXT_GAP_MS, Math.max(0, timeLeft(ctx))), ctx.execution.signal)
-  const second = await read()
-  // The HTML is the page as it stands after both reads: what the state below describes, not what was there a moment before.
-  const html = await bounded(ctx, ctx.page.content())
-  const url = ctx.page.url()
+  type Read = Awaited<ReturnType<typeof read>>
   // Word by word: a row whose price ticks keeps its name.
   const steady = (a: string, b: string) => { const before = new Set(a.split(/\s+/)); return b.split(/\s+/).filter((word) => before.has(word)).join(' ') }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
-  if (second.items !== null) {
-    const items = hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
-    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items }
+  // What two reads in a row have in common: the items, or the page's words and its links and sources.
+  const common = (first: Read, second: Read): string => second.items !== null
+    ? hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
+    : hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => new Set(first.refs).has(ref)).join(' ')}`)
+  const pause = () => abortableSleep(Math.min(STEADY_TEXT_GAP_MS, Math.max(0, timeLeft(ctx))), ctx.execution.signal)
+  let last = await read()
+  await pause()
+  let next = await read()
+  let key = common(last, next)
+  // Changed between the reads (what they share is not all the second shows): read on until two pairs agree. A ticker's pairs
+  // agree at once, its ticking words left out of both.
+  for (let extra = 0; key !== common(next, next) && extra < MAX_EXTRA_READS && timeLeft(ctx) > STEADY_TEXT_GAP_MS; extra++) {
+    await pause()
+    last = next
+    next = await read()
+    const settled = common(last, next) === key
+    key = common(last, next)
+    if (settled) break
   }
-  const stillThere = new Set(first.refs)
-  const page = hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => stillThere.has(ref)).join(' ')}`)
-  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null }
+  // The HTML is the page as it stands after the reads: what the state below describes, not what was there a moment before.
+  const html = await bounded(ctx, ctx.page.content())
+  const url = ctx.page.url()
+  const items = next.items === null ? null : key
+  return { html, url, state: `${withoutHash(url)}\u0000${key}`, items }
 }
 
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
