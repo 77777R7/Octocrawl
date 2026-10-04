@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -90,6 +90,9 @@ describe('agent hints', () => {
     expect(lowContentYieldHint(false)).toBe("the http lane's content was thin and the browser lane was not available; pass waitFor (up to 60000 ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction")
     // Under fastMode the one fastMode sentence says what was declined; the warning's own hint is left out.
     expect(hints(thin('…'), ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
+    // A thin rendered answer: the browser lane's own extraction found it thin, so the hint is about the rendered page.
+    const rendered = result({ lane: 'browser_local', warnings: [{ code: 'low_content_yield', message: 'The browser_local lane extracted 226 tokens at confidence 0; no lane after it was left to try.' }], trace: [{ at: 1, lane: 'browser_local', event: 'extract', detail: { confidence: 0 } }] })
+    expect(hints(rendered, ['http', 'browser_local'])).toEqual([RENDERED_LOW_YIELD_HINT])
     // A shell carries the client-rendered sentence first, then the thin-content one.
     const shell = result({ status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'low_content_yield', message: 'thin' }], trace: [{ at: 1, lane: 'http', event: 'quality_client_rendered' }] })
     expect(hints(shell, ['http'])).toEqual(['the page fills its data with JavaScript; the browser lane was not tried', lowContentYieldHint(false)])

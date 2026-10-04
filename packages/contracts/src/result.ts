@@ -253,7 +253,10 @@ export interface FetchWarning {
    * cannot be attributed to the host with certainty. `client_rendered_suspected`:
    * the HTTP lane's page looks like a shell for data its scripts fill in
    * (see RenderSignals), so the capture may not be the page a browser shows.
-   * `low_content_yield`: a thin http answer stayed the run's answer.
+   * `low_content_yield`: a thin answer stayed the run's answer: the http
+   * lane's, which the browser lane did not improve on or was not offered,
+   * or a rendered one (the browser or a provider lane's) its own extraction
+   * found thin and low-confidence, with no lane after it.
    * `screenshot_unavailable`: the `screenshot` format was asked for and the
    * browser lane rendered the page but could not capture it
    * (`screenshot_failed` in the trace); `screenshot` is null and the page
