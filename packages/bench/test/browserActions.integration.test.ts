@@ -253,6 +253,25 @@ describe('actions, real browser', () => {
     expect(result.actions?.failed?.message).toMatch(/the click on #go did not land within 60 s/)
   }, 150_000)
 
+  it('a fetch stopped with a timeout reason while a click waits stops at once, the event loop free', async () => {
+    // As a batch's wall-time budget stops its pages: the abort's reason is a TimeoutError.
+    const browser = new BrowserLocalSubject('standard')
+    const controller = new AbortController()
+    let ticks = 0
+    const ticker = setInterval(() => { ticks++ }, 100)
+    try {
+      const stop = setTimeout(() => controller.abort(new DOMException('Crawl wall-time budget exhausted', 'TimeoutError')), 3000)
+      const started = Date.now()
+      await browser.fetch(`${base}/disabled`, Date.now() + 20_000, controller.signal, undefined, { actions: [{ type: 'click', selector: '#go' }] }).catch(() => undefined)
+      clearTimeout(stop)
+      expect(Date.now() - started).toBeLessThan(8_000)
+      expect(ticks).toBeGreaterThan(20)
+    } finally {
+      clearInterval(ticker)
+      await browser.teardown()
+    }
+  }, 60_000)
+
   it('a control covered for a moment is clicked once the cover goes', async () => {
     const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])
     expect(result.actions?.failed).toBeUndefined()

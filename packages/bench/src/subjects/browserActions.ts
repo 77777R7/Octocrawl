@@ -603,7 +603,8 @@ async function clickControl(ctx: ActionRunContext, control: Locator, selector: s
       await raceWithSignal(control.click({ trial: true, timeout: COVERED_GIVE_UP_MS }), ctx.execution.signal)
       break
     } catch (error) {
-      if (!isTimeout(error)) throw error
+      // A stopped fetch stops here, whatever its reason (a batch's spent budget is a TimeoutError too): never tried again.
+      if (ctx.execution.signal?.aborted === true || !isTimeout(error)) throw error
       const covered = coveredBy(error)
       if (covered !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${covered} (still covered after ${COVERED_GIVE_UP_MS / 1000} s)`)
     }
@@ -611,7 +612,7 @@ async function clickControl(ctx: ActionRunContext, control: Locator, selector: s
   try {
     await raceWithSignal(control.click({ timeout: Math.max(1, Math.min(stepTimeout(ctx), until - Date.now())) }), ctx.execution.signal)
   } catch (error) {
-    if (!isTimeout(error)) throw error
+    if (ctx.execution.signal?.aborted === true || !isTimeout(error)) throw error
     // The last try's own timeout is a part of the wait: the step says how long the click was waited for in all.
     throw new StepFailure(deadlinePassed(ctx) ? 'deadline_exceeded' : 'action_error', `the click on ${selector} did not land within ${Math.round((Date.now() - started) / 1000)} s: ${message(error)}`)
   }
