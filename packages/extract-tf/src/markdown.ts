@@ -142,9 +142,17 @@ function cssBlock(el: Element, ctx: Context): boolean {
 function shownText(el: Element, ctx: Context): string {
   if (!ctx.layout) return el.textContent ?? ''
   let text = ''
-  for (let node = el.firstChild; node !== null; node = node.nextSibling) {
+  // In document order, on a stack of the next node at each level, so a deep page costs no stack frames.
+  const next: (Node | null)[] = [el.firstChild]
+  while (next.length > 0) {
+    const node = next[next.length - 1]!
+    if (node === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = node.nextSibling
     if (node.nodeType === TEXT_NODE) text += (node as Text).data
-    else if (node.nodeType === ELEMENT_NODE && !(node as Element).hasAttribute(LAYOUT_MARKERS.hidden)) text += shownText(node as Element, ctx)
+    else if (node.nodeType === ELEMENT_NODE && !(node as Element).hasAttribute(LAYOUT_MARKERS.hidden)) next.push(node.firstChild)
   }
   return text
 }
@@ -1009,22 +1017,64 @@ function longestBacktickRun(text: string): number {
   return longest
 }
 
+/**
+ * The children of an element being written as inline content: the next one,
+ * where they are written, in which marks, and what is written once they all
+ * are (an emphasis's markers, a link's brackets, a block's closing space).
+ */
+interface InlineLevel {
+  next: Node | null
+  out: Inline
+  marks: Marks
+  done?: () => void
+}
+
 function inlineChildren(parent: Node, out: Inline, ctx: Context, marks: Marks): void {
-  for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
-    if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
-    else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
-  }
+  walkInline({ next: parent.firstChild, out, marks }, ctx)
 }
 
 function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): void {
+  const level = openInline(el, out, ctx, marks)
+  if (level !== null) walkInline(level, ctx)
+}
+
+/** Inline content, depth first on a stack of levels, so nesting thousands deep (a <sup> in a <sup>…) costs no stack frames. */
+function walkInline(first: InlineLevel, ctx: Context): void {
+  const levels = [first]
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!
+    const node = level.next
+    if (node === null) {
+      levels.pop()
+      level.done?.()
+      continue
+    }
+    level.next = node.nextSibling
+    if (node.nodeType === TEXT_NODE) level.out.text((node as Text).data)
+    else if (node.nodeType === ELEMENT_NODE) {
+      const inner = openInline(node as Element, level.out, ctx, level.marks)
+      if (inner !== null) levels.push(inner)
+    }
+  }
+}
+
+/** Starts an element written as inline content: what it writes before its children, and the level of those, or null when it has none to write. */
+function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): InlineLevel | null {
   const tag = el.localName
-  if (skipped(el, ctx)) return
+  if (skipped(el, ctx)) return null
   // Blocks met in inline context (a card inside a link, a paragraph inside a
   // heading, a box the page's CSS lays out as a block) flatten to one line:
   // their boundaries become spaces.
   const block = BLOCK.has(tag) || cssBlock(el, ctx)
   if (block) out.space()
-  let rendered = true
+  // Its children, written to `inner`, then `done` and a block's closing space. (No closure where nothing is to be done.)
+  const children = (inner: Inline, innerMarks: Marks, done?: () => void): InlineLevel => ({
+    next: el.firstChild,
+    out: inner,
+    marks: innerMarks,
+    done: done === undefined ? (block ? () => out.space() : undefined) : block ? () => (done(), out.space()) : done,
+  })
+  if (!block && !SPECIAL_INLINE.has(tag)) return el.firstChild === null ? null : { next: el.firstChild, out, marks }
   switch (tag) {
     case 'br':
       out.lineBreak()
@@ -1036,51 +1086,55 @@ function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): vo
       } else image(el, out, ctx)
       break
     case 'code':
-      if (marks.plain) rendered = false
-      else codeSpan(el, out, ctx)
+      if (marks.plain) return children(out, marks)
+      codeSpan(el, out, ctx)
       break
-    case 'a':
-      rendered = link(el, out, ctx, marks)
-      break
+    case 'a': {
+      const href = el.getAttribute('href')
+      const target = href === null || marks.link || marks.text ? null : linkTarget(href, ctx.base)
+      // No usable target (no href, or inside another link): only its text.
+      if (target === null) return children(out, marks)
+      const inner = new Inline({ link: true })
+      return children(inner, { ...marks, link: true }, () => link(inner.finish(), target, out))
+    }
     case 'strong':
     case 'b':
-      if (marks.strong || marks.plain) rendered = false
-      else emphasis(el, out, ctx, { ...marks, strong: true }, '**')
-      break
+      if (marks.strong || marks.plain) return children(out, marks)
+      return emphasis(el, out, { ...marks, strong: true }, '**', children)
     case 'em':
     case 'i':
-      if (marks.em || marks.plain) rendered = false
-      else emphasis(el, out, ctx, { ...marks, em: true }, '*')
-      break
+      if (marks.em || marks.plain) return children(out, marks)
+      return emphasis(el, out, { ...marks, em: true }, '*', children)
     case 'sup':
     case 'sub': {
       // Digits and signs keep their script form; a footnote mark or a word
       // in a superscript stays as written.
       const inner = new Inline({ escape: !marks.text, link: marks.link })
-      inlineChildren(el, inner, ctx, marks)
-      const run = inner.finish()
-      const script = scriptText(run.text, tag)
-      out.wrap(script === null ? run : { ...run, text: script }, '', '')
-      break
+      return children(inner, marks, () => {
+        const run = inner.finish()
+        const script = scriptText(run.text, tag)
+        out.wrap(script === null ? run : { ...run, text: script }, '', '')
+      })
     }
     default:
-      rendered = false
-  }
-  // The loop is written out (not inlineChildren) so deep nesting costs one
-  // stack frame per level.
-  if (!rendered) {
-    for (let node = el.firstChild; node !== null; node = node.nextSibling) {
-      if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
-      else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
-    }
+      return children(out, marks)
   }
   if (block) out.space()
+  return null
 }
 
-function emphasis(el: Element, out: Inline, ctx: Context, marks: Marks, marker: string): void {
+/** The tags openInline writes otherwise than by their children alone. */
+const SPECIAL_INLINE = new Set(['br', 'img', 'code', 'a', 'strong', 'b', 'em', 'i', 'sup', 'sub'])
+
+function emphasis(
+  el: Element,
+  out: Inline,
+  marks: Marks,
+  marker: string,
+  children: (inner: Inline, marks: Marks, done: () => void) => InlineLevel,
+): InlineLevel {
   const inner = new Inline({ link: marks.link, before: out.preceding() })
-  inlineChildren(el, inner, ctx, marks)
-  out.emphasize(inner.finish(), marker)
+  return children(inner, marks, () => out.emphasize(inner.finish(), marker))
 }
 
 function codeSpan(el: Element, out: Inline, ctx: Context): void {
@@ -1089,19 +1143,12 @@ function codeSpan(el: Element, out: Inline, ctx: Context): void {
   out.code(inner.finish())
 }
 
-/** Render a link; false when it has no usable target (no href, or inside another link) and is only text. */
-function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
-  const href = el.getAttribute('href')
-  const target = href === null || marks.link || marks.text ? null : linkTarget(href, ctx.base)
-  if (target === null) return false
-  const inner = new Inline({ link: true })
-  inlineChildren(el, inner, ctx, { ...marks, link: true })
-  const result = inner.finish()
+/** A link's text, written between brackets before its target. */
+function link(result: InlineResult, target: string, out: Inline): void {
   // A link with no text keeps its target as the text, except a bare
   // same-page anchor (a heading's permalink icon), which says nothing.
   if (!result.text && target.startsWith('#')) out.wrap(result, '', '')
   else out.wrap({ ...result, text: escapeLastBackslash(result.text || target) }, '[', `](${destination(target)})`)
-  return true
 }
 
 /** An image with its alt text and absolute target; only the alt text when it has no target (a `data:` URI, unless the caller keeps those). */
@@ -1279,14 +1326,31 @@ function flowNode(node: Node, flow: Flow): void {
   if (block) flow.flush()
 }
 
-function containsBlock(el: Element, ctx: Context): boolean {
-  const known = ctx.blockMemo.get(el)
+function containsBlock(root: Element, ctx: Context): boolean {
+  const memo = ctx.blockMemo
+  const known = memo.get(root)
   if (known !== undefined) return known
+  // Depth first, on a stack of the elements searched and the next child of each, so a deep page costs no stack frames.
+  // `found`: whether the element last searched holds a block, which then holds for each element it is in.
+  const searched: { el: Element; next: Element | null }[] = [{ el: root, next: root.firstElementChild }]
   let found = false
-  for (let child = el.firstElementChild; child !== null && !found; child = child.nextElementSibling) {
-    if (!skipped(child, ctx)) found = BLOCK.has(child.localName) || cssBlock(child, ctx) || containsBlock(child, ctx)
+  while (searched.length > 0) {
+    const top = searched[searched.length - 1]!
+    const child = found ? null : top.next
+    if (child === null) {
+      memo.set(top.el, found)
+      searched.pop()
+      continue
+    }
+    top.next = child.nextElementSibling
+    if (skipped(child, ctx)) continue
+    if (BLOCK.has(child.localName) || cssBlock(child, ctx)) found = true
+    else {
+      const childKnown = memo.get(child)
+      if (childKnown !== undefined) found = childKnown
+      else searched.push({ el: child, next: child.firstElementChild })
+    }
   }
-  ctx.blockMemo.set(el, found)
   return found
 }
 
