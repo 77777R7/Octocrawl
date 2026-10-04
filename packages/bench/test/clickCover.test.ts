@@ -15,8 +15,10 @@ describe('the cover a trial click saw', () => {
     expect(coverOf(log(['element is visible, enabled and stable', COVER, 'retrying click action', COVER], true))).toEqual({ last: COVER, whole: COVER })
   })
 
-  it('counts a check that found the control moving as neither covered nor reachable', () => {
-    expect(coverOf(log([COVER, 'element is not stable', COVER, 'element is not stable']))).toEqual({ last: COVER, whole: COVER })
+  it('keeps a try covered through checks that found the control moving, but not one that ends moving', () => {
+    expect(coverOf(log(['element is not stable', COVER, 'element is not stable', COVER]))).toEqual({ last: COVER, whole: COVER })
+    // The cover gone and the control still moving: the try did not end covered.
+    expect(coverOf(log([COVER, COVER, 'element is not stable', 'element is not stable']))).toEqual({ last: null, whole: null })
   })
 
   it('is not whole when a check found the control hidden, and none when the last check did', () => {

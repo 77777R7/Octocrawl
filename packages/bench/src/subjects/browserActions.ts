@@ -631,15 +631,16 @@ function callLog(error: unknown): string[] {
 /**
  * What covered the control in a trial click that timed out, from Playwright's
  * call log: `last`, what covered it at its last check (null when that check
- * found it hidden, disabled or out of view, or there was none); `whole`, the
- * same when no check of the try found it any of those. A check that found it
- * moving ("not stable", as when a page scrolls smoothly to it) says neither.
+ * found anything else, or there was none); `whole`, the same when no check of
+ * the try found it hidden, disabled or out of view. A check that found it
+ * moving ("not stable", as when a page scrolls smoothly to it) does not make a
+ * try less covered, but a try that ends on one did not end covered.
  */
 export function coverOf(error: unknown): { last: string | null; whole: string | null } {
-  const outcomes = callLog(error).filter((line) => /intercepts pointer events$|^element is not (visible|enabled)|^element is outside of the viewport/.test(line))
+  const outcomes = callLog(error).filter((line) => /intercepts pointer events$|^element is not (visible|enabled|stable)|^element is outside of the viewport/.test(line))
   const covered = (line: string | undefined) => line !== undefined && line.endsWith('intercepts pointer events')
   const last = covered(outcomes.at(-1)) ? outcomes.at(-1)!.slice(0, 300) : null
-  return { last, whole: last !== null && outcomes.every(covered) ? last : null }
+  return { last, whole: last !== null && outcomes.every((line) => covered(line) || line === 'element is not stable') ? last : null }
 }
 
 function message(error: unknown): string {
