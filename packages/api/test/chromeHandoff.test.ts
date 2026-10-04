@@ -90,6 +90,24 @@ describe('the person\'s Chrome', () => {
     expect(chrome.calls).toContain('Target.closeTarget')
   })
 
+  it('a page is through as the read of it judges it, with the request\'s tags and blockAds', async () => {
+    // A page that keeps a check's script once passed is through only with content beside it, found as the read finds it.
+    const script = '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
+    const article = `<html><body>${script}${PAGE.slice('<html><body>'.length)}`
+    const inAd = `<html><body>${script}<div class="ad">${'<p>Prose long enough to be the page. </p>'.repeat(6)}</div></body></html>`
+    const readOf = async (html: string, options: { excludeTags?: string[]; blockAds?: boolean }) => {
+      const chrome = fakeChrome([at('https://site.test/a', html, { active: true })])
+      const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+      try { return await reader.read('https://site.test/a', { pollMs: 1, waitMs: 200, ...options }) } catch (error) { return error } finally { reader.close() }
+    }
+    expect(await readOf(article, {})).toMatchObject({ html: article })
+    // Its article left out (excludeTags), the page is the check's script alone: the read would call it blocked.
+    expect(await readOf(article, { excludeTags: ['article'] })).toMatchObject({ message: expect.stringContaining('still showed a check') })
+    // Its content in what blockAds takes for an ad: held by the check, unless the request keeps ads.
+    expect(await readOf(inAd, {})).toMatchObject({ message: expect.stringContaining('still showed a check') })
+    expect(await readOf(inAd, { blockAds: false })).toMatchObject({ html: inAd })
+  })
+
   it('the person at a sign-in step of their own (a code field showing, a field whose value they change) is waited for', async () => {
     const chrome = fakeChrome([
       at('https://site.test/a', '<form><input autocomplete="one-time-code"></form>', { secret: true }),

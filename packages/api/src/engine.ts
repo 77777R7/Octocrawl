@@ -21,6 +21,7 @@ import {
   prepareHttpIdentity,
   RobotsOriginCache,
   pageFromUserBrowser,
+  summarize,
   type Channel,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -49,6 +50,9 @@ import {
   type BatchErrorsResponse,
   type BatchStatusResponse,
   type BatchHandoffRequest,
+  type LoginImportRequest,
+  type LoginImportResponse,
+  type SavedLogin,
   type BatchHandoffResponse,
   HANDOFF_REASONS,
   CONTENTFUL_STATUS,
@@ -103,7 +107,8 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
-import { HandoffNotThrough, openUserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -130,6 +135,11 @@ export interface CrawlStatusPage {
   counts: Partial<Record<StepStatus, number>>
   /** Pages the crawl will still record, when this process runs it; null when it does not. */
   ahead: number | null
+}
+
+/** Saved logins this engine does not manage: a hosted engine, or one without the person's sessions file or Chrome. */
+export class LoginsUnavailableError extends Error {
+  override readonly name = 'LoginsUnavailableError'
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -167,7 +177,8 @@ interface Submission<T extends CrawlAccepted> {
 }
 
 export interface ApiEngine {
-  scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
+  /** One page; with `handoff`, a page a check stopped is handed to the person in their Chrome (`hooks` tell the caller what they are to do). */
+  scrape(req: ScrapeRequest, context?: ExecutionContext, hooks?: HandoffHooks): Promise<ScrapeResponse | CompactScrapeResponse>
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   /**
@@ -238,6 +249,17 @@ export interface ApiEngine {
   handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: HandoffHooks): Promise<BatchHandoffResponse | null>
   /** End every handoff now, closing the tabs they have open, and wait until they have; close() does this first. No handoff starts after. */
   endHandoffs(): Promise<void>
+  /**
+   * The person's login to a site, saved from their running Chrome into the
+   * sessions file (`w2l login import`), on an engine that serves them alone;
+   * a LoginsUnavailableError elsewhere, a RequestError for a site that is not
+   * one, a ChromeLoginError when Chrome cannot give it.
+   */
+  importLogin(req: LoginImportRequest): Promise<LoginImportResponse>
+  /** The saved logins, without their cookies; an empty list on an engine without a sessions file. */
+  listLogins(): Promise<SavedLogin[]>
+  /** Forget a saved login: false when none was saved for the site. */
+  removeLogin(site: string): Promise<boolean>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -786,6 +808,63 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
+  /**
+   * One page handed to the person in their open Chrome: the result read
+   * there once they are through, or why it is not read. Only a page (a
+   * contentful read) is a result; a check still showing, an error or no
+   * content leaves the stopped result standing.
+   */
+  async function readThrough(chrome: UserChrome, url: string, prior: FetchResult, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal): Promise<{ result: FetchResult } | { reason: string }> {
+    try {
+      // The page is through as the read below judges it: with the request's tags and blockAds.
+      const judged = { ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }), ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }), ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }) }
+      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal, ...judged })
+      const result = pageFromUserBrowser(read, prior, fetchOpts)
+      if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
+      return { result }
+    } catch (error) {
+      if (!(error instanceof HandoffNotThrough)) throw error
+      return { reason: error.message }
+    }
+  }
+
+  /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
+  function checkHandoff(req: ScrapeRequest): void {
+    if (req.handoff === undefined) return
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    const unread = unreadByPerson(fetchOptions(req, req.formats))
+    if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
+  }
+
+  /** The scrape's stopped page handed to the person, with its own Chrome connection: the page read, or why not. */
+  async function handOffScrape(req: ScrapeRequest, prior: FetchResult, context: ExecutionContext, hooks: HandoffHooks): Promise<{ result: FetchResult } | { reason: string }> {
+    if (handoffClosing.signal.aborted) return { reason: 'W2L is shutting down' }
+    // The caller going away, or this engine shutting down, ends it; the scrape's own timeout does not: the person's time is theirs.
+    const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+    let chrome: UserChrome
+    try { chrome = await openUserChrome(userChrome!, signal) }
+    catch (error) { return { reason: error instanceof Error ? error.message : String(error) } }
+    try {
+      return await readThrough(chrome, req.url, prior, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal)
+    } finally {
+      chrome.close()
+    }
+  }
+
+  /**
+   * A result as a server that hands pages to the person answers it: one a check stopped says so, and how (`handoff: true`);
+   * one already handed over and not read there (`tried`), that the request may hand it over again.
+   */
+  function withHandoffHint(result: FetchResult, req: ScrapeRequest, tried = false): FetchResult {
+    if (userChrome === null || !handoffResult(result) || unreadByPerson(fetchOptions(req, req.formats)) !== null) return result
+    const blockReason = result.blockReason!
+    const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass`
+    const rationale = tried
+      ? `${stopped}, and handed to you in your own Chrome it was not read there (the handoff_not_through warning says why): send the request again with handoff to try once more, with a longer handoff.waitMs if you needed more time`
+      : `${stopped}: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
+    return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale } }
+  }
+
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
     if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
@@ -814,16 +893,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
           try {
             for (const step of waiting) {
-              try {
+              {
                 // A caller that went away hands nothing more over: each item left keeps its stopped result.
                 if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
-                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
-                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
-                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
-                if (!CONTENTFUL_STATUS.has(result.status)) {
-                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
-                  continue
-                }
+                const read = await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal)
+                if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
+                const result = read.result
                 const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
                 const stored: FetchResult = {
                   ...result,
@@ -838,11 +913,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 }
                 // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
                 const { audit: _stoppedAudit, ...kept } = step
-                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                const replaced: StepRecord = { ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() }
+                await store.putStep(replaced)
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
-              } catch (error) {
-                if (!(error instanceof HandoffNotThrough)) throw error
-                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
+                // The item replaced is a job event of its own: a webhook delivery when the batch has a receiver, then the hub's.
+                const page = compactPage(replaced, task)
+                if (webhookOf(task) !== undefined) {
+                  try { await jobWebhooks.replaced(task, replaced, page, store) }
+                  catch (error) { logWebhookFailure(task.id, 'handoff', error) }
+                }
+                await jobEvents.emit({ type: 'page', taskId: task.id, jobKind: jobKindOf(task), page })
               }
             }
           } finally {
@@ -1016,7 +1096,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * Monitor's capture mints an id for its response but leaves no record: a
    * preview persists nothing, and a run's observation is the Monitor's own.
    */
-  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean): Promise<ScrapeResponse | CompactScrapeResponse> {
+  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+    checkHandoff(req)
     checkFileCap(req)
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
@@ -1048,15 +1129,28 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
           .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
-      const agentHints = agentHintsFor(req, run)
+      // A page a check stopped: handed to the person when the request asks, else told how it could be.
+      const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null
+      const read = handed !== null && 'result' in handed ? handed.result : null
+      // A page read in the person's Chrome keeps what the cache said of this call (a lookup that missed); it is never stored.
+      const result: FetchResult = handed === null
+        ? withHandoffHint(run.result, req)
+        : 'reason' in handed ? withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req, true)
+          : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
+      // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
+      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
       const full: ScrapeRun = {
-        ...run.result,
+        ...result,
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
-        summary: run.summary,
+        // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
+        summary: read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) },
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
-      const shaped = await prepareScrapeResponse(full, req, scope, null, overallStart, scrapeId)
+      // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
+      // JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline.
+      const shapeScope = handed !== null && 'result' in handed ? createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }) : scope
+      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
       const response = answer.kind === 'fetch' ? shaped : withoutFetchUsage(shaped)
       if (!record) return response
@@ -1161,7 +1255,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   return {
-    scrape: (req, context = {}) => runScrape(req, context, true),
+    scrape: (req, context = {}, hooks = {}) => runScrape(req, context, true, hooks),
 
     map: (req, context = {}) => runMap(req, context),
 
@@ -1457,6 +1551,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       } finally {
         if (!launched) await store.close()
       }
+    },
+
+    async importLogin(req) {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (w2l serve, the local MCP host, or w2l login import)')
+      try { loginDomain(req.site) }
+      catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
+      const imported = await importChromeLogin({
+        site: req.site,
+        sessionsFile: options.sessionsFile!,
+        ...(userChrome.userDataDir === undefined ? {} : { userDataDir: userChrome.userDataDir }),
+        ...(userChrome.connect === undefined ? {} : { connect: userChrome.connect }),
+        ...(req.approveTimeoutMs === undefined ? {} : { timeoutMs: req.approveTimeoutMs }),
+      })
+      const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
+      if (saved === undefined) throw new Error(`the login to ${imported.domain} was not found in the sessions file after it was saved`)
+      return { ...saved, localStorageRead: imported.localStorageRead, localStorageUnread: imported.localStorageUnread }
+    },
+
+    async listLogins() {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null) return []
+      return listSavedLogins(options.sessionsFile!)
+    },
+
+    async removeLogin(site) {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null) throw new LoginsUnavailableError('this server keeps no saved logins')
+      try { loginDomain(site) }
+      catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
+      return removeSavedLogin(options.sessionsFile!, site)
     },
 
     async endHandoffs() {
@@ -1892,10 +2014,19 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
  * to take, so such a batch's stopped items are not handed over.
  */
 function handoffUnread(task: Task): string | null {
-  const options = task.batch === undefined ? undefined : fetchOptions(task.batch, task.batch.formats)
-  if (options?.actions !== undefined && options.actions.length > 0) return 'page actions'
-  if (options?.screenshot !== undefined) return 'a screenshot'
+  return task.batch === undefined ? null : unreadByPerson(fetchOptions(task.batch, task.batch.formats))
+}
+
+/** What a request asks for that a page read in the person's Chrome cannot give: page actions or a screenshot, W2L's browser's to take; null when nothing. */
+function unreadByPerson(options: FetchOptions): string | null {
+  if (options.actions !== undefined && options.actions.length > 0) return 'page actions'
+  if (options.screenshot !== undefined) return 'a screenshot'
   return null
+}
+
+/** Whether a result was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */
+function handoffResult(result: FetchResult): boolean {
+  return result.status === 'blocked' && result.blockReason !== null && HANDOFF_REASONS[result.blockReason] !== undefined
 }
 
 /** Whether a step was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */

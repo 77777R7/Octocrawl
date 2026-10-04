@@ -3,7 +3,8 @@ import { streamSSE } from 'hono/streaming'
 import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
-import { CrawlStateError, HandoffUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
+import { CrawlStateError, HandoffUnavailableError, LoginsUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
+import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
 import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
@@ -21,6 +22,7 @@ import {
   parseBatchErrorsQuery,
   parseBatchStartRequest,
   parseBatchHandoffRequest,
+  parseLoginImportRequest,
   parseCrawlPageQuery,
   firecrawlCrawlCounts,
   parseFirecrawlCrawlRequest,
@@ -488,6 +490,26 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.post('/v1/deliveries/:id/retry', (c) => {
     try { return c.json(engine.retryDelivery(c.req.param('id'))) }
     catch (error) { return fail(c, 'conflict', error instanceof Error ? error.message : 'retry conflict') }
+  })
+
+  /** The person's saved logins, as `w2l login` keeps them: imported from their Chrome, listed without cookies, forgotten. A server on their machine alone. */
+  app.post('/v1/logins/import', async (c) => {
+    const req = parseLoginImportRequest(await c.req.json())
+    try { return c.json(await engine.importLogin(req), 200) }
+    catch (error) {
+      if (error instanceof LoginsUnavailableError || error instanceof ChromeLoginError) return fail(c, 'conflict', error.message)
+      throw error
+    }
+  })
+  app.get('/v1/logins', async (c) => c.json({ logins: await engine.listLogins() }, 200))
+  app.delete('/v1/logins/:site', async (c) => {
+    try {
+      const removed = await engine.removeLogin(c.req.param('site'))
+      return removed ? c.json({ site: c.req.param('site'), removed: true }, 200) : fail(c, 'not_found', 'no login saved for that site')
+    } catch (error) {
+      if (error instanceof LoginsUnavailableError) return fail(c, 'conflict', error.message)
+      throw error
+    }
   })
 
   app.post('/v1/sessions/managed', async (c) => {

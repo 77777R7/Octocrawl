@@ -100,7 +100,8 @@ interface LadderProgress {
   robotsOverrides: RobotsOverrideApplied[]
 }
 
-function summarize(channelsTried: readonly string[], attempts: readonly { channel: string; result: FetchResult }[]): LadderExecutionSummary {
+/** A run's totals over its attempts: what every lane tried cost, each attempt kept as it was. */
+export function summarize(channelsTried: readonly string[], attempts: readonly { channel: string; result: FetchResult }[]): LadderExecutionSummary {
   const cost: Meter = {
     knownSubtotal: attempts.reduce((sum, item) => sum + (item.result.usage.externalCostUsd ?? 0), 0),
     unknown: attempts.some(({ result }) => result.usage.externalCostUsd === null),

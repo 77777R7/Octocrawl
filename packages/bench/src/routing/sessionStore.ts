@@ -13,6 +13,7 @@
 import { sha256Hex } from '@w2l/http-core'
 import { readFile, writeFile, mkdir, chmod, rename } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 /** One cookie, the shape both Playwright and the vendor layers accept. */
 export interface StoredCookie {
@@ -119,7 +120,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async save(snapshot: SessionSnapshot): Promise<void> {
-    await this.write([...(await this.list()).filter((s) => s.domain !== snapshot.domain), snapshot])
+    await this.exclusive(async () => this.write([...(await this.list()).filter((s) => s.domain !== snapshot.domain), snapshot]))
   }
 
   /** Every saved session; none when the file does not exist yet. */
@@ -134,15 +135,32 @@ export class FileSessionStore implements SessionStore {
 
   /** Forget the session saved for `domain`. False when there was none. */
   async remove(domain: string): Promise<boolean> {
-    const all = await this.list()
-    const kept = all.filter((s) => s.domain !== domain)
-    if (kept.length === all.length) return false
-    await this.write(kept)
-    return true
+    return this.exclusive(async () => {
+      const all = await this.list()
+      const kept = all.filter((s) => s.domain !== domain)
+      if (kept.length === all.length) return false
+      await this.write(kept)
+      return true
+    })
   }
 
+  /**
+   * One read-change-write of the file at a time in this process, whichever
+   * store object makes it: two at once would each write what they read,
+   * and one would undo the other.
+   */
+  private exclusive<T>(change: () => Promise<T>): Promise<T> {
+    const before = FileSessionStore.writing.get(this.file) ?? Promise.resolve()
+    const run = before.then(change, change)
+    FileSessionStore.writing.set(this.file, run.then(() => undefined, () => undefined))
+    return run
+  }
+
+  private static readonly writing = new Map<string, Promise<void>>()
+
   private async write(all: readonly SessionSnapshot[]): Promise<void> {
-    const tmp = `${this.file}.tmp`
+    // A temporary file of its own: another process writing the same file at once renames its own.
+    const tmp = `${this.file}.${process.pid}.${randomUUID()}.tmp`
     await mkdir(dirname(this.file), { recursive: true })
     await writeFile(tmp, JSON.stringify({ sessions: all }, null, 2), { mode: 0o600 })
     await chmod(tmp, 0o600)
