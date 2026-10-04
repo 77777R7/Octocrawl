@@ -17,7 +17,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
   includeLinks: 'boolean', debug: 'boolean', onlyMainContent: 'boolean', mobile: 'boolean', skipTlsVerification: 'boolean', fastMode: 'boolean',
   blockAds: 'boolean', removeBase64Images: 'boolean', storeInCache: 'boolean', lockdown: 'boolean', useCached: 'boolean', ignoreInvalidURLs: 'boolean',
   regexOnFullURL: 'boolean', ignoreQueryParameters: 'boolean', deduplicateSimilarURLs: 'boolean', crawlEntireDomain: 'boolean',
-  allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean',
+  allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean', handoff: 'boolean',
   waitFor: 'int', timeout: 'int', maxFileBytes: 'int', maxAge: 'int', minAge: 'int', maxPages: 'int', maxDepth: 'int', maxConcurrency: 'int', limit: 'int',
   mode: 'string', sitemap: 'string', idempotencyKey: 'string', appendToId: 'string', search: 'string', integration: 'string',
   allowlistedDomains: 'list', includeTags: 'list', excludeTags: 'list',
@@ -217,8 +217,8 @@ export function usage(command: Command | null): string {
     ].join('\n')
   }
   const synopsis: Record<Command, string> = {
-    scrape: 'usage: w2l scrape <url> [options] [--markdown] [--out <dir>]',
     crawl: 'usage: w2l crawl <url> [options] [--out <dir>] | w2l crawl --resume <taskId>',
+    scrape: 'usage: w2l scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand W2L answers with it. W2L passes no check itself.',
     batch: 'usage: w2l batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and W2L reads the page. W2L passes no check itself.',
     map: 'usage: w2l map <url> [options]',
   }

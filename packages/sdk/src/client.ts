@@ -348,7 +348,8 @@ export class W2L {
     // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
     // wait that long plus a margin, and no longer.
     const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
-    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
+    // A scrape handed to the person waits for them as well: as long as they take (undici reads 0 as no limit); request.signal ends it.
+    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, opts.handoff === undefined ? deadlineMs + SCRAPE_ANSWER_MARGIN_MS : 0)
   }
 
   /** The record of one scrape call, by the `scrapeId` its response carried (`metadata.scrapeId`); a W2LError with code `not_found` for an id the server has no record of. */

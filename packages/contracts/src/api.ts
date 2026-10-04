@@ -186,6 +186,15 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    * (`unsupported_parameter`).
    */
   robotsOverride?: RobotsOverride
+  /**
+   * When W2L is stopped at a check it does not pass (a captcha, a challenge,
+   * a login wall), hand the page to the person in their own Chrome and answer
+   * with the page they get through to (`true`, or `{ waitMs }`: how long to
+   * wait for them, 10 s to 30 min, default 10 min). Offered only by a server
+   * on the person's own machine; refused elsewhere, and with `actions` or a
+   * screenshot (`unsupported_parameter`).
+   */
+  handoff?: { waitMs?: number }
 }
 
 /** A recorded robots override for one URL of a batch. */
@@ -285,6 +294,8 @@ export interface CompactScrapeResponse {
   warning?: string
   /** Present when the request itself left something on the table (`fastMode` declined a browser hop the http lane asked for), as on the full response. */
   agentHints?: AgentHints
+  /** A page stopped at a check a person can get through, on a server that hands pages to them: why, and how (`handoff: true`), as on the full response. */
+  handoff?: FetchResult['handoff']
   truncated: boolean
   truncatedAt: number | null
   usage: FetchResult['usage'] & { totalMs: number }
@@ -848,7 +859,7 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
@@ -1799,6 +1810,8 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.debug !== undefined && typeof rec.debug !== 'boolean') throw new RequestError('debug must be a boolean')
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
+  if (rec.handoff !== undefined && typeof rec.handoff !== 'boolean' && (rec.handoff === null || typeof rec.handoff !== 'object' || Array.isArray(rec.handoff))) throw new RequestError('handoff must be true or { waitMs }')
+  const handoff = rec.handoff === undefined || rec.handoff === false ? undefined : rec.handoff === true ? {} : parseBatchHandoffRequest(rec.handoff)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
@@ -1811,6 +1824,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     debug: rec.debug as boolean | undefined,
     ...page,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
+    ...(handoff === undefined ? {} : { handoff }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)

@@ -103,7 +103,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
-import { HandoffNotThrough, openUserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -167,7 +167,8 @@ interface Submission<T extends CrawlAccepted> {
 }
 
 export interface ApiEngine {
-  scrape(req: ScrapeRequest, context?: ExecutionContext): Promise<ScrapeResponse | CompactScrapeResponse>
+  /** One page; with `handoff`, a page a check stopped is handed to the person in their Chrome (`hooks` tell the caller what they are to do). */
+  scrape(req: ScrapeRequest, context?: ExecutionContext, hooks?: HandoffHooks): Promise<ScrapeResponse | CompactScrapeResponse>
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   /**
@@ -786,6 +787,54 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
+  /**
+   * One page handed to the person in their open Chrome: the result read
+   * there once they are through, or why it is not read. Only a page (a
+   * contentful read) is a result; a check still showing, an error or no
+   * content leaves the stopped result standing.
+   */
+  async function readThrough(chrome: UserChrome, url: string, prior: FetchResult, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal): Promise<{ result: FetchResult } | { reason: string }> {
+    try {
+      const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
+      const result = pageFromUserBrowser(read, prior, fetchOpts)
+      if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
+      return { result }
+    } catch (error) {
+      if (!(error instanceof HandoffNotThrough)) throw error
+      return { reason: error.message }
+    }
+  }
+
+  /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
+  function checkHandoff(req: ScrapeRequest): void {
+    if (req.handoff === undefined) return
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    const unread = unreadByPerson(fetchOptions(req, req.formats))
+    if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
+  }
+
+  /** The scrape's stopped page handed to the person, with its own Chrome connection: the page read, or why not. */
+  async function handOffScrape(req: ScrapeRequest, prior: FetchResult, context: ExecutionContext, hooks: HandoffHooks): Promise<{ result: FetchResult } | { reason: string }> {
+    if (handoffClosing.signal.aborted) return { reason: 'W2L is shutting down' }
+    // The caller going away, or this engine shutting down, ends it; the scrape's own timeout does not: the person's time is theirs.
+    const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+    let chrome: UserChrome
+    try { chrome = await openUserChrome(userChrome!, signal) }
+    catch (error) { return { reason: error instanceof Error ? error.message : String(error) } }
+    try {
+      return await readThrough(chrome, req.url, prior, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal)
+    } finally {
+      chrome.close()
+    }
+  }
+
+  /** A result as a server that hands pages to the person answers it: one a check stopped says so, and how (`handoff: true`). */
+  function withHandoffHint(result: FetchResult, req: ScrapeRequest): FetchResult {
+    if (userChrome === null || !handoffResult(result) || unreadByPerson(fetchOptions(req, req.formats)) !== null) return result
+    const blockReason = result.blockReason!
+    return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale: `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there` } }
+  }
+
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
     if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
@@ -814,16 +863,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
           try {
             for (const step of waiting) {
-              try {
+              {
                 // A caller that went away hands nothing more over: each item left keeps its stopped result.
                 if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
-                const read = await chrome.read(step.url, { ...(req.waitMs === undefined ? {} : { waitMs: req.waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), signal })
-                const result = pageFromUserBrowser(read, step.result!, fetchOpts)
-                // Only the page replaces the stopped result: a read that is not one (a check still showing, an error, no content) leaves it standing.
-                if (!CONTENTFUL_STATUS.has(result.status)) {
-                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` })
-                  continue
-                }
+                const read = await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal)
+                if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
+                const result = read.result
                 const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
                 const stored: FetchResult = {
                   ...result,
@@ -840,9 +885,6 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 const { audit: _stoppedAudit, ...kept } = step
                 await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
-              } catch (error) {
-                if (!(error instanceof HandoffNotThrough)) throw error
-                items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: error.message })
               }
             }
           } finally {
@@ -1016,7 +1058,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * Monitor's capture mints an id for its response but leaves no record: a
    * preview persists nothing, and a run's observation is the Monitor's own.
    */
-  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean): Promise<ScrapeResponse | CompactScrapeResponse> {
+  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+    checkHandoff(req)
     checkFileCap(req)
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
@@ -1048,9 +1091,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
           .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
-      const agentHints = agentHintsFor(req, run)
+      // A page a check stopped: handed to the person when the request asks, else told how it could be.
+      const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null
+      const result: FetchResult = handed === null
+        ? withHandoffHint(run.result, req)
+        : 'result' in handed ? handed.result : withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req)
+      // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
+      const agentHints = handed !== null && 'result' in handed ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
       const full: ScrapeRun = {
-        ...run.result,
+        ...result,
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
         summary: run.summary,
@@ -1161,7 +1210,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   return {
-    scrape: (req, context = {}) => runScrape(req, context, true),
+    scrape: (req, context = {}, hooks = {}) => runScrape(req, context, true, hooks),
 
     map: (req, context = {}) => runMap(req, context),
 
@@ -1892,10 +1941,19 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
  * to take, so such a batch's stopped items are not handed over.
  */
 function handoffUnread(task: Task): string | null {
-  const options = task.batch === undefined ? undefined : fetchOptions(task.batch, task.batch.formats)
-  if (options?.actions !== undefined && options.actions.length > 0) return 'page actions'
-  if (options?.screenshot !== undefined) return 'a screenshot'
+  return task.batch === undefined ? null : unreadByPerson(fetchOptions(task.batch, task.batch.formats))
+}
+
+/** What a request asks for that a page read in the person's Chrome cannot give: page actions or a screenshot, W2L's browser's to take; null when nothing. */
+function unreadByPerson(options: FetchOptions): string | null {
+  if (options.actions !== undefined && options.actions.length > 0) return 'page actions'
+  if (options.screenshot !== undefined) return 'a screenshot'
   return null
+}
+
+/** Whether a result was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */
+function handoffResult(result: FetchResult): boolean {
+  return result.status === 'blocked' && result.blockReason !== null && HANDOFF_REASONS[result.blockReason] !== undefined
 }
 
 /** Whether a step was stopped at a check a person can get through in their own browser: a captcha, a challenge, a login wall. */

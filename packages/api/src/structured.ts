@@ -1169,6 +1169,7 @@ export function compactScrapeResponse(
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
     ...(warningOf(next.warnings) === undefined ? {} : { warning: warningOf(next.warnings) }),
     ...(next.agentHints === undefined ? {} : { agentHints: next.agentHints }),
+    ...(next.handoff === undefined || next.handoff === null ? {} : { handoff: next.handoff }),
     truncated: next.truncated,
     truncatedAt: next.truncatedAt,
     usage: { ...next.usage, totalMs },

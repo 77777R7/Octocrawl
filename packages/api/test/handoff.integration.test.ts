@@ -47,6 +47,8 @@ beforeAll(async () => {
     }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
     if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
+    // A scrape's page, behind its own captcha.
+    if (req.url === '/single') return cookie.includes('single=1') ? html(ARTICLE.replace('The member page', 'The single page')) : html(captcha('single'))
     // A page that keeps the widget's script once the person is through it (as a Turnstile page does).
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
@@ -232,6 +234,27 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(done).toMatchObject({ through: 0, notThrough: 2 })
       expect(done!.items.every((item) => item.reason?.includes('you did not click on it to have it read'))).toBe(true)
     } finally {
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed to the person answers with the page they got through to', async () => {
+    const engine = engineFor(join(root, 'tasks-10'))
+    // The person reads the check before passing it, as a person does.
+    const stop = person(chrome, { '/single': async (page) => { await page.waitForTimeout(1_500); await page.click('#pass') } })
+    const told: string[] = []
+    try {
+      const response = await engine.scrape({ url: `${base}/single`, handoff: { waitMs: 20_000 } } as never, {}, { onWaiting: (url, check) => told.push(`${new URL(url).pathname} ${check}`) }) as Record<string, any>
+      expect(told).toEqual(['/single captcha'])
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', blockReason: null })
+      expect(response.markdown).toContain('The single page')
+      expect(response.handoff).toBeUndefined()
+      expect(response.evidenceRecord).toMatchObject({ lane: 'browser_local_authed', identity: { mode: 'authed', userAgent: null } })
+      // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
+      expect(response.channelsTried).toEqual(['http'])
+      expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
+    } finally {
+      stop()
       await engine.close()
     }
   }, 120_000)
