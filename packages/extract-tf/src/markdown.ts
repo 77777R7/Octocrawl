@@ -159,11 +159,58 @@ function shownText(el: Element, ctx: Context): string {
   return text
 }
 
-/** One rendered Markdown block, without surrounding blank lines. */
+/**
+ * One rendered Markdown block, without surrounding blank lines, as its
+ * lines: a list item or quote around it adds a prefix to each line instead
+ * of writing the text again, so a list nested thousands deep costs the size
+ * of its Markdown, not that size at each level.
+ */
 interface Block {
-  text: string
+  lines: Line[]
   /** A list that may follow a paragraph without a blank line (bullets, or numbers from 1). */
   interrupts?: boolean
+}
+
+/** A line of a block: its prefixes, outermost first (a list item's indent, a quote's `>`), then its text. */
+interface Line {
+  prefix: Prefix | null
+  body: string
+}
+
+/** A prefix of a line, and the one inside it. */
+interface Prefix {
+  text: string
+  inner: Prefix | null
+}
+
+function textBlock(text: string, interrupts?: boolean): Block {
+  const lines = text.split('\n').map((body): Line => ({ prefix: null, body }))
+  return interrupts ? { lines, interrupts } : { lines }
+}
+
+/** Whether a block's text is empty. */
+function blockEmpty(block: Block): boolean {
+  return block.lines.length === 1 && block.lines[0]!.prefix === null && block.lines[0]!.body === ''
+}
+
+function lineText(line: Line): string {
+  let text = ''
+  for (let prefix = line.prefix; prefix !== null; prefix = prefix.inner) text += prefix.text
+  return text + line.body
+}
+
+function blockText(block: Block): string {
+  return block.lines.map(lineText).join('\n')
+}
+
+/** The lines of blocks written one after another: a blank line between two, none before one that `interrupts` when `interrupting`. */
+function joinedLines(blocks: Block[], interrupting: boolean): Line[] {
+  const lines: Line[] = []
+  for (let i = 0; i < blocks.length; i++) {
+    if (i > 0 && !(interrupting && blocks[i]!.interrupts)) lines.push({ prefix: null, body: '' })
+    for (const line of blocks[i]!.lines) lines.push(line)
+  }
+  return lines
 }
 
 // ---------------------------------------------------------------- tables
@@ -1193,13 +1240,13 @@ class Flow {
 
   flush(): void {
     const text = this.inline.paragraph()
-    if (text) this.blocks.push({ text: emphasized(text, this.ctx) })
+    if (text) this.blocks.push(textBlock(emphasized(text, this.ctx)))
     this.inline = new Inline({ paragraph: true })
   }
 
   add(...blocks: (Block | null)[]): void {
     this.flush()
-    for (const block of blocks) if (block !== null && block.text) this.blocks.push(block)
+    for (const block of blocks) if (block !== null && !blockEmpty(block)) this.blocks.push(block)
   }
 }
 
@@ -1348,7 +1395,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       // the data tables inside are grids. (The row count first: it costs
       // less than looking through the nested tables.)
       if (ownRows(el).length < 2 || ctx.layoutTable(el)) break
-      flow.add({ text: tableToGfm(el, ctx) })
+      flow.add(textBlock(tableToGfm(el, ctx)))
       return
     case 'li': {
       // An item outside any list still renders with its bullet.
@@ -1356,7 +1403,9 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       walk.push(
         flowLevel(el, inner, walk, () => {
           inner.flush()
-          flow.add({ text: listItem('-', inner.blocks), interrupts: true })
+          // (An empty one still ends the paragraph before it.)
+          const item = listItem('-', inner.blocks)
+          flow.add(item === null ? null : { lines: item, interrupts: true })
         }),
       )
       return
@@ -1372,7 +1421,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       return
     }
     case 'hr':
-      flow.add({ text: '---' })
+      flow.add(textBlock('---'))
       return
     case 'br':
       flow.inline.lineBreak()
@@ -1457,7 +1506,7 @@ function heading(el: Element, ctx: Context): Block | null {
   inlineChildren(el, inner, ctx, NO_MARKS)
   // A heading is one line: a <br> inside it becomes a space.
   const text = inner.finish().text.split('\n').filter(Boolean).join(' ')
-  return text ? { text: `${'#'.repeat(Number(el.localName[1]))} ${text}` } : null
+  return text ? textBlock(`${'#'.repeat(Number(el.localName[1]))} ${text}`) : null
 }
 
 /** Text of a <pre>, exactly, with <br> as a newline. */
@@ -1503,14 +1552,15 @@ function codeBlock(pre: Element, ctx: Context): Block | null {
   let longest = 0
   for (const match of text.matchAll(/^ {0,3}(`+)/gm)) longest = Math.max(longest, match[1]!.length)
   const fence = '`'.repeat(Math.max(3, longest + 1))
-  return { text: `${fence}${codeLanguage(pre)}\n${text}\n${fence}` }
+  return textBlock(`${fence}${codeLanguage(pre)}\n${text}\n${fence}`)
 }
 
-/** A quote of the blocks inside a <blockquote>. */
+/** A quote of the blocks inside a <blockquote>: `> ` before each line, `>` alone for a blank one. */
 function blockquote(blocks: Block[]): Block | null {
-  const inner = blocks.map((block) => block.text).join('\n\n')
-  if (!inner) return null
-  return { text: inner.split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n') }
+  if (blocks.length === 0) return null
+  const lines = joinedLines(blocks, false)
+  for (const line of lines) line.prefix = { text: line.prefix !== null || line.body !== '' ? '> ' : '>', inner: line.prefix }
+  return { lines }
 }
 
 /**
@@ -1518,11 +1568,17 @@ function blockquote(blocks: Block[]): Block | null {
  * nested list follows the text before it directly; other blocks are
  * separated by a blank line. An item with no content is dropped.
  */
-function listItem(marker: string, blocks: Block[]): string {
-  if (blocks.length === 0) return ''
-  let body = blocks[0]!.text
-  for (const block of blocks.slice(1)) body += (block.interrupts ? '\n' : '\n\n') + block.text
-  return `${marker} ${body.replace(/\n(?=.)/g, `\n${' '.repeat(marker.length + 1)}`)}`
+function listItem(marker: string, blocks: Block[]): Line[] | null {
+  if (blocks.length === 0) return null
+  const lines = joinedLines(blocks, true)
+  lines[0]!.prefix = { text: `${marker} `, inner: lines[0]!.prefix }
+  const indent = ' '.repeat(marker.length + 1)
+  // Each line after the first that has a first character (one a regular expression's `.` matches: not \r, \u2028 or \u2029).
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!
+    if (line.prefix !== null || (line.body !== '' && !/^[\r\u2028\u2029]/.test(line.body))) line.prefix = { text: indent, inner: line.prefix }
+  }
+  return lines
 }
 
 function hasItemChild(el: Element): boolean {
@@ -1581,11 +1637,16 @@ function list(el: Element, flow: Flow, walk: FlowWalk): void {
   })
   walk.push(
     visit(el, () => {
-      const text = items
-        .map((item) => listItem(item.marker, item.blocks))
-        .filter(Boolean)
-        .join('\n')
-      flow.add(...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') })
+      // The items one per line (an empty one left out); the list interrupts a paragraph when its first item is `- ` or `1. `.
+      const lines: Line[] = []
+      let first: string | undefined
+      for (const item of items) {
+        const itemLines = listItem(item.marker, item.blocks)
+        if (itemLines === null) continue
+        first ??= item.marker
+        for (const line of itemLines) lines.push(line)
+      }
+      flow.add(...before, first === undefined ? null : { lines, interrupts: first === '-' || first === '1.' })
     }),
   )
 }
@@ -1666,7 +1727,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
   const markdown = blocksOf(root, { base, blockMemo: new Map(), layoutTable: layoutTables(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
-    .map((block) => block.text)
+    .map(blockText)
     .join('\n\n')
   doc.close()
   return markdown
