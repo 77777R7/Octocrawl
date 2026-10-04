@@ -49,6 +49,8 @@ import {
   type BatchErrorsResponse,
   type BatchStatusResponse,
   type BatchHandoffRequest,
+  type LoginImportRequest,
+  type SavedLogin,
   type BatchHandoffResponse,
   HANDOFF_REASONS,
   CONTENTFUL_STATUS,
@@ -104,6 +106,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -130,6 +133,11 @@ export interface CrawlStatusPage {
   counts: Partial<Record<StepStatus, number>>
   /** Pages the crawl will still record, when this process runs it; null when it does not. */
   ahead: number | null
+}
+
+/** Saved logins this engine does not manage: a hosted engine, or one without the person's sessions file or Chrome. */
+export class LoginsUnavailableError extends Error {
+  override readonly name = 'LoginsUnavailableError'
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -239,6 +247,17 @@ export interface ApiEngine {
   handOffBatch(taskId: string, req: BatchHandoffRequest, hooks?: HandoffHooks): Promise<BatchHandoffResponse | null>
   /** End every handoff now, closing the tabs they have open, and wait until they have; close() does this first. No handoff starts after. */
   endHandoffs(): Promise<void>
+  /**
+   * The person's login to a site, saved from their running Chrome into the
+   * sessions file (`w2l login import`), on an engine that serves them alone;
+   * a LoginsUnavailableError elsewhere, a RequestError for a site that is not
+   * one, a ChromeLoginError when Chrome cannot give it.
+   */
+  importLogin(req: LoginImportRequest): Promise<SavedLogin>
+  /** The saved logins, without their cookies; an empty list on an engine without a sessions file. */
+  listLogins(): Promise<SavedLogin[]>
+  /** Forget a saved login: false when none was saved for the site. */
+  removeLogin(site: string): Promise<boolean>
   runFirecrawlMonitor(triggerKey?: string, context?: ExecutionContext): Promise<MonitorView>
   getFirecrawlMonitor(): Promise<MonitorView>
   configureMonitor(revision: MonitorRevision, initialEnabled?: boolean): MonitorRevision
@@ -1509,6 +1528,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       } finally {
         if (!launched) await store.close()
       }
+    },
+
+    async importLogin(req) {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (w2l serve, the local MCP host, or w2l login import)')
+      try { loginDomain(req.site) }
+      catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
+      const imported = await importChromeLogin({
+        site: req.site,
+        sessionsFile: options.sessionsFile!,
+        ...(userChrome.userDataDir === undefined ? {} : { userDataDir: userChrome.userDataDir }),
+        ...(userChrome.connect === undefined ? {} : { connect: userChrome.connect }),
+        ...(req.approveTimeoutMs === undefined ? {} : { timeoutMs: req.approveTimeoutMs }),
+      })
+      const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
+      if (saved === undefined) throw new Error(`the login to ${imported.domain} was not found in the sessions file after it was saved`)
+      return saved
+    },
+
+    async listLogins() {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null) return []
+      return listSavedLogins(options.sessionsFile!)
+    },
+
+    async removeLogin(site) {
+      if (options.hosted === true || (options.sessionsFile ?? null) === null) throw new LoginsUnavailableError('this server keeps no saved logins')
+      try { loginDomain(site) }
+      catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
+      return removeSavedLogin(options.sessionsFile!, site)
     },
 
     async endHandoffs() {

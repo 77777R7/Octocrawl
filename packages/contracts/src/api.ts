@@ -623,6 +623,34 @@ export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_
   login_wall: 'login_required',
 }
 
+/**
+ * `POST /v1/logins/import`: save the person's login to `site` (a domain or a
+ * page URL) from the Chrome they use, as `w2l login import` does, on a server
+ * on their machine. `approveTimeoutMs`: how long to wait for them to click
+ * Allow in Chrome, 10 s to 10 min; default 2 min.
+ */
+export interface LoginImportRequest {
+  site: string
+  approveTimeoutMs?: number
+}
+
+export function parseLoginImportRequest(body: unknown): LoginImportRequest {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new RequestError('body must be a JSON object')
+  const rec = body as Record<string, unknown>
+  for (const key of Object.keys(rec)) if (key !== 'site' && key !== 'approveTimeoutMs') throw new RequestError(`unsupported login import option: ${key}`)
+  if (typeof rec.site !== 'string' || rec.site.trim() === '' || rec.site.length > 2048) throw new RequestError('site must be a domain or a page URL')
+  if (rec.approveTimeoutMs !== undefined && (typeof rec.approveTimeoutMs !== 'number' || !Number.isInteger(rec.approveTimeoutMs) || rec.approveTimeoutMs < 10_000 || rec.approveTimeoutMs > 600_000)) throw new RequestError('approveTimeoutMs must be an integer from 10000 to 600000')
+  return { site: rec.site.trim(), ...(rec.approveTimeoutMs === undefined ? {} : { approveTimeoutMs: rec.approveTimeoutMs }) }
+}
+
+/** A login saved for a domain: never its cookies, only how many and the hash a record names it by. */
+export interface SavedLogin {
+  domain: string
+  savedAt: string
+  cookieCount: number
+  sessionSha256: string
+}
+
 /** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
 export interface BatchHandoffRequest {
   waitMs?: number
