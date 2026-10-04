@@ -16,7 +16,7 @@
  * it contains. HTML without markers converts by its tags alone.
  */
 
-import { detachAll, isLayoutTable, parse } from './dom.js'
+import { detachAll, layoutTables, parse } from './dom.js'
 import { namedBy } from './selectors.js'
 import { documentBaseUrl } from './links.js'
 
@@ -110,6 +110,8 @@ interface Context {
   base: URL | null
   /** containsBlock results, so the walk stays linear in the size of the tree. */
   blockMemo: Map<Element, boolean>
+  /** Whether a table lays out other tables (layoutTables), measuring each element of the page once. */
+  layoutTable: (table: Element) => boolean
   /** The HTML carries layout markers. */
   layout: boolean
   /** `data:` image URIs are written as targets instead of being dropped (MarkdownOptions.dataUriImages 'keep'). */
@@ -1427,7 +1429,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       // does a single row (a bar of links): their cells are blocks, and only
       // the data tables inside are grids. (The row count first: it costs
       // less than looking through the nested tables.)
-      if (ownRows(el).length < 2 || isLayoutTable(el)) break
+      if (ownRows(el).length < 2 || ctx.layoutTable(el)) break
       flow.add(textBlock(tableToGfm(el, ctx)))
       return
     case 'li': {
@@ -1733,7 +1735,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = writeBlocks(blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) }))
+  const markdown = writeBlocks(blocksOf(root, { base, blockMemo: new Map(), layoutTable: layoutTables(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) }))
   doc.close()
   return markdown
 }
