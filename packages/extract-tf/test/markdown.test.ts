@@ -359,6 +359,26 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(Date.now() - started).toBeLessThan(15_000)
   })
 
+  it('writes lists and quotes nested deep in time that grows with their Markdown, not faster', () => {
+    // Each level indents the text of every level inside it, so the Markdown grows with the square of the depth; writing
+    // each level's text again made the time grow with its cube. Four times as deep: sixteen times the Markdown, so about
+    // sixteen times the time (sixty-four before). The shortest of three runs, so a busy machine weighs less.
+    const time = (open: string, close: string, depth: number): number => {
+      const html = `<!doctype html><html><body>${open.repeat(depth)}x${close.repeat(depth)}</body></html>`
+      let best = Infinity
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now()
+        htmlToMarkdown(html)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    // (Parsing a page that deep takes a little more than its size too: 20 or so here, 55 or more before.)
+    for (const [open, close] of [['<ol><li>a', '</li></ol>'], ['<ul><li><p>a</p>', '</li></ul>'], ['<blockquote><p>a</p>', '</blockquote>']]) {
+      expect(time(open!, close!, 1_600) / time(open!, close!, 400)).toBeLessThan(40)
+    }
+  }, 60_000)
+
   it('joins adjacent runs of one emphasis or code without rewriting the run each time', () => {
     const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
     expect(md('<code>a`</code><code>`b</code><code>c</code>')).toBe('```a``bc```')
