@@ -1091,6 +1091,33 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(sessionRejection('https://example.com/admin', at('https://example.com/login.php'))).not.toBeNull()
   })
 
+  it('a page that asks for a sign-in in place, at the URL asked for, under the saved login is login_wall too', async () => {
+    const url = 'https://example.com/wishlists'
+    const asksToSignIn: FetchResult = { ...contentfulResult(url, 'browser_local_authed'), markdown: '# Wishlists\n\n## Log in to view your wishlists\n\nYou can create, view, or edit wishlists once you have logged in.\n\n## Support\n\n- [Help Centre](https://example.com/help)' }
+    const http = channel('http', [contentfulResult(url, 'http')])
+    const authed = channel('authed_session', [asksToSignIn])
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const run = await new LadderRunner([http, authed], { mode: 'authed' }, null, null, store).run(url)
+    expect(run.result).toMatchObject({ status: 'blocked', blockReason: 'login_wall' })
+    expect(http.calls).toEqual([])
+    expect(run.ladderTrace.find((t) => t.event === 'ladder_session_rejected')?.detail).toMatchObject({ domain: 'example.com', signInPrompt: 'Log in to view your wishlists' })
+  })
+
+  it('reads a sign-in prompt only where a page asks for one, not a link or a sentence that mentions signing in', () => {
+    const page = (markdown: string): FetchResult => ({ ...contentfulResult('https://example.com/x', 'browser_local_authed'), markdown })
+    const asks = (markdown: string) => sessionRejection('https://example.com/x', page(markdown)) !== null
+    expect(asks('## Please sign in to continue')).toBe(true)
+    expect(asks('You must be logged in to see this page.')).toBe(true)
+    expect(asks('# Orders\n\nSign in to view your orders')).toBe(true)
+    expect(asks('Login required')).toBe(true)
+    // A signed-in page: a header link, a bare heading, prose that mentions signing in, a sign-out link.
+    expect(asks('[Sign in](https://example.com/login) · [Help](https://example.com/help)\n\n# Your orders\n\n- Order 1')).toBe(false)
+    expect(asks('# Sign in\n\nWelcome back, Jane.')).toBe(false)
+    expect(asks('Our guide explains how admins sign in to view the audit log, and why the log in to view step needs two-factor codes on every device you own.')).toBe(false)
+    expect(asks('[Log out](https://example.com/logout)')).toBe(false)
+  })
+
   it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {
     const url = 'https://other.org/p'
     const store = new MemorySessionStore()

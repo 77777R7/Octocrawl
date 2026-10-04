@@ -446,7 +446,9 @@ export class LadderRunner {
       // if it were the page the caller asked for.
       const rejected = channel === sessionFirst ? sessionRejection(url, result) : null
       if (rejected !== null) {
-        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...(rejected === result ? {} : { redirectedTo: rejected.evidence.finalUrl }) } })
+        // How the site refused it: a block, a redirect to its login page, or a sign-in asked for in place.
+        const how = rejected === result ? {} : redirectedToLogin(url, result) ? { redirectedTo: rejected.evidence.finalUrl } : { signInPrompt: signInPrompt(result.markdown) }
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...how } })
         return finish(rejected, false)
       }
 
@@ -1052,24 +1054,47 @@ function safeHost(url: string): string {
 const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
 export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
+/** A page's own request to sign in: to see it, to go on, or because it requires one. A link or a heading that only names signing in is not one. */
+const SIGN_IN_PROMPT = /\b(?:log|sign)\s?in\s+to\s+(?:view|see|continue|access|read|use)\b|\byou\s+(?:must|need\s+to)\s+(?:be\s+)?(?:logged|signed)\s+in\b|\bplease\s+(?:log|sign)\s?in\b|\b(?:log|sign)\s?in\s+(?:is\s+)?required\b/i
+
+/** Lines longer than this are prose that may mention signing in, not a page asking for it. */
+const SIGN_IN_PROMPT_MAX_LINE = 120
+
+/**
+ * The line of a page's Markdown that asks the reader to sign in ("Log in to
+ * view your wishlists", "You must be logged in to see this page"), or null:
+ * a heading or a short line, never a long paragraph that only mentions it.
+ */
+export function signInPrompt(markdown: string | null | undefined): string | null {
+  for (const raw of (markdown ?? '').split('\n')) {
+    const line = raw.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/, '').trim()
+    if (line.length > 0 && line.length <= SIGN_IN_PROMPT_MAX_LINE && SIGN_IN_PROMPT.test(line)) return line
+  }
+  return null
+}
+
+/** A page that redirected from the one asked for to a login page: a path segment that is a login endpoint, which the requested path did not have. */
+function redirectedToLogin(url: string, result: FetchResult): boolean {
+  try {
+    const requested = new URL(url)
+    const landed = new URL(result.evidence.finalUrl)
+    return landed.href !== requested.href && !isLoginPath(requested.pathname) && isLoginPath(landed.pathname)
+  } catch {
+    return false
+  }
+}
+
 /**
  * The result of a fetch with the user's saved login when the site refused
- * that login, else null: a `login_wall` block, or a page that redirected
- * from the one asked for to a login page (a path segment that is a login
- * endpoint, which the requested path did not have). The site's login page is not the
- * page asked for, so it is never answered as its content.
+ * that login, else null: a `login_wall` block, a page that redirected from
+ * the one asked for to a login page, or a page that asks for a sign-in in
+ * place (signInPrompt), as a site does for a login that expired or was
+ * signed out without redirecting. The site's login page is not the page
+ * asked for, so it is never answered as its content.
  */
 export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
   if (result.status === 'blocked' && result.blockReason === 'login_wall') return result
   if (!CONTENTFUL_STATUS.has(result.status)) return null
-  let requested: URL
-  let landed: URL
-  try {
-    requested = new URL(url)
-    landed = new URL(result.evidence.finalUrl)
-  } catch {
-    return null
-  }
-  if (landed.href === requested.href || isLoginPath(requested.pathname) || !isLoginPath(landed.pathname)) return null
+  if (!redirectedToLogin(url, result) && signInPrompt(result.markdown) === null) return null
   return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }
