@@ -507,7 +507,7 @@ class Inline {
    * and punctuation ending it moves after its closing marker when a letter
    * follows (see emphasize).
    */
-  private lastEmphasis: { marker: string; pieces: string[]; textTrail: number } | null = null
+  private lastEmphasis: { marker: string; pieces: string[]; textTrail: number; plain: boolean } | null = null
   /** Text not yet written (see text), in pieces, and whether the last ends in a space. */
   private pendingText: string[] = []
   private pendingEndsSpace = false
@@ -609,7 +609,10 @@ class Inline {
     // An underscore run (see emphasize) does not close before a letter: it is written with stars again, unless punctuation now follows it.
     const written = trailing === '' ? marker.replace(/_/g, '*') : marker
     if (trailing === '' && written === marker) return
-    this.parts[this.parts.length - 1] = rest ? written + rest + written + trailing : trailing
+    // Punctuation now next to what follows is escaped where it would pair with it: a `<`, `&` or `&#` (a tag or an entity).
+    // (Not a `!`: before a link, which would make it an image, nothing moves, as a `[` is punctuation.)
+    const moved = escapeMovedEnd(trailing)
+    this.parts[this.parts.length - 1] = rest ? written + rest + written + moved : moved
     this.unwritten = null
   }
 
@@ -667,7 +670,10 @@ class Inline {
     const textTrail = Math.max(0, inner.textTrail - after.length)
     if (before) this.content(before)
     const previous = this.lastEmphasis
-    if (core && !before && !this.pendingSpace && previous !== null && previous.marker === marker) {
+    // (Only runs of plain text join: Markdown written for each, such as its own emphasis, code or a link, or a character that
+    // pairs with one across the join, such as `<` with `span>` or `&` with `amp;`, would read otherwise next to the other's.)
+    const plain = PLAIN_RUN.test(core)
+    if (core && !before && !this.pendingSpace && previous !== null && previous.marker === marker && previous.plain && plain) {
       // Right after a run of the same emphasis (`<b>a</b><b>b</b>`): one run, as `**a****b**` reads otherwise.
       previous.pieces.push(core)
       previous.textTrail = textTrail
@@ -678,15 +684,16 @@ class Inline {
       const before = this.pendingSpace ? ' ' : (this.parts[this.parts.length - 1] ?? '').slice(-1)
       const leading = before !== '' && !FLANK_NEUTRAL.test(before) ? /^[\p{P}\p{S}][\s\p{Zs}\p{P}\p{S}]*/u.exec(core.slice(0, textLead))?.[0] : undefined
       if (leading !== undefined) {
-        // A backslash ending it now comes before the marker, which it would escape.
-        this.content(escapeLastBackslash(leading))
         core = core.slice(leading.length)
+        // A backslash ending it now comes before the marker, which it would escape; with no marker after it (the run is all
+        // punctuation), a `<`, `&` or `&#` ending it would pair with what follows (a tag, an entity): escaped.
+        this.content(core === '' ? escapeMovedEnd(escapeLastBackslash(leading)) : escapeLastBackslash(leading))
       }
       if (core) {
         // Right after a run of the other emphasis, its stars would join this one's (`**x***.y*`): this one is written with underscores.
         const written = previous !== null && this.parts[this.parts.length - 1]?.endsWith('*') && !this.pendingSpace ? marker.replace(/\*/g, '_') : marker
         this.content(written + core + written)
-        this.lastEmphasis = { marker: written, pieces: [core], textTrail: Math.min(textTrail, core.length) }
+        this.lastEmphasis = { marker: written, pieces: [core], textTrail: Math.min(textTrail, core.length), plain }
       }
     }
     if (after) this.content(after)
@@ -778,6 +785,8 @@ function emphasisParts(text: string): { before: string; core: string; after: str
 const ASCII_PUNCTUATION = /[!-/:-@[-`{-~]/
 /** Characters next to which an emphasis marker reads as one either way: white space and punctuation (a line's end too). */
 const FLANK_NEUTRAL = /[\s\p{Zs}\p{P}\p{S}]/u
+/** A run of emphasis that is text with none of the characters Markdown pairs across a join: one may join the next (see emphasize). */
+const PLAIN_RUN = /^[^\\`*_~[\]!<>&]*$/
 const WORD_CHARACTER = /[\p{L}\p{N}]/u
 const SPACE_CHARACTER = /[\s\p{Zs}]/u
 
@@ -854,6 +863,19 @@ function escapeLineStart(line: string): string {
   if (/^(?:=+|-+|(?:-[ \t]*){3,})[ \t]*$/.test(line)) return `\\${line}`
   if (/^\[(?:[^\]\\]|\\.)*\]:/.test(line)) return `\\${line}`
   return line
+}
+
+/**
+ * Punctuation moved out of emphasis markers, now right before what follows: a
+ * `<` ending it, or a `&` or `&#` (the `&`), would start a tag or an entity
+ * with that, so it is escaped, unless a backslash already escapes it.
+ */
+function escapeMovedEnd(text: string): string {
+  const at = text.endsWith('<') || text.endsWith('&') ? text.length - 1 : text.endsWith('&#') ? text.length - 2 : -1
+  if (at < 0) return text
+  let backslashes = 0
+  while (backslashes < at && text[at - 1 - backslashes] === '\\') backslashes++
+  return backslashes % 2 === 1 ? text : `${text.slice(0, at)}\\${text.slice(at)}`
 }
 
 /**

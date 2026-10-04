@@ -321,6 +321,13 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(md('<code>a`</code><code>`b</code><code>c</code>')).toBe('```a``bc```')
     expect(md('<code>`a</code><code>b</code>')).toBe('`` `ab ``')
     expect(md('<b>a</b><b>b.</b>c')).toBe('**ab**.c')
+    // Only plain text joins: Markdown written for each run, such as its own emphasis, code, a link or a character that pairs with
+    // one across the join (`<` and `span>`, `&` and `amp;`), would read otherwise next to the other's.
+    expect(md('<b><i>x</i></b><b><i>y</i></b>')).toBe('***x***__*y*__')
+    expect(md('<b>Note <i>this</i></b><b><i>now</i> please</b>')).toBe('**Note *this***__*now* please__')
+    expect(md('<b>a!</b><b><a href="/u">x</a></b>')).toBe('**a!**__[x](/u)__')
+    expect(md('<b>&lt;</b><b>span&gt;x</b>')).toBe('**<**__span>x__')
+    expect(md('<b>&amp;</b><b>amp;</b>')).toBe('**&**__amp;__')
     const started = Date.now()
     expect(md('<code>a`</code>'.repeat(80_000)).length).toBeLessThan(200_000)
     expect(md('<b>a.</b>'.repeat(80_000)).length).toBeLessThan(200_000)
@@ -349,6 +356,14 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(md('<b>Note:</b> text')).toBe('**Note:** text')
     expect(md('a <b>"x"</b> b')).toBe('a **"x"** b')
     expect(md('a<b>!</b>b')).toBe('a!b')
+    // Punctuation moved out of the markers is escaped where it would pair with what follows: a tag, an entity, or an image
+    // where a link follows (a run that ends in one, before a link, keeps it).
+    expect(md('x<b>&lt;</b>span&gt;')).toBe('x\\<span>')
+    expect(md('<b>&amp;</b>amp;')).toBe('\\&amp;')
+    expect(md('<b>a&amp;#</b>39;')).toBe('**a**\\&#39;')
+    expect(md('x<b>&amp;#</b>x41;')).toBe('x\\&#x41;')
+    expect(md('a<b>!</b><a href="/u">x</a>')).toBe('a\\![x](/u)')
+    expect(md('a<b>x!</b><a href="/u">y</a>')).toBe('a**x!**[y](/u)')
   })
 
   it('escapes text only where CommonMark would read it as Markdown, so it renders as written', () => {

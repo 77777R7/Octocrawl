@@ -380,7 +380,8 @@ describe('htmlToTables', () => {
     expect(withoutLayoutMarkers('<tr data-w2l-display="block"><td>a</td><td>b</td></tr>')).toBe('<tr><td>a</td><td>b</td></tr>')
     // A selection of table rows, given as <body>…</body>, keeps its rows and cells.
     const rowsSelection = '<body><tr class="athing"><td data-w2l-display="block">1.</td><td><a href="/s1">Story one</a></td></tr><tr class="athing"><td>2.</td><td><a href="/s2">Story two</a></td></tr></body>'
-    expect(htmlToMarkdown(rowsSelection)).toBe('1.\n\n[Story one](/s1)\n\n2.\n\n[Story two](/s2)')
+    // (A `1.` alone on a line is escaped: CommonMark would read it as an empty list item, and lose the number.)
+    expect(htmlToMarkdown(rowsSelection)).toBe('1\\.\n\n[Story one](/s1)\n\n2\\.\n\n[Story two](/s2)')
     expect(withoutLayoutMarkers(rowsSelection)).toBe(rowsSelection.replace(' data-w2l-display="block"', ''))
     // A selection given whole keeps its <body>.
     expect(withoutLayoutMarkers('<body class="k"><nav><a href="/a" data-w2l-display="block">Nav</a></nav></body>')).toBe('<body class="k"><nav><a href="/a">Nav</a></nav></body>')
