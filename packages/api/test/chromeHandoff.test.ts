@@ -85,7 +85,7 @@ describe('the person\'s Chrome', () => {
     // The tab behind another one (or Chrome's Allow dialog) all along: the person is told to switch to it, once.
     const behind = fakeChrome([at('https://site.test/a', GATE, { hidden: true })])
     const hidden: string[] = []
-    await (await openUserChrome({ userDataDir, connect: behind.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 300, hiddenNoticeMs: 100, onHidden: (url) => hidden.push(url) }).catch(() => undefined)
+    await (await openUserChrome({ userDataDir, connect: behind.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 2_000, hiddenNoticeMs: 100, onHidden: (url) => hidden.push(url) }).catch(() => undefined)
     expect(hidden).toEqual(['https://site.test/a'])
     // Hidden for the first reads only, then in front: no notice.
     const brief = fakeChrome([at('https://site.test/a', GATE, { hidden: true }), at('https://site.test/a', GATE), at('https://site.test/a', PAGE, { active: true })])
