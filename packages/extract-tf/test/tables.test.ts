@@ -476,6 +476,26 @@ describe('htmlToTables', () => {
     expect(Date.now() - started).toBeLessThan(5_000)
   })
 
+  it('tells layout tables from data tables in time linear in the page, however deep its tables are nested', () => {
+    // Two-row tables, each nested in the last row of the one around it: each is asked whether it lays out the others.
+    const chain = (n: number) => `${'<table><tr><td>a</td></tr><tr><td>'.repeat(n)}x${'</td></tr></table>'.repeat(n)}`
+    const time = (n: number): number => {
+      const html = chain(n)
+      let best = Infinity
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now()
+        htmlToMarkdown(html)
+        htmlToTables(html)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    expect(htmlToTables(chain(3)).map((table) => table.rows)).toEqual([[['a'], ['x']]])
+    time(100)
+    // Twice the depth takes about twice the time; it took four times as long when each table measured all it holds.
+    expect(time(2_000) / time(1_000)).toBeLessThan(3)
+  })
+
   it('shares one budget among a page\'s tables, so many tables just under the cap cannot add up to a huge response', () => {
     const near = `<table><tr><td colspan="1000">${'x'.repeat(1990)}</td></tr><tr><td>y</td></tr></table>`
     const tables = htmlToTables(near.repeat(150))

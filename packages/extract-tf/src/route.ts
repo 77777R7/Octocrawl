@@ -15,7 +15,7 @@
  */
 
 import type { PageType } from '@w2l/contracts'
-import { commonAncestor, isLayoutTable, qsa, tagOf } from './dom.js'
+import { commonAncestor, layoutTables, qsa, tagOf } from './dom.js'
 import { visiblePrices } from './product.js'
 
 interface RouterCounts {
@@ -456,7 +456,8 @@ export function selectTable(doc: Document): Element | null {
     return qsa(t, 'td,th').length >= 4 && (t.textContent ?? '').trim() !== ''
   })
   if (dataTables.length === 0) return null
-  const unlaid = dataTables.filter((t) => !isLayoutTable(t))
+  const layoutTable = layoutTables()
+  const unlaid = dataTables.filter((t) => !layoutTable(t))
   const largest = [...(unlaid.length > 0 ? unlaid : dataTables)].sort((a, b) => qsa(b, 'td,th').length - qsa(a, 'td,th').length)[0]!
   const length = (el: Element): number => (el.textContent ?? '').replace(/\s+/g, '').length
   const menu = (t: Element): boolean =>
