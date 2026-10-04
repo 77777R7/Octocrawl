@@ -174,8 +174,11 @@ const endsWithBodyEnd = (html: string): boolean => {
  */
 const CLOSING_START = /<(?:li|dd|dt|h[1-6]|button|p|a|b|big|code|em|font|i|nobr|s|small|strike|strong|tt|u|form|template)[\t\n\f\r />]/i
 
-/** Whether the page may have a <![CDATA[ ]]> in an svg or math, which a browser reads as text and htmlparser2 as a comment. */
-const hasForeignCdata = (html: string): boolean => html.includes('<![CDATA[') && /<(?:svg|math)[\t\n\f\r />]/i.test(html)
+/**
+ * Whether the page may have a <![CDATA[ ]]>: htmlparser2 reads one to its ]]>, as a comment, where a browser reads text in an
+ * svg or math, and in HTML a comment that ends at its first >.
+ */
+const hasCdata = (html: string): boolean => html.includes('<![CDATA[')
 
 /** Whether the page has an end tag a browser reads by its "any other end tag" rule, such as `</span>`, or a heading's, which closes any heading. */
 const hasLooseEnd = (html: string): boolean => {
@@ -195,7 +198,7 @@ const hasLooseEnd = (html: string): boolean => {
  */
 export function normalizeTableTags(html: string, whole = /<html[\s>]|<!doctype/i.test(html)): string {
   const tableTags = whole ? /<(table|t[dhr]|thead|tbody|tfoot|caption|col)/i : /<table/i
-  if (!tableTags.test(html) && (!whole || endsWithBodyEnd(html)) && !breaksOutOfForeign(html) && !hasLooseEnd(html) && !CLOSING_START.test(html) && !hasForeignCdata(html)) return html
+  if (!tableTags.test(html) && (!whole || endsWithBodyEnd(html)) && !breaksOutOfForeign(html) && !hasLooseEnd(html) && !CLOSING_START.test(html) && !hasCdata(html)) return html
   // Replace [at, end) with text, in source order.
   // `first`: written before the other edits at its place (the copy of a formatting element a browser puts in a block,
   // before its content), a later one before an earlier one, as the later copy holds the earlier.
@@ -1078,6 +1081,14 @@ export function normalizeTableTags(html: string, whole = /<html[\s>]|<!doctype/i
     afterText = false
     if (openRun !== null && stack.length - 1 === last(tablePos)) closeRun(html.lastIndexOf('<', start - 1))
   }
+  /**
+   * Whether a <![CDATA[ here is in an svg or math, not at an HTML integration point, where a browser reads it as text. (Not in an
+   * <annotation-xml>, which is an integration point or not by its encoding, unknown here, as is whether what is in it is HTML.)
+   */
+  const cdataInForeign = (): boolean =>
+    tables === 0 || inCell() ? inOuterForeign() && last(outerByName.get('annotation-xml')) < 0 : inForeign() && last(byName.get('^annotation-xml')) < 0
+  // The <![CDATA[s in HTML, by where they start.
+  const cdataInHtml = new Set<number>()
   const tokenizer = new Tokenizer(
     { decodeEntities: true },
     {
@@ -1109,17 +1120,20 @@ export function normalizeTableTags(html: string, whole = /<html[\s>]|<!doctype/i
       },
       oncdata(start, endIndex, endOffset) {
         // In an svg or math (not at an HTML integration point) a browser reads it as text, as written, to its ]]> or the end
-        // of the page: written out as that text. (Not in an <annotation-xml>, which is an integration point or not by its
-        // encoding, unknown here, as is whether what is in it is HTML: left a comment there.)
-        const foreign = tables === 0 || inCell() ? inOuterForeign() && last(outerByName.get('annotation-xml')) < 0 : inForeign() && last(byName.get('^annotation-xml')) < 0
-        if (!foreign) return comment(start)
+        // of the page: written out as that text.
+        if (!cdataInForeign()) return comment(start)
         afterText = true
         // (Its content ends `endOffset` before `endIndex`, the `>` of its ]]>, or the page's end.)
         const text = html.slice(start, endIndex - endOffset).replace(/&/g, '&amp;').replace(/</g, '&lt;')
         edits.push({ at: html.lastIndexOf('<', start - 1), end: Math.min(endIndex + 1, html.length), text })
       },
       oncomment: comment,
-      ondeclaration: comment,
+      ondeclaration(start, endIndex) {
+        comment(start)
+        // A <![CDATA[ in HTML, read as a declaration to its first > (see below): written out as the comment a browser reads (after
+        // the foster run it ends, so it stays in the table).
+        if (cdataInHtml.has(start - 2)) edits.push({ at: start - 2, end: endIndex + 1, text: `<!--${html.slice(start, endIndex)}-->` })
+      },
       onend() {},
       onprocessinginstruction: comment,
       ontext(start, endIndex) {
@@ -1151,7 +1165,25 @@ export function normalizeTableTags(html: string, whole = /<html[\s>]|<!doctype/i
       },
     },
   )
-  tokenizer.write(html)
+  // A <![CDATA[ where a tag may start, in HTML (not in an svg or math, nor in a <noscript> or the like, text to a browser), is
+  // given the tokenizer as <!xCDATA[, a declaration, which it ends at the first > as a browser ends the comment: what follows
+  // is read as the page's. Each is seen in place, after what comes before it is read. (One with no > after it is left as it
+  // is: htmlparser2 makes it a comment to the end of the page, as a browser does.)
+  const state = tokenizer as unknown as { state: number; baseState: number }
+  const lastGt = html.lastIndexOf('>')
+  let from = 0
+  for (let at = html.indexOf('<![CDATA['); at >= 0; at = html.indexOf('<![CDATA[', at + 9)) {
+    tokenizer.write(html.slice(from, at))
+    from = at
+    // The tokenizer's Text state (1), or reading a character reference (26) in it.
+    const tagMayStart = state.state === 1 || (state.state === 26 && state.baseState === 1)
+    if (!tagMayStart || cdataInForeign() || [...TEXT_CONTENT].some((name) => last(outerByName.get(name)) >= 0 || last(byName.get(name)) >= 0)) continue
+    if (at > lastGt) break
+    cdataInHtml.add(at)
+    tokenizer.write('<!xCDATA[')
+    from = at + 9
+  }
+  tokenizer.write(html.slice(from))
   tokenizer.end()
   tagStart = html.length
   closeRun(html.length)

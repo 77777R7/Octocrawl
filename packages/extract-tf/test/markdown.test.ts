@@ -333,6 +333,14 @@ describe('htmlToMarkdown', () => {
     expect(body('<template><svg><![CDATA[tp]]></svg></template>')).toBe('<template><svg>tp</svg></template>')
     expect(body('<svg><![CDATA[open')).toBe('<svg>open&lt;/body&gt;&lt;/html&gt;</svg>')
     expect(htmlToMarkdown('<p>Area: <math><mi>x</mi><![CDATA[ + 1]]></math></p>')).toBe('Area: x + 1')
+    // In HTML it is a comment that ends at its first >, as a browser reads it: what follows is the page's.
+    expect(body('<p>x<![CDATA[a>b]]>y</p>')).toBe('<p>x<!--[CDATA[a-->b]]&gt;y</p>')
+    expect(body('<p><![CDATA[a><b>bold</b>]]>z</p><select><option>o<![CDATA[s>t]]></select>')).toBe('<p><!--[CDATA[a--><b>bold</b>]]&gt;z</p><select><option>o<!--[CDATA[s-->t]]&gt;</option></select>')
+    expect(body('<table><tr><td>a</td></tr>x<![CDATA[c>d]]> <tr><td>b</td></tr></table>')).toBe('xd]]&gt; <table><tr><td>a</td></tr><!--[CDATA[c--><tr><td>b</td></tr></table>')
+    expect(body('<svg><![CDATA[s>t]]></svg><![CDATA[h>i]]>&amp<![CDATA[e-->f')).toBe('<svg>s&gt;t</svg><!--[CDATA[h-->i]]&gt;&amp;<!--[CDATA[e---->f')
+    // (Not in an attribute, a comment or a <textarea>, nor in a <noscript>, whose content a browser reads as text.)
+    expect(body('<div title="<![CDATA[q>r]]>">v<!--<![CDATA[x>y]]>--><textarea><![CDATA[t>u]]></textarea></div>')).toBe('<div title="<![CDATA[q>r]]>">v<!--<![CDATA[x>y]]>--><textarea><![CDATA[t>u]]></textarea></div>')
+    expect(htmlToMarkdown('<p>See <![CDATA[note>the <b>bold</b> part]]></p>')).toBe('See the **bold** part]]>')
     // A <font> with a color, face or size ends the svg or math, as a browser ends it there: the CDATA after it is HTML's comment.
     expect(body('<p>Area <math><font color=x><![CDATA[hidden]]></font><mi>x</mi><![CDATA[y]]></math></p>')).toBe('<p>Area <math></math><font color="x"><!--[CDATA[hidden]]--></font><mi>x</mi><!--[CDATA[y]]--></p>')
     expect(body('<svg><font>a</font><![CDATA[b]]><font data-size=1 face=f>c</font></svg>')).toBe('<svg><font>a</font>b</svg><font data-size="1" face="f">c</font>')
