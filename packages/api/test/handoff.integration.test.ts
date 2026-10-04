@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -47,8 +47,19 @@ beforeAll(async () => {
     }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
     if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
+    // A page whose own data is not on it: the JSON format asks the model.
+    if (req.url === '/slowpass') return cookie.includes('slowpass=1') ? html(ARTICLE) : html(captcha('slowpass'))
+    // A scrape's page, behind its own captcha.
+    if (req.url === '/single') return cookie.includes('single=1') ? html(ARTICLE.replace('The member page', 'The single page')) : html(captcha('single'))
     // A page that keeps the widget's script once the person is through it (as a Turnstile page does).
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
+    // Behind its captcha, a page that keeps the widget's script and has its prose in what blockAds takes for an ad.
+    if (req.url === '/inad') return cookie.includes('inad=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script><div class="ad">${ARTICLE.replace('The member page', 'The page in an ad box')}</div>`) : html(captcha('inad'))
+    // A batch item behind its captcha, whose replacement the batch's webhook hears of.
+    if (req.url === '/hooked') return cookie.includes('hooked=1') ? html(ARTICLE.replace('The member page', 'The hooked page')) : html(captcha('hooked'))
+    // A scrape's page behind its captcha, asked for with a cache lookup; and one nobody gets through.
+    if (req.url === '/cached') return cookie.includes('cached=1') ? html(ARTICLE.replace('The member page', 'The cached page')) : html(captcha('cached'))
+    if (req.url === '/never') return html(captcha('never'))
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
     if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
     if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
@@ -233,6 +244,115 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(done!.items.every((item) => item.reason?.includes('you did not click on it to have it read'))).toBe(true)
     } finally {
       await engine.close()
+    }
+  }, 120_000)
+
+  it('an item the person got through replaces its stopped result as a page event of its own on the batch\'s webhook, after the terminal one', async () => {
+    const engine = engineFor(join(root, 'tasks-13'))
+    const stop = person(chrome, { '/hooked': async (page) => { await page.click('#pass') } })
+    try {
+      const { taskId } = await engine.startBatch({ urls: [`${base}/hooked`, `${base}/open`], formats: ['markdown'], webhook: 'http://127.0.0.1:8829/hook' } as never)
+      for (let i = 0; i < 300 && !['completed', 'failed', 'cancelled'].includes((await engine.getBatch(taskId))?.status ?? ''); i++) await new Promise((resolve) => setTimeout(resolve, 50))
+      const stopped = (await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/hooked'))!
+      for (let i = 0; i < 100 && engine.listDeliveries({ jobId: taskId }).length < 4; i++) await new Promise((resolve) => setTimeout(resolve, 25))
+      const before = engine.listDeliveries({ jobId: taskId }).map((delivery) => [delivery.eventId, delivery.eventVersion])
+      expect(before).toHaveLength(4)
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ through: 1 })
+      const deliveries = engine.listDeliveries({ jobId: taskId })
+      const replaced = deliveries.find((delivery) => delivery.eventId === `${taskId}:handoff:${stopped.id}`)
+      expect(replaced).toMatchObject({ eventVersion: 4, payload: { event: 'page', sequence: 4, page: { id: stopped.id, status: 'success', lane: 'browser_local_authed' } } })
+      expect((replaced!.payload as { page: CrawlPage }).page.markdown).toContain('The hooked page')
+      // The events before it are as they were: started, the two items, completed.
+      expect(deliveries.filter((delivery) => delivery !== replaced).map((delivery) => [delivery.eventId, delivery.eventVersion])).toEqual(before)
+      // Handed over again, nothing is left to hand over, and nothing more is sent.
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0 })
+      expect(engine.listDeliveries({ jobId: taskId })).toHaveLength(5)
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed to the person answers with the page they got through to', async () => {
+    const engine = engineFor(join(root, 'tasks-10'))
+    // The person reads the check before passing it, as a person does.
+    const stop = person(chrome, { '/single': async (page) => { await page.waitForTimeout(1_500); await page.click('#pass') } })
+    const told: string[] = []
+    try {
+      const response = await engine.scrape({ url: `${base}/single`, handoff: { waitMs: 20_000 } } as never, {}, { onWaiting: (url, check) => told.push(`${new URL(url).pathname} ${check}`) }) as Record<string, any>
+      expect(told).toEqual(['/single captcha'])
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', blockReason: null })
+      expect(response.markdown).toContain('The single page')
+      expect(response.handoff).toBeUndefined()
+      expect(response.evidenceRecord).toMatchObject({ lane: 'browser_local_authed', identity: { mode: 'authed', userAgent: null } })
+      // The person's Chrome's time zone is not W2L's to state.
+      expect(response.metadata.timezone).toBeNull()
+      // The stopped run is still the response's routing audit; its hints speak of the read, not of W2L's lanes.
+      expect(response.channelsTried).toEqual(['http'])
+      // The call's totals count the read too, as one more attempt: never less than the read alone.
+      expect(response.summary.attempts.map((attempt: { channel: string }) => attempt.channel)).toEqual(['http', 'browser_local_authed'])
+      expect(response.summary).toMatchObject({ requestCount: 1, attemptCount: 1 })
+      expect(response.summary.browserMs).toBe(response.usage.browserMs)
+      expect(response.summary.bytesDecompressed).toBeGreaterThan(response.usage.bytesDecompressed)
+      expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed to the person is through as its own options read the page: blockAds false keeps what an ad box holds', async () => {
+    const engine = engineFor(join(root, 'tasks-12'))
+    const stop = person(chrome, { '/inad': async (page) => { await page.click('#pass') } })
+    try {
+      const response = await engine.scrape({ url: `${base}/inad`, blockAds: false, handoff: { waitMs: 15_000 } } as never, {}, {}) as Record<string, any>
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed' })
+      expect(response.markdown).toContain('The page in an ad box')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape handed over keeps what the cache said of the call, and one not read there is told it can be handed over again', async () => {
+    const engine = engineFor(join(root, 'tasks-14'))
+    const stop = person(chrome, { '/cached': async (page) => { await page.click('#pass') } })
+    try {
+      const read = await engine.scrape({ url: `${base}/cached`, maxAge: 60_000, handoff: { waitMs: 20_000 } } as never, {}, {}) as Record<string, any>
+      expect(read).toMatchObject({ status: 'success', lane: 'browser_local_authed', metadata: { cacheState: 'miss' } })
+      const notRead = await engine.scrape({ url: `${base}/never`, handoff: { waitMs: 1_000 } } as never, {}, {}) as Record<string, any>
+      expect(notRead.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
+      expect(notRead.handoff.rationale).toContain('it was not read there')
+      expect(notRead.handoff.rationale).not.toContain('handoff: true (w2l scrape --handoff)')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('a scrape the person takes longer than its timeout over still gets its JSON from the model', async () => {
+    let calls = 0
+    const model = createServer((req, res) => {
+      calls++
+      req.resume()
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"secret":"from-model"}' } }] }))
+    })
+    await new Promise<void>((resolve) => model.listen(0, '127.0.0.1', resolve))
+    vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(model.address() as AddressInfo).port}`)
+    vi.stubEnv('W2L_EXTRACT_MODEL', 'stub-model')
+    const engine = engineFor(join(root, 'tasks-11'))
+    // The person passes the check after the scrape's 3 s timeout.
+    const stop = person(chrome, { '/slowpass': async (page) => { await page.waitForTimeout(5_000); await page.click('#pass') } })
+    try {
+      const formats = [{ type: 'json', schema: { type: 'object', properties: { secret: { type: 'string' } }, required: ['secret'] }, modelFallback: true }]
+      const response = await engine.scrape({ url: `${base}/slowpass`, timeout: 3_000, formats, handoff: { waitMs: 30_000 } } as never) as Record<string, any>
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', json: { status: 'complete', data: { secret: 'from-model' } } })
+      expect(calls).toBe(1)
+    } finally {
+      stop()
+      vi.unstubAllEnvs()
+      await engine.close()
+      await new Promise<void>((resolve) => model.close(() => resolve()))
     }
   }, 120_000)
 

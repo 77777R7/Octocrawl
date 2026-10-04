@@ -13,11 +13,12 @@ export const LOGIN_USAGE = [
   '       w2l login list',
   '       w2l login remove <domain>',
   '',
-  'import reads the cookies of one site from the Chrome you already use and saves them, so',
+  'import reads the login of one site from the Chrome you already use and saves it, so',
   '`w2l scrape <url> --mode authed` (and the API and MCP in mode authed) read the page signed in as you.',
   'First open chrome://inspect/#remote-debugging in Chrome 144 or later and turn on',
   '"Allow remote debugging for this browser instance"; Chrome then asks "Allow remote debugging?": click Allow.',
-  'W2L connects once, reads that site\'s cookies, disconnects, and never touches your tabs.',
+  'W2L connects once, reads that site\'s cookies and the localStorage of its tabs you have open',
+  '(a site that keeps its login there needs a tab of it open), disconnects, and loads nothing in your tabs.',
   'Logins are kept in W2L_SESSIONS_FILE, else ~/.w2l/sessions.json (readable by you alone).',
 ].join('\n')
 

@@ -121,6 +121,61 @@ describe('the handoff route', () => {
   })
 })
 
+describe('a scrape handed to the person', () => {
+  let server: FixtureServer
+  let root: string
+  let engine: ApiEngine | null = null
+  beforeAll(async () => { server = await startFixtureServer() })
+  afterAll(async () => { await server.close() })
+  afterEach(async () => { await engine?.close(); engine = null; await rm(root, { recursive: true, force: true }) })
+
+  async function setup(userChrome: boolean) {
+    root = await mkdtemp(join(tmpdir(), 'w2l-scrape-handoff-'))
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      channelsFor: (mode) => [buildChannels(mode, { localSubjects: { http: { fetch: async (url: string) => laneResult(url) }, browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!],
+      ...(userChrome ? { userChrome: { userDataDir: join(root, 'no-chrome') } } : {}),
+    })
+    return createApp(engine)
+  }
+  const scrape = async (app: ReturnType<typeof createApp>, body: Record<string, unknown>) => {
+    const res = await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return { status: res.status, body: await res.json() as Record<string, any> }
+  }
+
+  it('a stopped page says how it can be handed over, on a server that offers it, and only for a check a person gets through', async () => {
+    const app = await setup(true)
+    const stopped = await scrape(app, { url: `${server.url}/gate` })
+    expect(stopped.body).toMatchObject({ status: 'blocked', blockReason: 'captcha', handoff: { reason: 'captcha_required', liveViewUrl: null, rationale: expect.stringContaining('handoff: true') } })
+    expect((await scrape(app, { url: `${server.url}/gate`, debug: true })).body.handoff).toMatchObject({ reason: 'captcha_required' })
+    expect((await scrape(app, { url: `${server.url}/slow` })).body.handoff).toBeUndefined()
+    expect((await scrape(app, { url: `${server.url}/ok` })).body.handoff).toBeUndefined()
+  })
+
+  it('a server that does not hand pages over refuses the option by name, and gives no hint', async () => {
+    const app = await setup(false)
+    expect(await scrape(app, { url: `${server.url}/gate`, handoff: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['handoff'] } } })
+    expect((await scrape(app, { url: `${server.url}/gate` })).body.handoff).toBeUndefined()
+  })
+
+  it('refuses it beside actions or a screenshot, and in a malformed shape', async () => {
+    const app = await setup(true)
+    expect(await scrape(app, { url: `${server.url}/gate`, handoff: true, actions: [{ type: 'wait', milliseconds: 1 }] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
+    expect(await scrape(app, { url: `${server.url}/gate`, handoff: true, formats: ['screenshot'] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('a screenshot') } })
+    expect(await scrape(app, { url: `${server.url}/gate`, handoff: 'yes' })).toMatchObject({ status: 400, body: { error: 'handoff must be true or { waitMs }' } })
+    expect(await scrape(app, { url: `${server.url}/gate`, handoff: { waitMs: 5 } })).toMatchObject({ status: 400 })
+  })
+
+  it('a handoff that cannot reach Chrome answers the stopped page, with why and the hint', async () => {
+    const app = await setup(true)
+    const res = await scrape(app, { url: `${server.url}/gate`, handoff: true })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ status: 'blocked', handoff: { reason: 'captcha_required' } })
+    expect(res.body.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
+    expect(res.body.warning).toContain('chrome://inspect/#remote-debugging')
+  })
+})
+
 describe('parseBatchHandoffRequest', () => {
   it('takes a wait of 10 s to 30 min, or none', () => {
     expect(parseBatchHandoffRequest(undefined)).toEqual({})
