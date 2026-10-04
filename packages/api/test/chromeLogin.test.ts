@@ -20,7 +20,7 @@ const COOKIES = [
 type Tab = { url: string; storage?: [string, string][]; context?: string; crashed?: boolean }
 
 /** A Chrome holding `cookies`, with `tabs` open; a page's storage is read through a session attached to its tab. */
-function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string | null = 'default') {
+function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string | null | 'refused' = 'default') {
   const calls: { endpoint: string; methods: string[]; closed: boolean } = { endpoint: '', methods: [], closed: false }
   const connect = async (endpoint: string): Promise<CdpConnection> => {
     calls.endpoint = endpoint
@@ -29,6 +29,7 @@ function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string 
         calls.methods.push(sessionId === undefined ? method : `${method}@${sessionId}`)
         const tab = sessionId === undefined ? undefined : tabs[Number(sessionId.slice(1))]
         if (method === 'Storage.getCookies') return { cookies }
+        if (method === 'Target.getBrowserContexts' && defaultContext === 'refused') throw new ChromeLoginError('Chrome refused the request: Not allowed')
         if (method === 'Target.getBrowserContexts') return { browserContextIds: ['incognito'], ...(defaultContext === null ? {} : { defaultBrowserContextId: defaultContext }) }
         if (method === 'Target.getTargets') return { targetInfos: [{ targetId: 'sw', type: 'service_worker', url: 'https://www.example.com/sw.js', browserContextId: 'default' }, ...tabs.map((t, i) => ({ targetId: `t${i}`, type: 'page', url: t.url, browserContextId: t.context ?? 'default' }))] }
         if (method === 'Target.attachToTarget') return { sessionId: `s${String(params.targetId).slice(1)}` }
@@ -129,6 +130,8 @@ describe('w2l login import from the user\'s Chrome', () => {
     const unnamed = fakeChrome(COOKIES, [{ url: 'https://app.example.com/', storage: [['token', 'storage-value-1']] }], null)
     expect(await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: unnamed.connect })).toMatchObject({ cookieCount: 3, localStorage: null, localStorageRead: false })
     expect(unnamed.calls.methods).not.toContain('Target.getTargets')
+    // A Chrome that refuses to list its contexts still has the site's cookies saved.
+    expect(await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: fakeChrome(COOKIES, [], 'refused').connect })).toMatchObject({ cookieCount: 3, localStorage: null, localStorageRead: false })
   })
 
   it('a site that keeps its login in localStorage alone is saved; with no tab of it open, the refusal says to open one', async () => {

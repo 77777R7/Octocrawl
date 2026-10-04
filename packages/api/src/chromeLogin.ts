@@ -65,7 +65,7 @@ export interface ImportedLogin {
   cookieCount: number
   /** The localStorage saved with the login; null when none was (no tab of the site open, or its storage empty). */
   localStorage: LoginStorage | null
-  /** Whether the site's localStorage was read: false when no tab of the site was open in Chrome, so none could be. */
+  /** Whether the site's open tabs were found and read: false when none was open in Chrome (or Chrome would not list them), so no localStorage could be; see localStorageUnread for tabs found that did not answer. */
   localStorageRead: boolean
   /** The origins of the site's open tabs whose localStorage Chrome did not give (a tab that crashed or was discarded): saved without it. */
   localStorageUnread: string[]
@@ -174,10 +174,17 @@ const TAB_READ_TIMEOUT_MS = 5_000
  * meanwhile), which the import saves without.
  */
 async function siteStorage(connection: CdpConnection, domain: string): Promise<{ origins: OriginStorage[]; unread: string[] } | null> {
-  const { defaultBrowserContextId } = await connection.send('Target.getBrowserContexts') as { defaultBrowserContextId?: string }
-  // A Chrome that does not name its default profile's context: no tab can be told to be in it, and none is read.
-  if (defaultBrowserContextId === undefined) return null
-  const { targetInfos } = await connection.send('Target.getTargets') as { targetInfos?: { targetId: string; type: string; url: string; browserContextId?: string }[] }
+  let defaultBrowserContextId: string | undefined
+  let targetInfos: { targetId: string; type: string; url: string; browserContextId?: string }[] | undefined
+  try {
+    ;({ defaultBrowserContextId } = await connection.send('Target.getBrowserContexts', {}, undefined, TAB_READ_TIMEOUT_MS) as { defaultBrowserContextId?: string })
+    // A Chrome that does not name its default profile's context: no tab can be told to be in it, and none is read.
+    if (defaultBrowserContextId === undefined) return null
+    ;({ targetInfos } = await connection.send('Target.getTargets', {}, undefined, TAB_READ_TIMEOUT_MS) as { targetInfos?: typeof targetInfos })
+  } catch {
+    // A Chrome that will not list its contexts or tabs leaves the cookies to be saved, and no localStorage read.
+    return null
+  }
   const tabs = (targetInfos ?? []).filter((target) => target.type === 'page' && target.browserContextId === defaultBrowserContextId && onSite(target.url, domain))
   if (tabs.length === 0) return null
   const byOrigin = new Map<string, OriginStorage>()
