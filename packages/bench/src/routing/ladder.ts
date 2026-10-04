@@ -466,7 +466,9 @@ export class LadderRunner {
       // if it were the page the caller asked for.
       const rejected = channel === sessionFirst ? sessionRejection(url, result) : null
       if (rejected !== null) {
-        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...(rejected === result ? {} : { redirectedTo: rejected.evidence.finalUrl }) } })
+        // How the site refused it: a block, a redirect to its login page, or a sign-in asked for in place.
+        const how = rejected === result ? {} : redirectedToLogin(url, result) ? { redirectedTo: rejected.evidence.finalUrl } : { signInPrompt: signInPrompt(result.markdown, result.metadata?.title) }
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_session_rejected', channel: channel.id, detail: { domain: effectiveSession!.domain, blockReason: 'login_wall', ...how } })
         return finish(rejected, false)
       }
 
@@ -1073,23 +1075,72 @@ const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelo
 export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
 /**
+ * A page's own request to sign in, as a line begins: to see it, to go on, or
+ * because it requires one. A line that only names signing in ("Sign in", a
+ * header link), or mentions it after other words ("Step 2: Sign in to
+ * continue"), is not one.
+ */
+const SIGN_IN_PROMPT = /^(?:(?:log|sign)\s?in\s+to\s+(?:view|see|continue|access|read|use)\b|you\s+(?:must|need\s+to)\s+(?:be\s+)?(?:logged|signed)\s+in\b|please\s+(?:log|sign)\s?in\b|(?:log|sign)\s?in\s+(?:is\s+)?required\b)/i
+
+/** How far down a page its own sign-in prompt stands: within its first lines, before the content a signed-in page shows. */
+const SIGN_IN_PROMPT_LINES = 8
+
+/** Lines longer than this are prose that may mention signing in, not a page asking for it. */
+const SIGN_IN_PROMPT_MAX_LINE = 120
+
+/**
+ * The line near the top of a page's Markdown that asks the reader to sign in
+ * ("Log in to view your wishlists", "You must be logged in to see this
+ * page"), or null. Only a heading or a plain line among the first
+ * SIGN_IN_PROMPT_LINES counts, and it must begin with the request: a table
+ * row, a list item, a quote or a line with a link is the page's content (an
+ * issue titled "Login required error", an email asking to sign in, an offer
+ * for another area), never its request to the reader; so is a line its
+ * `title` names (the heading of one issue, ticket or question whose subject
+ * begins with the words, "Please log in again #1411").
+ */
+export function signInPrompt(markdown: string | null | undefined, title?: string | null): string | null {
+  const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const named = ` ${words(title ?? '')} `
+  // The page's own lines: not those of a code block, nor a list item's indented continuation.
+  let fenced = false
+  const own = (markdown ?? '').split('\n').filter((line) => {
+    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; return false }
+    return !fenced && !/^(?: {2,}|\t)/.test(line)
+  })
+  const lines = own.map((line) => line.trim()).filter((line) => line.length > 0).slice(0, SIGN_IN_PROMPT_LINES)
+  for (const raw of lines) {
+    if (/^(?:\||[-*+]\s|\d+[.)]\s|>)/.test(raw) || raw.includes('](')) continue
+    const line = raw.replace(/^#{1,6}\s+/, '')
+    // The page's subject, as its title names it (its first words, an issue's number dropped, in the title in order): not a request to the reader.
+    if (named.trim() !== '' && named.includes(` ${words(line.replace(/\s+#\d+$/, '')).split(' ').slice(0, 6).join(' ')} `)) continue
+    if (line.length <= SIGN_IN_PROMPT_MAX_LINE && SIGN_IN_PROMPT.test(line)) return line
+  }
+  return null
+}
+
+/** A page that redirected from the one asked for to a login page: a path segment that is a login endpoint, which the requested path did not have. */
+function redirectedToLogin(url: string, result: FetchResult): boolean {
+  try {
+    const requested = new URL(url)
+    const landed = new URL(result.evidence.finalUrl)
+    return landed.href !== requested.href && !isLoginPath(requested.pathname) && isLoginPath(landed.pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
  * The result of a fetch with the user's saved login when the site refused
- * that login, else null: a `login_wall` block, or a page that redirected
- * from the one asked for to a login page (a path segment that is a login
- * endpoint, which the requested path did not have). The site's login page is not the
- * page asked for, so it is never answered as its content.
+ * that login, else null: a `login_wall` block, a page that redirected from
+ * the one asked for to a login page, or a page that asks for a sign-in in
+ * place (signInPrompt), as a site does for a login that expired or was
+ * signed out without redirecting. The site's login page is not the page
+ * asked for, so it is never answered as its content.
  */
 export function sessionRejection(url: string, result: FetchResult): FetchResult | null {
   if (result.status === 'blocked' && result.blockReason === 'login_wall') return result
   if (!CONTENTFUL_STATUS.has(result.status)) return null
-  let requested: URL
-  let landed: URL
-  try {
-    requested = new URL(url)
-    landed = new URL(result.evidence.finalUrl)
-  } catch {
-    return null
-  }
-  if (landed.href === requested.href || isLoginPath(requested.pathname) || !isLoginPath(landed.pathname)) return null
+  if (!redirectedToLogin(url, result) && signInPrompt(result.markdown, result.metadata?.title) === null) return null
   return { ...result, status: 'blocked', blockReason: 'login_wall', failureReason: null }
 }

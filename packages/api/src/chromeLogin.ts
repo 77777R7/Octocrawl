@@ -282,7 +282,10 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
     // Cancelled while Chrome waits for Allow: the connection is dropped, and an Allow clicked later attaches to nothing.
     const cancel = () => { reject(new ChromeLoginError('the connection to Chrome was cancelled')); socket.close() }
     signal?.addEventListener('abort', cancel, { once: true })
-    const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+    const pending = new Map<number, { sessionId: string | undefined; resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+    // Sessions Chrome detached (their tab closed): it answers none of their commands again, so none is waited for.
+    const detached = new Set<string>()
+    const tabClosed = () => new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
     const listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
     let nextId = 1
     let opened = false
@@ -300,13 +303,14 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
         send(method, params = {}, sessionId, within = CDP_COMMAND_TIMEOUT_MS) {
           // A closed socket sends nothing and answers nothing: the command fails now, not never.
           if (closed) return Promise.reject(new ChromeLoginError('Chrome closed the connection'))
+          if (sessionId !== undefined && detached.has(sessionId)) return Promise.reject(tabClosed())
           const id = nextId++
           return new Promise((done, fail) => {
             const timeout = setTimeout(() => {
               pending.delete(id)
               fail(new ChromeLoginError(`Chrome did not answer ${method} within ${Math.round(within / 1000)} s`))
             }, within)
-            pending.set(id, { resolve: (value) => { clearTimeout(timeout); done(value) }, reject: (error) => { clearTimeout(timeout); fail(error) } })
+            pending.set(id, { sessionId, resolve: (value) => { clearTimeout(timeout); done(value) }, reject: (error) => { clearTimeout(timeout); fail(error) } })
             socket.send(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }))
           })
         },
@@ -325,6 +329,12 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string; result?: unknown; error?: { message?: string } }
       if (message.id === undefined && message.method !== undefined) {
+        // A tab closed (or W2L let it go): its session's commands in flight fail now, not after their timeout.
+        const gone = message.method === 'Target.detachedFromTarget' && message.sessionId === undefined ? message.params?.sessionId : undefined
+        if (typeof gone === 'string') {
+          detached.add(gone)
+          for (const [id, waiter] of pending) if (waiter.sessionId === gone) { pending.delete(id); waiter.reject(tabClosed()) }
+        }
         for (const listener of listeners.get(`${message.sessionId ?? ''}|${message.method}`) ?? []) listener(message.params ?? {})
         return
       }

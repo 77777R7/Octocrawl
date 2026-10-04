@@ -159,11 +159,112 @@ function shownText(el: Element, ctx: Context): string {
   return text
 }
 
-/** One rendered Markdown block, without surrounding blank lines. */
-interface Block {
-  text: string
-  /** A list that may follow a paragraph without a blank line (bullets, or numbers from 1). */
-  interrupts?: boolean
+/**
+ * One rendered Markdown block, without surrounding blank lines: text, or a
+ * list item, quote or list of the blocks in it. Kept as that tree and written
+ * out once (see writeBlocks), so a list nested thousands deep costs the size
+ * of its Markdown in time and the size of the tree in memory, not that at
+ * each level.
+ */
+type Block =
+  | { kind: 'text'; text: string }
+  /** `interrupts`: a list that may follow a paragraph without a blank line (bullets, or numbers from 1). */
+  | { kind: 'item'; marker: string; blocks: Block[]; interrupts?: boolean }
+  | { kind: 'quote'; blocks: Block[] }
+  | { kind: 'list'; items: Block[]; interrupts: boolean }
+
+function textBlock(text: string): Block {
+  return { kind: 'text', text }
+}
+
+/** Whether a block's text is empty. */
+function blockEmpty(block: Block): boolean {
+  return block.kind === 'text' && block.text === ''
+}
+
+/**
+ * The most list items and quotes a line is written in. The blocks of a
+ * deeper item or quote are written as blocks of the innermost one, with no
+ * marker or `>` of their own and a blank line between each two, so none
+ * runs into another (a list item's text into a table, a line before `---`
+ * into a heading): their text is kept, in order, and a line's prefixes stay
+ * short, so the Markdown of a list nested thousands deep grows with its text,
+ * not with the square of its depth.
+ */
+const MAX_NESTING = 32
+
+/** A list item or quote that a line being written is in, and the one it is in (`depth` of them in all). */
+interface Around {
+  /** A list item's marker (null for a quote), the indent of its later lines, and whether its first line is written. */
+  marker: string | null
+  indent: string
+  started: boolean
+  outer: Around | null
+  depth: number
+}
+
+/**
+ * Blocks as Markdown, a blank line between two, depth first on a stack (a
+ * list nested thousands deep costs no stack frames). Each line gets the
+ * prefixes of the items and quotes it is in, innermost first, as each was
+ * written around the text inside it: an item's marker on its first line and
+ * its indent on each later one with a first character (one a regular
+ * expression's `.` matches: not \r, \u2028 or \u2029), a quote's `> `, or
+ * `>` alone on a blank line. An item's blocks are separated by a blank line
+ * except before one that `interrupts`, a list's items by none.
+ */
+function writeBlocks(top: Block[]): string {
+  const lines: string[] = []
+  const write = (body: string, around: Around | null): void => {
+    let prefix = ''
+    // Whether the line so far is empty, or starts with a character `.` does not match.
+    let empty = body === ''
+    let unmatched = !empty && /^[\r\u2028\u2029]/.test(body)
+    for (let a = around; a !== null; a = a.outer) {
+      let added = ''
+      if (a.marker === null) added = empty ? '>' : '> '
+      else if (!a.started) {
+        a.started = true
+        added = `${a.marker} `
+      } else if (!empty && !unmatched) added = a.indent
+      if (added !== '') {
+        prefix = added + prefix
+        empty = false
+        unmatched = false
+      }
+    }
+    lines.push(prefix + body)
+  }
+  const levels: { blocks: Block[]; next: number; around: Around | null; separator: 'blank' | 'item' | 'none' }[] = [
+    { blocks: top, next: 0, around: null, separator: 'blank' },
+  ]
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!
+    if (level.next === level.blocks.length) {
+      levels.pop()
+      continue
+    }
+    const index = level.next++
+    const block = level.blocks[index]!
+    if (index > 0 && (level.separator === 'blank' || (level.separator === 'item' && !('interrupts' in block && block.interrupts)))) {
+      write('', level.around)
+    }
+    if (block.kind === 'text') for (const line of block.text.split('\n')) write(line, level.around)
+    else {
+      // Past the most levels, the blocks of an item, quote or list are the innermost one's (see MAX_NESTING).
+      const depth = level.around?.depth ?? 0
+      const blocks = block.kind === 'list' ? block.items : block.blocks
+      if (depth >= MAX_NESTING) levels.push({ blocks, next: 0, around: level.around, separator: 'blank' })
+      else if (block.kind === 'item') {
+        const around = { marker: block.marker, indent: ' '.repeat(block.marker.length + 1), started: false, outer: level.around, depth: depth + 1 }
+        // (At the most levels, a list in it is written as its blocks: a blank line before it too.)
+        levels.push({ blocks, next: 0, around, separator: depth + 1 >= MAX_NESTING ? 'blank' : 'item' })
+      } else if (block.kind === 'quote') {
+        levels.push({ blocks, next: 0, around: { marker: null, indent: '', started: true, outer: level.around, depth: depth + 1 }, separator: 'blank' })
+      } else levels.push({ blocks, next: 0, around: level.around, separator: 'none' })
+    }
+  }
+  return lines.join('\n')
 }
 
 // ---------------------------------------------------------------- tables
@@ -1193,13 +1294,13 @@ class Flow {
 
   flush(): void {
     const text = this.inline.paragraph()
-    if (text) this.blocks.push({ text: emphasized(text, this.ctx) })
+    if (text) this.blocks.push(textBlock(emphasized(text, this.ctx)))
     this.inline = new Inline({ paragraph: true })
   }
 
   add(...blocks: (Block | null)[]): void {
     this.flush()
-    for (const block of blocks) if (block !== null && block.text) this.blocks.push(block)
+    for (const block of blocks) if (block !== null && !blockEmpty(block)) this.blocks.push(block)
   }
 }
 
@@ -1348,7 +1449,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       // the data tables inside are grids. (The row count first: it costs
       // less than looking through the nested tables.)
       if (ownRows(el).length < 2 || ctx.layoutTable(el)) break
-      flow.add({ text: tableToGfm(el, ctx) })
+      flow.add(textBlock(tableToGfm(el, ctx)))
       return
     case 'li': {
       // An item outside any list still renders with its bullet.
@@ -1356,7 +1457,8 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       walk.push(
         flowLevel(el, inner, walk, () => {
           inner.flush()
-          flow.add({ text: listItem('-', inner.blocks), interrupts: true })
+          // (An empty one still ends the paragraph before it.)
+          flow.add(inner.blocks.length === 0 ? null : { kind: 'item', marker: '-', blocks: inner.blocks, interrupts: true })
         }),
       )
       return
@@ -1372,7 +1474,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
       return
     }
     case 'hr':
-      flow.add({ text: '---' })
+      flow.add(textBlock('---'))
       return
     case 'br':
       flow.inline.lineBreak()
@@ -1457,7 +1559,7 @@ function heading(el: Element, ctx: Context): Block | null {
   inlineChildren(el, inner, ctx, NO_MARKS)
   // A heading is one line: a <br> inside it becomes a space.
   const text = inner.finish().text.split('\n').filter(Boolean).join(' ')
-  return text ? { text: `${'#'.repeat(Number(el.localName[1]))} ${text}` } : null
+  return text ? textBlock(`${'#'.repeat(Number(el.localName[1]))} ${text}`) : null
 }
 
 /** Text of a <pre>, exactly, with <br> as a newline. */
@@ -1503,26 +1605,12 @@ function codeBlock(pre: Element, ctx: Context): Block | null {
   let longest = 0
   for (const match of text.matchAll(/^ {0,3}(`+)/gm)) longest = Math.max(longest, match[1]!.length)
   const fence = '`'.repeat(Math.max(3, longest + 1))
-  return { text: `${fence}${codeLanguage(pre)}\n${text}\n${fence}` }
+  return textBlock(`${fence}${codeLanguage(pre)}\n${text}\n${fence}`)
 }
 
-/** A quote of the blocks inside a <blockquote>. */
+/** A quote of the blocks inside a <blockquote> (see writeBlocks). */
 function blockquote(blocks: Block[]): Block | null {
-  const inner = blocks.map((block) => block.text).join('\n\n')
-  if (!inner) return null
-  return { text: inner.split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n') }
-}
-
-/**
- * One list item: the marker, then the item's blocks indented under it. A
- * nested list follows the text before it directly; other blocks are
- * separated by a blank line. An item with no content is dropped.
- */
-function listItem(marker: string, blocks: Block[]): string {
-  if (blocks.length === 0) return ''
-  let body = blocks[0]!.text
-  for (const block of blocks.slice(1)) body += (block.interrupts ? '\n' : '\n\n') + block.text
-  return `${marker} ${body.replace(/\n(?=.)/g, `\n${' '.repeat(marker.length + 1)}`)}`
+  return blocks.length === 0 ? null : { kind: 'quote', blocks }
 }
 
 function hasItemChild(el: Element): boolean {
@@ -1581,11 +1669,12 @@ function list(el: Element, flow: Flow, walk: FlowWalk): void {
   })
   walk.push(
     visit(el, () => {
-      const text = items
-        .map((item) => listItem(item.marker, item.blocks))
-        .filter(Boolean)
-        .join('\n')
-      flow.add(...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') })
+      // The items one per line, each its marker and its blocks indented under it (see writeBlocks), an empty one left out; the
+      // list interrupts a paragraph when its first item is `- ` or `1. `.
+      const written: Block[] = []
+      for (const item of items) if (item.blocks.length > 0) written.push({ kind: 'item', marker: item.marker, blocks: item.blocks })
+      const first = written[0]
+      flow.add(...before, first === undefined ? null : { kind: 'list', items: written, interrupts: first.kind === 'item' && (first.marker === '-' || first.marker === '1.') })
     }),
   )
 }
@@ -1665,9 +1754,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layoutTable: layoutTables(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
-    .map((block) => block.text)
-    .join('\n\n')
+  const markdown = writeBlocks(blocksOf(root, { base, blockMemo: new Map(), layoutTable: layoutTables(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) }))
   doc.close()
   return markdown
 }

@@ -56,6 +56,10 @@ export interface UserChromeReadOptions {
   onWaiting?: (url: string, check: string) => void
   /** Told once, when the page shows no check and W2L waits for the person to click on it to have it read. */
   onConfirm?: (url: string) => void
+  /** Told when the tab W2L opened has been out of sight (another tab or window in front) for hiddenNoticeMs: clicks elsewhere are not seen. Again after it was in sight. */
+  onHidden?: (url: string) => void
+  /** How long the tab is out of sight before onHidden. Default 3 s: Chrome's Allow dialog hides it for a moment as it opens. */
+  hiddenNoticeMs?: number
   /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
   signal?: AbortSignal
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
@@ -97,6 +101,8 @@ interface PageState {
   secret: boolean
   /** The form field in focus and what it holds, or null: a value that changed between two reads is a step under way. */
   field: string | null
+  /** The tab is out of sight: another tab or window is in front of it. */
+  hidden: boolean
 }
 
 /** What the page shows now. */
@@ -106,6 +112,7 @@ const STATE = `JSON.stringify({
   status: (performance.getEntriesByType('navigation')[0] || {}).responseStatus || null,
   html: document.documentElement ? document.documentElement.outerHTML : '',
   secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
+  hidden: document.visibilityState === 'hidden',
   field: (() => { const el = document.activeElement; if (!el) return null; if (el.isContentEditable) return 'edit:' + String(el.textContent).slice(0, 500); return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.tagName + ':' + String(el.value).slice(0, 500) : null })(),
 })`
 
@@ -195,6 +202,9 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     // The world W2L reads the person's activation in, made once for each document the tab shows.
     let world: { documents: number; href: string; id: number } | null = null
     let field: string | null | undefined
+    // Since when the tab has been out of sight, and whether the person was told.
+    let hiddenSince: number | null = null
+    let toldHidden = false
     let clear = 0
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
@@ -226,6 +236,14 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
         world = null
         clear = 0
         continue
+      }
+      // A tab out of sight for a while: the person is looking at, and clicking in, another one.
+      if (state.hidden === true) {
+        hiddenSince ??= Date.now()
+        if (!toldHidden && Date.now() - hiddenSince >= (options.hiddenNoticeMs ?? 3_000)) { toldHidden = true; options.onHidden?.(url) }
+      } else {
+        hiddenSince = null
+        toldHidden = false
       }
       // The document's own response, when it is the one shown (the address may differ by its fragment alone).
       const response: DocumentResponse | null = heard.document !== null && sameDocument(heard.document.url, state.href) ? heard.document : null
