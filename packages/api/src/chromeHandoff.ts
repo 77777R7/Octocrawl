@@ -33,6 +33,7 @@
  * address is Chrome's, not what the page's script says.
  */
 
+import { extractTf } from '@w2l/extract-tf'
 import { classifyGate } from '@w2l/http-core'
 import { isLoginPath, sessionCoversHost, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
@@ -224,10 +225,13 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       const response: DocumentResponse | null = heard.document !== null && sameDocument(heard.document.url, state.href) ? heard.document : null
       const status = response?.status ?? state.status
       last = { state, response }
-      const gate = classifyGate({ status: status ?? 200, header: (name) => response?.headers[name.toLowerCase()] ?? null, body: state.html })
-      // What the page showed, as evidence: a generic bot check only on decisive markers, not a loading page's weak ones.
+      const full = classifyGate({ status: status ?? 200, header: (name) => response?.headers[name.toLowerCase()] ?? null, body: state.html })
       const decisive = classifyGate({ status: status ?? 200, header: (name) => response?.headers[name.toLowerCase()] ?? null, body: state.html, contentful: true })
-      if (gate !== null && (gate.reason !== 'bot_detected_generic' || decisive !== null)) sawGate ??= gate.reason
+      // As W2L's own lanes judge a page: one with content (an article that embeds a captcha widget, a page that keeps the widget's
+      // script once passed) is gated by decisive evidence alone; one without, by any.
+      const gate = full === null || decisive !== null || state.ready !== 'complete' ? full ?? decisive : extractTf.extract(state.html, { url: state.href }).escalate ? full : null
+      // What the page showed, as evidence: a generic bot check only on decisive markers, not a loading page's weak ones.
+      if (full !== null && (full.reason !== 'bot_detected_generic' || decisive !== null)) sawGate ??= full.reason
       if (gate !== null && !told) { told = true; options.onWaiting?.(url, gate.reason) }
       const typing = state.field !== null && field !== undefined && state.field !== field
       field = state.field
