@@ -345,6 +345,20 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(Date.now() - started).toBeLessThan(10_000)
   })
 
+  it('converts blocks nested thousands deep without running out of stack', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`)
+    const nest = (open: string, close: string, depth: number, inner: string) => open.repeat(depth) + inner + close.repeat(depth)
+    const started = Date.now()
+    // The same Markdown as a few levels give.
+    const same: [string, string][] = [['<div>', '</div>'], ['<table><tr><td>', '</td></tr></table>'], ['<b><div>', '</div></b>'], ['<span><div>', '</div></span>'], ['<pre><span>', '</span></pre>']]
+    // (10,000 deep: each ran out of stack by 8,000; parsing a page so deep takes long enough already.)
+    for (const [open, close] of same) expect(md(nest(open, close, 10_000, 'x'))).toBe(md(nest(open, close, 3, 'x')))
+    // Lists and quotes indent their content at each level (their Markdown grows with the square of the depth): 3,000 deep.
+    const indented: [string, string][] = [['<ul><li>', '</li></ul>'], ['<ol><li>', '</li></ol>'], ['<blockquote>', '</blockquote>'], ['<ul><span><li>', '</li></span></ul>'], ['<section><p>a</p>', '</section>']]
+    for (const [open, close] of indented) expect(md(nest(open, close, 3_000, 'x'))).toMatch(/x$/)
+    expect(Date.now() - started).toBeLessThan(15_000)
+  })
+
   it('joins adjacent runs of one emphasis or code without rewriting the run each time', () => {
     const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
     expect(md('<code>a`</code><code>`b</code><code>c</code>')).toBe('```a``bc```')
