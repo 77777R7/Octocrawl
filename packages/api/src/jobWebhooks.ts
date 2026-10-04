@@ -185,9 +185,11 @@ export class JobWebhooks {
     const eventId = first ? `${task.id}:${status}` : `${task.id}:${status}:${report.attemptId}`
     if (this.terminalsSeen.has(eventId) || this.store.getDeliveryByEvent(stored.destinationId, eventId) !== null) return
     this.terminalsSeen.add(eventId)
+    // Numbered only when sent: after a restart the numbering is rebuilt from the deliveries stored, and a terminal event the
+    // job's events leave out has none, so counting it here would number the next event twice.
+    if (!stored.events.includes(status)) return
     const counters = await this.countersFor(task, stored, taskStore, false)
     counters.terminals++
-    if (!stored.events.includes(status)) return
     this.enqueue(task, stored, status, eventId, nextSequence(counters), { report, ...(error === undefined ? {} : { error }) })
   }
 

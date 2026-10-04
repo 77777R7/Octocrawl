@@ -306,9 +306,11 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
   const steady = (a: string, b: string) => { const before = new Set(a.split(/\s+/)); return b.split(/\s+/).filter((word) => before.has(word)).join(' ') }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
   // What two reads in a row have in common: the items, or the page's words and its links and sources.
-  const common = (first: Read, second: Read): string => second.items !== null
-    ? hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
-    : hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => new Set(first.refs).has(ref)).join(' ')}`)
+  const common = (first: Read, second: Read): string => {
+    if (second.items !== null) return hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
+    const stillThere = new Set(first.refs)
+    return hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => stillThere.has(ref)).join(' ')}`)
+  }
   const pause = () => abortableSleep(Math.min(STEADY_TEXT_GAP_MS, Math.max(0, timeLeft(ctx))), ctx.execution.signal)
   let last = await read()
   await pause()

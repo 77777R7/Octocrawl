@@ -84,6 +84,9 @@ beforeAll(async () => {
     // An app like /spa whose second page's rows arrive just after W2L's first look at them (between two reads of one look), and
     // whose third page's rows arrive 1.5 s after the URL changes.
     if (url === '/spaswap' || url.startsWith('/spaswap?')) return html(`<h1>App</h1>${PROSE}<ul id="l">${rows(1, 4)}</ul><button id="next">Next</button><script>let p = 1; let armed = false; const show = (n) => { document.getElementById('l').innerHTML = [1, 2, 3, 4].map((i) => '<li class="row">Reading ' + (n * 10 + i) + '</li>').join(''); if (n >= 3) document.getElementById('next').remove() }; const all = document.querySelectorAll.bind(document); document.querySelectorAll = (selector) => { const found = all(selector); if (armed && selector === 'li.row') { armed = false; setTimeout(() => show(2), 50) } return found }; document.getElementById('next').onclick = () => { p++; history.pushState({}, '', '/spaswap?page=' + p); if (p === 2) armed = true; else { const asked = p; setTimeout(() => show(asked), 1500) } }</script>`)
+    // Two pages of 20,000 links each, built in the browser.
+    const many = /^\/many\/(\d)$/.exec(url)
+    if (many !== null) { const n = Number(many[1]); return html(`<h1>Many ${n}</h1>${PROSE}<div id="all"></div>${n < 2 ? `<a class="next" href="/many/${n + 1}">Next</a>` : ''}<script>document.getElementById('all').innerHTML = Array.from({ length: 20000 }, (_, i) => '<a href="/wiki/Page_${n}_' + i + '">Page ' + i + '</a>').join(' ')</script>`) }
     const api = /^\/api\?page=(\d)$/.exec(url)
     if (api !== null) { const n = Number(api[1]); setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify([1, 2, 3, 4].map((i) => `Reading ${n * 10 + i}`))) }, 2400); return }
     // Item links whose query changes on every load (a search id), on an alias first page and a clamping paginator.
@@ -238,6 +241,14 @@ describe('list steps, real browser', () => {
     const result = await run('/spaswap', [{ type: 'paginate', nextSelector: '#next', itemSelector: 'li.row', waitMs: 200 }])
     expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, itemsRead: 12 })
     expect(result.actions?.scrapes.map((scrape) => /Reading (\d+)/.exec(scrape.html)?.[1])).toEqual(['1', '21', '31'])
+  }, 90_000)
+
+  it('paginate without itemSelector reads pages of tens of thousands of links in time linear in them', async () => {
+    const started = Date.now()
+    const result = await run('/many/1', [{ type: 'paginate', nextSelector: 'a.next', waitMs: 200 }])
+    expect(result.actions?.lists?.[0]).toMatchObject({ stoppedBy: 'end', rounds: 2 })
+    // Comparing each link with the ones read before, link by link, took seconds a read on these pages.
+    expect(Date.now() - started).toBeLessThan(15_000)
   }, 90_000)
 
   it('item links whose query changes on every load do not make a page read before look new', async () => {
