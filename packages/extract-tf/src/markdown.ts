@@ -307,8 +307,7 @@ function headAndFoot(table: Element): { head: Element | null; foot: Element | nu
  */
 function ownRowGroups(table: Element): Element[][] {
   const runs: { group: Element | null; rows: Element[] }[] = []
-  for (const tr of Array.from(table.querySelectorAll('tr'))) {
-    if (tr.closest('table') !== table || inForeign(tr, table)) continue
+  for (const tr of ownElements(table, ROWS, 'table')) {
     const group = rowGroup(tr, table)
     const last = runs[runs.length - 1]
     if (last !== undefined && last.group === group) last.rows.push(tr)
@@ -327,15 +326,35 @@ function ownRows(table: Element): Element[] {
 
 /** A row's own cells, not those of a table nested in one of them. */
 function ownCells(tr: Element): Element[] {
-  return Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr && !inForeign(cell, tr))
+  return ownElements(tr, CELLS, 'tr')
 }
 
-/** Whether an svg or math element lies between `el` and its ancestor `top`: its <tr> or <td> is not a row or cell. */
-function inForeign(el: Element, top: Element): boolean {
-  for (let up = el.parentElement; up !== null && up !== top; up = up.parentElement) {
-    if (up.localName === 'svg' || up.localName === 'math') return true
+const ROWS = new Set(['tr'])
+const CELLS = new Set(['th', 'td'])
+
+/**
+ * The elements of the names under `top`, in tree order, not looking into an
+ * element named `stop` (a nested table's rows are its own), an svg or math
+ * (whose <tr> or <td> is not a row or cell) or a <template>'s content (not
+ * the page's, as querySelectorAll does not find it). Each element is looked at
+ * once, so a table nested thousands deep costs its size, not its size times
+ * its depth.
+ */
+function ownElements(top: Element, names: Set<string>, stop: string): Element[] {
+  const found: Element[] = []
+  const next: (Element | null)[] = [top.firstElementChild]
+  while (next.length > 0) {
+    const el = next[next.length - 1]!
+    if (el === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = el.nextElementSibling
+    const name = el.localName
+    if (names.has(name)) found.push(el)
+    if (name !== stop && name !== 'svg' && name !== 'math' && name !== 'template') next.push(el.firstElementChild)
   }
-  return false
+  return found
 }
 
 /**
@@ -1200,12 +1219,63 @@ function emphasized(text: string, ctx: Context): string {
 const flowMarks = (ctx: Context): Marks => ctx.emphasis?.marks ?? NO_MARKS
 
 /**
+ * A node's children being written as blocks: the next one, how one is
+ * written, and what is written once they all are (a list item's marker, a
+ * quote's `>`, a block's closing paragraph break). `single`: only the node
+ * `next` names, not its siblings.
+ */
+interface FlowLevel {
+  next: Node | null
+  single?: boolean
+  step: (node: Node) => void
+  done?: () => void
+}
+
+/**
+ * Block content written depth first on a stack of levels, so nesting
+ * thousands deep (a <div> in a <div>, a list in a list) costs no stack
+ * frames: what a level writes after its children is its `done`.
+ */
+class FlowWalk {
+  private readonly levels: FlowLevel[] = []
+
+  push(level: FlowLevel): void {
+    this.levels.push(level)
+  }
+
+  run(): void {
+    while (this.levels.length > 0) {
+      const level = this.levels[this.levels.length - 1]!
+      const node = level.next
+      if (node === null) {
+        this.levels.pop()
+        level.done?.()
+        continue
+      }
+      level.next = level.single ? null : node.nextSibling
+      level.step(node)
+    }
+  }
+}
+
+/** The level writing a node's children into a flow, then `done`. */
+function flowLevel(parent: Node, flow: Flow, walk: FlowWalk, done?: () => void): FlowLevel {
+  return { next: parent.firstChild, step: (node) => flowNode(node, flow, walk), done }
+}
+
+/** The level writing one node into a flow, then `done`. */
+function nodeLevel(node: Node, flow: Flow, walk: FlowWalk, done?: () => void): FlowLevel {
+  return { next: node, single: true, step: (child) => flowNode(child, flow, walk), done }
+}
+
+/**
  * A <b>, <strong>, <em> or <i> around blocks, as a browser shows it: its
  * inline runs are written between the markers, and the paragraphs of the
  * blocks in it (a list's items, a quote's paragraphs too) in the emphasis.
- * Headings, code blocks and tables keep their own form.
+ * Headings, code blocks and tables keep their own form. `after`: written
+ * once it is.
  */
-function emphasisAroundBlocks(el: Element, flow: Flow, strong: boolean): void {
+function emphasisAroundBlocks(el: Element, flow: Flow, strong: boolean, walk: FlowWalk, after: () => void): void {
   const ctx = flow.ctx
   const outer = ctx.emphasis
   const marker = strong ? '**' : '*'
@@ -1215,34 +1285,39 @@ function emphasisAroundBlocks(el: Element, flow: Flow, strong: boolean): void {
     flow.inline.emphasize(run.finish(), marker)
     run = new Inline()
   }
-  for (let node = el.firstChild; node !== null; node = node.nextSibling) {
-    if (node.nodeType === TEXT_NODE) {
-      run.text((node as Text).data)
-      continue
-    }
-    if (node.nodeType !== ELEMENT_NODE) continue
-    const child = node as Element
-    if (skipped(child, ctx)) continue
-    if (!BLOCK.has(child.localName) && !cssBlock(child, ctx) && !containsBlock(child, ctx)) {
-      inlineElement(child, run, ctx, marks)
-      continue
-    }
-    // A block: the paragraph so far ends outside the emphasis, the block's own paragraphs are written in it.
-    endRun()
-    flow.flush()
-    ctx.emphasis = { markers: [...(outer?.markers ?? []), marker], marks }
-    flowNode(child, flow)
-    flow.flush()
-    ctx.emphasis = outer
-  }
-  endRun()
+  walk.push({
+    next: el.firstChild,
+    step: (node) => {
+      if (node.nodeType === TEXT_NODE) {
+        run.text((node as Text).data)
+        return
+      }
+      if (node.nodeType !== ELEMENT_NODE) return
+      const child = node as Element
+      if (skipped(child, ctx)) return
+      if (!BLOCK.has(child.localName) && !cssBlock(child, ctx) && !containsBlock(child, ctx)) {
+        inlineElement(child, run, ctx, marks)
+        return
+      }
+      // A block: the paragraph so far ends outside the emphasis, the block's own paragraphs are written in it.
+      endRun()
+      flow.flush()
+      ctx.emphasis = { markers: [...(outer?.markers ?? []), marker], marks }
+      walk.push(
+        nodeLevel(child, flow, walk, () => {
+          flow.flush()
+          ctx.emphasis = outer
+        }),
+      )
+    },
+    done: () => {
+      endRun()
+      after()
+    },
+  })
 }
 
-function flowChildren(parent: Node, flow: Flow): void {
-  for (let node = parent.firstChild; node !== null; node = node.nextSibling) flowNode(node, flow)
-}
-
-function flowNode(node: Node, flow: Flow): void {
+function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
   if (node.nodeType === TEXT_NODE) {
     flow.inline.text((node as Text).data)
     return
@@ -1268,19 +1343,32 @@ function flowNode(node: Node, flow: Flow): void {
       // A table whose nested tables hold most of its text lays out the page
       // (Hacker News puts its header, story list and footer in one), and so
       // does a single row (a bar of links): their cells are blocks, and only
-      // the data tables inside are grids.
-      if (isLayoutTable(el) || ownRows(el).length < 2) break
+      // the data tables inside are grids. (The row count first: it costs
+      // less than looking through the nested tables.)
+      if (ownRows(el).length < 2 || isLayoutTable(el)) break
       flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {
       // An item outside any list still renders with its bullet.
-      const text = listItem('-', blocksOf(el, ctx))
-      flow.add({ text, interrupts: true })
+      const inner = new Flow(ctx)
+      walk.push(
+        flowLevel(el, inner, walk, () => {
+          inner.flush()
+          flow.add({ text: listItem('-', inner.blocks), interrupts: true })
+        }),
+      )
       return
     }
-    case 'blockquote':
-      flow.add(blockquote(el, ctx))
+    case 'blockquote': {
+      const inner = new Flow(ctx)
+      walk.push(
+        flowLevel(el, inner, walk, () => {
+          inner.flush()
+          flow.add(blockquote(inner.blocks))
+        }),
+      )
       return
+    }
     case 'hr':
       flow.add({ text: '---' })
       return
@@ -1289,7 +1377,7 @@ function flowNode(node: Node, flow: Flow): void {
       return
   }
   if (LIST.has(tag)) {
-    flow.add(...list(el, ctx))
+    list(el, flow, walk)
     return
   }
   const tagBlock = BLOCK.has(tag)
@@ -1312,18 +1400,16 @@ function flowNode(node: Node, flow: Flow): void {
   }
   const marks = flowMarks(ctx)
   const strong = tag === 'b' || tag === 'strong'
+  const after = block ? () => flow.flush() : () => {}
   if (!tagBlock && (strong || tag === 'em' || tag === 'i') && !(strong ? marks.strong : marks.em)) {
     if (block) flow.flush()
-    emphasisAroundBlocks(el, flow, strong)
-    if (block) flow.flush()
+    emphasisAroundBlocks(el, flow, strong, walk, after)
     return
   }
   // A block container, or an inline element around blocks (a <span> holding
-  // <div>s), which is laid out as those blocks. The loop is written out so
-  // deep nesting costs one stack frame per level.
+  // <div>s), which is laid out as those blocks.
   if (block) flow.flush()
-  for (let child = el.firstChild; child !== null; child = child.nextSibling) flowNode(child, flow)
-  if (block) flow.flush()
+  walk.push(flowLevel(el, flow, walk, block ? after : undefined))
 }
 
 function containsBlock(root: Element, ctx: Context): boolean {
@@ -1357,15 +1443,9 @@ function containsBlock(root: Element, ctx: Context): boolean {
 /** The blocks inside a container element. */
 function blocksOf(el: Node, ctx: Context): Block[] {
   const flow = new Flow(ctx)
-  flowChildren(el, flow)
-  flow.flush()
-  return flow.blocks
-}
-
-/** The blocks one node renders to on its own. */
-function nodeBlocks(node: Node, ctx: Context): Block[] {
-  const flow = new Flow(ctx)
-  flowNode(node, flow)
+  const walk = new FlowWalk()
+  walk.push(flowLevel(el, flow, walk))
+  walk.run()
   flow.flush()
   return flow.blocks
 }
@@ -1381,18 +1461,23 @@ function heading(el: Element, ctx: Context): Block | null {
 /** Text of a <pre>, exactly, with <br> as a newline. */
 function preText(pre: Element, ctx: Context): string {
   const parts: string[] = []
-  const walk = (parent: Node): void => {
-    for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
-      if (node.nodeType === TEXT_NODE) {
-        parts.push((node as Text).data)
-      } else if (node.nodeType === ELEMENT_NODE) {
-        if (skipped(node as Element, ctx)) continue
-        if ((node as Element).localName === 'br') parts.push('\n')
-        else walk(node)
-      }
+  // In document order, on a stack of the next node at each level, so a deep page costs no stack frames.
+  const next: (Node | null)[] = [pre.firstChild]
+  while (next.length > 0) {
+    const node = next[next.length - 1]!
+    if (node === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = node.nextSibling
+    if (node.nodeType === TEXT_NODE) {
+      parts.push((node as Text).data)
+    } else if (node.nodeType === ELEMENT_NODE) {
+      if (skipped(node as Element, ctx)) continue
+      if ((node as Element).localName === 'br') parts.push('\n')
+      else next.push(node.firstChild)
     }
   }
-  walk(pre)
   return parts.join('')
 }
 
@@ -1419,10 +1504,9 @@ function codeBlock(pre: Element, ctx: Context): Block | null {
   return { text: `${fence}${codeLanguage(pre)}\n${text}\n${fence}` }
 }
 
-function blockquote(el: Element, ctx: Context): Block | null {
-  const inner = blocksOf(el, ctx)
-    .map((block) => block.text)
-    .join('\n\n')
+/** A quote of the blocks inside a <blockquote>. */
+function blockquote(blocks: Block[]): Block | null {
+  const inner = blocks.map((block) => block.text).join('\n\n')
   if (!inner) return null
   return { text: inner.split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n') }
 }
@@ -1451,38 +1535,57 @@ function hasItemChild(el: Element): boolean {
  * item. Ordered items are numbered from `start` (and an item's `value`).
  * Other children of the list (a nested list written as a sibling of the
  * items) belong to the item before them; wrappers around items are looked
- * through.
+ * through. Written to the flow once its items are.
  */
-function list(el: Element, ctx: Context): Block[] {
+function list(el: Element, flow: Flow, walk: FlowWalk): void {
+  const ctx = flow.ctx
   const ordered = el.localName === 'ol'
   const start = Number.parseInt(el.getAttribute('start') ?? '', 10)
   let number = ordered && start >= 0 ? start : 1
   const before: Block[] = []
   const items: { marker: string; blocks: Block[] }[] = []
-  const visit = (parent: Element): void => {
-    for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
+  const visit = (parent: Element, done?: () => void): FlowLevel => ({
+    next: parent.firstChild,
+    step: (node) => {
       const tag = node.nodeType === ELEMENT_NODE ? (node as Element).localName : ''
       if (tag === 'li') {
         const value = ordered ? Number.parseInt((node as Element).getAttribute('value') ?? '', 10) : Number.NaN
         if (value >= 0) number = value
-        items.push({ marker: ordered ? `${number}.` : '-', blocks: blocksOf(node, ctx) })
+        const item: { marker: string; blocks: Block[] } = { marker: ordered ? `${number}.` : '-', blocks: [] }
         number++
+        const inner = new Flow(ctx)
+        walk.push(
+          flowLevel(node, inner, walk, () => {
+            inner.flush()
+            item.blocks = inner.blocks
+            items.push(item)
+          }),
+        )
       } else if (tag !== '' && !SKIP.has(tag) && !LIST.has(tag) && hasItemChild(node as Element)) {
-        visit(node as Element)
+        walk.push(visit(node as Element))
       } else {
-        const blocks = nodeBlocks(node, ctx)
-        const last = items[items.length - 1]
-        if (last) last.blocks.push(...blocks)
-        else before.push(...blocks)
+        const inner = new Flow(ctx)
+        walk.push(
+          nodeLevel(node, inner, walk, () => {
+            inner.flush()
+            const last = items[items.length - 1]
+            if (last) last.blocks.push(...inner.blocks)
+            else before.push(...inner.blocks)
+          }),
+        )
       }
-    }
-  }
-  visit(el)
-  const text = items
-    .map((item) => listItem(item.marker, item.blocks))
-    .filter(Boolean)
-    .join('\n')
-  return [...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') }]
+    },
+    done,
+  })
+  walk.push(
+    visit(el, () => {
+      const text = items
+        .map((item) => listItem(item.marker, item.blocks))
+        .filter(Boolean)
+        .join('\n')
+      flow.add(...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') })
+    }),
+  )
 }
 
 function toUrl(value: string | null | undefined): URL | null {
