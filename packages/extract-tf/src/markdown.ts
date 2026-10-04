@@ -531,9 +531,11 @@ class Inline {
    * line of the Markdown (a link's or emphasis's starts after its marker).
    * `escape`: text is escaped where CommonMark would read it as Markdown
    * (not in code, nor in the plain text of the `tables` format). `link`: in
-   * a link's text, where an unbalanced bracket would end the link.
+   * a link's text, where an unbalanced bracket would end the link. `before`:
+   * in an emphasis run, the character before its opening marker, which
+   * CommonMark reads with the markers of a run opened at its start too.
    */
-  constructor(private readonly options: { paragraph?: boolean; escape?: boolean; link?: boolean } = {}) {
+  constructor(private readonly options: { paragraph?: boolean; escape?: boolean; link?: boolean; before?: string } = {}) {
     this.atLineStart = options.paragraph === true
   }
 
@@ -681,13 +683,14 @@ class Inline {
     } else if (core) {
       this.settle()
       // An opening marker before punctuation reads as text after a letter (`a**"x"**`): that punctuation goes before it.
-      const before = this.pendingSpace ? ' ' : (this.parts[this.parts.length - 1] ?? '').slice(-1)
+      const before = this.preceding()
       const leading = before !== '' && !FLANK_NEUTRAL.test(before) ? /^[\p{P}\p{S}][\s\p{Zs}\p{P}\p{S}]*/u.exec(core.slice(0, textLead))?.[0] : undefined
       if (leading !== undefined) {
         core = core.slice(leading.length)
         // A backslash ending it now comes before the marker, which it would escape; with no marker after it (the run is all
         // punctuation), a `<`, `&` or `&#` ending it would pair with what follows (a tag, an entity): escaped.
-        this.content(core === '' ? escapeMovedEnd(escapeLastBackslash(leading)) : escapeLastBackslash(leading))
+        // (As text: a run this one starts moves it before its own marker too.)
+        this.content(core === '' ? escapeMovedEnd(escapeLastBackslash(leading)) : escapeLastBackslash(leading), true)
       }
       if (core) {
         // Right after a run of the other emphasis, its stars would join this one's (`**x***.y*`): this one is written with underscores.
@@ -699,6 +702,17 @@ class Inline {
     if (after) this.content(after)
     if (inner.trailBreak) this.lineBreak()
     else if (inner.trail) this.space()
+  }
+
+  /**
+   * The character content written next would follow: a space for one pending
+   * or leading, else the end of what is written, or at the start of an
+   * emphasis run, the character before its marker (see `before`).
+   */
+  preceding(): string {
+    this.flushText()
+    if (this.pendingSpace || (this.parts.length === 0 && (this.lead || this.leadBreak))) return ' '
+    return (this.parts[this.parts.length - 1] ?? this.options.before ?? '').slice(-1)
   }
 
   /** A code span: its code between enough backticks; one right after another joins it, as two would read as a double backtick. */
@@ -1020,7 +1034,7 @@ function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): vo
 }
 
 function emphasis(el: Element, out: Inline, ctx: Context, marks: Marks, marker: string): void {
-  const inner = new Inline({ link: marks.link })
+  const inner = new Inline({ link: marks.link, before: out.preceding() })
   inlineChildren(el, inner, ctx, marks)
   out.emphasize(inner.finish(), marker)
 }

@@ -374,6 +374,16 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(md('<b>Note:</b> text')).toBe('**Note:** text')
     expect(md('a <b>"x"</b> b')).toBe('a **"x"** b')
     expect(md('a<b>!</b>b')).toBe('a!b')
+    // Nested emphasis starting with punctuation after a letter: the markers of both make one run, read by the letter before
+    // it, so the punctuation goes before them all.
+    expect(md('x<i><b>"y"</b></i>')).toBe('x"***y"***')
+    expect(md('x<i><b>*y</b></i>')).toBe('x\\****y***')
+    expect(md('x<i><b>"y"</b>z</i>')).toBe('x"***y**"z*')
+    expect(md('x<b><i><em>"y"</em></i></b>')).toBe('x"***y"***')
+    // After a space, or in a link (after its bracket), nothing moves.
+    expect(md('x <i><b>"y"</b></i>')).toBe('x ***"y"***')
+    expect(md('x<i> <b>"y"</b></i>')).toBe('x ***"y"***')
+    expect(md('x<a href="/u"><b>"y"</b></a>')).toBe('x[**"y"**](/u)')
     // Punctuation moved out of the markers is escaped where it would pair with what follows: a tag, an entity, or an image
     // where a link follows (a run that ends in one, before a link, keeps it).
     expect(md('x<b>&lt;</b>span&gt;')).toBe('x\\<span>')

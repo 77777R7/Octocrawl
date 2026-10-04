@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Nested emphasis that starts with punctuation right after a letter (`x<i><b>"y"</b></i>`) is now written so CommonMark reads it as emphasis: the markers of both runs make one delimiter run, read by the letter before it, so the punctuation goes before them all (`x"***y"***`); it was written `x***"y"***`, which shows its markers as text. After a space, or at the start of a link's text, nothing moves. Checked by rendering the Markdown with markdown-it and comparing each page's visible text with Chromium's on random pages of nested emphasis, punctuation, code and links: 103, 96, 95 and 106 of four runs of 1,500 differ (116, 109, 108 and 119 before); no page differs that matched before. The Markdown of 120 locally captured pages does not change. `EXTRACTOR_VERSION` is now `extract-tf/11`.
 - The Markdown converter writes emphasis, escapes and adjacent runs so CommonMark reads them as the page shows them (`EXTRACTOR_VERSION` is now `extract-tf/10`):
   - A `<b>`, `<strong>`, `<em>` or `<i>` that holds blocks keeps its emphasis on each paragraph in it, as a browser shows it; it was dropped.
   - White space at the edges of emphasis goes outside the markers, a full-width space included, and a backslash at the end of emphasised text is escaped, so the markers are read as emphasis (`　**indent**`, not `**　indent**`).
