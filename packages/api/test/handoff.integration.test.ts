@@ -55,6 +55,8 @@ beforeAll(async () => {
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
     // Behind its captcha, a page that keeps the widget's script and has its prose in what blockAds takes for an ad.
     if (req.url === '/inad') return cookie.includes('inad=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script><div class="ad">${ARTICLE.replace('The member page', 'The page in an ad box')}</div>`) : html(captcha('inad'))
+    // A batch item behind its captcha, whose replacement the batch's webhook hears of.
+    if (req.url === '/hooked') return cookie.includes('hooked=1') ? html(ARTICLE.replace('The member page', 'The hooked page')) : html(captcha('hooked'))
     // Checks that pass by themselves in a browser, with nobody there: a script that reloads into the page, a meta refresh.
     if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
     if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
@@ -238,6 +240,32 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(done).toMatchObject({ through: 0, notThrough: 2 })
       expect(done!.items.every((item) => item.reason?.includes('you did not click on it to have it read'))).toBe(true)
     } finally {
+      await engine.close()
+    }
+  }, 120_000)
+
+  it('an item the person got through replaces its stopped result as a page event of its own on the batch\'s webhook, after the terminal one', async () => {
+    const engine = engineFor(join(root, 'tasks-13'))
+    const stop = person(chrome, { '/hooked': async (page) => { await page.click('#pass') } })
+    try {
+      const { taskId } = await engine.startBatch({ urls: [`${base}/hooked`, `${base}/open`], formats: ['markdown'], webhook: 'http://127.0.0.1:8829/hook' } as never)
+      for (let i = 0; i < 300 && !['completed', 'failed', 'cancelled'].includes((await engine.getBatch(taskId))?.status ?? ''); i++) await new Promise((resolve) => setTimeout(resolve, 50))
+      const stopped = (await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/hooked'))!
+      for (let i = 0; i < 100 && engine.listDeliveries({ jobId: taskId }).length < 4; i++) await new Promise((resolve) => setTimeout(resolve, 25))
+      const before = engine.listDeliveries({ jobId: taskId }).map((delivery) => [delivery.eventId, delivery.eventVersion])
+      expect(before).toHaveLength(4)
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ through: 1 })
+      const deliveries = engine.listDeliveries({ jobId: taskId })
+      const replaced = deliveries.find((delivery) => delivery.eventId === `${taskId}:handoff:${stopped.id}`)
+      expect(replaced).toMatchObject({ eventVersion: 4, payload: { event: 'page', sequence: 4, page: { id: stopped.id, status: 'success', lane: 'browser_local_authed' } } })
+      expect((replaced!.payload as { page: CrawlPage }).page.markdown).toContain('The hooked page')
+      // The events before it are as they were: started, the two items, completed.
+      expect(deliveries.filter((delivery) => delivery !== replaced).map((delivery) => [delivery.eventId, delivery.eventVersion])).toEqual(before)
+      // Handed over again, nothing is left to hand over, and nothing more is sent.
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0 })
+      expect(engine.listDeliveries({ jobId: taskId })).toHaveLength(5)
+    } finally {
+      stop()
       await engine.close()
     }
   }, 120_000)

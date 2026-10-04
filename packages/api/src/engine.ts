@@ -904,8 +904,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 }
                 // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
                 const { audit: _stoppedAudit, ...kept } = step
-                await store.putStep({ ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() })
+                const replaced: StepRecord = { ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() }
+                await store.putStep(replaced)
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
+                // The item replaced is a job event of its own: a webhook delivery when the batch has a receiver, then the hub's.
+                const page = compactPage(replaced, task)
+                if (webhookOf(task) !== undefined) {
+                  try { await jobWebhooks.replaced(task, replaced, page, store) }
+                  catch (error) { logWebhookFailure(task.id, 'handoff', error) }
+                }
+                await jobEvents.emit({ type: 'page', taskId: task.id, jobKind: jobKindOf(task), page })
               }
             }
           } finally {
