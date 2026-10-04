@@ -383,22 +383,26 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
 
   it('writes lists and quotes nested deep in time that grows with their Markdown, not faster', () => {
     // Each level indents the text of every level inside it, so the Markdown grows with the square of the depth; writing
-    // each level's text again made the time grow with its cube. 2,000 levels of each: about 0.4 s in all here, 4 s
-    // before. (An upper bound with room for a slow machine: the ratio of two depths was too noisy on CI, where parsing a
-    // page that deep and collecting its strings take a share of their own.) The shorter of two runs of each.
-    const time = (open: string, close: string): number => {
-      const html = `<!doctype html><html><body>${open.repeat(2_000)}x${close.repeat(2_000)}</body></html>`
-      let best = Infinity
+    // each level's text again made the time grow with its cube. Measured against a list as long, side by side, whose
+    // lines are as long as the nested ones (the same machine at the same moment, so a slow or busy one weighs on both):
+    // 2,000 levels of a list, a list of paragraphs and a quote take about twice as long as three of it here, twenty
+    // times before. (A bound on the time alone, or on its ratio at two depths, was too noisy on CI.) The shorter of two
+    // runs of each.
+    const best = (html: string): number => {
+      let time = Infinity
       for (let run = 0; run < 2; run++) {
         const started = performance.now()
         htmlToMarkdown(html)
-        best = Math.min(best, performance.now() - started)
+        time = Math.min(time, performance.now() - started)
       }
-      return best
+      return time
     }
-    const total = time('<ol><li>a', '</li></ol>') + time('<ul><li><p>a</p>', '</li></ul>') + time('<blockquote><p>a</p>', '</blockquote>')
-    expect(total).toBeLessThan(2_000)
-  }, 60_000)
+    const page = (body: string) => `<!doctype html><html><body>${body}</body></html>`
+    const nested = (open: string, close: string) => page(`${open.repeat(2_000)}x${close.repeat(2_000)}`)
+    const flat = page(`<ol>${Array.from({ length: 2_000 }, (_, i) => `<li>${'a'.repeat(3 * i + 1)}</li>`).join('')}</ol>`)
+    const deep = best(nested('<ol><li>a', '</li></ol>')) + best(nested('<ul><li><p>a</p>', '</li></ul>')) + best(nested('<blockquote><p>a</p>', '</blockquote>'))
+    expect(deep / (3 * best(flat))).toBeLessThan(6)
+  }, 120_000)
 
   it('joins adjacent runs of one emphasis or code without rewriting the run each time', () => {
     const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
