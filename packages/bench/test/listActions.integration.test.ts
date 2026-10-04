@@ -61,10 +61,10 @@ beforeAll(async () => {
     // A last page whose Next goes nowhere.
     if (url === '/noop/1') return html(`<h1>Noop 1</h1>${PROSE}<ul>${rows(1, 2)}</ul><a class="next" href="/noop/2">Next</a>`)
     if (url === '/noop/2') return html(`<h1>Noop 2</h1>${PROSE}<ul>${rows(3, 4)}</ul><a class="next" href="#">Next</a>`)
-    // A button hidden for 2.5 s while it loads 3 more rows, until 9.
     // A button the page's script shows 1.5 s after load (as NPR's is), then as /hiding; and one it never shows.
     if (url === '/shown') return html(`<h1>Shown</h1>${PROSE}<ul id="list">${rows(1, 3)}</ul><div id="opts" style="display:none"><button id="more" onclick="const l = document.getElementById('list'); for (let i = 0; i < 3; i++) { const li = document.createElement('li'); li.className = 'row'; li.textContent = 'Reading ' + (l.children.length + 1); l.appendChild(li) } if (l.children.length >= 9) this.disabled = true">Load more</button></div><script>setTimeout(() => { document.getElementById('opts').style.display = '' }, 1500)</script>`)
     if (url === '/never-shown') return html(`<h1>Never shown</h1>${PROSE}<ul id="list">${rows(1, 3)}</ul><div style="display:none"><button id="more">Load more</button></div>`)
+    // A button hidden for 2.5 s while it loads 3 more rows, until 9.
     if (url === '/hiding') return html(`<h1>Hiding</h1>${PROSE}<ul id="list">${rows(1, 3)}</ul><button id="more" onclick="const b = this; b.style.display = 'none'; setTimeout(() => { const l = document.getElementById('list'); for (let i = 0; i < 3; i++) { const li = document.createElement('li'); li.className = 'row'; li.textContent = 'Reading ' + (l.children.length + 1); l.appendChild(li) } if (l.children.length < 9) b.style.display = '' }, 2500)">Load more</button>`)
     // An image grid: items with no text; and a list of the same names on every page, at different prices.
     const grid = /^\/grid\/(\d)$/.exec(url)

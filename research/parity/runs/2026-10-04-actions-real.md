@@ -17,11 +17,18 @@ Cases AR01 to AR10 in [sites.v1.json](../sites.v1.json), batch `actions-real`. T
 | AR05 | github.com topic javascript | loadMore "Load more…" twice | repositories past the first 20 |
 | AR06 | aljazeera.com news | loadMore "Show more" twice | stories past the first 19 |
 | AR07 | npr.org news | loadMore "Load more stories" twice | stories past the first 24 |
-| AR08 | dev.to | scrollToEnd three times | posts drawn as the feed scrolls |
+| AR08 | dev.to | scrollToEnd three times | posts drawn as the feed scrolls (see the caveat below) |
 | AR09 | gov.uk find your local council | write a postcode, press Enter | the council's page (Westminster) |
 | AR10 | hn.algolia.com | write a query in the search box | results drawn in place |
 
 Before freezing, each page was read without steps (`onlyMainContent: false`) and with them, to confirm that each case's marker was missing without the steps. The case notes record what was seen.
+
+Two checks prove less than their rows above say:
+
+- **AR08:** the count before the steps is taken about half a second after load, before dev.to has drawn its feed, so it is 0. The check (posts after the steps above that count) therefore shows only that the feed was read through its steps, not that scrolling added posts.
+  - The two runs end with 41 and 57 posts. The step stopped at its limit (`max`) after 3 rounds, each of which grew the page.
+  - No check says whether a round grew it by posts or by something else, such as lazy images.
+- **AR10:** the count comparison has the same weakness (0 before). Its `sqlite` check does show results that the page without steps lacks.
 
 ### Candidates probed and not used
 
