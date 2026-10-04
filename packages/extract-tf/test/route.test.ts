@@ -197,9 +197,13 @@ describe('routePage', () => {
     declared.close()
     // A product page that marks up only the cards beside it: its buy box, the heading over the cards, a container named for
     // recommendations, or cards with no class to tell them from the page's own product keep it a product page.
+    const priced = grid.replace(/<h4 itemprop="offers"[^>]*>(\$\d+)<\/h4>/g, '<span class="price">$1</span>')
+    expect(priced).toContain('class="price"')
     const unmarked = (cards: string) => parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><span class="price">$49.00</span><button>Add to cart</button><p>Hand-thrown stoneware.</p></div>${cards}</main>`))
     for (const page of [
       unmarked(`<div class="row">${grid}</div>`),
+      // Cards that show their prices as the page's own price is shown: the page still has a price of its own beside its h1.
+      unmarked(`<div class="row">${priced}</div>`),
       parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><section><h2>You may also like</h2><div class="row">${grid}</div></section></main>`)),
       parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><div class="related-products">${grid}</div></main>`)),
       parse(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p><div>${grid.replaceAll(' class="card thumbnail"', '')}</div></main>`)),

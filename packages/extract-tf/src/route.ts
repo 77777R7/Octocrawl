@@ -192,7 +192,8 @@ function collectPageSignals(doc: Document): PageSignals {
  * Whether the outermost microdata Product scopes are a listing's cards
  * (PageSignals.productCards). Cards a product page shows beside its own
  * product are its recommendations: under a heading or in an element that says
- * so, or without a class to tell them from the page's own scope.
+ * so, without a class to tell them from the page's own scope, or beside a
+ * lone h1 with a price shown outside them.
  */
 function productCards(doc: Document): boolean {
   const scopes = new Set(qsa(doc, '[itemtype]').filter((el) => splitTokens(el.getAttribute('itemtype') ?? '').some((t) => normalizeTypeName(t) === 'product')))
@@ -211,7 +212,10 @@ function productCards(doc: Document): boolean {
   }
   const all = qsa(doc, '*')
   const first = all.indexOf(outer[0]!)
-  return !all.some((el, at) => at < first && /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el)))
+  if (all.some((el, at) => at < first && /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el)))) return false
+  // A lone h1 with a price of its own outside the cards is a product page's buy box, whatever the cards show.
+  const h1s = qsa(doc, 'h1')
+  return !(h1s.length === 1 && visiblePrices(doc).some((price) => !outer.some((card) => card.contains(price))))
 }
 
 /** Exact, case-insensitive membership across all tokens. */

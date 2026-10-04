@@ -316,7 +316,9 @@ function checksOf(state: PageState, response: DocumentResponse | null, status: n
   const header = (name: string) => response?.headers[name.toLowerCase()] ?? null
   const full = classifyGate({ status: status ?? 200, header, body: state.html })
   const decisive = classifyGate({ status: status ?? 200, header, body: state.html, contentful: true })
-  const gate = full === null || decisive !== null || state.ready !== 'complete' ? full ?? decisive : extractTf.extract(state.html, { url: state.href, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds }).escalate ? full : null
+  const extracted = full === null || decisive !== null || state.ready !== 'complete' ? null : extractTf.extract(state.html, { url: state.href, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+  // A page whose content is only the extractor's last resort is judged as one with none, as the lanes judge it.
+  const gate = extracted === null ? full ?? decisive : extracted.escalate || extracted.lastResort === true ? full : null
   return { full, decisive, gate }
 }
 
