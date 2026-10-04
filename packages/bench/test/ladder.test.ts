@@ -1116,6 +1116,17 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(asks('# Sign in\n\nWelcome back, Jane.')).toBe(false)
     expect(asks('Our guide explains how admins sign in to view the audit log, and why the log in to view step needs two-factor codes on every device you own.')).toBe(false)
     expect(asks('[Log out](https://example.com/logout)')).toBe(false)
+    // Signed-in pages whose own items, rows or titles mention a sign-in: an issue list, an inbox, an error table, a tutorial,
+    // a forum post, another area's offer; and a prompt far down the page, below its own content.
+    expect(asks('# Issues\n\n- [Login required error after upgrading to v2](https://github.com/acme/app/issues/412)')).toBe(false)
+    expect(asks('# Inbox\n\n| From | Subject | Date |\n| --- | --- | --- |\n| Acme Security | Please sign in to confirm your new device | Oct 3 |')).toBe(false)
+    expect(asks('# Errors\n\n| Code | Meaning |\n| --- | --- |\n| 401 | Login required |')).toBe(false)
+    expect(asks('# Getting started\n\n## Step 2: Sign in to continue')).toBe(false)
+    expect(asks('# Help forum\n\n### Chrome keeps saying "please log in" on every site')).toBe(false)
+    expect(asks('# Account\n\n- Wholesale catalogue: Log in to view prices with a trade account')).toBe(false)
+    expect(asks(['# Orders', ...Array.from({ length: 10 }, (_, i) => `Order ${i + 1} shipped.`), 'Sign in to view older orders'].join('\n\n'))).toBe(false)
+    // The page's own prompt near its top, after a skip link (onlyMainContent: false).
+    expect(asks('[Skip to content](#site-content) [https://www.airbnb.com.sg/](https://www.airbnb.com.sg/)\n\n# Wishlists\n\n## Log in to view your wishlists')).toBe(true)
   })
 
   it('keeps the public order when no login is saved for the host, or the mode is not authed', async () => {

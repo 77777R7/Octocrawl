@@ -1054,21 +1054,35 @@ function safeHost(url: string): string {
 const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
 export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
-/** A page's own request to sign in: to see it, to go on, or because it requires one. A link or a heading that only names signing in is not one. */
-const SIGN_IN_PROMPT = /\b(?:log|sign)\s?in\s+to\s+(?:view|see|continue|access|read|use)\b|\byou\s+(?:must|need\s+to)\s+(?:be\s+)?(?:logged|signed)\s+in\b|\bplease\s+(?:log|sign)\s?in\b|\b(?:log|sign)\s?in\s+(?:is\s+)?required\b/i
+/**
+ * A page's own request to sign in, as a line begins: to see it, to go on, or
+ * because it requires one. A line that only names signing in ("Sign in", a
+ * header link), or mentions it after other words ("Step 2: Sign in to
+ * continue"), is not one.
+ */
+const SIGN_IN_PROMPT = /^(?:(?:log|sign)\s?in\s+to\s+(?:view|see|continue|access|read|use)\b|you\s+(?:must|need\s+to)\s+(?:be\s+)?(?:logged|signed)\s+in\b|please\s+(?:log|sign)\s?in\b|(?:log|sign)\s?in\s+(?:is\s+)?required\b)/i
+
+/** How far down a page its own sign-in prompt stands: within its first lines, before the content a signed-in page shows. */
+const SIGN_IN_PROMPT_LINES = 8
 
 /** Lines longer than this are prose that may mention signing in, not a page asking for it. */
 const SIGN_IN_PROMPT_MAX_LINE = 120
 
 /**
- * The line of a page's Markdown that asks the reader to sign in ("Log in to
- * view your wishlists", "You must be logged in to see this page"), or null:
- * a heading or a short line, never a long paragraph that only mentions it.
+ * The line near the top of a page's Markdown that asks the reader to sign in
+ * ("Log in to view your wishlists", "You must be logged in to see this
+ * page"), or null. Only a heading or a plain line among the first
+ * SIGN_IN_PROMPT_LINES counts, and it must begin with the request: a table
+ * row, a list item, a quote or a line with a link is the page's content (an
+ * issue titled "Login required error", an email asking to sign in, an offer
+ * for another area), never its request to the reader.
  */
 export function signInPrompt(markdown: string | null | undefined): string | null {
-  for (const raw of (markdown ?? '').split('\n')) {
-    const line = raw.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/, '').trim()
-    if (line.length > 0 && line.length <= SIGN_IN_PROMPT_MAX_LINE && SIGN_IN_PROMPT.test(line)) return line
+  const lines = (markdown ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0).slice(0, SIGN_IN_PROMPT_LINES)
+  for (const raw of lines) {
+    if (/^(?:\||[-*+]\s|\d+[.)]\s|>)/.test(raw) || raw.includes('](')) continue
+    const line = raw.replace(/^#{1,6}\s+/, '')
+    if (line.length <= SIGN_IN_PROMPT_MAX_LINE && SIGN_IN_PROMPT.test(line)) return line
   }
   return null
 }
