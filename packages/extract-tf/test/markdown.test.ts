@@ -359,6 +359,28 @@ describe('htmlToMarkdown blocks and inline whitespace', () => {
     expect(Date.now() - started).toBeLessThan(15_000)
   })
 
+  it('indents lists and quotes 32 levels deep at most, writing deeper ones at the 32nd level, so their Markdown grows with their text', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`)
+    const nest = (open: string, close: string, depth: number, inner = '') => open.repeat(depth) + inner + close.repeat(depth)
+    // Up to 32 levels as written; the blocks of a deeper item are the 32nd level item's, a blank line between each two.
+    const lines = md(nest('<ul><li>a', '</li></ul>', 34)).split('\n')
+    expect(lines.slice(31)).toEqual([`${'  '.repeat(31)}- a`, '', `${'  '.repeat(32)}a`, '', `${'  '.repeat(32)}a`])
+    expect(md(nest('<ul><li>a', '</li></ul>', 32))).toBe(lines.slice(0, 32).join('\n'))
+    // Text past that runs into none of the blocks next to it (a table, a rule): it is its own paragraph.
+    const quotes = '<blockquote>'.repeat(32)
+    expect(md(`${quotes}<ul><li><table><tr><th>h</th></tr><tr><td>1</td></tr></table></li><li>next words</li><li><hr></li></ul>`))
+      .toBe([`${'> '.repeat(32)}| h |`, `${'> '.repeat(32)}| --- |`, `${'> '.repeat(32)}| 1 |`, `${'> '.repeat(31)}>`, `${'> '.repeat(32)}next words`, `${'> '.repeat(31)}>`, `${'> '.repeat(32)}---`].join('\n'))
+    // A quote deeper than 32 levels adds no `>`.
+    expect(md(nest('<blockquote>', '</blockquote>', 40, 'q'))).toBe(`${'> '.repeat(32)}q`)
+    expect(md(nest('<blockquote><ul><li>', '</li></ul></blockquote>', 20, 'x'))).toBe(`${'> - '.repeat(16)}x`)
+    // So 2,000 levels with text at each write each line's text after 32 levels of prefixes at most: twice the depth,
+    // twice the Markdown.
+    const deep = (depth: number) => md(nest('<ol><li>a', '</li></ol>', depth))
+    expect(deep(2_000).split('\n').every((line) => line.length <= 32 * 3 + 1)).toBe(true)
+    expect(deep(2_000).length / deep(1_000).length).toBeLessThan(2.1)
+    expect(deep(2_000).match(/a/g)).toHaveLength(2_000)
+  })
+
   it('writes lists and quotes nested deep in time that grows with their Markdown, not faster', () => {
     // Each level indents the text of every level inside it, so the Markdown grows with the square of the depth; writing
     // each level's text again made the time grow with its cube. Four times as deep: sixteen times the Markdown, so about

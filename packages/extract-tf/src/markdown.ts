@@ -182,13 +182,25 @@ function blockEmpty(block: Block): boolean {
   return block.kind === 'text' && block.text === ''
 }
 
-/** A list item or quote that a line being written is in, and the one it is in. */
+/**
+ * The most list items and quotes a line is written in. The blocks of a
+ * deeper item or quote are written as blocks of the innermost one, with no
+ * marker or `>` of their own and a blank line between each two, so none
+ * runs into another (a list item's text into a table, a line before `---`
+ * into a heading): their text is kept, in order, and a line's prefixes stay
+ * short, so the Markdown of a list nested thousands deep grows with its text,
+ * not with the square of its depth.
+ */
+const MAX_NESTING = 32
+
+/** A list item or quote that a line being written is in, and the one it is in (`depth` of them in all). */
 interface Around {
   /** A list item's marker (null for a quote), the indent of its later lines, and whether its first line is written. */
   marker: string | null
   indent: string
   started: boolean
   outer: Around | null
+  depth: number
 }
 
 /**
@@ -238,12 +250,19 @@ function writeBlocks(top: Block[]): string {
       write('', level.around)
     }
     if (block.kind === 'text') for (const line of block.text.split('\n')) write(line, level.around)
-    else if (block.kind === 'item') {
-      const around = { marker: block.marker, indent: ' '.repeat(block.marker.length + 1), started: false, outer: level.around }
-      levels.push({ blocks: block.blocks, next: 0, around, separator: 'item' })
-    } else if (block.kind === 'quote') {
-      levels.push({ blocks: block.blocks, next: 0, around: { marker: null, indent: '', started: true, outer: level.around }, separator: 'blank' })
-    } else levels.push({ blocks: block.items, next: 0, around: level.around, separator: 'none' })
+    else {
+      // Past the most levels, the blocks of an item, quote or list are the innermost one's (see MAX_NESTING).
+      const depth = level.around?.depth ?? 0
+      const blocks = block.kind === 'list' ? block.items : block.blocks
+      if (depth >= MAX_NESTING) levels.push({ blocks, next: 0, around: level.around, separator: 'blank' })
+      else if (block.kind === 'item') {
+        const around = { marker: block.marker, indent: ' '.repeat(block.marker.length + 1), started: false, outer: level.around, depth: depth + 1 }
+        // (At the most levels, a list in it is written as its blocks: a blank line before it too.)
+        levels.push({ blocks, next: 0, around, separator: depth + 1 >= MAX_NESTING ? 'blank' : 'item' })
+      } else if (block.kind === 'quote') {
+        levels.push({ blocks, next: 0, around: { marker: null, indent: '', started: true, outer: level.around, depth: depth + 1 }, separator: 'blank' })
+      } else levels.push({ blocks, next: 0, around: level.around, separator: 'none' })
+    }
   }
   return lines.join('\n')
 }
