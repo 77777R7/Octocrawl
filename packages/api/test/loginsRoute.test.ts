@@ -40,7 +40,7 @@ describe('saved logins through the API', () => {
   it('imports a site\'s login from the person\'s Chrome, lists it and forgets it, never answering a cookie', async () => {
     const app = await setup('local')
     const imported = await call(app, 'POST', '/v1/logins/import', { site: 'https://www.example.com/account' })
-    expect(imported).toMatchObject({ status: 200, body: { domain: 'www.example.com', cookieCount: 2, localStorage: null, localStorageRead: false, sessionSha256: expect.stringMatching(/^[0-9a-f]{64}$/) } })
+    expect(imported).toMatchObject({ status: 200, body: { domain: 'www.example.com', cookieCount: 2, localStorage: null, localStorageRead: false, localStorageUnread: [], localStorageUnreadReasons: [], sessionSha256: expect.stringMatching(/^[0-9a-f]{64}$/) } })
     expect(JSON.stringify(imported.body)).not.toContain('secret-cookie-value')
     // The sessions file holds them, for mode authed to use.
     expect(await readFile(join(root, 'sessions.json'), 'utf8')).toContain('secret-cookie-value')

@@ -17,9 +17,9 @@ const COOKIES = [
 /**
  * A tab open in the person's Chrome: its address, the localStorage of its top frame's origin, the browser context it is
  * in (`incognito`: not the default profile's) and whether its page answers (`crashed`: it fails at once; `hangs`: it says
- * nothing until the command's timeout).
+ * nothing until the command's timeout; `gone`: Chrome refuses to attach to it, as to a tab closed meanwhile).
  */
-type Tab = { url: string; storage?: [string, string][]; context?: string; crashed?: boolean; hangs?: boolean }
+type Tab = { url: string; storage?: [string, string][]; context?: string; crashed?: boolean; hangs?: boolean; gone?: boolean }
 
 /** A Chrome holding `cookies`, with `tabs` open; a page's storage is read through a session attached to its tab. */
 function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string | null | 'refused' = 'default') {
@@ -34,6 +34,7 @@ function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string 
         if (method === 'Target.getBrowserContexts' && defaultContext === 'refused') throw new ChromeLoginError('Chrome refused the request: Not allowed')
         if (method === 'Target.getBrowserContexts') return { browserContextIds: ['incognito'], ...(defaultContext === null ? {} : { defaultBrowserContextId: defaultContext }) }
         if (method === 'Target.getTargets') return { targetInfos: [{ targetId: 'sw', type: 'service_worker', url: 'https://www.example.com/sw.js', browserContextId: 'default' }, ...tabs.map((t, i) => ({ targetId: `t${i}`, type: 'page', url: t.url, browserContextId: t.context ?? 'default' }))] }
+        if (method === 'Target.attachToTarget' && tabs[Number(String(params.targetId).slice(1))]?.gone === true) throw new ChromeLoginError('Chrome refused the request: No target with given id found')
         if (method === 'Target.attachToTarget') return { sessionId: `s${String(params.targetId).slice(1)}` }
         // A page that does not answer: Chrome's silence until the command's own timeout.
         if (tab?.hangs === true && method !== 'Target.detachFromTarget') return new Promise((_, reject) => setTimeout(() => reject(new ChromeLoginError(`Chrome did not answer ${method} within ${timeoutMs} ms`)), timeoutMs))
@@ -81,7 +82,7 @@ describe('w2l login import from the user\'s Chrome', () => {
     const imported = await importChromeLogin({ site: 'https://www.example.com/account', sessionsFile, userDataDir, connect: chrome.connect, now: () => new Date('2026-10-03T09:00:00Z') })
     expect(chrome.calls).toEqual({ endpoint: 'ws://127.0.0.1:9333/devtools/browser/abc', methods: ['Storage.getCookies', 'Target.getBrowserContexts', 'Target.getTargets'], closed: true })
     // No tab of the site open: its localStorage was not read, which is not the same as none.
-    expect(imported).toMatchObject({ domain: 'www.example.com', cookieCount: 3, localStorage: null, localStorageRead: false, localStorageUnread: [], sessionsFile })
+    expect(imported).toMatchObject({ domain: 'www.example.com', cookieCount: 3, localStorage: null, localStorageRead: false, localStorageUnread: [], localStorageUnreadReasons: [], sessionsFile })
     expect(imported.sessionSha256).toMatch(/^[0-9a-f]{64}$/)
     const saved = await new FileSessionStore(sessionsFile).load('www.example.com')
     expect(saved?.vendor).toBe('browser_local_authed')
@@ -127,12 +128,24 @@ describe('w2l login import from the user\'s Chrome', () => {
     const chrome = fakeChrome(COOKIES, [
       { url: 'https://mail.example.com/', crashed: true },
       { url: 'https://app.example.com/', storage: [['token', 'storage-value-1']] },
+      { url: 'https://docs.example.com/', gone: true },
+      // A second tab of an origin read in another tab: that origin is read, not unread.
+      { url: 'https://app.example.com/other', crashed: true },
     ])
     const imported = await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: chrome.connect })
-    expect(imported).toMatchObject({ cookieCount: 3, localStorage: { origins: ['https://app.example.com'], itemCount: 1 }, localStorageRead: true, localStorageUnread: ['https://mail.example.com'] })
-    // The tab that did not answer is let go too.
-    expect(chrome.calls.methods.filter((method) => method === 'Target.detachFromTarget')).toHaveLength(2)
-    await expect(importChromeLogin({ site: 'jwt.test', sessionsFile, userDataDir, connect: fakeChrome([], [{ url: 'https://jwt.test/', crashed: true }]).connect })).rejects.toThrow(/did not give the localStorage of its open tabs \(https:\/\/jwt.test; reload them\)/)
+    expect(imported).toMatchObject({ cookieCount: 3, localStorage: { origins: ['https://app.example.com'], itemCount: 1 }, localStorageRead: true, localStorageUnread: ['https://docs.example.com', 'https://mail.example.com'] })
+    // Why each was not read: the step Chrome failed at, and its answer.
+    expect(imported.localStorageUnreadReasons).toEqual([
+      { origin: 'https://docs.example.com', step: 'Target.attachToTarget', error: 'Chrome refused the request: No target with given id found' },
+      { origin: 'https://mail.example.com', step: 'Page.getFrameTree', error: 'Chrome did not answer Page.getFrameTree within 5 s' },
+    ])
+    // The tabs that did not answer are let go too; the one never attached to has nothing to let go.
+    expect(chrome.calls.methods.filter((method) => method === 'Target.detachFromTarget')).toHaveLength(3)
+    // Named in the order of their characters, whatever the machine's language.
+    const odd = await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: fakeChrome(COOKIES, [{ url: 'https://a_b.example.com/', crashed: true }, { url: 'https://a.example.com/', crashed: true }, { url: 'https://a-b.example.com/', crashed: true }]).connect })
+    expect(odd.localStorageUnread).toEqual(['https://a-b.example.com', 'https://a.example.com', 'https://a_b.example.com'])
+    expect(odd.localStorageUnreadReasons.map((reason) => reason.origin)).toEqual(odd.localStorageUnread)
+    await expect(importChromeLogin({ site: 'jwt.test', sessionsFile, userDataDir, connect: fakeChrome([], [{ url: 'https://jwt.test/', crashed: true }]).connect })).rejects.toThrow(/did not give the localStorage of its open tabs \(https:\/\/jwt.test: Chrome did not answer Page.getFrameTree within 5 s; reload them\)/)
     const unnamed = fakeChrome(COOKIES, [{ url: 'https://app.example.com/', storage: [['token', 'storage-value-1']] }], null)
     expect(await importChromeLogin({ site: 'example.com', sessionsFile, userDataDir, connect: unnamed.connect })).toMatchObject({ cookieCount: 3, localStorage: null, localStorageRead: false })
     expect(unnamed.calls.methods).not.toContain('Target.getTargets')
@@ -153,6 +166,7 @@ describe('w2l login import from the user\'s Chrome', () => {
     // One wait of a tab's read (5 s) for all three, not three.
     expect(Date.now() - started).toBeLessThan(8_000)
     expect(imported).toMatchObject({ localStorage: { origins: ['https://app.example.com'], itemCount: 1 }, localStorageUnread: ['https://a.example.com', 'https://b.example.com', 'https://c.example.com'] })
+    expect(imported.localStorageUnreadReasons.map((reason) => reason.step)).toEqual(['Page.getFrameTree', 'Page.getFrameTree', 'Page.getFrameTree'])
   }, 30_000)
 
   it('names a saved login by the SHA-256 the records of its reads carry', async () => {

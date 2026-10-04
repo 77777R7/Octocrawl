@@ -664,6 +664,8 @@ export interface LoginImportResponse extends SavedLogin {
   localStorageRead: boolean
   /** The origins of the site's open tabs whose localStorage Chrome did not give (a tab that crashed or was discarded): saved without it. */
   localStorageUnread: string[]
+  /** Why each of localStorageUnread was not read, a tab at a time: the request to Chrome that failed (`Target.attachToTarget`, `Page.getFrameTree` or `DOMStorage.getDOMStorageItems`) and Chrome's answer, or the wait that ran out. */
+  localStorageUnreadReasons: { origin: string; step: string; error: string }[]
 }
 
 /** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
