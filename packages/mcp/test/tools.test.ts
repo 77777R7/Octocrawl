@@ -443,6 +443,14 @@ describe('MCP tools', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('a scrape asks for its page to be handed to the person when the call does', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); return json({ status: 'success' }) }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/', handoff: true })
+    await callTool(client, 'scrape', { url: 'https://example.com/', handoff: { waitMs: 60_000 } })
+    expect(bodies.map((body) => (body as { handoff?: unknown }).handoff)).toEqual([{}, { waitMs: 60_000 }])
+  })
+
   it('hands a batch\'s stopped items to the person through the API, with how long to wait for them', async () => {
     const calls: Array<{ line: string; body: unknown }> = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

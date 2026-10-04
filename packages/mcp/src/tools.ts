@@ -470,6 +470,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...cacheOptions(req),
       ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }),
       ...(req.actions === undefined ? {} : { actions: req.actions }),
+      ...(req.handoff === undefined ? {} : { handoff: req.handoff }),
       ...integrationOf(req),
     }, request)
   }

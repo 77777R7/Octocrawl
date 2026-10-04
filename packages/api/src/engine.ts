@@ -1105,7 +1105,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         summary: run.summary,
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
-      const shaped = await prepareScrapeResponse(full, req, scope, null, overallStart, scrapeId)
+      // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
+      // JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline.
+      const shapeScope = handed !== null && 'result' in handed ? createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }) : scope
+      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
       const response = answer.kind === 'fetch' ? shaped : withoutFetchUsage(shaped)
       if (!record) return response
