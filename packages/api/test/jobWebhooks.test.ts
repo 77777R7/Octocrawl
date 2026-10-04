@@ -368,7 +368,7 @@ describe('job webhooks', () => {
       const webhook = first.register('t1', { url: HOOK, events: ['page'] })
       const task = { id: 't1', batch: { urls: ['https://a.test/1', 'https://a.test/2'], formats: ['markdown'], includeLinks: false, webhook } } as unknown as Task
       const steps = [{ id: 's1', result: null }, { id: 's2', result: null }] as unknown as StepRecord[]
-      const taskStore = { countSteps: async () => ({ success: 2 }), listAttempts: async () => [], listSteps: async () => steps } as unknown as TaskStore
+      const taskStore = { countSteps: async () => ({ success: 2 }), listAttempts: async () => [], listSteps: async () => steps, listStepIdsWithTraceEvent: async () => [] } as unknown as TaskStore
       const page = (id: string) => ({ id }) as unknown as CrawlPage
       for (const step of steps) await first.page(task, step, page(step.id), taskStore)
       await first.terminal(task, { status: 'completed', attemptId: '' } as never, taskStore)
@@ -377,6 +377,63 @@ describe('job webhooks', () => {
       await hooks().replaced(task, steps[1]!, page('s2'), taskStore)
       const sent = store.listDeliveries({ destinationId: 'job:t1' }).map((delivery) => [delivery.eventId, delivery.eventVersion]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
       expect(sent).toEqual([['t1:handoff:s1', 3], ['t1:handoff:s2', 4], ['t1:page:s1', 1], ['t1:page:s2', 2]])
+    } finally {
+      store.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('offers again, after a restart, a page whose delivery was never enqueued and an item a handoff replaced, each under a number no event has', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-webhooks-reconcile-'))
+    const store = DeliveryStore.open(join(root, 'section-b-control.sqlite'))
+    try {
+      const hooks = () => new JobWebhooks(store, { hosted: false, allowHttpLoopback: true })
+      const webhook = hooks().register('t1', { url: HOOK })
+      const task = { id: 't1', batch: { urls: ['https://a.test/1', 'https://a.test/2', 'https://a.test/3'], formats: ['markdown'], includeLinks: false, webhook } } as unknown as Task
+      // s2's page event was never enqueued (its enqueue failed and was logged), and s3 was then replaced by a handoff, the
+      // process stopping before that event was enqueued.
+      const replaced = { trace: [{ at: 0, lane: 'browser_local_authed', event: 'handoff_from', detail: {} }] }
+      const steps = [{ id: 's1', result: null }, { id: 's2', result: null }, { id: 's3', result: replaced }] as unknown as StepRecord[]
+      const taskStore = { countSteps: async () => ({ success: 3 }), listAttempts: async () => [], listSteps: async () => steps, listStepIdsWithTraceEvent: async () => ['s3'], getStep: async (id: string) => steps.find((step) => step.id === id) ?? null } as unknown as TaskStore
+      const sent = { schemaVersion: 'w2l.job-event/v1' } as unknown as JobWebhookEnvelope
+      store.enqueueJob('job:t1', 't1:started', 0, sent)
+      store.enqueueJob('job:t1', 't1:page:s1', 1, sent)
+      store.enqueueJob('job:t1', 't1:page:s3', 2, sent)
+      store.enqueueJob('job:t1', 't1:completed', 3, sent)
+      await hooks().reconcile(task, taskStore, (step) => ({ id: step.id }) as unknown as CrawlPage)
+      const numbered = store.listDeliveries({ destinationId: 'job:t1' }).sort((a, b) => a.eventVersion - b.eventVersion).map((delivery) => [delivery.eventId, delivery.eventVersion])
+      expect(numbered).toEqual([['t1:started', 0], ['t1:page:s1', 1], ['t1:page:s3', 2], ['t1:completed', 3], ['t1:page:s2', 4], ['t1:handoff:s3', 5]])
+    } finally {
+      store.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('offers again an item a handoff replaced whose event was lost, when every page event was sent, reading no other step', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-webhooks-handoff-'))
+    const store = DeliveryStore.open(join(root, 'section-b-control.sqlite'))
+    try {
+      const hooks = () => new JobWebhooks(store, { hosted: false, allowHttpLoopback: true })
+      const webhook = hooks().register('t1', { url: HOOK })
+      const task = { id: 't1', batch: { urls: ['https://a.test/1', 'https://a.test/2'], formats: ['markdown'], includeLinks: false, webhook } } as unknown as Task
+      const replaced = { id: 's2', result: { trace: [{ at: 0, lane: 'browser_local_authed', event: 'handoff_from', detail: {} }] } } as unknown as StepRecord
+      const read: string[] = []
+      const taskStore = {
+        countSteps: async () => ({ success: 2 }), listAttempts: async () => [],
+        listSteps: async () => { read.push('listSteps'); return [] },
+        listStepIdsWithTraceEvent: async () => ['s2'],
+        getStep: async (id: string) => { read.push(id); return id === 's2' ? replaced : null },
+      } as unknown as TaskStore
+      const sent = { schemaVersion: 'w2l.job-event/v1' } as unknown as JobWebhookEnvelope
+      for (const [eventId, sequence] of [['t1:started', 0], ['t1:page:s1', 1], ['t1:page:s2', 2], ['t1:completed', 3]] as const) store.enqueueJob('job:t1', eventId, sequence, sent)
+      await hooks().reconcile(task, taskStore, (step) => ({ id: step.id }) as unknown as CrawlPage)
+      expect(read).toEqual(['s2'])
+      expect(store.getDeliveryByEvent('job:t1', 't1:handoff:s2')).toMatchObject({ eventVersion: 4 })
+      // Offered again with it sent, nothing more is read or sent.
+      read.length = 0
+      await hooks().reconcile(task, { ...taskStore, listStepIdsWithTraceEvent: async () => ['s2'] } as unknown as TaskStore, (step) => ({ id: step.id }) as unknown as CrawlPage)
+      expect(read).toEqual([])
+      expect(store.listDeliveries({ destinationId: 'job:t1' })).toHaveLength(5)
     } finally {
       store.close()
       await rm(root, { recursive: true, force: true })

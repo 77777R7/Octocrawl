@@ -163,6 +163,18 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.countSteps('task-1', 'attempt-2')).toEqual({})
     })
 
+    it('finds the steps whose trace has an event by name, without a lookalike name or another task\'s', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const traced = (event: string) => ({ ...pageResult('https://example.com/'), trace: [{ at: 0, lane: 'browser_local_authed' as const, event, detail: {} }] })
+      await store.putStep(step({ id: 'step-1', result: traced('handoff_from') }))
+      await store.putStep(step({ id: 'step-2', result: traced('handoffXfrom'), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-3', result: null, status: 'failed', createdAt: LATER }))
+      await store.putStep(step({ id: 'step-4', result: traced('handoff_from'), createdAt: LATER }))
+      expect(await store.listStepIdsWithTraceEvent('task-1', 'handoff_from')).toEqual(['step-1', 'step-4'])
+      expect(await store.listStepIdsWithTraceEvent('task-2', 'handoff_from')).toEqual([])
+    })
+
     it('is idempotent: the same (taskId, attemptId, stepId) does not create a second row', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)
