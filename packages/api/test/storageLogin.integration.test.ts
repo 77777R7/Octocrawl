@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type BrowserContext } from 'playwright'
 import { buildChannels, FileSessionStore } from '@w2l/bench'
-import { importChromeLogin } from '../src/chromeLogin.js'
+import { chromeEndpoint, importChromeLogin } from '../src/chromeLogin.js'
 
 /**
  * A site that keeps its login in localStorage (a token its script reads), in
@@ -53,12 +53,25 @@ describe('a login kept in localStorage', () => {
     const tab = await chrome.newPage()
     await tab.goto(`${base}/inbox`)
     await tab.evaluate(() => { localStorage.setItem('token', 'jwt-abc') })
+    // The site signed in as someone else in a separate context (as an Incognito window is): never saved with this profile's login.
+    const remote = await chromium.connectOverCDP(await chromeEndpoint(join(root, 'chrome')))
+    const incognito = await (await remote.newContext()).newPage()
+    await incognito.goto(`${base}/inbox`)
+    await incognito.evaluate(() => { localStorage.setItem('token', 'account-B') })
+    // Another tab of the site whose page crashed: it answers nothing, and the import goes on without it.
+    const crashed = await chrome.newPage()
+    await crashed.goto(`${base}/inbox`)
+    void (await chrome.newCDPSession(crashed)).send('Page.crash').catch(() => undefined)
     const before = requested.length
 
+    const started = Date.now()
     const imported = await importChromeLogin({ site: `${base}/inbox`, sessionsFile, userDataDir: join(root, 'chrome') })
-    expect(imported).toMatchObject({ domain: '127.0.0.1', cookieCount: 0, localStorage: { origins: [base], itemCount: 1 }, localStorageRead: true })
+    expect(Date.now() - started).toBeLessThan(15_000)
+    expect(imported).toMatchObject({ domain: '127.0.0.1', cookieCount: 0, localStorage: { origins: [base], itemCount: 1 }, localStorageRead: true, localStorageUnread: [] })
+    expect(await readFile(sessionsFile, 'utf8')).not.toContain('account-B')
     expect(requested.length).toBe(before)
     expect(tab.url()).toBe(`${base}/inbox`)
+    await remote.close()
 
     const channels = buildChannels('authed', {})
     const authed = channels.find((channel) => channel.id === 'authed_session')!

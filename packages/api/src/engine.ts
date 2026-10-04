@@ -1566,7 +1566,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
       if (saved === undefined) throw new Error(`the login to ${imported.domain} was not found in the sessions file after it was saved`)
-      return { ...saved, localStorageRead: imported.localStorageRead }
+      return { ...saved, localStorageRead: imported.localStorageRead, localStorageUnread: imported.localStorageUnread }
     },
 
     async listLogins() {

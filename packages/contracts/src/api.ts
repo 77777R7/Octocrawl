@@ -662,6 +662,8 @@ export interface SavedLogin {
 /** What an import saved, and whether the site's localStorage was read: false when no tab of the site was open in Chrome. */
 export interface LoginImportResponse extends SavedLogin {
   localStorageRead: boolean
+  /** The origins of the site's open tabs whose localStorage Chrome did not give (a tab that crashed or was discarded): saved without it. */
+  localStorageUnread: string[]
 }
 
 /** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */
