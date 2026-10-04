@@ -296,6 +296,34 @@ describe('htmlToTables', () => {
       .toBe('<select><button><selectedcontent>A</selectedcontent></button><div><option>A</option><table></table></div></select>')
   })
 
+  it('writes a table\'s text pending at the end of a template\'s content after the open elements close, as Chromium does', () => {
+    const body = (html: string) => parse(`<!doctype html><html><body>${html}</body></html>`).document.body.innerHTML
+    const fragment = (html: string) => parse(html, true).document.body.innerHTML
+    const shown = '<button><selectedcontent></selectedcontent></button>'
+    // In a template the option the </template> (or the end) closes is copied first, so its copy lacks the fostered text (or the spaces the table holds).
+    expect(body(`<template><select>${shown}<option selected>w8<table>w10</template>`))
+      .toBe(`<template><select><button><selectedcontent>w8<table></table></selectedcontent></button><option selected>w8w10<table></table></option></select></template>`)
+    expect(fragment(`<template><select>${shown}<option selected>w8<table>w10`))
+      .toBe(`<template><select><button><selectedcontent>w8<table></table></selectedcontent></button><option selected>w8w10<table></table></option></select></template>`)
+    // A token that writes the text without closing the option leaves it in the copy.
+    expect(body(`<template><select>${shown}<option selected>w8<table>w10<!--c--></template>`))
+      .toBe(`<template><select><button><selectedcontent>w8w10<table><!--c--></table></selectedcontent></button><option selected>w8w10<table><!--c--></table></option></select></template>`)
+    expect(fragment(`<template><select>${shown}<option selected>w8<table>   `))
+      .toBe(`<template><select><button><selectedcontent>w8<table></table></selectedcontent></button><option selected>w8<table>   </table></option></select></template>`)
+    // It is written once no template is left open: an option around the template, at a page's or a fragment's own level, has it.
+    expect(fragment(`<select>${shown}<option selected>a<template><table>x`))
+      .toBe(`<select><button><selectedcontent>a<template>x<table></table></template></selectedcontent></button><option selected>a<template>x<table></table></template></option></select>`)
+    expect(fragment(`<select>${shown}<option selected>a<template><select>${shown}<option selected>b<table>x`))
+      .toBe(`<select><button><selectedcontent>a<template><select><button><selectedcontent>b<table></table></selectedcontent></button><option selected>bx<table></table></option></select></template></selectedcontent></button><option selected>a<template><select><button><selectedcontent>b<table></table></selectedcontent></button><option selected>bx<table></table></option></select></template></option></select>`)
+    // At a page's or a fragment's own level the copy has it.
+    expect(body(`<select>${shown}<option selected>w8<table>w10`))
+      .toBe(`<select><button><selectedcontent>w8w10<table></table></selectedcontent></button><option selected>w8w10<table></table></option></select>`)
+    expect(fragment(`<select>${shown}<option selected>w8<table>w10`))
+      .toBe(`<select><button><selectedcontent>w8w10<table></table></selectedcontent></button><option selected>w8w10<table></table></option></select>`)
+    // The text still goes where the table's rules put it, in the template.
+    expect(body('<template><div><table>w10')).toBe('<template><div>w10<table></table></div></template>')
+  })
+
   it('matches an end tag in svg or math to an element by its exact name, as Chromium does', () => {
     const page = (body: string) => parse(`<!doctype html><html><body>${body}</body></html>`).document
     // In svg the end tag takes svg's spelling (</foreignObject>, </clipPath>), which no HTML element has, so it closes nothing there.

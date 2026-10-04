@@ -319,6 +319,14 @@ class StandardParser extends Parser<DefaultTreeAdapterMap> {
       this.pendingCharacterTokens.length = 0
       this.hasNonWhitespacePendingCharacterToken = false
     }
+    // parse5 ends a template at the end of the input and then reads the end again: once no template is left open, the text
+    // an earlier read held back is written, after the templates' own options closed and before the options around them do.
+    if (this.lateText !== null && this.openElements.tmplCount === 0) {
+      this.writeLate(this.lateText)
+      this.lateText = null
+    }
+    const late = this.takePendingTableText()
+    if (late !== null) this.lateText = late
     super.onEof(token)
     // The parser pops every element left open when it stops (parse5 leaves them): an option still open closes then.
     if (this.stopped && !this.drained) {
@@ -329,9 +337,59 @@ class StandardParser extends Parser<DefaultTreeAdapterMap> {
         if (element.tagName === 'option' && defaultTreeAdapter.getNamespaceURI(element) === HTML_NS) this.optionClosed(element)
       }
     }
+    if (late !== null && this.lateText === late) {
+      this.writeLate(late)
+      this.lateText = null
+    }
+  }
+
+  /** A table's text held back at the end of the input, until parse5 reads the end again once a template is closed. */
+  private lateText: { chars: string; parent: Spec.ParentNode; before: Spec.ChildNode | null } | null = null
+
+  /**
+   * In a template's content, Chromium writes a table's text still pending
+   * when a token ends it only after that token is done, so an option the
+   * token closes (the end of the input, or a </template>) is copied into its
+   * select's <selectedcontent> without it. At the end of the input it is
+   * written once no template is left open, so an option around the templates,
+   * at a page's or a fragment's own level, still has it when it closes. Where the text goes is decided now, as the
+   * table's rules would put it (fostered out of the table, after re-opening
+   * formatting elements, when it is not all whitespace), and it is written
+   * by writeLate once the token is done.
+   */
+  private takePendingTableText(): { chars: string; parent: Spec.ParentNode; before: Spec.ChildNode | null } | null {
+    if ((this.insertionMode as number) !== IN_TABLE_TEXT || this.pendingCharacterTokens.length === 0 || this.openElements.tmplCount === 0) return null
+    let parent: Spec.ParentNode = this.openElements.currentTmplContentOrNode
+    let before: Spec.ChildNode | null = null
+    if (this.hasNonWhitespacePendingCharacterToken) {
+      const fostering = this.fosterParentingEnabled
+      this.fosterParentingEnabled = true
+      this._reconstructActiveFormattingElements()
+      if (this._shouldFosterParentOnInsertion()) ({ parent, beforeElement: before } = this._findFosterParentingLocation())
+      else parent = this.openElements.currentTmplContentOrNode
+      this.fosterParentingEnabled = fostering
+    }
+    const chars = this.pendingCharacterTokens.map((token) => token.chars).join('')
+    this.pendingCharacterTokens.length = 0
+    this.hasNonWhitespacePendingCharacterToken = false
+    return { chars, parent, before }
+  }
+
+  private writeLate(late: { chars: string; parent: Spec.ParentNode; before: Spec.ChildNode | null } | null): void {
+    if (late === null) return
+    if (late.before === null) this.treeAdapter.insertText(late.parent, late.chars)
+    else this.treeAdapter.insertTextBefore(late.parent, late.chars, late.before)
   }
 
   override _endTagOutsideForeignContent(token: Token.TagToken): void {
+    if (token.tagID === T.TEMPLATE && (this.insertionMode as number) === IN_TABLE_TEXT) {
+      const late = this.takePendingTableText()
+      if (late !== null) {
+        this._endTagOutsideForeignContent(token)
+        this.writeLate(late)
+        return
+      }
+    }
     if ((this.insertionMode as number) === IN_ROW && GROUP_ENDS.has(token.tagID) && !this.openElements.hasInTableScope(token.tagID)) return
     const mode = this.insertionMode as number
     if (token.tagID === T.FORM && BODY_RULE_MODES.has(mode) && this.openElements.tmplCount > 0) {
