@@ -383,6 +383,32 @@ describe('job webhooks', () => {
     }
   })
 
+  it('offers again, after a restart, a page whose delivery was never enqueued and an item a handoff replaced, each under a number no event has', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'w2l-webhooks-reconcile-'))
+    const store = DeliveryStore.open(join(root, 'section-b-control.sqlite'))
+    try {
+      const hooks = () => new JobWebhooks(store, { hosted: false, allowHttpLoopback: true })
+      const webhook = hooks().register('t1', { url: HOOK })
+      const task = { id: 't1', batch: { urls: ['https://a.test/1', 'https://a.test/2', 'https://a.test/3'], formats: ['markdown'], includeLinks: false, webhook } } as unknown as Task
+      // s2's page event was never enqueued (its enqueue failed and was logged), and s3 was then replaced by a handoff, the
+      // process stopping before that event was enqueued.
+      const replaced = { trace: [{ at: 0, lane: 'browser_local_authed', event: 'handoff_from', detail: {} }] }
+      const steps = [{ id: 's1', result: null }, { id: 's2', result: null }, { id: 's3', result: replaced }] as unknown as StepRecord[]
+      const taskStore = { countSteps: async () => ({ success: 3 }), listAttempts: async () => [], listSteps: async () => steps } as unknown as TaskStore
+      const sent = { schemaVersion: 'w2l.job-event/v1' } as unknown as JobWebhookEnvelope
+      store.enqueueJob('job:t1', 't1:started', 0, sent)
+      store.enqueueJob('job:t1', 't1:page:s1', 1, sent)
+      store.enqueueJob('job:t1', 't1:page:s3', 2, sent)
+      store.enqueueJob('job:t1', 't1:completed', 3, sent)
+      await hooks().reconcile(task, taskStore, (step) => ({ id: step.id }) as unknown as CrawlPage)
+      const numbered = store.listDeliveries({ destinationId: 'job:t1' }).sort((a, b) => a.eventVersion - b.eventVersion).map((delivery) => [delivery.eventId, delivery.eventVersion])
+      expect(numbered).toEqual([['t1:started', 0], ['t1:page:s1', 1], ['t1:page:s3', 2], ['t1:completed', 3], ['t1:page:s2', 4], ['t1:handoff:s3', 5]])
+    } finally {
+      store.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('fans a job event out to every hub listener and isolates a listener that throws', async () => {
     const hub = new JobEventHub()
     const seen: string[] = []
