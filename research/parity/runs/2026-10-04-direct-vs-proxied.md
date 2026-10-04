@@ -10,10 +10,11 @@ Every recorded run of the interaction cases before this one was proxied, apart f
 - **Direct**, 09:06–09:20 UTC:
   - Both the API and the runner had `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` unset; the API also had `W2L_PROXY=off`.
   - No response records an environment proxy.
-  - The exit was in China (`loc=CN` from Cloudflare's trace).
-- **Proxied**, 09:20–09:33 UTC:
+  - A Cloudflare trace (`curl https://www.cloudflare.com/cdn-cgi/trace`, proxy unset) taken just before these runs showed `loc=CN`.
+- **Proxied**, 09:20–09:32 UTC:
   - The shell's `HTTPS_PROXY` was 127.0.0.1:7890, and every fetched response records it.
-  - The exit was in Singapore (`loc=SG` earlier in the day).
+  - The same trace through the proxy, taken earlier the same day while probing the actions-real pages, showed `loc=SG`.
+- Neither exit was checked during the runs themselves.
 
 | Batch | Cases | Direct: cases fully passing (checks) | Proxied: cases fully passing (checks) |
 | --- | --- | --- | --- |
@@ -38,29 +39,36 @@ Of these:
 - AC02 and AC03 still failed proxied: the page navigation timed out after 20 s.
 - AC04 failed proxied for another reason, given below.
 
-**Navigation that timed out (direct only).** scrapethissite.com did not finish loading direct:
+**Navigation that timed out (direct only).** scrapethissite.com was slow direct:
 - AC15 failed with `page.goto` past 20 s; it passed proxied.
-- LS07 and LR03 failed with `page.waitForLoadState` past 60 s; both passed proxied.
+- LS07 and LR03 read their first page (LR03 kept its 25 records), then failed during the paginate step with `page.waitForLoadState` past 60 s. Both passed proxied.
 - AC06, on the same site, failed direct on the timeout. Proxied it fails, as in every earlier run, on its invalid selector `#2015`.
 
-**A different overlay over NPR's button (AR07, both ways).** Direct, the click was intercepted by a OneTrust consent filter (`<div class="onetrust-pc-dark-filter ot-fade-in">`). Proxied, as in the earlier runs, it was the Piano subscription modal (`tp-modal`). Each exit sees its own overlay.
+**A different overlay over NPR's button (AR07, both ways).**
+- Direct, the click was intercepted by a OneTrust consent filter (`<div class="onetrust-pc-dark-filter ot-fade-in">`).
+- Proxied, it was intercepted by a Piano checkout iframe (`buy.tinypass.com`). The earlier runs recorded its container, `tp-modal`.
+- Each exit was shown its own overlay.
 
 **Failed proxied only, at this commit:**
 - **AR03, npmjs.com:** `blocked` as `cloudflare_challenge` (`cf-mitigated` header, 403). npm also answered so once while probing before the set was frozen, and passed both earlier proxied runs and the direct run here.
 - **AR09, gov.uk:** the council's page was read ("Westminster" present). But the form's navigation landed after the press step had settled, so the step's trace has no `navigatedTo`, and the check that expects it there failed. Direct, and in both earlier proxied runs, it landed within the step. The final page is right; only which step records the navigation depends on timing.
 - **AR10, hn.algolia.com:** the stories were already on the page when the count before the steps was taken (30 before, 30 after). The `sqlite` results check still passed. This is the weakness the [actions-real record](2026-10-04-actions-real.md) already names: a count taken right after load measures the page's own timing.
 
-So the `actions-real` set read 9 of 10 proxied two hours earlier ([cf1acee](2026-10-04-actions-real-proxied-cf1acee.md)) and 6 of 10 proxied here, with no change to the steps' code in between. Three of the ten pages vary from run to run on their own.
+So the `actions-real` set read 9 of 10 proxied two hours earlier ([cf1acee](2026-10-04-actions-real-proxied-cf1acee.md)) and 6 of 10 proxied here.
+- Between the two commits the steps' code did not change; the Markdown converter and the route handling did.
+- None of the three failures above involves either: a site's challenge, a navigation's timing, and the page's own timing. Three of the ten pages vary from run to run.
 
 **AC04, the-internet.herokuapp.com key presses (proxied: reached for the first time).**
 - The page loaded proxied for the first time in any recorded run, and both steps ran (`click #target`, `press Enter`).
-- `#target` is a field inside a form, so Enter submitted the form. The page reloaded (`navigatedTo .../key_presses?`), and the "You entered: ENTER" line it had shown was gone. A person pressing Enter there sees the same thing.
-- So the case expects a result this page does not keep. The case is unchanged, and it stays in the denominator as a failure.
+- The press step navigated (`navigatedTo .../key_presses?`), and the page read after it has no "You entered" line.
+- The page's source, fetched after the runs (curl, proxied), puts `#target` inside a `<form>` and starts `#result` empty. So Enter most likely submitted the form and the page that was read is the reloaded one.
+- Whether the line appeared before the reload was not observed.
+- The case is unchanged, and it stays in the denominator as a failure.
 
 ## The same both ways
 
 These failed the same way direct and proxied, as in earlier runs:
-- AC01, AC05, AC07, AC08 and AC09: `failed`/`empty_unverified` on list pages with the default `onlyMainContent`;
+- AC01, AC05, AC07, AC08 and AC09: `failed`/`empty_unverified` on list pages with the default `onlyMainContent`. AC05 also counted 20 quotes, not the 30 it expects, as in [2026-10-03-i2-actions.md](2026-10-03-i2-actions.md);
 - AC12: the "Example Domain" check (see [2026-10-04-ac12-ac23-proxied-19e31c9.md](2026-10-04-ac12-ac23-proxied-19e31c9.md)).
 
 AC06 also failed both ways, but for different reasons, as noted above.
@@ -68,5 +76,5 @@ AC06 also failed both ways, but for different reasons, as noted above.
 ## Not measured
 
 - How long each site took, apart from the timeouts named above.
-- Any exit other than these two.
+- The exit during the runs (see above), and any exit other than these two.
 - Whether a direct run from another network in China would reach the robots.txt files that timed out here.
