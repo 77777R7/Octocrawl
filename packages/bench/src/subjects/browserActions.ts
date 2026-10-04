@@ -264,9 +264,11 @@ const STEADY_TEXT_GAP_MS = 300
  *   null without `itemSelector`;
  * - `state`: the URL with the items, or without `itemSelector` with the
  *   page's steady words and every link and source in it, which says whether
- *   the page is one already read at that URL.
+ *   the page is one already read at that URL;
+ * - `changing`: whether the two reads differed at all, by a ticking word or
+ *   by a page drawn between them (see steadyPageState).
  */
-async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<{ html: string; url: string; state: string; items: string | null }> {
+async function pageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<PageState> {
   await documentLoaded(ctx)
   const read = () => bounded(ctx, ctx.page.evaluate((selector) => {
     // A link or source by its path: a query that changes on every load (a search id, a tracking token) does not make a record new.
@@ -287,13 +289,38 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
   // Word by word: a row whose price ticks keeps its name.
   const steady = (a: string, b: string) => { const before = new Set(a.split(/\s+/)); return b.split(/\s+/).filter((word) => before.has(word)).join(' ') }
   const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const changing = JSON.stringify(first) !== JSON.stringify(second)
   if (second.items !== null) {
     const items = hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
-    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items }
+    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items, changing }
   }
   const stillThere = new Set(first.refs)
   const page = hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => stillThere.has(ref)).join(' ')}`)
-  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null }
+  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null, changing }
+}
+
+interface PageState { html: string; url: string; state: string; items: string | null; changing: boolean }
+
+/** How long paginate reads a page that changed while it was read, waiting for two reads in a row that agree. */
+const STEADY_READ_WAIT_MS = 3_000
+
+/**
+ * The page once it reads the same twice in a row. Two reads that differ are
+ * a page that ticks (a clock, a price; its steady words read the same next
+ * time) or a page drawn between them (an app swapping its rows in): a read
+ * that straddles the swap is half one page and half the next, a list no page
+ * ever showed, and is read again. Within STEADY_READ_WAIT_MS and the time a
+ * round leaves; past it, the last read stands.
+ */
+async function steadyPageState(ctx: ActionRunContext, itemSelector: string | undefined): Promise<PageState> {
+  let read = await pageState(ctx, itemSelector)
+  const until = Date.now() + Math.min(STEADY_READ_WAIT_MS, Math.max(0, timeLeft(ctx) - ROUND_OVERHEAD_MS))
+  while (read.changing && Date.now() < until) {
+    const again = await pageState(ctx, itemSelector)
+    if (again.state === read.state) return again
+    read = again
+  }
+  return read
 }
 
 /** Two rounds in a row that add nothing end a list: one quiet round may be a slow load. */
@@ -438,7 +465,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   let stoppedBy: ListStop
   try {
     for (;;) {
-      let { html, url, state, items: listed } = await pageState(ctx, action.itemSelector)
+      let { html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector)
       // Next clicked and the page unchanged, or showing the records it showed before under a URL changed within the page (an app
       // that changes the URL first and loads its rows after, keeping the old ones meanwhile): its page may be on the way, and gets
       // COME_BACK_WAIT_MS. A new document with the same records (a first page under two URLs) has arrived, and is not waited for.
@@ -447,7 +474,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         const until = comeBackUntil(ctx)
         while (unchanged() && Date.now() < until) {
           await abortableSleep(250, ctx.execution.signal)
-          ;({ html, url, state, items: listed } = await pageState(ctx, action.itemSelector))
+          ;({ html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector))
         }
       }
       lastState = state
