@@ -10,7 +10,7 @@ const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
 /** What the tab shows on one read; `active`: the person has clicked or typed on this document (its user activation, which only Chrome sets). */
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
@@ -79,6 +79,19 @@ describe('the person\'s Chrome', () => {
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Page.createIsolatedWorld@s1', 'Runtime.evaluate@s1',
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Runtime.evaluate@s1',
       ...Array(2).fill(['Target.getTargetInfo', 'Runtime.evaluate@s1']).flat(), 'Target.closeTarget', 'close'])
+  })
+
+  it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {
+    // The tab behind another one (or Chrome's Allow dialog) all along: the person is told to switch to it, once.
+    const behind = fakeChrome([at('https://site.test/a', GATE, { hidden: true })])
+    const hidden: string[] = []
+    await (await openUserChrome({ userDataDir, connect: behind.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 300, hiddenNoticeMs: 100, onHidden: (url) => hidden.push(url) }).catch(() => undefined)
+    expect(hidden).toEqual(['https://site.test/a'])
+    // Hidden for the first reads only, then in front: no notice.
+    const brief = fakeChrome([at('https://site.test/a', GATE, { hidden: true }), at('https://site.test/a', GATE), at('https://site.test/a', PAGE, { active: true })])
+    const none: string[] = []
+    await (await openUserChrome({ userDataDir, connect: brief.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, hiddenNoticeMs: 100, onHidden: (url) => none.push(url) })
+    expect(none).toEqual([])
   })
 
   it('a page that still shows its check when the wait ends is not read, and its tab is closed', async () => {
