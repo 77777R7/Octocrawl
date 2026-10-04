@@ -15,7 +15,8 @@
  */
 
 import type { PageType } from '@w2l/contracts'
-import { commonAncestor, layoutTables, qsa, tagOf } from './dom.js'
+import { detectLists } from './detectList.js'
+import { commonAncestor, layoutTables, outerHtml, qsa, tagOf, textOf } from './dom.js'
 import { visiblePrices } from './product.js'
 
 interface RouterCounts {
@@ -92,7 +93,16 @@ export interface PageSignals {
   itemTypeTokens: string[]
   /** Count of <article class~="post"> elements. */
   postArticles: number
+  /**
+   * Whether the page's microdata Product scopes are cards of one listing: at
+   * least PRODUCT_CARDS of them, the outermost ones all of one tag and class,
+   * none holding an h1.
+   */
+  productCards: boolean
 }
+
+/** The fewest alike Product scopes that are a listing's cards rather than one product. */
+const PRODUCT_CARDS = 3
 
 /** itemprop tokens that indicate a product/offer context. */
 const PRICE_ITEMPROPS = ['price', 'offers', 'sku', 'gtin', 'mpn', 'brand'] as const
@@ -172,7 +182,20 @@ function collectPageSignals(doc: Document): PageSignals {
     itempropTokens,
     itemTypeTokens,
     postArticles: qsa(doc, 'article.post').length,
+    productCards: productCards(doc),
   }
+}
+
+/** Whether the outermost microdata Product scopes are PRODUCT_CARDS or more of one tag and class, none holding an h1 (PageSignals.productCards). */
+function productCards(doc: Document): boolean {
+  const scopes = new Set(qsa(doc, '[itemtype]').filter((el) => splitTokens(el.getAttribute('itemtype') ?? '').some((t) => normalizeTypeName(t) === 'product')))
+  const outer = [...scopes].filter((el) => {
+    for (let up = el.parentElement; up !== null; up = up.parentElement) if (scopes.has(up)) return false
+    return true
+  })
+  if (outer.length < PRODUCT_CARDS) return false
+  const shapes = new Set(outer.map((el) => `${tagOf(el)} ${splitTokens(el.getAttribute('class') ?? '').sort().join(' ')}`))
+  return shapes.size === 1 && outer.every((el) => el.querySelector('h1') === null)
 }
 
 /** Exact, case-insensitive membership across all tokens. */
@@ -235,6 +258,12 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // The strategy reports null when no defensible product region exists, and
   // the extractor falls back to the article cascade — recording the strategy
   // that actually produced the output, not the one it hoped for.
+  // Alike Product cards with no product declared in JSON-LD are a listing of
+  // products (a category page), not one: the product strategy would cut them
+  // as recommendations.
+  if (s.productCards && !hasToken(s.jsonLdTypes, 'product')) {
+    return { type: 'collection', strategy: 'article' }
+  }
   if (hasProductSignals(s)) {
     return { type: 'product', strategy: 'product' }
   }
@@ -428,6 +457,45 @@ export function selectCardList(doc: Document): Element | null {
   if (best === null) return null
   const shared = commonAncestor(best, h1)
   return shared !== null && shared !== doc.body && shared !== doc.documentElement ? shared : best
+}
+
+/** A detected list is the page's content when at least this many of its items each hold DETECTED_ITEM_CHARS characters of text, all different. */
+const DETECTED_LIST_ITEMS = 3
+const DETECTED_ITEM_CHARS = 40
+
+/**
+ * Last resort after selectCardList: the list the `list` format finds on the
+ * page (detectLists), read on the page as cleaned. Items that carry no link
+ * (quotes and their authors), or cards on a page with more than one h1, are
+ * no listing of cards to selectCardList, yet a list of such items is the
+ * page's content. It counts when at least DETECTED_LIST_ITEMS of its items
+ * hold DETECTED_ITEM_CHARS characters of text each, all different: rows of
+ * placeholders saying one thing are not content. The region is the lowest
+ * element holding every item, widened to the container it shares with the
+ * last h1 before them when that is below <body>, so the page's own heading
+ * stays. Null otherwise: the page still has no content and escalates.
+ */
+export function selectDetectedList(doc: Document): Element | null {
+  const root = doc.documentElement
+  if (root === null) return null
+  const [list] = detectLists(outerHtml(root), 1)
+  if (list === undefined) return null
+  // The detection read a copy of this page: its selector names the same items here.
+  const items = qsa(doc, list.itemSelector)
+  if (items.length < 2) return null
+  const texts = items.map((item) => textOf(item).replace(/\s+/g, ' ').trim()).filter((text) => text.length >= DETECTED_ITEM_CHARS)
+  if (new Set(texts).size < DETECTED_LIST_ITEMS) return null
+  let region = commonAncestor(items[0]!, items[1]!)
+  for (const item of items.slice(2)) if (region !== null && !region.contains(item)) region = commonAncestor(region, item)
+  if (region === null) return null
+  const all = qsa(doc, '*')
+  const first = all.indexOf(items[0]!)
+  const h1 = all.filter((el, at) => at < first && tagOf(el) === 'h1').pop()
+  if (h1 !== undefined && !region.contains(h1)) {
+    const shared = commonAncestor(region, h1)
+    if (shared !== null && shared !== doc.body && shared !== doc.documentElement) region = shared
+  }
+  return region
 }
 
 /**

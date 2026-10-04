@@ -178,6 +178,25 @@ describe('routePage', () => {
     doc.close()
   })
 
+  it('routes a grid of alike microdata Product cards to collection, and a product page beside such cards to product', () => {
+    const card = (n: number) => `<div class="card thumbnail" itemscope itemtype="https://schema.org/Product"><h4 itemprop="offers" itemscope itemtype="https://schema.org/Offer">$${n}99</h4><a href="/p/${n}" itemprop="name">Teapot ${n}</a></div>`
+    const grid = Array.from({ length: 4 }, (_, i) => card(i + 1)).join('')
+    const listing = parse(wrap(`<main><h1>Teapots</h1><div class="row">${grid}</div></main>`))
+    expect(routePage(listing.document)).toEqual({ type: 'collection', strategy: 'article' })
+    listing.close()
+    // The page's own product is a scope of another shape, holding its h1: the cards beside it are its recommendations.
+    const pdp = parse(wrap(`<main><div class="product-main" itemscope itemtype="https://schema.org/Product"><h1 itemprop="name">Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><div class="row">${grid}</div></main>`))
+    expect(routePage(pdp.document).type).toBe('product')
+    pdp.close()
+    // Two cards are not yet a listing; a page declaring its product in JSON-LD stays a product page.
+    const two = parse(wrap(`<main><h1>Teapots</h1><div class="row">${card(1)}${card(2)}</div></main>`))
+    expect(routePage(two.document).type).toBe('product')
+    two.close()
+    const declared = parse(wrap(`<main><h1>Teapots</h1><div class="row">${grid}</div></main>`, PRODUCT_LD()))
+    expect(routePage(declared.document).type).toBe('product')
+    declared.close()
+  })
+
   it('does not route an article with JSON-LD comments to forum', () => {
     const doc = parse(
       wrap('<article><h1>Essay</h1>' +

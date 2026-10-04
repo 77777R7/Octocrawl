@@ -19,7 +19,7 @@ import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
 import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
-import { pageSignalsFor, routePage, selectCardList, selectList, selectTable } from './route.js'
+import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
@@ -184,7 +184,7 @@ export class ExtractTf implements Extractor {
     // A listing of cards has no text block for the cascade to find. Before
     // the page is reported empty, look for one.
     if (main === null) {
-      main = selectCardList(doc.document)
+      main = selectCardList(doc.document) ?? selectDetectedList(doc.document)
       if (main !== null) strategy = 'list'
     }
 
