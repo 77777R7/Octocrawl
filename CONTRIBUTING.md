@@ -75,6 +75,9 @@ npm test
 # Run tests for one package
 npm test -- packages/http-core
 
+# Run the tests that call live websites (needs the network)
+npm run test:live
+
 # Run benchmark
 npm run bench
 ```
@@ -82,6 +85,7 @@ npm run bench
 Test files run in parallel, except two groups that run after the rest, so that no other file shares the machine with them (see `vitest.config.ts`):
 
 - **A test that bounds the time of a piece of code** (a page converted in under so many seconds, or a cost that grows linearly) goes in a `*.perf.test.ts` file next to the module's test file. These files run last, one at a time. On CI the files run side by side on a few cores, and such bounds failed there whenever a heavy file ran beside them. Even then, measure against a reference run at the same moment (as `detectList.perf.test.ts` measures against parsing the page) rather than against a fixed number of milliseconds.
+- **A test that calls a live website** is named `*.live.test.ts`. `npm test` leaves these out, so that it passes offline and is not failed by a site's own changes; `npm run test:live` runs them.
 - **A test file that drives a real browser or real HTTP and bounds how long a wait or a cancellation takes** is named `*.integration.test.ts` or listed in `TIMED` in `vitest.config.ts`. These files run after the parallel ones, two at a time.
 
 ## License Gate (CI)

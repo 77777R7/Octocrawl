@@ -5,6 +5,8 @@ import { configDefaults, defineConfig } from 'vitest/config'
 const root = dirname(fileURLToPath(import.meta.url))
 
 const TESTS = ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'cloudflare/*/test/**/*.test.ts']
+/** Tests that call live websites (`*.live.test.ts`): not run by `npm test`, which must pass offline; `npm run test:live` runs them. */
+const LIVE = TESTS.map((glob) => glob.replace(/\.test\.ts$/, '.live.test.ts'))
 /**
  * Tests that bound the CPU time of a piece of code (`*.perf.test.ts`): run
  * last, one file at a time, so no other test file shares the machine with
@@ -55,8 +57,8 @@ export default defineConfig({
     // The rest in parallel first, then the timed files two at a time, then the perf files one at a time (a group runs
     // once the one before it is done).
     projects: [
-      { extends: true, test: { name: 'unit', include: TESTS, exclude: [...configDefaults.exclude, ...PERF, ...TIMED] } },
-      { extends: true, test: { name: 'timed', include: TIMED, exclude: [...configDefaults.exclude, ...PERF], maxWorkers: 2, sequence: { groupOrder: 1 } } },
+      { extends: true, test: { name: 'unit', include: TESTS, exclude: [...configDefaults.exclude, ...PERF, ...TIMED, ...LIVE] } },
+      { extends: true, test: { name: 'timed', include: TIMED, exclude: [...configDefaults.exclude, ...PERF, ...LIVE], maxWorkers: 2, sequence: { groupOrder: 1 } } },
       { extends: true, test: { name: 'perf', include: PERF, fileParallelism: false, sequence: { groupOrder: 2 } } },
     ],
   },
