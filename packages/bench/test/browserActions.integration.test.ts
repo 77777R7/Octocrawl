@@ -35,6 +35,9 @@ beforeAll(async () => {
     if (req.url === '/private/red') return html(`<style>body{background:rgb(255,0,0)}</style><h1>Secret red</h1>${PROSE}<p>Not for crawlers.</p><script>location.href = '/private/z'</script>`)
     // A button an overlay covers (a subscription modal, as NPR's is): a click cannot reach it.
     if (req.url === '/covered') return html(`<h1>Covered</h1>${PROSE}<button id="go">Go</button><div class="tp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
+    // A link whose page answers 8 s after it is asked for (a slow search or "Next").
+    if (req.url === '/slowlink') return html(`<h1>Slow link</h1>${PROSE}<a id="go" href="/slowpage">Go</a>`)
+    if (req.url === '/slowpage') { setTimeout(() => html(`<h1>Slow page</h1>${PROSE}<p>The slow page arrived.</p>`), 8000); return }
     // A banner over the button for 2 s, then gone: a click waits it out.
     if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
@@ -231,6 +234,14 @@ describe('actions, real browser', () => {
       expect(result.actions?.failed?.message).toMatch(/the click on #go could not reach it: <div class="tp-modal"[^]*intercepts pointer events \(still covered after 5 s\)/)
     }
   }, 120_000)
+
+  it('a click whose page takes longer than a covered control is waited for still waits for that page, and clicks once', async () => {
+    requested.length = 0
+    const result = await run('/slowlink', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The slow page arrived.')
+    expect(requested.filter((url) => url === '/slowpage')).toHaveLength(1)
+  }, 90_000)
 
   it('a control covered for a moment is clicked once the cover goes', async () => {
     const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])

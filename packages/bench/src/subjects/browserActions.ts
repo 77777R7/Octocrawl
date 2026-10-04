@@ -583,25 +583,27 @@ function isTimeout(error: unknown): boolean {
 const COVERED_GIVE_UP_MS = 5_000
 
 /**
- * A click on the control, within the step's time, in tries of at most
+ * A click on the control, within the step's time. Its checks come first,
+ * alone (Playwright's trial: nothing is clicked), in tries of at most
  * COVERED_GIVE_UP_MS: one that timed out because something still covered the
  * control at its last try fails the step at once, naming what covers it,
  * instead of waiting out the step's whole time; one that timed out for any
- * other reason (not shown yet, still moving) is tried again. A try that times
- * out has clicked nothing, so none lands after the step has failed.
+ * other reason (not shown yet, still moving) is tried again. Then the click
+ * itself, once, with the time left: it waits for a navigation it starts (a
+ * slow next page), as a click always did, and is never sent twice.
  */
 async function clickControl(ctx: ActionRunContext, control: Locator, selector: string): Promise<void> {
-  for (;;) {
-    const left = stepTimeout(ctx)
+  while (stepTimeout(ctx) > COVERED_GIVE_UP_MS) {
     try {
-      await raceWithSignal(control.click({ timeout: Math.min(left, COVERED_GIVE_UP_MS) }), ctx.execution.signal)
-      return
+      await raceWithSignal(control.click({ trial: true, timeout: COVERED_GIVE_UP_MS }), ctx.execution.signal)
+      break
     } catch (error) {
-      if (!isTimeout(error) || left <= COVERED_GIVE_UP_MS) throw error
+      if (!isTimeout(error)) throw error
       const covered = coveredBy(error)
       if (covered !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${covered} (still covered after ${COVERED_GIVE_UP_MS / 1000} s)`)
     }
   }
+  await raceWithSignal(control.click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
 }
 
 /** What covered the control at a click's last try, from Playwright's call log; null when its last try saw something else. */
