@@ -334,6 +334,104 @@ describe('htmlToMarkdown with a <head> tag in the body', () => {
 })
 
 describe('htmlToMarkdown blocks and inline whitespace', () => {
+  it('joins adjacent runs of one emphasis or code without rewriting the run each time', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
+    expect(md('<code>a`</code><code>`b</code><code>c</code>')).toBe('```a``bc```')
+    expect(md('<code>`a</code><code>b</code>')).toBe('`` `ab ``')
+    expect(md('<b>a</b><b>b.</b>c')).toBe('**ab**.c')
+    // Only plain text joins: Markdown written for each run, such as its own emphasis, code, a link or a character that pairs with
+    // one across the join (`<` and `span>`, `&` and `amp;`), would read otherwise next to the other's.
+    expect(md('<b><i>x</i></b><b><i>y</i></b>')).toBe('***x***__*y*__')
+    expect(md('<b>Note <i>this</i></b><b><i>now</i> please</b>')).toBe('**Note *this***__*now* please__')
+    expect(md('<b>a!</b><b><a href="/u">x</a></b>')).toBe('**a!**__[x](/u)__')
+    expect(md('<b>&lt;</b><b>span&gt;x</b>')).toBe('**<**__span>x__')
+    expect(md('<b>&amp;</b><b>amp;</b>')).toBe('**&**__amp;__')
+    const started = Date.now()
+    expect(md('<code>a`</code>'.repeat(80_000)).length).toBeLessThan(200_000)
+    expect(md('<b>a.</b>'.repeat(80_000)).length).toBeLessThan(200_000)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
+  it('keeps emphasis next to punctuation readable as emphasis: the punctuation at an edge goes outside the markers where it must', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
+    // A marker between a letter and punctuation is plain text to CommonMark.
+    expect(md('a<b>"x"</b>b')).toBe('a"**x**"b')
+    expect(md('<b>Note:</b>text')).toBe('**Note**:text')
+    expect(md('x<b>(1)</b>')).toBe('x(**1)**')
+    // Two runs of different emphasis side by side: the second with underscores, as their stars would join.
+    expect(md('<b>x</b><i>.y</i>')).toBe('**x**_.y_')
+    expect(md('<i>x</i><b>y</b>')).toBe('*x*__y__')
+    // White space next to the moved punctuation moves with it.
+    expect(md('w<b>, x:</b>y')).toBe('w, **x**:y')
+    // Only punctuation written from text moves: a link, code span or image at the edge stays whole inside the markers.
+    expect(md('<b><a href="https://e.test/x">链接</a></b>文字')).toBe('**[链接](https://e.test/x)**文字')
+    expect(md('<i><code>npm</code></i>s')).toBe('*`npm`*s')
+    expect(md('<b>x<img src="https://e.test/i.png" alt="i"></b>y')).toBe('**x![i](https://e.test/i.png)**y')
+    // A backslash moved before the opening marker is escaped, as it would escape the marker.
+    expect(md('x<b>\\a</b>')).toBe('x\\\\**a**')
+    expect(md('<i>“quoted”</i>word')).toBe('*“quoted*”word')
+    // Where the markers read as they are, nothing moves; a run of punctuation alone between letters stays plain text.
+    expect(md('<b>Note:</b> text')).toBe('**Note:** text')
+    expect(md('a <b>"x"</b> b')).toBe('a **"x"** b')
+    expect(md('a<b>!</b>b')).toBe('a!b')
+    // Punctuation moved out of the markers is escaped where it would pair with what follows: a tag, an entity, or an image
+    // where a link follows (a run that ends in one, before a link, keeps it).
+    expect(md('x<b>&lt;</b>span&gt;')).toBe('x\\<span>')
+    expect(md('<b>&amp;</b>amp;')).toBe('\\&amp;')
+    expect(md('<b>a&amp;#</b>39;')).toBe('**a**\\&#39;')
+    expect(md('x<b>&amp;#</b>x41;')).toBe('x\\&#x41;')
+    expect(md('a<b>!</b><a href="/u">x</a>')).toBe('a\\![x](/u)')
+    expect(md('a<b>x!</b><a href="/u">y</a>')).toBe('a**x!**[y](/u)')
+  })
+
+  it('escapes text only where CommonMark would read it as Markdown, so it renders as written', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`)
+    // Ordinary text stays as written: an underscore inside a word, a star between spaces, balanced brackets.
+    expect(md('<p>snake_case and 2 * 3 [note] a.b</p>')).toBe('snake_case and 2 * 3 [note] a.b')
+    // Text that would become emphasis, code, a link, HTML or an entity.
+    expect(md('<p>*not bold* and _not em_ and `not code`</p>')).toBe('\\*not bold\\* and \\_not em\\_ and \\`not code\\`')
+    expect(md('<p>[x](y) &lt;div&gt; &amp;amp; C:\\*</p>')).toBe('[x\\](y) \\<div> \\&amp; C:\\\\\\*')
+    // At the start of a line: a heading, list item, quote or rule.
+    expect(md('<p># tag</p><p>- dash</p><p>1. one</p><p>&gt; quote</p><p>---</p>')).toBe('\\# tag\n\n\\- dash\n\n1\\. one\n\n\\> quote\n\n\\---')
+    expect(md('<p>a<br>= b<br>+ c<br>===</p>')).toBe('a  \n= b  \n\\+ c  \n\\===')
+    // The parser splits text at entities; it is escaped as a whole.
+    expect(md('<p>x &lt;div&gt; &amp;amp; snake&#95;case</p>')).toBe('x \\<div> \\&amp; snake_case')
+    // Code stays as written; the tables format stays plain text.
+    expect(md('<p><code>*a*_b_</code></p>')).toBe('`*a*_b_`')
+    // Adjacent runs of one emphasis are one run.
+    expect(md('<p><b>a</b><b>b</b></p>')).toBe('**ab**')
+    // Adjacent code spans are one span, and a `!` before a link stays text.
+    expect(md('<p><code>a</code><code>b</code> x</p>')).toBe('`ab` x')
+    expect(md('<p>wow!<a href="https://e.test/x">link</a></p>')).toBe('wow\\![link](https://e.test/x)')
+    expect(md('<p>a\\!<a href="https://e.test/x">t</a></p>')).toBe('a\\\\\\![t](https://e.test/x)')
+  })
+
+  it('writes emphasis CommonMark reads as emphasis: white space at its edges outside the markers, a last backslash escaped', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`)
+    // A full-width space (a CJK paragraph indent) next to a marker makes it plain text to CommonMark.
+    expect(md('<b><p>\u3000indent</p></b>')).toBe('\u3000**indent**')
+    expect(md('<p><strong>\u3000lead</strong> rest</p>')).toBe('\u3000**lead** rest')
+    expect(md('<b>x\u3000</b>y')).toBe('**x**\u3000y')
+    expect(md('<i>\u3000</i>z')).toBe('\u3000z')
+    // A backslash before the closing marker would escape it.
+    expect(md('<em>path C:\\</em> end')).toBe('*path C:\\\\* end')
+    expect(md('<b><div>C:\\</div></b>')).toBe('**C:\\\\**')
+  })
+
+  it('keeps the emphasis of a <b> or <em> around blocks on each paragraph in it, as a browser shows it', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`, { baseUrl: 'https://e.test/' })
+    expect(md('<b>w1<p>w2</p>w3</b>')).toBe('**w1**\n\n**w2**\n\n**w3**')
+    expect(md('a <strong>b<div>c</div></strong> d')).toBe('a **b**\n\n**c**\n\nd')
+    expect(md('<em><div>x</div></em>')).toBe('*x*')
+    expect(md('<b><div><a href="/x">w1</a></div></b>')).toBe('**[w1](https://e.test/x)**')
+    // List items and quotes take it too; a <b> in it adds no second marker; headings, code and tables keep their own form.
+    expect(md('<b><ul><li>a</li><li><p>b</p></li></ul></b>')).toBe('- **a**\n- **b**')
+    expect(md('<b><blockquote><p>q</p></blockquote></b>')).toBe('> **q**')
+    expect(md('<b><div><b>x</b> y</div></b>')).toBe('**x y**')
+    expect(md('<b><h2>x</h2>y<pre>z</pre></b>')).toBe('## x\n\n**y**\n\n```\nz\n```')
+    expect(md('<b><table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table></b>')).toBe('| a | b |\n| --- | --- |\n| c | d |')
+  })
+
   it('separates adjacent blocks and keeps inline spacing and markup', () => {
     expect(htmlToMarkdown('<div>Alpha</div><div>Beta</div>')).toBe('Alpha\n\nBeta')
     expect(htmlToMarkdown('<div>Hello <b>world</b> <a href="/x">link</a></div>', { baseUrl: BASE }))
@@ -379,6 +477,17 @@ describe('htmlToMarkdown lists and code', () => {
 })
 
 describe('htmlToMarkdown link and image targets', () => {
+  it('escapes a backslash that would escape the bracket or parenthesis closing a link or image', () => {
+    const md = (html: string, baseUrl?: string) => htmlToMarkdown(`<!doctype html><html><body>${html}</body></html>`, baseUrl ? { baseUrl } : {})
+    expect(md('<a href="/x">C:\\</a> next', 'https://e.test/')).toBe('[C:\\\\](https://e.test/x) next')
+    expect(md('<img src="/i.png" alt="dir\\"> next', 'https://e.test/')).toBe('![dir\\\\](https://e.test/i.png) next')
+    expect(md('<a href="http://e.test/a\\">t</a>')).toBe('[t](http://e.test/a\\\\)')
+    expect(md('<a href="http://e.test/a b\\">t</a>')).toBe('[t](<http://e.test/a b\\\\>)')
+    // In a target every backslash is doubled, as one before another backslash or punctuation escapes it.
+    expect(md('<a href="mailto:a\\\\b\\.c">t</a>')).toBe('[t](mailto:a\\\\\\\\b\\\\.c)')
+    expect(md('<a href="/x">plain</a>', 'https://e.test/')).toBe('[plain](https://e.test/x)')
+  })
+
   it('resolves relative targets against the base URL and keeps fragments and mailto', () => {
     const md = htmlToMarkdown(
       '<p><a href="../guide/">Guide</a> <img src="//cdn.fixture.test/a.png" alt="A"> <a href="#top">Top</a> ' +
