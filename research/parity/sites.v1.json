@@ -2936,6 +2936,24 @@
       ]
     },
     {
+      "id": "AC23",
+      "batch": "actions",
+      "feature": "scrape-execution.actions-pipeline",
+      "url": "https://example.com/",
+      "request": {"debug": true, "actions": [{"type": "scrape"}, {"type": "click", "selector": "#no-such-button"}, {"type": "scrape"}]},
+      "note": "Added 2026-10-04 after AC12's runs, frozen before its first run. AC12's steps again; AC12 checks markdownIncludes \"Example Domain\", which example.com no longer has in its body: as served since at least 2026-09-29 (commit d32dddd) the page has no h1, its body is one paragraph, and \"Example Domain\" is only its <title>. AC12 stays as it was. This case checks the page as it stood by its paragraph, and the title from metadata.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "actions-pipeline", "type": "field", "path": "status", "equals": "failed"},
+        {"item": "actions-pipeline", "type": "field", "path": "failureReason", "equals": "action_failed"},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.failed.index", "equals": 1},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.failed.code", "equals": "selector_not_found"},
+        {"item": "actions-pipeline", "type": "field", "path": "actions.scrapes.length", "equals": 1},
+        {"item": "actions-pipeline", "type": "markdownIncludes", "text": "This domain is for use in documentation examples"},
+        {"item": "actions-pipeline", "type": "field", "path": "metadata.title", "equals": "Example Domain"}
+      ]
+    },
+    {
       "id": "LS01",
       "batch": "lists",
       "feature": "interaction.list-steps",

@@ -324,6 +324,12 @@ export class SqliteTaskStore implements TaskStore {
     return row.count
   }
 
+  async listStepIdsWithTraceEvent(taskId: string, event: string): Promise<string[]> {
+    // The stored result is JSON.stringify's: an event is written exactly so, and found without parsing any result.
+    const rows = this.db.prepare('SELECT id FROM steps WHERE task_id = ? AND instr(result_json, ?) > 0 ORDER BY created_at, id').all(taskId, `"event":${JSON.stringify(event)}`) as Array<{ id: string }>
+    return rows.map((row) => row.id)
+  }
+
   async countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>> {
     const rows = this.db
       .prepare(`SELECT status, COUNT(*) AS count FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} GROUP BY status`)

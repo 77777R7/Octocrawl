@@ -35,6 +35,8 @@ export interface TaskStore {
   listSteps(taskId: string, attemptId?: string): Promise<readonly StepRecord[]>
   /** Count terminal URL checkpoints without reading their result bodies. */
   countCompletedSteps(taskId: string): Promise<number>
+  /** The ids of a task's steps whose result's trace has an event of this name, without reading their bodies. */
+  listStepIdsWithTraceEvent(taskId: string, event: string): Promise<string[]>
   /** How many of an attempt's steps (every attempt's without attemptId) have each status, without reading their bodies. */
   countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>>
   /** How many of a task's `blocked` steps have each block reason, every attempt counted, without reading their bodies' text. */

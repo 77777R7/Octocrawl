@@ -70,13 +70,27 @@ interface Counters {
   terminals: number
   /** Items a handoff replaced, each one `page` event of its own (see JobWebhooks.replaced). */
   handoffs: number
+  /** The highest number an event of the job was enqueued under, -1 for none: no later event takes it or one below it. */
+  last: number
 }
 
 /** `<taskId>:handoff:<stepId>`: the page a handoff put in place of an item's stopped result. */
 const isHandoffEventId = (taskId: string, eventId: string): boolean => eventId.startsWith(`${taskId}:handoff:`)
 
-/** The number the next event of a job takes: one more than every event numbered before it. */
-const nextSequence = (counters: Counters): number => counters.pages + counters.terminals + counters.handoffs
+/**
+ * The number the next event of a job takes: one more than every event numbered before it, and above every number already
+ * enqueued (an event offered again after a restart, its first enqueue lost, comes after the ones that were not).
+ */
+function nextSequence(counters: Counters): number {
+  counters.last = Math.max(counters.pages + counters.terminals + counters.handoffs, counters.last + 1)
+  return counters.last
+}
+
+/** The highest of a job's event numbers, -1 for none (a job may have more deliveries than a spread call takes arguments). */
+const highest = (numbers: Iterable<number>): number => { let top = -1; for (const n of numbers) if (n > top) top = n; return top }
+
+/** An item whose stopped result a handoff replaced: its result's trace starts from the result it replaced. */
+const replacedByHandoff = (step: StepRecord): boolean => step.result?.trace.some((event) => event.event === 'handoff_from') === true
 
 export class JobWebhooks {
   private readonly counters = new Map<string, Counters>()
@@ -121,7 +135,7 @@ export class JobWebhooks {
       ...(config.secretEnv === undefined ? {} : { secretEnv: config.secretEnv }),
       ...(payloadFormat === undefined ? {} : { payloadFormat }),
     }, Date.now(), { allowHttpLoopback: this.options.allowHttpLoopback && !this.options.hosted })
-    this.counters.set(taskId, { pages: 0, terminals: 0, handoffs: 0 })
+    this.counters.set(taskId, { pages: 0, terminals: 0, handoffs: 0, last: -1 })
     return {
       url: config.url,
       events,
@@ -198,7 +212,8 @@ export class JobWebhooks {
    * numbering from what is persisted, and offer `started` and every step
    * without a delivery again. Already-enqueued events are ignored by their
    * ids, so a resume or a restart sends nothing twice; steps are read only
-   * when their count and the page deliveries' differ.
+   * when their count and the page deliveries' differ, and a batch item a
+   * handoff replaced only when its event is missing (found by id first).
    */
   async reconcile(task: Task, taskStore: TaskStore, pageOf: (step: StepRecord) => CrawlPage): Promise<void> {
     const stored = webhookOf(task)
@@ -211,17 +226,37 @@ export class JobWebhooks {
     const total = Object.values(await taskStore.countSteps(task.id)).reduce((sum, count) => sum + (count ?? 0), 0)
     const terminals = [...existing].filter((eventId) => isTerminalEventId(task.id, eventId)).length
     const handoffs = [...existing].filter((eventId) => isHandoffEventId(task.id, eventId)).length
-    const counters: Counters = { pages: total, terminals, handoffs }
+    const taken = new Set(this.store.listEventVersions(stored.destinationId))
+    const counters: Counters = { pages: total, terminals, handoffs, last: highest(taken) }
     this.counters.set(task.id, counters)
-    if (stored.events.includes('started') && !existing.has(`${task.id}:started`)) this.enqueue(task, stored, 'started', `${task.id}:started`, 0, {})
+    if (stored.events.includes('started') && !existing.has(`${task.id}:started`)) {
+      this.enqueue(task, stored, 'started', `${task.id}:started`, 0, {})
+      counters.last = Math.max(counters.last, 0)
+    }
     if (!stored.events.includes('page')) return
     const pageDeliveries = [...existing].filter((eventId) => eventId.startsWith(`${task.id}:page:`)).length
-    if (pageDeliveries >= total) return
-    const steps = await taskStore.listSteps(task.id)
-    steps.forEach((step, index) => {
-      const eventId = `${task.id}:page:${step.id}`
-      if (!existing.has(eventId)) this.enqueue(task, stored, 'page', eventId, index + 1 + terminals + handoffs, { page: pageOf(step) }, step.result)
-    })
+    // A batch's items a handoff replaced may lack their event too (the process stopped between the write and the enqueue):
+    // found by their ids alone, so a job with every event enqueued reads no step.
+    const unsentHandoffs = task.batch === undefined ? [] : (await taskStore.listStepIdsWithTraceEvent(task.id, 'handoff_from')).filter((id) => !existing.has(`${task.id}:handoff:${id}`))
+    if (pageDeliveries < total) {
+      const steps = await taskStore.listSteps(task.id)
+      steps.forEach((step, index) => {
+        const eventId = `${task.id}:page:${step.id}`
+        if (existing.has(eventId)) return
+        // In step order, numbered as when it was first offered; that number taken by another event, after every number taken.
+        const first = index + 1 + terminals + handoffs
+        const sequence = taken.has(first) ? counters.last + 1 : first
+        taken.add(sequence)
+        counters.last = Math.max(counters.last, sequence)
+        this.enqueue(task, stored, 'page', eventId, sequence, { page: pageOf(step) }, step.result)
+      })
+    }
+    for (const id of unsentHandoffs) {
+      const step = await taskStore.getStep(id)
+      if (step === null || !replacedByHandoff(step)) continue
+      counters.handoffs++
+      this.enqueue(task, stored, 'page', `${task.id}:handoff:${id}`, nextSequence(counters), { page: pageOf(step) }, step.result)
+    }
   }
 
   /** The webhook block of a job's status: the destination, the receiver (no query), the events taken and the delivery counts. */
@@ -240,7 +275,7 @@ export class JobWebhooks {
     const eventIds = this.store.listEventIds(stored.destinationId)
     const terminals = eventIds.filter((eventId) => isTerminalEventId(task.id, eventId)).length
     const handoffs = eventIds.filter((eventId) => isHandoffEventId(task.id, eventId)).length
-    const counters: Counters = { pages: Math.max(0, total - (excludeCurrent ? 1 : 0)), terminals, handoffs }
+    const counters: Counters = { pages: Math.max(0, total - (excludeCurrent ? 1 : 0)), terminals, handoffs, last: highest(this.store.listEventVersions(stored.destinationId)) }
     this.counters.set(task.id, counters)
     return counters
   }
