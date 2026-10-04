@@ -120,6 +120,12 @@ interface Context {
   tableBudget?: { left: number }
   /** What the GFM grids of this page's tables may still add as empty cells (MAX_PAGE_TABLE_PADDING). */
   tablePadding: { left: number }
+  /**
+   * The emphasis of a <b> or <em> (and the like) around blocks: its markers,
+   * outermost first, around each paragraph the walk writes in it, and the
+   * marks its inline content starts from, so a <b> in it adds none.
+   */
+  emphasis?: { markers: string[]; marks: Marks }
 }
 
 /** Never content, or hidden by the page's CSS: skipped together with everything inside. */
@@ -136,9 +142,17 @@ function cssBlock(el: Element, ctx: Context): boolean {
 function shownText(el: Element, ctx: Context): string {
   if (!ctx.layout) return el.textContent ?? ''
   let text = ''
-  for (let node = el.firstChild; node !== null; node = node.nextSibling) {
+  // In document order, on a stack of the next node at each level, so a deep page costs no stack frames.
+  const next: (Node | null)[] = [el.firstChild]
+  while (next.length > 0) {
+    const node = next[next.length - 1]!
+    if (node === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = node.nextSibling
     if (node.nodeType === TEXT_NODE) text += (node as Text).data
-    else if (node.nodeType === ELEMENT_NODE && !(node as Element).hasAttribute(LAYOUT_MARKERS.hidden)) text += shownText(node as Element, ctx)
+    else if (node.nodeType === ELEMENT_NODE && !(node as Element).hasAttribute(LAYOUT_MARKERS.hidden)) next.push(node.firstChild)
   }
   return text
 }
@@ -162,7 +176,7 @@ function normalizeCell(s: string): string {
  * boundaries are spaces, so separate lines stay separate words.
  */
 function cellText(cell: Element, ctx: Context): string {
-  const inline = new Inline()
+  const inline = new Inline({ escape: true })
   inlineChildren(cell, inline, ctx, CELL_MARKS)
   return inline.finish().text.replace(/\n/g, ' ')
 }
@@ -293,8 +307,7 @@ function headAndFoot(table: Element): { head: Element | null; foot: Element | nu
  */
 function ownRowGroups(table: Element): Element[][] {
   const runs: { group: Element | null; rows: Element[] }[] = []
-  for (const tr of Array.from(table.querySelectorAll('tr'))) {
-    if (tr.closest('table') !== table || inForeign(tr, table)) continue
+  for (const tr of ownElements(table, ROWS, 'table')) {
     const group = rowGroup(tr, table)
     const last = runs[runs.length - 1]
     if (last !== undefined && last.group === group) last.rows.push(tr)
@@ -313,15 +326,35 @@ function ownRows(table: Element): Element[] {
 
 /** A row's own cells, not those of a table nested in one of them. */
 function ownCells(tr: Element): Element[] {
-  return Array.from(tr.querySelectorAll('th,td')).filter((cell) => cell.closest('tr') === tr && !inForeign(cell, tr))
+  return ownElements(tr, CELLS, 'tr')
 }
 
-/** Whether an svg or math element lies between `el` and its ancestor `top`: its <tr> or <td> is not a row or cell. */
-function inForeign(el: Element, top: Element): boolean {
-  for (let up = el.parentElement; up !== null && up !== top; up = up.parentElement) {
-    if (up.localName === 'svg' || up.localName === 'math') return true
+const ROWS = new Set(['tr'])
+const CELLS = new Set(['th', 'td'])
+
+/**
+ * The elements of the names under `top`, in tree order, not looking into an
+ * element named `stop` (a nested table's rows are its own), an svg or math
+ * (whose <tr> or <td> is not a row or cell) or a <template>'s content (not
+ * the page's, as querySelectorAll does not find it). Each element is looked at
+ * once, so a table nested thousands deep costs its size, not its size times
+ * its depth.
+ */
+function ownElements(top: Element, names: Set<string>, stop: string): Element[] {
+  const found: Element[] = []
+  const next: (Element | null)[] = [top.firstElementChild]
+  while (next.length > 0) {
+    const el = next[next.length - 1]!
+    if (el === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = el.nextElementSibling
+    const name = el.localName
+    if (names.has(name)) found.push(el)
+    if (name !== stop && name !== 'svg' && name !== 'math' && name !== 'template') next.push(el.firstElementChild)
   }
-  return false
+  return found
 }
 
 /**
@@ -428,7 +461,7 @@ function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedT
 }
 
 function plainCell(cell: Element, ctx: Context): string {
-  const inline = new Inline()
+  const inline = new Inline({ escape: false })
   inlineChildren(cell, inline, ctx, TEXT_MARKS)
   return inline.finish().text.replace(/\s+/g, ' ').trim()
 }
@@ -474,6 +507,15 @@ interface InlineResult {
   trail: boolean
   leadBreak: boolean
   trailBreak: boolean
+  /** How much of the text's start and end was written from text, not Markdown of the walk's own (a link, code, an image, emphasis). */
+  textLead: number
+  textTrail: number
+  /**
+   * For text ending with an emphasis run that a letter after it would make
+   * write otherwise (see closedBeforeLetter): the text so written, without
+   * the punctuation moved after the run, and that punctuation.
+   */
+  closedBeforeLetter?: { text: string; moved: string }
 }
 
 /**
@@ -483,45 +525,135 @@ interface InlineResult {
  */
 class Inline {
   private readonly parts: string[] = []
+  /** Whether each part was written from text (white space included), not Markdown of the walk's own. */
+  private readonly fromText: boolean[] = []
   private any = false
   private lineStarted = false
   private pendingSpace = false
   private lead = false
   private leadBreak = false
+  /** Whether text written now starts a line of the Markdown (a paragraph's own first line, or after a <br>). */
+  private atLineStart: boolean
+  /**
+   * The emphasis run the last part is (its marker and what is between the
+   * markers): an adjacent run of it continues it instead of writing `****`,
+   * and punctuation ending it moves after its closing marker when a letter
+   * follows (see emphasize).
+   */
+  private lastEmphasis: Emphasis | null = null
+  /** Text not yet written (see text), in pieces, and whether the last ends in a space. */
+  private pendingText: string[] = []
+  private pendingEndsSpace = false
+  /** The code of the code span the last part is, so an adjacent one joins it instead of writing a double backtick. */
+  private lastCode: { pieces: string[]; longest: number; tail: number; startsTick: boolean; endsTick: boolean } | null = null
+  /**
+   * How to write the last part once nothing more joins it: a run that adjacent
+   * runs joined keeps its pieces and is written once, as rewriting it at each
+   * join would cost its whole length each time.
+   */
+  private unwritten: (() => string) | null = null
 
+  private settle(): void {
+    if (this.unwritten === null) return
+    this.parts[this.parts.length - 1] = this.unwritten()
+    this.unwritten = null
+  }
+
+  /**
+   * `paragraph`: the inline content of a paragraph, whose first line starts a
+   * line of the Markdown (a link's or emphasis's starts after its marker).
+   * `escape`: text is escaped where CommonMark would read it as Markdown
+   * (not in code, nor in the plain text of the `tables` format). `link`: in
+   * a link's text, where an unbalanced bracket would end the link. `before`:
+   * in an emphasis run, the character before its opening marker, which
+   * CommonMark reads with the markers of a run opened at its start too.
+   */
+  constructor(private readonly options: { paragraph?: boolean; escape?: boolean; link?: boolean; before?: string } = {}) {
+    this.atLineStart = options.paragraph === true
+  }
+
+  /**
+   * Text, collected until other content, a break or the end follows: the
+   * parser splits text at each entity (`&lt;div&gt;` is five nodes), and the
+   * text is escaped as a whole, so each character is read with its
+   * neighbours.
+   */
   text(raw: string): void {
     const text = raw.replace(WHITESPACE, ' ')
     if (text.length === 0) return
+    const piece = this.pendingEndsSpace && text.startsWith(' ') ? text.slice(1) : text
+    if (piece.length === 0) return
+    this.pendingText.push(piece)
+    this.pendingEndsSpace = piece.endsWith(' ')
+  }
+
+  private flushText(): void {
+    if (this.pendingText.length === 0) return
+    const text = this.pendingText.join('')
+    this.pendingText = []
+    this.pendingEndsSpace = false
     const leading = text.startsWith(' ')
     const trailing = text.length > 1 && text.endsWith(' ')
     if (leading) this.space()
     const core = text.slice(leading ? 1 : 0, trailing ? -1 : undefined)
-    if (core) this.content(core)
+    if (core) this.content(this.options.escape === false ? core : escapeText(core, this.atLineStart && !this.pendingSpace, this.options.link === true), true)
     if (trailing) this.space()
   }
 
   space(): void {
+    this.flushText()
+    this.settle()
+    this.lastEmphasis = null
     if (this.lineStarted) this.pendingSpace = true
     else if (!this.any) this.lead = true
   }
 
-  content(s: string): void {
+  content(s: string, text = false): void {
+    this.flushText()
+    if (this.lastEmphasis !== null && !this.pendingSpace && s !== '') this.closeEmphasisBefore(s)
+    this.settle()
     if (this.pendingSpace) {
       this.parts.push(' ')
+      this.fromText.push(true)
       this.pendingSpace = false
     }
     this.parts.push(s)
+    this.fromText.push(text)
     this.any = this.lineStarted = true
+    this.atLineStart = false
+    this.lastEmphasis = null
+    this.lastCode = null
+  }
+
+  /**
+   * CommonMark reads a closing marker after punctuation as text where a
+   * letter follows it (`**"x"**b`): the punctuation ending the run moves after
+   * the marker (`**"x**"b`), and a run of punctuation alone loses its markers.
+   */
+  private closeEmphasisBefore(next: string): void {
+    if (FLANK_NEUTRAL.test(next[0]!)) return
+    const closed = closedBeforeLetter(this.lastEmphasis!)
+    if (closed === null) return
+    // Punctuation now next to what follows is escaped where it would pair with it: a `<`, `&` or `&#` (a tag or an entity).
+    // (Not a `!`: before a link, which would make it an image, nothing moves, as a `[` is punctuation.)
+    this.parts[this.parts.length - 1] = closed.run + escapeMovedEnd(closed.moved)
+    this.unwritten = null
   }
 
   lineBreak(): void {
+    this.flushText()
+    this.settle()
     this.pendingSpace = false
     if (!this.any) {
       this.leadBreak = true
       return
     }
     this.parts.push('\n')
+    this.fromText.push(false)
     this.lineStarted = false
+    this.atLineStart = true
+    this.lastEmphasis = null
+    this.lastCode = null
   }
 
   /**
@@ -530,6 +662,14 @@ class Inline {
    * markers at all.
    */
   wrap(inner: InlineResult, open: string, close: string): void {
+    this.flushText()
+    this.settle()
+    // A `!` written right before a link would make it an image.
+    const last = this.parts.length - 1
+    // (Not escaped already: an even run of backslashes before it, none included, escapes only themselves.)
+    if (open === '[' && !this.pendingSpace && !inner.lead && !inner.leadBreak && /(?:^|[^\\])(?:\\\\)*!$/.test(this.parts[last] ?? '')) {
+      this.parts[last] = `${this.parts[last]!.slice(0, -1)}\\!`
+    }
     if (inner.leadBreak) this.lineBreak()
     else if (inner.lead) this.space()
     // A blank line would end the paragraph inside the markers.
@@ -538,15 +678,127 @@ class Inline {
     else if (inner.trail) this.space()
   }
 
+  /**
+   * Append a run between emphasis markers, written so CommonMark reads it as
+   * emphasis (see emphasisParts); a run of white space alone gets none.
+   */
+  emphasize(inner: InlineResult, marker: string): void {
+    this.flushText()
+    if (inner.leadBreak) this.lineBreak()
+    else if (inner.lead) this.space()
+    const parts = emphasisParts(inner.text.replace(/\n{2,}/g, '\n'))
+    const { before, after } = parts
+    let { core } = parts
+    // Content ending with a run of other emphasis whose punctuation moves after it before a letter: this run's core then
+    // (the same start, white space and punctuation moved from it alike), for this run to move that punctuation after its own marker.
+    const inside = inner.closedBeforeLetter
+    let nestedCore = inside !== undefined && after === '' ? inside.text.replace(/\n{2,}/g, '\n').slice(before.length) : undefined
+    // How much of the run's start and end is text: only that may move outside the markers.
+    const textLead = Math.max(0, inner.textLead - before.length)
+    const textTrail = Math.max(0, inner.textTrail - after.length)
+    if (before) this.content(before)
+    const previous = this.lastEmphasis
+    // (Only runs of plain text join: Markdown written for each, such as its own emphasis, code or a link, or a character that
+    // pairs with one across the join, such as `<` with `span>` or `&` with `amp;`, would read otherwise next to the other's.)
+    const plain = PLAIN_RUN.test(core)
+    if (core && !before && !this.pendingSpace && previous !== null && previous.marker === marker && previous.plain && plain) {
+      // Right after a run of the same emphasis (`<b>a</b><b>b</b>`): one run, as `**a****b**` reads otherwise.
+      previous.pieces.push(core)
+      previous.textTrail = textTrail
+      this.unwritten = () => marker + previous.pieces.join('') + marker
+    } else if (core) {
+      this.settle()
+      // An opening marker before punctuation reads as text after a letter (`a**"x"**`): that punctuation goes before it.
+      const before = this.preceding()
+      const leading = before !== '' && !FLANK_NEUTRAL.test(before) ? /^[\p{P}\p{S}][\s\p{Zs}\p{P}\p{S}]*/u.exec(core.slice(0, textLead))?.[0] : undefined
+      if (leading !== undefined) {
+        core = core.slice(leading.length)
+        // A backslash ending it now comes before the marker, which it would escape; with no marker after it (the run is all
+        // punctuation), a `<`, `&` or `&#` ending it would pair with what follows (a tag, an entity): escaped.
+        // (As text: a run this one starts moves it before its own marker too.)
+        this.content(core === '' ? escapeMovedEnd(escapeLastBackslash(leading)) : escapeLastBackslash(leading), true)
+        if (nestedCore !== undefined) nestedCore = nestedCore.slice(leading.length)
+      }
+      if (core) {
+        // Right after a run of the other emphasis, its stars would join this one's (`**x***.y*`): this one is written with underscores.
+        const written = previous !== null && this.parts[this.parts.length - 1]?.endsWith('*') && !this.pendingSpace ? marker.replace(/\*/g, '_') : marker
+        this.content(written + core + written)
+        this.lastEmphasis = { marker: written, pieces: [core], textTrail: Math.min(textTrail, core.length), plain }
+        if (nestedCore !== undefined) this.lastEmphasis.nested = { core: nestedCore, moved: inside!.moved }
+      }
+    }
+    if (after) this.content(after)
+    if (inner.trailBreak) this.lineBreak()
+    else if (inner.trail) this.space()
+  }
+
+  /**
+   * The character content written next would follow: a space for one pending
+   * or leading, else the end of what is written, or at the start of an
+   * emphasis run, the character before its marker (see `before`).
+   */
+  preceding(): string {
+    this.flushText()
+    if (this.pendingSpace || (this.parts.length === 0 && (this.lead || this.leadBreak))) return ' '
+    return (this.parts[this.parts.length - 1] ?? this.options.before ?? '').slice(-1)
+  }
+
+  /** A code span: its code between enough backticks; one right after another joins it, as two would read as a double backtick. */
+  code(inner: InlineResult): void {
+    this.flushText()
+    if (inner.leadBreak) this.lineBreak()
+    else if (inner.lead) this.space()
+    if (inner.text) {
+      const piece = inner.text.replace(/\n{2,}/g, '\n')
+      const write = (run: NonNullable<Inline['lastCode']>): string => {
+        const fence = '`'.repeat(run.longest + 1)
+        const pad = run.startsTick || run.endsTick ? ' ' : ''
+        return fence + pad + run.pieces.join('') + pad + fence
+      }
+      const leading = backticksAt(piece, false)
+      const trailing = backticksAt(piece, true)
+      const run = this.lastCode
+      if (run !== null && !this.pendingSpace) {
+        // The fence outlasts the longest backtick run of the code, one across the join included.
+        run.longest = Math.max(run.longest, longestBacktickRun(piece), run.tail + leading)
+        run.tail = leading === piece.length ? run.tail + leading : trailing
+        run.endsTick = piece.endsWith('`')
+        run.pieces.push(piece)
+        this.unwritten = () => write(run)
+      } else {
+        const started = { pieces: [piece], longest: longestBacktickRun(piece), tail: trailing, startsTick: piece.startsWith('`'), endsTick: piece.endsWith('`') }
+        this.content(write(started))
+        this.lastCode = started
+      }
+    }
+    if (inner.trailBreak) this.lineBreak()
+    else if (inner.trail) this.space()
+  }
+
   finish(): InlineResult {
+    this.flushText()
+    this.settle()
     const joined = this.parts.join('')
     const text = joined.replace(/\n+$/, '')
+    let textLead = 0
+    for (let i = 0; i < this.parts.length && this.fromText[i]; i++) textLead += this.parts[i]!.length
+    let end = this.parts.length
+    while (end > 0 && this.parts[end - 1] === '\n') end--
+    let textTrail = 0
+    for (let i = end - 1; i >= 0 && this.fromText[i]; i--) textTrail += this.parts[i]!.length
+    // (The run is the last part while it is the last emphasis: anything written after it ends that.)
+    const closed = this.lastEmphasis === null ? null : closedBeforeLetter(this.lastEmphasis)
     return {
+      ...(closed !== null && closed.moved !== '' && end === this.parts.length
+        ? { closedBeforeLetter: { text: this.parts.slice(0, -1).join('') + closed.run, moved: closed.moved } }
+        : {}),
       text,
       lead: this.lead,
       trail: this.pendingSpace,
       leadBreak: this.leadBreak,
       trailBreak: text.length < joined.length,
+      textLead,
+      textTrail,
     }
   }
 
@@ -557,6 +809,169 @@ class Inline {
       .map((part) => part.split('\n').join('  \n'))
       .join('\n\n')
   }
+}
+
+/**
+ * A run of emphasis split so CommonMark reads its markers as emphasis: a
+ * marker next to Unicode white space (a full-width space indenting a CJK
+ * paragraph, say) is plain text, so that white space goes outside the
+ * markers; and a backslash ending the run would escape the closing marker,
+ * so it is escaped itself (it still reads as one backslash).
+ */
+const EDGE_SPACE = /[\p{Zs}\t\f\r]/u
+
+function emphasisParts(text: string): { before: string; core: string; after: string } {
+  // Scanned from both ends, so a long run of spaces costs one pass.
+  let start = 0
+  let end = text.length
+  while (start < end && EDGE_SPACE.test(text[start]!)) start++
+  while (end > start && EDGE_SPACE.test(text[end - 1]!)) end--
+  return { before: text.slice(0, start), core: escapeLastBackslash(text.slice(start, end)), after: text.slice(end) }
+}
+
+const ASCII_PUNCTUATION = /[!-/:-@[-`{-~]/
+/** Characters next to which an emphasis marker reads as one either way: white space and punctuation (a line's end too). */
+const FLANK_NEUTRAL = /[\s\p{Zs}\p{P}\p{S}]/u
+/** A run of emphasis that is text with none of the characters Markdown pairs across a join: one may join the next (see emphasize). */
+const PLAIN_RUN = /^[^\\`*_~[\]!<>&]*$/
+const WORD_CHARACTER = /[\p{L}\p{N}]/u
+const SPACE_CHARACTER = /[\s\p{Zs}]/u
+
+/**
+ * Text as Markdown that renders as written, escaped only where CommonMark
+ * would read it otherwise: a backslash before punctuation (or at the end,
+ * before what follows), a `*` that is not between spaces, a `_` not inside a
+ * word, a backtick, a `]` opening a link's target (and in a link's text an
+ * unbalanced bracket), a `<` that starts a tag, an `&` that starts an
+ * entity, a double `~`; and at the start of a line, what starts a heading,
+ * list item, quote, rule, setext underline or link definition. Snake_case
+ * names, `2 * 3` and `[1]` stay as written.
+ */
+function escapeText(text: string, lineStart: boolean, link: boolean): string {
+  // In a link's text, the brackets with no partner in this text.
+  let unmatched: Set<number> | null = null
+  if (link && /[[\]]/.test(text)) {
+    unmatched = new Set()
+    const open: number[] = []
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '[') open.push(i)
+      else if (text[i] === ']') {
+        if (open.length > 0) open.pop()
+        else unmatched.add(i)
+      }
+    }
+    for (const i of open) unmatched.add(i)
+  }
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!
+    const prev = text[i - 1]
+    const next = text[i + 1]
+    switch (c) {
+      case '\\':
+        out += next === undefined || ASCII_PUNCTUATION.test(next) ? '\\\\' : c
+        break
+      case '*':
+        out += prev !== undefined && next !== undefined && SPACE_CHARACTER.test(prev) && SPACE_CHARACTER.test(next) ? c : '\\*'
+        break
+      case '_':
+        out += prev !== undefined && next !== undefined && WORD_CHARACTER.test(prev) && WORD_CHARACTER.test(next) ? c : '\\_'
+        break
+      case '`':
+        out += '\\`'
+        break
+      case '[':
+        out += unmatched?.has(i) ? '\\[' : c
+        break
+      case ']':
+        out += next === '(' || next === '[' || unmatched?.has(i) ? '\\]' : c
+        break
+      case '<':
+        out += next !== undefined && /[A-Za-z/!?]/.test(next) ? '\\<' : c
+        break
+      case '&':
+        out += /^&#?[A-Za-z0-9]{1,32};/.test(text.slice(i, i + 35)) ? '\\&' : c
+        break
+      case '~':
+        out += prev === '~' || next === '~' ? '\\~' : c
+        break
+      default:
+        out += c
+    }
+  }
+  return lineStart ? escapeLineStart(out) : out
+}
+
+/** What would start a block at the start of a line: a heading, list item, quote, rule, setext underline or link definition. */
+function escapeLineStart(line: string): string {
+  if (/^(?:#{1,6}|[-+]|>)(?=[ \t]|$)/.test(line) || /^>/.test(line)) return `\\${line}`
+  const ordered = /^(\d{1,9})([.)])(?=[ \t]|$)/.exec(line)
+  if (ordered) return `${ordered[1]}\\${line.slice(ordered[1]!.length)}`
+  if (/^(?:=+|-+|(?:-[ \t]*){3,})[ \t]*$/.test(line)) return `\\${line}`
+  if (/^\[(?:[^\]\\]|\\.)*\]:/.test(line)) return `\\${line}`
+  return line
+}
+
+/**
+ * An emphasis run written last: its marker and what is between the markers
+ * (in pieces, as adjacent runs join it), how much of its end is text, whether
+ * it is plain text (see emphasize), and for a run whose content ends with
+ * another emphasis run, how that ends before a letter (see closedBeforeLetter).
+ */
+interface Emphasis {
+  marker: string
+  pieces: string[]
+  textTrail: number
+  plain: boolean
+  nested?: { core: string; moved: string }
+}
+
+/**
+ * How an emphasis run is written where a letter follows it, which CommonMark
+ * reads its closing marker with: the punctuation ending it after the marker
+ * (`**"x**"b`), a run of punctuation alone without markers, an underscore run
+ * with stars; or null when it reads as written. `run` is the run as written
+ * then, `moved` the punctuation after it. A run ending with another run
+ * (`***"y"***`) moves that one's punctuation after both markers.
+ */
+function closedBeforeLetter({ marker, pieces, textTrail, nested }: Emphasis): { run: string; moved: string } | null {
+  const core = pieces.join('')
+  // The punctuation, and white space before it (a marker after a space reads as text too), of the text ending the run:
+  // never Markdown of the walk's own, such as a link's closing parenthesis. Scanned from the end, so a long run costs one pass.
+  const limit = core.length - textTrail
+  let start = core.length
+  while (start > limit && FLANK_NEUTRAL.test(core[start - 1]!)) start--
+  const trailing = start < core.length && !/[\s\p{Zs}]/u.test(core[core.length - 1]!) ? core.slice(start) : ''
+  if (trailing === '' && nested !== undefined) return { run: nested.core ? marker + nested.core + marker : '', moved: nested.moved }
+  const rest = core.slice(0, core.length - trailing.length)
+  // An underscore run (see emphasize) does not close before a letter: it is written with stars again, unless punctuation now follows it.
+  const written = trailing === '' ? marker.replace(/_/g, '*') : marker
+  if (trailing === '' && written === marker) return null
+  return { run: rest ? written + rest + written : '', moved: trailing }
+}
+
+/**
+ * Punctuation moved out of emphasis markers, now right before what follows: a
+ * `<` ending it, or a `&` or `&#` (the `&`), would start a tag or an entity
+ * with that, so it is escaped, unless a backslash already escapes it.
+ */
+function escapeMovedEnd(text: string): string {
+  const at = text.endsWith('<') || text.endsWith('&') ? text.length - 1 : text.endsWith('&#') ? text.length - 2 : -1
+  if (at < 0) return text
+  let backslashes = 0
+  while (backslashes < at && text[at - 1 - backslashes] === '\\') backslashes++
+  return backslashes % 2 === 1 ? text : `${text.slice(0, at)}\\${text.slice(at)}`
+}
+
+/**
+ * Text written right before a closing marker, bracket or parenthesis: an odd
+ * run of backslashes ending it would escape that delimiter, so the last one is
+ * escaped itself (it still reads as one backslash).
+ */
+function escapeLastBackslash(text: string): string {
+  let backslashes = 0
+  while (backslashes < text.length && text[text.length - 1 - backslashes] === '\\') backslashes++
+  return backslashes % 2 === 1 ? `${text}\\` : text
 }
 
 interface Marks {
@@ -596,6 +1011,8 @@ function linkTarget(raw: string, base: URL | null): string | null {
 
 /** A target as a CommonMark link destination, in <…> where a space or unbalanced parenthesis would cut it short. */
 function destination(target: string): string {
+  // A backslash in a destination escapes the punctuation after it, another backslash too: doubled, each reads as one.
+  target = target.replace(/\\/g, '\\\\')
   if (!/[()\s<>]/.test(target)) return target
   let depth = 0
   for (const ch of target) {
@@ -606,28 +1023,77 @@ function destination(target: string): string {
   return `<${target.replace(/</g, '%3C').replace(/>/g, '%3E')}>`
 }
 
+/** How many backticks start (or end) the text. */
+function backticksAt(text: string, end: boolean): number {
+  let count = 0
+  while (count < text.length && text[end ? text.length - 1 - count : count] === '`') count++
+  return count
+}
+
 function longestBacktickRun(text: string): number {
   let longest = 0
   for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length)
   return longest
 }
 
+/**
+ * The children of an element being written as inline content: the next one,
+ * where they are written, in which marks, and what is written once they all
+ * are (an emphasis's markers, a link's brackets, a block's closing space).
+ */
+interface InlineLevel {
+  next: Node | null
+  out: Inline
+  marks: Marks
+  done?: () => void
+}
+
 function inlineChildren(parent: Node, out: Inline, ctx: Context, marks: Marks): void {
-  for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
-    if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
-    else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
-  }
+  walkInline({ next: parent.firstChild, out, marks }, ctx)
 }
 
 function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): void {
+  const level = openInline(el, out, ctx, marks)
+  if (level !== null) walkInline(level, ctx)
+}
+
+/** Inline content, depth first on a stack of levels, so nesting thousands deep (a <sup> in a <sup>…) costs no stack frames. */
+function walkInline(first: InlineLevel, ctx: Context): void {
+  const levels = [first]
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!
+    const node = level.next
+    if (node === null) {
+      levels.pop()
+      level.done?.()
+      continue
+    }
+    level.next = node.nextSibling
+    if (node.nodeType === TEXT_NODE) level.out.text((node as Text).data)
+    else if (node.nodeType === ELEMENT_NODE) {
+      const inner = openInline(node as Element, level.out, ctx, level.marks)
+      if (inner !== null) levels.push(inner)
+    }
+  }
+}
+
+/** Starts an element written as inline content: what it writes before its children, and the level of those, or null when it has none to write. */
+function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): InlineLevel | null {
   const tag = el.localName
-  if (skipped(el, ctx)) return
+  if (skipped(el, ctx)) return null
   // Blocks met in inline context (a card inside a link, a paragraph inside a
   // heading, a box the page's CSS lays out as a block) flatten to one line:
   // their boundaries become spaces.
   const block = BLOCK.has(tag) || cssBlock(el, ctx)
   if (block) out.space()
-  let rendered = true
+  // Its children, written to `inner`, then `done` and a block's closing space. (No closure where nothing is to be done.)
+  const children = (inner: Inline, innerMarks: Marks, done?: () => void): InlineLevel => ({
+    next: el.firstChild,
+    out: inner,
+    marks: innerMarks,
+    done: done === undefined ? (block ? () => out.space() : undefined) : block ? () => (done(), out.space()) : done,
+  })
+  if (!block && !SPECIAL_INLINE.has(tag)) return el.firstChild === null ? null : { next: el.firstChild, out, marks }
   switch (tag) {
     case 'br':
       out.lineBreak()
@@ -639,75 +1105,69 @@ function inlineElement(el: Element, out: Inline, ctx: Context, marks: Marks): vo
       } else image(el, out, ctx)
       break
     case 'code':
-      if (marks.plain) rendered = false
-      else codeSpan(el, out, ctx)
+      if (marks.plain) return children(out, marks)
+      codeSpan(el, out, ctx)
       break
-    case 'a':
-      rendered = link(el, out, ctx, marks)
-      break
+    case 'a': {
+      const href = el.getAttribute('href')
+      const target = href === null || marks.link || marks.text ? null : linkTarget(href, ctx.base)
+      // No usable target (no href, or inside another link): only its text.
+      if (target === null) return children(out, marks)
+      const inner = new Inline({ link: true })
+      return children(inner, { ...marks, link: true }, () => link(inner.finish(), target, out))
+    }
     case 'strong':
     case 'b':
-      if (marks.strong || marks.plain) rendered = false
-      else emphasis(el, out, ctx, { ...marks, strong: true }, '**')
-      break
+      if (marks.strong || marks.plain) return children(out, marks)
+      return emphasis(el, out, { ...marks, strong: true }, '**', children)
     case 'em':
     case 'i':
-      if (marks.em || marks.plain) rendered = false
-      else emphasis(el, out, ctx, { ...marks, em: true }, '*')
-      break
+      if (marks.em || marks.plain) return children(out, marks)
+      return emphasis(el, out, { ...marks, em: true }, '*', children)
     case 'sup':
     case 'sub': {
       // Digits and signs keep their script form; a footnote mark or a word
       // in a superscript stays as written.
-      const inner = new Inline()
-      inlineChildren(el, inner, ctx, marks)
-      const run = inner.finish()
-      const script = scriptText(run.text, tag)
-      out.wrap(script === null ? run : { ...run, text: script }, '', '')
-      break
+      const inner = new Inline({ escape: !marks.text, link: marks.link })
+      return children(inner, marks, () => {
+        const run = inner.finish()
+        const script = scriptText(run.text, tag)
+        out.wrap(script === null ? run : { ...run, text: script }, '', '')
+      })
     }
     default:
-      rendered = false
-  }
-  // The loop is written out (not inlineChildren) so deep nesting costs one
-  // stack frame per level.
-  if (!rendered) {
-    for (let node = el.firstChild; node !== null; node = node.nextSibling) {
-      if (node.nodeType === TEXT_NODE) out.text((node as Text).data)
-      else if (node.nodeType === ELEMENT_NODE) inlineElement(node as Element, out, ctx, marks)
-    }
+      return children(out, marks)
   }
   if (block) out.space()
+  return null
 }
 
-function emphasis(el: Element, out: Inline, ctx: Context, marks: Marks, marker: string): void {
-  const inner = new Inline()
-  inlineChildren(el, inner, ctx, marks)
-  out.wrap(inner.finish(), marker, marker)
+/** The tags openInline writes otherwise than by their children alone. */
+const SPECIAL_INLINE = new Set(['br', 'img', 'code', 'a', 'strong', 'b', 'em', 'i', 'sup', 'sub'])
+
+function emphasis(
+  el: Element,
+  out: Inline,
+  marks: Marks,
+  marker: string,
+  children: (inner: Inline, marks: Marks, done: () => void) => InlineLevel,
+): InlineLevel {
+  const inner = new Inline({ link: marks.link, before: out.preceding() })
+  return children(inner, marks, () => out.emphasize(inner.finish(), marker))
 }
 
 function codeSpan(el: Element, out: Inline, ctx: Context): void {
-  const inner = new Inline()
+  const inner = new Inline({ escape: false })
   inner.text(shownText(el, ctx))
-  const result = inner.finish()
-  const fence = '`'.repeat(longestBacktickRun(result.text) + 1)
-  const pad = result.text.startsWith('`') || result.text.endsWith('`') ? ' ' : ''
-  out.wrap(result, fence + pad, pad + fence)
+  out.code(inner.finish())
 }
 
-/** Render a link; false when it has no usable target (no href, or inside another link) and is only text. */
-function link(el: Element, out: Inline, ctx: Context, marks: Marks): boolean {
-  const href = el.getAttribute('href')
-  const target = href === null || marks.link || marks.text ? null : linkTarget(href, ctx.base)
-  if (target === null) return false
-  const inner = new Inline()
-  inlineChildren(el, inner, ctx, { ...marks, link: true })
-  const result = inner.finish()
+/** A link's text, written between brackets before its target. */
+function link(result: InlineResult, target: string, out: Inline): void {
   // A link with no text keeps its target as the text, except a bare
   // same-page anchor (a heading's permalink icon), which says nothing.
   if (!result.text && target.startsWith('#')) out.wrap(result, '', '')
-  else out.wrap({ ...result, text: result.text || target }, '[', `](${destination(target)})`)
-  return true
+  else out.wrap({ ...result, text: escapeLastBackslash(result.text || target) }, '[', `](${destination(target)})`)
 }
 
 /** An image with its alt text and absolute target; only the alt text when it has no target (a `data:` URI, unless the caller keeps those). */
@@ -716,7 +1176,7 @@ function image(el: Element, out: Inline, ctx: Context): void {
   const src = el.getAttribute('src')
   const kept = src === null ? null : src.replace(/[\t\n\r]/g, '').trim()
   const target = kept === null ? null : ctx.keepDataUriImages && /^data:/i.test(kept) ? kept : linkTarget(kept, ctx.base)
-  if (target !== null) out.content(`![${alt.replace(/[[\]]/g, '\\$&')}](${destination(target)})`)
+  if (target !== null) out.content(`![${escapeLastBackslash(alt.replace(/[[\]]/g, '\\$&'))}](${destination(target)})`)
   else if (alt) out.content(alt)
 }
 
@@ -725,14 +1185,14 @@ function image(el: Element, out: Inline, ctx: Context): void {
 /** Blocks of one container, plus the paragraph its inline content is building. */
 class Flow {
   readonly blocks: Block[] = []
-  inline = new Inline()
+  inline = new Inline({ paragraph: true })
 
   constructor(readonly ctx: Context) {}
 
   flush(): void {
     const text = this.inline.paragraph()
-    if (text) this.blocks.push({ text })
-    this.inline = new Inline()
+    if (text) this.blocks.push({ text: emphasized(text, this.ctx) })
+    this.inline = new Inline({ paragraph: true })
   }
 
   add(...blocks: (Block | null)[]): void {
@@ -741,11 +1201,123 @@ class Flow {
   }
 }
 
-function flowChildren(parent: Node, flow: Flow): void {
-  for (let node = parent.firstChild; node !== null; node = node.nextSibling) flowNode(node, flow)
+/** A paragraph in the emphasis it is written in: each of its parts (a double <br> starts one) between the markers. */
+function emphasized(text: string, ctx: Context): string {
+  if (ctx.emphasis === undefined) return text
+  const open = ctx.emphasis.markers.join('')
+  const close = [...ctx.emphasis.markers].reverse().join('')
+  return text
+    .split('\n\n')
+    .map((part) => {
+      const { before, core, after } = emphasisParts(part)
+      return core ? before + open + core + close + after : part
+    })
+    .join('\n\n')
 }
 
-function flowNode(node: Node, flow: Flow): void {
+/** The marks inline content starts from in a paragraph of the walk. */
+const flowMarks = (ctx: Context): Marks => ctx.emphasis?.marks ?? NO_MARKS
+
+/**
+ * A node's children being written as blocks: the next one, how one is
+ * written, and what is written once they all are (a list item's marker, a
+ * quote's `>`, a block's closing paragraph break). `single`: only the node
+ * `next` names, not its siblings.
+ */
+interface FlowLevel {
+  next: Node | null
+  single?: boolean
+  step: (node: Node) => void
+  done?: () => void
+}
+
+/**
+ * Block content written depth first on a stack of levels, so nesting
+ * thousands deep (a <div> in a <div>, a list in a list) costs no stack
+ * frames: what a level writes after its children is its `done`.
+ */
+class FlowWalk {
+  private readonly levels: FlowLevel[] = []
+
+  push(level: FlowLevel): void {
+    this.levels.push(level)
+  }
+
+  run(): void {
+    while (this.levels.length > 0) {
+      const level = this.levels[this.levels.length - 1]!
+      const node = level.next
+      if (node === null) {
+        this.levels.pop()
+        level.done?.()
+        continue
+      }
+      level.next = level.single ? null : node.nextSibling
+      level.step(node)
+    }
+  }
+}
+
+/** The level writing a node's children into a flow, then `done`. */
+function flowLevel(parent: Node, flow: Flow, walk: FlowWalk, done?: () => void): FlowLevel {
+  return { next: parent.firstChild, step: (node) => flowNode(node, flow, walk), done }
+}
+
+/** The level writing one node into a flow, then `done`. */
+function nodeLevel(node: Node, flow: Flow, walk: FlowWalk, done?: () => void): FlowLevel {
+  return { next: node, single: true, step: (child) => flowNode(child, flow, walk), done }
+}
+
+/**
+ * A <b>, <strong>, <em> or <i> around blocks, as a browser shows it: its
+ * inline runs are written between the markers, and the paragraphs of the
+ * blocks in it (a list's items, a quote's paragraphs too) in the emphasis.
+ * Headings, code blocks and tables keep their own form. `after`: written
+ * once it is.
+ */
+function emphasisAroundBlocks(el: Element, flow: Flow, strong: boolean, walk: FlowWalk, after: () => void): void {
+  const ctx = flow.ctx
+  const outer = ctx.emphasis
+  const marker = strong ? '**' : '*'
+  const marks: Marks = { ...flowMarks(ctx), ...(strong ? { strong: true } : { em: true }) }
+  let run = new Inline()
+  const endRun = (): void => {
+    flow.inline.emphasize(run.finish(), marker)
+    run = new Inline()
+  }
+  walk.push({
+    next: el.firstChild,
+    step: (node) => {
+      if (node.nodeType === TEXT_NODE) {
+        run.text((node as Text).data)
+        return
+      }
+      if (node.nodeType !== ELEMENT_NODE) return
+      const child = node as Element
+      if (skipped(child, ctx)) return
+      if (!BLOCK.has(child.localName) && !cssBlock(child, ctx) && !containsBlock(child, ctx)) {
+        inlineElement(child, run, ctx, marks)
+        return
+      }
+      // A block: the paragraph so far ends outside the emphasis, the block's own paragraphs are written in it.
+      endRun()
+      flow.flush()
+      ctx.emphasis = { markers: [...(outer?.markers ?? []), marker], marks }
+      walk.push(
+        nodeLevel(child, flow, walk, () => {
+          flow.flush()
+          ctx.emphasis = outer
+        }),
+      )
+    },
+    done: () => {
+      endRun()
+      after()
+    },
+  })
+}
+
+function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
   if (node.nodeType === TEXT_NODE) {
     flow.inline.text((node as Text).data)
     return
@@ -771,19 +1343,32 @@ function flowNode(node: Node, flow: Flow): void {
       // A table whose nested tables hold most of its text lays out the page
       // (Hacker News puts its header, story list and footer in one), and so
       // does a single row (a bar of links): their cells are blocks, and only
-      // the data tables inside are grids.
-      if (isLayoutTable(el) || ownRows(el).length < 2) break
+      // the data tables inside are grids. (The row count first: it costs
+      // less than looking through the nested tables.)
+      if (ownRows(el).length < 2 || isLayoutTable(el)) break
       flow.add({ text: tableToGfm(el, ctx) })
       return
     case 'li': {
       // An item outside any list still renders with its bullet.
-      const text = listItem('-', blocksOf(el, ctx))
-      flow.add({ text, interrupts: true })
+      const inner = new Flow(ctx)
+      walk.push(
+        flowLevel(el, inner, walk, () => {
+          inner.flush()
+          flow.add({ text: listItem('-', inner.blocks), interrupts: true })
+        }),
+      )
       return
     }
-    case 'blockquote':
-      flow.add(blockquote(el, ctx))
+    case 'blockquote': {
+      const inner = new Flow(ctx)
+      walk.push(
+        flowLevel(el, inner, walk, () => {
+          inner.flush()
+          flow.add(blockquote(inner.blocks))
+        }),
+      )
       return
+    }
     case 'hr':
       flow.add({ text: '---' })
       return
@@ -792,7 +1377,7 @@ function flowNode(node: Node, flow: Flow): void {
       return
   }
   if (LIST.has(tag)) {
-    flow.add(...list(el, ctx))
+    list(el, flow, walk)
     return
   }
   const tagBlock = BLOCK.has(tag)
@@ -801,7 +1386,7 @@ function flowNode(node: Node, flow: Flow): void {
     // Inline content, in a paragraph of its own when the page's CSS makes
     // the element a block (a link or emphasis keeps its markup).
     if (block) flow.flush()
-    inlineElement(el, flow.inline, ctx, NO_MARKS)
+    inlineElement(el, flow.inline, ctx, flowMarks(ctx))
     if (block) flow.flush()
     return
   }
@@ -809,41 +1394,58 @@ function flowNode(node: Node, flow: Flow): void {
     // A link around blocks (a card) stays one link, with its text flattened,
     // in a paragraph of its own.
     flow.flush()
-    inlineElement(el, flow.inline, ctx, NO_MARKS)
+    inlineElement(el, flow.inline, ctx, flowMarks(ctx))
     flow.flush()
     return
   }
+  const marks = flowMarks(ctx)
+  const strong = tag === 'b' || tag === 'strong'
+  const after = block ? () => flow.flush() : () => {}
+  if (!tagBlock && (strong || tag === 'em' || tag === 'i') && !(strong ? marks.strong : marks.em)) {
+    if (block) flow.flush()
+    emphasisAroundBlocks(el, flow, strong, walk, after)
+    return
+  }
   // A block container, or an inline element around blocks (a <span> holding
-  // <div>s), which is laid out as those blocks. The loop is written out so
-  // deep nesting costs one stack frame per level.
+  // <div>s), which is laid out as those blocks.
   if (block) flow.flush()
-  for (let child = el.firstChild; child !== null; child = child.nextSibling) flowNode(child, flow)
-  if (block) flow.flush()
+  walk.push(flowLevel(el, flow, walk, block ? after : undefined))
 }
 
-function containsBlock(el: Element, ctx: Context): boolean {
-  const known = ctx.blockMemo.get(el)
+function containsBlock(root: Element, ctx: Context): boolean {
+  const memo = ctx.blockMemo
+  const known = memo.get(root)
   if (known !== undefined) return known
+  // Depth first, on a stack of the elements searched and the next child of each, so a deep page costs no stack frames.
+  // `found`: whether the element last searched holds a block, which then holds for each element it is in.
+  const searched: { el: Element; next: Element | null }[] = [{ el: root, next: root.firstElementChild }]
   let found = false
-  for (let child = el.firstElementChild; child !== null && !found; child = child.nextElementSibling) {
-    if (!skipped(child, ctx)) found = BLOCK.has(child.localName) || cssBlock(child, ctx) || containsBlock(child, ctx)
+  while (searched.length > 0) {
+    const top = searched[searched.length - 1]!
+    const child = found ? null : top.next
+    if (child === null) {
+      memo.set(top.el, found)
+      searched.pop()
+      continue
+    }
+    top.next = child.nextElementSibling
+    if (skipped(child, ctx)) continue
+    if (BLOCK.has(child.localName) || cssBlock(child, ctx)) found = true
+    else {
+      const childKnown = memo.get(child)
+      if (childKnown !== undefined) found = childKnown
+      else searched.push({ el: child, next: child.firstElementChild })
+    }
   }
-  ctx.blockMemo.set(el, found)
   return found
 }
 
 /** The blocks inside a container element. */
 function blocksOf(el: Node, ctx: Context): Block[] {
   const flow = new Flow(ctx)
-  flowChildren(el, flow)
-  flow.flush()
-  return flow.blocks
-}
-
-/** The blocks one node renders to on its own. */
-function nodeBlocks(node: Node, ctx: Context): Block[] {
-  const flow = new Flow(ctx)
-  flowNode(node, flow)
+  const walk = new FlowWalk()
+  walk.push(flowLevel(el, flow, walk))
+  walk.run()
   flow.flush()
   return flow.blocks
 }
@@ -859,18 +1461,23 @@ function heading(el: Element, ctx: Context): Block | null {
 /** Text of a <pre>, exactly, with <br> as a newline. */
 function preText(pre: Element, ctx: Context): string {
   const parts: string[] = []
-  const walk = (parent: Node): void => {
-    for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
-      if (node.nodeType === TEXT_NODE) {
-        parts.push((node as Text).data)
-      } else if (node.nodeType === ELEMENT_NODE) {
-        if (skipped(node as Element, ctx)) continue
-        if ((node as Element).localName === 'br') parts.push('\n')
-        else walk(node)
-      }
+  // In document order, on a stack of the next node at each level, so a deep page costs no stack frames.
+  const next: (Node | null)[] = [pre.firstChild]
+  while (next.length > 0) {
+    const node = next[next.length - 1]!
+    if (node === null) {
+      next.pop()
+      continue
+    }
+    next[next.length - 1] = node.nextSibling
+    if (node.nodeType === TEXT_NODE) {
+      parts.push((node as Text).data)
+    } else if (node.nodeType === ELEMENT_NODE) {
+      if (skipped(node as Element, ctx)) continue
+      if ((node as Element).localName === 'br') parts.push('\n')
+      else next.push(node.firstChild)
     }
   }
-  walk(pre)
   return parts.join('')
 }
 
@@ -897,10 +1504,9 @@ function codeBlock(pre: Element, ctx: Context): Block | null {
   return { text: `${fence}${codeLanguage(pre)}\n${text}\n${fence}` }
 }
 
-function blockquote(el: Element, ctx: Context): Block | null {
-  const inner = blocksOf(el, ctx)
-    .map((block) => block.text)
-    .join('\n\n')
+/** A quote of the blocks inside a <blockquote>. */
+function blockquote(blocks: Block[]): Block | null {
+  const inner = blocks.map((block) => block.text).join('\n\n')
   if (!inner) return null
   return { text: inner.split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n') }
 }
@@ -929,38 +1535,57 @@ function hasItemChild(el: Element): boolean {
  * item. Ordered items are numbered from `start` (and an item's `value`).
  * Other children of the list (a nested list written as a sibling of the
  * items) belong to the item before them; wrappers around items are looked
- * through.
+ * through. Written to the flow once its items are.
  */
-function list(el: Element, ctx: Context): Block[] {
+function list(el: Element, flow: Flow, walk: FlowWalk): void {
+  const ctx = flow.ctx
   const ordered = el.localName === 'ol'
   const start = Number.parseInt(el.getAttribute('start') ?? '', 10)
   let number = ordered && start >= 0 ? start : 1
   const before: Block[] = []
   const items: { marker: string; blocks: Block[] }[] = []
-  const visit = (parent: Element): void => {
-    for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
+  const visit = (parent: Element, done?: () => void): FlowLevel => ({
+    next: parent.firstChild,
+    step: (node) => {
       const tag = node.nodeType === ELEMENT_NODE ? (node as Element).localName : ''
       if (tag === 'li') {
         const value = ordered ? Number.parseInt((node as Element).getAttribute('value') ?? '', 10) : Number.NaN
         if (value >= 0) number = value
-        items.push({ marker: ordered ? `${number}.` : '-', blocks: blocksOf(node, ctx) })
+        const item: { marker: string; blocks: Block[] } = { marker: ordered ? `${number}.` : '-', blocks: [] }
         number++
+        const inner = new Flow(ctx)
+        walk.push(
+          flowLevel(node, inner, walk, () => {
+            inner.flush()
+            item.blocks = inner.blocks
+            items.push(item)
+          }),
+        )
       } else if (tag !== '' && !SKIP.has(tag) && !LIST.has(tag) && hasItemChild(node as Element)) {
-        visit(node as Element)
+        walk.push(visit(node as Element))
       } else {
-        const blocks = nodeBlocks(node, ctx)
-        const last = items[items.length - 1]
-        if (last) last.blocks.push(...blocks)
-        else before.push(...blocks)
+        const inner = new Flow(ctx)
+        walk.push(
+          nodeLevel(node, inner, walk, () => {
+            inner.flush()
+            const last = items[items.length - 1]
+            if (last) last.blocks.push(...inner.blocks)
+            else before.push(...inner.blocks)
+          }),
+        )
       }
-    }
-  }
-  visit(el)
-  const text = items
-    .map((item) => listItem(item.marker, item.blocks))
-    .filter(Boolean)
-    .join('\n')
-  return [...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') }]
+    },
+    done,
+  })
+  walk.push(
+    visit(el, () => {
+      const text = items
+        .map((item) => listItem(item.marker, item.blocks))
+        .filter(Boolean)
+        .join('\n')
+      flow.add(...before, { text, interrupts: text.startsWith('- ') || text.startsWith('1. ') })
+    }),
+  )
 }
 
 function toUrl(value: string | null | undefined): URL | null {
