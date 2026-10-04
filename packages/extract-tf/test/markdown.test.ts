@@ -334,6 +334,17 @@ describe('htmlToMarkdown with a <head> tag in the body', () => {
 })
 
 describe('htmlToMarkdown blocks and inline whitespace', () => {
+  it('converts inline elements nested thousands deep without running out of stack', () => {
+    const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>a ${html} b</p></body></html>`)
+    const nest = (open: string, close: string, depth: number, inner: string) => open.repeat(depth) + inner + close.repeat(depth)
+    const started = Date.now()
+    for (const [open, close, inner] of [['<sup>', '</sup>', '2'], ['<sub>', '</sub>', 'x'], ['<span>', '</span>', 'x'], ['<i><b>', '</b></i>', 'x'], ['<code>', '</code>', 'x'], ['<sup><i>', '</i></sup>', 'x'], ['<span><u>', '</u></span>', 'x']]) {
+      expect(md(nest(open!, close!, 20_000, inner!))).toBe(md(nest(open!, close!, 3, inner!)))
+    }
+    expect(md(nest('<sup>', '</sup>', 20_000, '2'))).toBe('a ² b')
+    expect(Date.now() - started).toBeLessThan(10_000)
+  })
+
   it('joins adjacent runs of one emphasis or code without rewriting the run each time', () => {
     const md = (html: string) => htmlToMarkdown(`<!doctype html><html><body><p>${html}</p></body></html>`)
     expect(md('<code>a`</code><code>`b</code><code>c</code>')).toBe('```a``bc```')
