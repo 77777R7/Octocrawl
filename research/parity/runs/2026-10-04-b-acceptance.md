@@ -13,7 +13,11 @@ The checks of the interaction work that only the person's own Chrome can run:
 - **Saved logins:** a scratch `W2L_SESSIONS_FILE` (`.w2l/b-acceptance/sessions.json`), deleted after the run; `~/.w2l/sessions.json` was not used. The task roots were scratch directories under `.w2l/b-acceptance/`.
 - **Temporary servers:** the API on port 8787 and a local MCP host on port 8792, both with the scratch sessions file, both stopped after. The person's own MCP host on 8791 was not touched.
 - **What this record holds:** statuses, counts, event names and page titles only. Nothing of the person's accounts is recorded.
-- **Where the figures come from:** each scrape's JSON was saved under `.w2l/b-acceptance/` (git-ignored). The `login import` answers, `GET /v1/logins`, `list_logins`, the cookie names and the `loc=SG` trace were read from the commands' output during the session and not kept as files.
+- **Where the figures come from:** each CLI and API scrape's JSON was saved under `.w2l/b-acceptance/` (git-ignored). These were read from the commands' output during the session and not kept as files:
+  - the MCP scrape's result;
+  - the `login import` answers, `GET /v1/logins` and `list_logins`;
+  - the cookie names, flags and domains;
+  - the `loc=SG` trace.
 
 ## B1: a login kept in localStorage (bsky.app)
 
@@ -81,11 +85,14 @@ W2L tells a refused login in two ways (`sessionRejection` in `packages/bench/src
 - a redirect to a sign-in path, as the site in I1 step 9 made;
 - a result the gate reads as `login_wall`: a 401, or a page without content that shows a password field with a sign-in phrase (`packages/http-core/src/gate.ts`).
 
-Neither matched here. Airbnb answered the same URL with status 200 and a sign-in prompt in place, with no password field, and the page was read as content.
+Neither matched here:
+- Airbnb answered the same URL with status 200, so there was no redirect.
+- The page was read as content (`extract` with `escalate: false`, confidence 1). The browser lane judges a page it read as content by decisive evidence alone (`classifyGate` with `contentful: true`), which returns before any sign-in check. So the gate never asked whether the page asked for a sign-in, whatever its form.
+- No HTML of the page was kept, so whether it had a password field is not known.
 
 ## What this found
 
-1. **An expired login read as content** (B3c step 4), when the site answers the same URL with a sign-in prompt that has no password field.
+1. **An expired login read as content** (B3c step 4), when the site answers the same URL with status 200 and a page W2L reads as content around a sign-in prompt. The gate does not look for a sign-in on a page read as content.
 2. **Two different SHA-256s for one login.**
    - `login import`, `GET /v1/logins` and MCP `list_logins` give `sessionFingerprint` (`packages/bench/src/routing/sessionStore.ts`), e.g. `9b29…` for B1's login.
    - A read's `session_attached` event gives another hash, of the access configuration (`packages/http-core/src/access.ts`), `cee3…` for the same login.
