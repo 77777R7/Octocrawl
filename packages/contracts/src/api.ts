@@ -643,12 +643,25 @@ export function parseLoginImportRequest(body: unknown): LoginImportRequest {
   return { site: rec.site.trim(), ...(rec.approveTimeoutMs === undefined ? {} : { approveTimeoutMs: rec.approveTimeoutMs }) }
 }
 
-/** A login saved for a domain: never its cookies, only how many and the hash a record names it by. */
+/** The localStorage a saved login holds: the origins, and how many items in all; never a value. */
+export interface LoginStorage {
+  origins: string[]
+  itemCount: number
+}
+
+/** A login saved for a domain: never its cookies or storage values, only how many and the hash a record names it by. */
 export interface SavedLogin {
   domain: string
   savedAt: string
   cookieCount: number
+  /** The localStorage saved with it, read from the site's tabs open in Chrome when it was imported; null for none. */
+  localStorage: LoginStorage | null
   sessionSha256: string
+}
+
+/** What an import saved, and whether the site's localStorage was read: false when no tab of the site was open in Chrome. */
+export interface LoginImportResponse extends SavedLogin {
+  localStorageRead: boolean
 }
 
 /** `POST /v1/batches/:id/handoff`: how long to wait for the person on each page, 10 s to 30 min; default 10 min. */

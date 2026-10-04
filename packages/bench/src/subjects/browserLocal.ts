@@ -632,6 +632,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // the context API rather than a header so the browser scopes them the
       // way the origin expects.
       const userCookies = this.accessConfig?.session?.cookies ?? []
+      // The origins whose localStorage the session's storageState restored above (a login some sites keep there).
+      const storedOrigins = this.accessConfig?.session?.storageState === undefined ? 0 : ((JSON.parse(this.accessConfig.session.storageState) as { origins?: { localStorage?: unknown[] }[] }).origins ?? []).filter((origin) => (origin.localStorage?.length ?? 0) > 0).length
       if (userCookies.length > 0) {
         // The cookie's own attributes go with it: Chromium refuses a
         // `__Secure-` or `__Host-` cookie without `secure`, and many logins
@@ -645,13 +647,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
             ...(c.sameSite === undefined ? {} : { sameSite: c.sameSite }),
           })),
         )
+      }
+      if (userCookies.length > 0 || storedOrigins > 0) {
         trace.push({
           at: Date.now() - start,
           lane: 'browser_local',
           event: 'session_attached',
-          // Count and scope only. A trace that printed cookie values would
-          // leak the user's account into every bench artifact.
-          detail: { cookieCount: userCookies.length, sessionSha256: this.access.sessionSha256 },
+          // Count and scope only. A trace that printed cookie or storage values
+          // would leak the user's account into every bench artifact.
+          detail: { cookieCount: userCookies.length, ...(storedOrigins === 0 ? {} : { localStorageOrigins: storedOrigins }), sessionSha256: this.access.sessionSha256 },
         })
       }
       throwIfExecutionStopped(execution)

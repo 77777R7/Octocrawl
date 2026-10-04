@@ -51,6 +51,7 @@ import {
   type BatchStatusResponse,
   type BatchHandoffRequest,
   type LoginImportRequest,
+  type LoginImportResponse,
   type SavedLogin,
   type BatchHandoffResponse,
   HANDOFF_REASONS,
@@ -254,7 +255,7 @@ export interface ApiEngine {
    * a LoginsUnavailableError elsewhere, a RequestError for a site that is not
    * one, a ChromeLoginError when Chrome cannot give it.
    */
-  importLogin(req: LoginImportRequest): Promise<SavedLogin>
+  importLogin(req: LoginImportRequest): Promise<LoginImportResponse>
   /** The saved logins, without their cookies; an empty list on an engine without a sessions file. */
   listLogins(): Promise<SavedLogin[]>
   /** Forget a saved login: false when none was saved for the site. */
@@ -1565,7 +1566,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
       if (saved === undefined) throw new Error(`the login to ${imported.domain} was not found in the sessions file after it was saved`)
-      return saved
+      return { ...saved, localStorageRead: imported.localStorageRead }
     },
 
     async listLogins() {

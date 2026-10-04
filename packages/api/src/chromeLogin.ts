@@ -7,14 +7,16 @@
  * once the user turns on "Allow remote debugging for this browser instance"
  * at chrome://inspect/#remote-debugging, and asks again ("Allow remote
  * debugging?") for every connection. W2L connects once, reads the cookies
- * of the one domain asked for, saves them to the user's sessions file and
- * disconnects; later fetches use the saved cookies in W2L's own browser and
- * never touch the user's tabs. Nothing is read from Chrome's files on disk.
+ * of the one domain asked for and the localStorage of that site's tabs the
+ * user has open, saves them to the user's sessions file and disconnects;
+ * later fetches use the saved login in W2L's own browser and never touch
+ * the user's tabs. Nothing is read from Chrome's files on disk.
  */
 
 import { readFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
+import type { LoginStorage } from '@w2l/contracts'
 import { FileSessionStore, sessionCoversHost, sessionFingerprint, type SessionSnapshot, type StoredCookie } from '@w2l/bench'
 
 /** A refusal or failure the person can act on; the message says how. */
@@ -61,9 +63,19 @@ export interface ImportChromeLoginOptions {
 export interface ImportedLogin {
   domain: string
   cookieCount: number
+  /** The localStorage saved with the login; null when none was (no tab of the site open, or its storage empty). */
+  localStorage: LoginStorage | null
+  /** Whether the site's localStorage was read: false when no tab of the site was open in Chrome, so none could be. */
+  localStorageRead: boolean
   /** SHA-256 of the saved session, the only trace of it a record carries. */
   sessionSha256: string
   sessionsFile: string
+}
+
+/** One origin's localStorage, as Playwright's storageState keeps it. */
+interface OriginStorage {
+  origin: string
+  localStorage: { name: string; value: string }[]
 }
 
 export const ENABLE_HINT = 'open chrome://inspect/#remote-debugging in Chrome (144 or later), turn on "Allow remote debugging for this browser instance", then run this again'
@@ -135,35 +147,91 @@ function hostsBelow(cookies: readonly CdpCookie[], domain: string): string[] {
   return [...new Set(cookies.map((c) => c.domain.toLowerCase().replace(/^\./, '')).filter((d) => d !== domain && sessionCoversHost(domain, d)))].sort()
 }
 
-/** Read the user's cookies for one site from their running Chrome and save them as that site's login. */
+/** Whether a page's address or origin is on the site `domain` names: an http(s) origin of the domain or a subdomain of it. */
+function onSite(address: string, domain: string): boolean {
+  try {
+    const url = new URL(address)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && sessionCoversHost(domain, url.hostname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The localStorage of the site's tabs open in the person's Chrome: each tab
+ * on the site, by its top frame's origin, read through DOMStorage, which
+ * loads nothing and runs no script in the page. Null when no tab of the site
+ * is open: Chrome reads an origin's storage only through a frame that shows
+ * it, so none could be read. A frame of another origin inside a tab is not
+ * read.
+ */
+async function siteStorage(connection: CdpConnection, domain: string): Promise<OriginStorage[] | null> {
+  const { targetInfos } = await connection.send('Target.getTargets') as { targetInfos?: { targetId: string; type: string; url: string }[] }
+  const tabs = (targetInfos ?? []).filter((target) => target.type === 'page' && onSite(target.url, domain))
+  if (tabs.length === 0) return null
+  const byOrigin = new Map<string, OriginStorage>()
+  for (const tab of tabs) {
+    const { sessionId } = await connection.send('Target.attachToTarget', { targetId: tab.targetId, flatten: true }) as { sessionId: string }
+    try {
+      const { frameTree } = await connection.send('Page.getFrameTree', {}, sessionId) as { frameTree: { frame: { securityOrigin: string } } }
+      const origin = frameTree.frame.securityOrigin
+      // Two tabs of one origin share its storage.
+      if (byOrigin.has(origin) || !onSite(origin, domain)) continue
+      const { entries } = await connection.send('DOMStorage.getDOMStorageItems', { storageId: { securityOrigin: origin, isLocalStorage: true } }, sessionId) as { entries: [string, string][] }
+      byOrigin.set(origin, { origin, localStorage: entries.map(([name, value]) => ({ name, value })) })
+    } finally {
+      await connection.send('Target.detachFromTarget', { sessionId }).catch(() => undefined)
+    }
+  }
+  return [...byOrigin.values()]
+}
+
+/** What a saved login's storageState holds: its origins with localStorage, and how many items; null for none. */
+export function loginStorage(storageState: string | undefined): LoginStorage | null {
+  if (storageState === undefined) return null
+  const origins = ((JSON.parse(storageState) as { origins?: OriginStorage[] }).origins ?? []).filter((origin) => origin.localStorage.length > 0)
+  return origins.length === 0 ? null : { origins: origins.map((origin) => origin.origin), itemCount: origins.reduce((sum, origin) => sum + origin.localStorage.length, 0) }
+}
+
+/**
+ * Read the user's login to one site from their running Chrome, its cookies
+ * and the localStorage of the site's tabs they have open, and save it as
+ * that site's login, replacing any saved before.
+ */
 export async function importChromeLogin(options: ImportChromeLoginOptions): Promise<ImportedLogin> {
   const domain = loginDomain(options.site)
   const timeoutMs = options.timeoutMs ?? 120_000
   const endpoint = await chromeEndpoint(options.userDataDir ?? chromeUserDataDir())
   const connection = await (options.connect ?? connectCdp)(endpoint, timeoutMs)
   let all: CdpCookie[]
+  let storage: OriginStorage[] | null
   try {
     const answer = await connection.send('Storage.getCookies') as { cookies?: CdpCookie[] }
     all = answer.cookies ?? []
+    storage = await siteStorage(connection, domain)
   } finally {
     connection.close()
   }
   const cookies = cookiesForDomain(all, domain)
-  if (cookies.length === 0) {
+  const kept = (storage ?? []).filter((origin) => origin.localStorage.length > 0)
+  if (cookies.length === 0 && kept.length === 0) {
     const below = hostsBelow(all, domain)
     if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. w2l login import ${below[0]}`)
-    throw new ChromeLoginError(`Chrome has no cookies for ${domain}: sign in to ${domain} in Chrome's default profile, in a normal (not Incognito) window, then run this again. Remote debugging reaches the default profile only`)
+    const tabs = storage === null ? `, and no tab of ${domain} is open to read its localStorage from` : `, and its open tabs hold no localStorage`
+    throw new ChromeLoginError(`Chrome has no cookies for ${domain}${tabs}: sign in to ${domain} in Chrome's default profile, in a normal (not Incognito) window, leave a tab of it open, then run this again. Remote debugging reaches the default profile only`)
   }
+  const storageState = kept.length === 0 ? undefined : JSON.stringify({ cookies: [], origins: kept })
   const snapshot: SessionSnapshot = {
     domain,
     attestedBy: localUser(),
     attestedAt: (options.now ?? (() => new Date()))().toISOString(),
     vendor: 'browser_local_authed',
     cookies,
-    statement: `cookies for ${domain} taken from the user's own Chrome, with their approval in Chrome's remote debugging dialog`,
+    ...(storageState === undefined ? {} : { storageState }),
+    statement: `${storageState === undefined ? 'cookies' : 'cookies and localStorage'} for ${domain} taken from the user's own Chrome, with their approval in Chrome's remote debugging dialog`,
   }
   await new FileSessionStore(options.sessionsFile).save(snapshot)
-  return { domain, cookieCount: cookies.length, sessionSha256: sessionFingerprint(snapshot), sessionsFile: options.sessionsFile }
+  return { domain, cookieCount: cookies.length, localStorage: loginStorage(storageState), localStorageRead: storage !== null, sessionSha256: sessionFingerprint(snapshot), sessionsFile: options.sessionsFile }
 }
 
 function localUser(): string {
@@ -248,11 +316,11 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
   })
 }
 
-/** The saved logins, by domain, without their cookies: what `w2l login list` shows. */
-export async function listSavedLogins(sessionsFile: string): Promise<{ domain: string; savedAt: string; cookieCount: number; sessionSha256: string }[]> {
+/** The saved logins, by domain, without their cookies or storage values: what `w2l login list` shows. */
+export async function listSavedLogins(sessionsFile: string): Promise<{ domain: string; savedAt: string; cookieCount: number; localStorage: LoginStorage | null; sessionSha256: string }[]> {
   return (await new FileSessionStore(sessionsFile).list())
     .filter((s) => s.vendor === 'browser_local_authed')
-    .map((s) => ({ domain: s.domain, savedAt: s.attestedAt, cookieCount: s.cookies?.length ?? 0, sessionSha256: sessionFingerprint(s) }))
+    .map((s) => ({ domain: s.domain, savedAt: s.attestedAt, cookieCount: s.cookies?.length ?? 0, localStorage: loginStorage(s.storageState), sessionSha256: sessionFingerprint(s) }))
 }
 
 /** Forget a saved login. False when none was saved for `site`. */
