@@ -17,7 +17,7 @@
  */
 
 import type { ExecutionContext, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, TraceEvent } from '@w2l/contracts'
-import { CONTENTFUL_STATUS, identityBundleIssues } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
 import {
   createExecutionScope,
   raceWithSignal,
@@ -188,11 +188,31 @@ function lowContentYieldWarning(result: FetchResult, browserTried: boolean): Fet
  * it found no main content. Any other answer is returned as it is.
  */
 function withLowContentYield(result: FetchResult, channelsTried: readonly string[]): FetchResult {
-  if (result.lane !== 'http' || qualityEscalationEvent(result) === null) return result
+  if (result.lane !== 'http') return withRenderedLowYield(result)
+  if (qualityEscalationEvent(result) === null) return result
   const evidence = result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null
   if (!CONTENTFUL_STATUS.has(result.status) && !evidence) return result
   if (result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
   return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => channel !== 'http'))] }
+}
+
+/**
+ * A rendered answer (any lane but http) that its own extraction found thin
+ * and low-confidence, with the `low_content_yield` warning: it is the run's
+ * answer, so the caveat is what tells the reader that `success` holds little
+ * (a page whose data its scripts draw, a listing of navigation links). The
+ * status stands.
+ */
+function withRenderedLowYield(result: FetchResult): FetchResult {
+  if (!CONTENTFUL_STATUS.has(result.status) || result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
+  const extract = [...result.trace].reverse().find((t) => t.event === 'extract' && t.lane === result.lane)?.detail
+  const confidence = typeof extract?.confidence === 'number' ? extract.confidence : null
+  const tokens = result.usage.contentTokens
+  if (confidence === null || tokens === null || confidence > QUALITY_ESCALATION_MAX_CONFIDENCE || tokens > RENDERED_LOW_YIELD_MAX_TOKENS) return result
+  return {
+    ...result,
+    warnings: [...(result.warnings ?? []), { code: 'low_content_yield', message: `The ${result.lane} lane rendered the page and extracted ${tokens} tokens at confidence ${confidence}; that is the answer.` }],
+  }
 }
 
 /** Content size as the ladder's improvement metric: main-content tokens,
@@ -570,7 +590,7 @@ export class LadderRunner {
         const withImprovement = qualityEscalation === null
           ? result.escalations
           : [...result.escalations, { ...qualityEscalation, improved: true }]
-        return finish({ ...result, escalations: withImprovement }, false)
+        return finish(withLowContentYield({ ...result, escalations: withImprovement }, channelsTried), false)
       }
 
       // A rung that found the page blocked says more about it than an

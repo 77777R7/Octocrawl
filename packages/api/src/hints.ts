@@ -18,6 +18,9 @@ export function lowContentYieldHint(browserTried: boolean): string {
   return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction`
 }
 
+/** The hint a `low_content_yield` warning on a rendered answer carries: the page was rendered and still held little. */
+export const RENDERED_LOW_YIELD_HINT = `the rendered page's main content was thin and the extraction unsure of it; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the whole page`
+
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
@@ -182,8 +185,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'client_rendered_suspected')) {
     hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : 'was not tried'}`)
   }
-  // A thin http answer the browser lane did not improve on, or could not be offered to.
-  if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(lowContentYieldHint(browserTried))
+  // A thin http answer the browser lane did not improve on, or could not be offered to; or a thin rendered answer.
+  if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(result.lane === 'http' ? lowContentYieldHint(browserTried) : RENDERED_LOW_YIELD_HINT)
   if (fastModeDeclined) hints.push(FAST_MODE_DECLINED_HINT)
   // The browser lane rendered the page but could not capture the screenshot asked for.
   if (result.warnings?.some((warning) => warning.code === 'screenshot_unavailable')) hints.push(SCREENSHOT_UNAVAILABLE_HINT)

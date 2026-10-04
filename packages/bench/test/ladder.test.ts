@@ -3,6 +3,8 @@ import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
   modeIdentity,
+  QUALITY_ESCALATION_MAX_CONFIDENCE,
+  RENDERED_LOW_YIELD_MAX_TOKENS,
   type FetchResult,
   type HandoffRequest,
   type IdentityBundle,
@@ -560,6 +562,27 @@ describe('LadderRunner — best-so-far content', () => {
     expect(run.result.escalations.some((e) => e.improved === true)).toBe(true)
     // The rendered page is the answer: nothing was kept thin, so no low_content_yield.
     expect(run.result.warnings).toBeUndefined()
+  })
+})
+
+describe('LadderRunner — a thin rendered answer', () => {
+  const url = 'https://example.com/p'
+  /** The browser lane's answer, with its own extraction's confidence and the main content's tokens. */
+  function rendered(contentTokens: number, confidence: number): FetchResult {
+    const base = contentfulResult(url, 'browser_local')
+    return { ...base, usage: { ...base.usage, contentTokens }, trace: [{ at: 1, lane: 'browser_local', event: 'extract', detail: { pageType: 'listing', strategy: 'list', confidence } }] }
+  }
+  const run = (result: FetchResult) => new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('browser_local', [result])], { mode: 'authed' }).run(url)
+
+  it('carries low_content_yield when its own extraction found it thin and unsure, and stays success', async () => {
+    const thin = await run(rendered(RENDERED_LOW_YIELD_MAX_TOKENS, 0))
+    expect(thin.result).toMatchObject({ status: 'success', lane: 'browser_local' })
+    expect(thin.result.warnings).toEqual([{ code: 'low_content_yield', message: `The browser_local lane rendered the page and extracted ${RENDERED_LOW_YIELD_MAX_TOKENS} tokens at confidence 0; that is the answer.` }])
+  })
+
+  it('carries none when it holds more, or its extraction is sure of it', async () => {
+    expect((await run(rendered(RENDERED_LOW_YIELD_MAX_TOKENS + 1, 0))).result.warnings).toBeUndefined()
+    expect((await run(rendered(20, QUALITY_ESCALATION_MAX_CONFIDENCE + 0.1))).result.warnings).toBeUndefined()
   })
 })
 
