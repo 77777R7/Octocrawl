@@ -169,10 +169,24 @@ describe('htmlToMarkdown', () => {
     expect(Date.now() - tallStarted).toBeLessThan(5_000)
   })
 
-  it('writes a table of 200,000 rows', () => {
-    const md = htmlToMarkdown(`<table>${'<tr><td>y</td></tr>'.repeat(200_000)}</table>`)
-    expect(md.split('\n')).toHaveLength(200_001)
-  })
+  it('writes a table of 200,000 rows, in time proportional to its rows', () => {
+    const table = (rows: number) => `<table>${'<tr><td>y</td></tr>'.repeat(rows)}</table>`
+    // A table this tall once overflowed the call stack.
+    expect(htmlToMarkdown(table(200_000)).split('\n')).toHaveLength(200_001)
+    // Twice the rows take about twice the time: the ratio holds on a slow or busy machine, where a fixed limit in
+    // seconds (the test runner's own included) does not. The faster of two runs counts.
+    const time = (rows: number): number => {
+      let best = Infinity
+      for (let run = 0; run < 2; run++) {
+        const started = performance.now()
+        expect(htmlToMarkdown(table(rows)).split('\n')).toHaveLength(rows + 1)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+    const once = time(50_000)
+    expect(time(100_000) / once).toBeLessThan(3)
+  }, 60_000)
 
   it('shares one padding budget among a page\'s tables', () => {
     // Each table pads to just under the per-table limit; together they pass the page's.
