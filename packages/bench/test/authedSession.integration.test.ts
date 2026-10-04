@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { buildChannels } from '../src/ladderCli.js'
+import { LadderRunner } from '../src/routing/ladder.js'
+import { MemorySessionStore } from '../src/routing/sessionStore.js'
 import type { SessionSnapshot } from '../src/routing/sessionStore.js'
 
 /**
@@ -16,6 +18,15 @@ let base: string
 beforeAll(async () => {
   server = createServer((req, res) => {
     const sid = /(?:^|;\s*)sid=([^;]+)/.exec(req.headers.cookie ?? '')?.[1] ?? 'nobody'
+    if (req.url === '/robots.txt') { res.writeHead(404); res.end(); return }
+    // A page that asks for a sign-in in place, at its own URL, when the session is not the live one (as Airbnb's wishlists do).
+    if (req.url === '/wishlists') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(sid === 'live-login'
+        ? '<!doctype html><html><head><title>Your lists</title></head><body><main><h1>Wishlists</h1><p>Your saved places: a cabin by the lake, a flat near the old harbour, and a farmhouse in the hills.</p></main></body></html>'
+        : '<!doctype html><html><head><title>Wishlists</title></head><body><main><h1>Wishlists</h1><h2>Log in to view your wishlists</h2><p>You can create, view, or edit wishlists once you have logged in.</p></main><footer><a href="/help">Help Centre</a></footer></body></html>')
+      return
+    }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     res.end(`<!doctype html><html><head><title>Account</title></head><body><main><h1>Account</h1><p>Signed in with session ${sid}. This page lists the orders and the saved addresses of the account that is signed in.</p></main></body></html>`)
   })
@@ -36,6 +47,26 @@ const login = (sid: string): SessionSnapshot => ({
 })
 
 describe('authed rung, real browser', () => {
+  it('a page that asks for a sign-in in place under a login the site no longer takes is login_wall, and one it takes is read', async () => {
+    const channels = buildChannels('authed', {})
+    try {
+      for (const [sid, status] of [['expired-login', 'blocked'], ['live-login', 'success']] as const) {
+        const store = new MemorySessionStore()
+        await store.save(login(sid))
+        const run = await new LadderRunner(channels, { mode: 'authed' }, null, null, store).run(`${base}/wishlists`)
+        expect(run.result.status).toBe(status)
+        if (status === 'blocked') {
+          expect(run.result.blockReason).toBe('login_wall')
+          expect(run.ladderTrace.find((event) => event.event === 'ladder_session_rejected')?.detail).toMatchObject({ signInPrompt: 'Log in to view your wishlists' })
+        } else {
+          expect(run.result.markdown).toContain('Your saved places')
+        }
+      }
+    } finally {
+      for (const channel of channels) await channel.close?.()
+    }
+  }, 120_000)
+
   it('uses the login it is handed, and a re-imported one replaces the old cookies', async () => {
     const channels = buildChannels('authed', {})
     const authed = channels.find((channel) => channel.id === 'authed_session')!

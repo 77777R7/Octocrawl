@@ -80,7 +80,8 @@ describe('a login kept in localStorage', () => {
       const result = await authed.fetch(`${base}/inbox`, session)
       expect(result.status).toBe('success')
       expect(result.markdown).toContain('Signed in with the stored token')
-      expect(result.trace.find((event) => event.event === 'session_attached')?.detail).toMatchObject({ cookieCount: 0, localStorageOrigins: 1 })
+      // The record names the login by the SHA-256 the import gave it.
+      expect(result.trace.find((event) => event.event === 'session_attached')?.detail).toMatchObject({ cookieCount: 0, localStorageOrigins: 1, sessionSha256: imported.sessionSha256 })
       expect(JSON.stringify(result.trace)).not.toContain('jwt-abc')
     } finally {
       for (const channel of channels) await channel.close?.()
