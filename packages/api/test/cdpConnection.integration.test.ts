@@ -7,8 +7,9 @@ import { chromeEndpoint, connectCdp, type CdpConnection } from '../src/chromeLog
 
 /**
  * The connection to the person's Chrome, in real Chromium, when a tab W2L
- * is reading closes: Chrome answers no command of that tab's session again,
- * the one in flight included, and says so only by detaching the session.
+ * is reading closes: Chrome leaves the command in flight on that tab's
+ * session unanswered, and says the tab is gone by detaching the session.
+ * A command sent after it is refused at once instead of being sent.
  */
 
 let root: string
