@@ -1192,6 +1192,39 @@ const blockLoginWall: Fixture = {
   }),
 }
 
+const blockLoginWallBenefits: Fixture = {
+  truth: {
+    id: 'block-login-wall-benefits',
+    target: '/block/login-wall-benefits',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Unlimited access to every article'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'login_wall',
+    notes:
+      'The login wall above with a list of what signing in brings beside its form: a list the ' +
+      'extractor can take as a last resort, which must not make the wall read as content.',
+  },
+  respond: () => ({
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: `<!doctype html><html><head><title>Sign in</title></head><body>
+<h1>Sign in</h1>
+<form method="post" action="/login"><input name="email" type="email"><input name="password" type="password"><button>Sign in</button></form>
+<div class="benefits">
+<div class="benefit"><span>Unlimited access to every article on all of your devices</span></div>
+<div class="benefit"><span>Exclusive newsletters written by our reporters every week</span></div>
+<div class="benefit"><span>Save stories to read later and sync them across devices</span></div>
+</div>
+</body></html>`,
+  }),
+}
+
 // ---------------------------------------------------------------------------
 // Wrong-page content
 // ---------------------------------------------------------------------------
@@ -1771,6 +1804,7 @@ export const FIXTURES: readonly Fixture[] = [
   blockChallenge200Prose,
   blockRateLimit,
   blockLoginWall,
+  blockLoginWallBenefits,
   soft404,
   redirectToHome,
   redirectChain,

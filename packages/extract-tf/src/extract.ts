@@ -183,8 +183,13 @@ export class ExtractTf implements Extractor {
     }
     // A listing of cards has no text block for the cascade to find. Before
     // the page is reported empty, look for one.
+    let lastResort = false
     if (main === null) {
-      main = selectCardList(doc.document) ?? selectDetectedList(doc.document)
+      main = selectCardList(doc.document)
+      if (main === null) {
+        main = selectDetectedList(doc.document)
+        lastResort = main !== null
+      }
       if (main !== null) strategy = 'list'
     }
 
@@ -233,6 +238,7 @@ export class ExtractTf implements Extractor {
       // Escalate only when a strategy produced nothing at all. Routing to a
       // non-article strategy is not by itself an escalation reason.
       escalate: main === null,
+      ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
       product,

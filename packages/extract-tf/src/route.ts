@@ -17,6 +17,7 @@
 import type { PageType } from '@w2l/contracts'
 import { detectLists } from './detectList.js'
 import { commonAncestor, layoutTables, outerHtml, qsa, tagOf, textOf } from './dom.js'
+import { hasRecommendationToken, isRecommendationHeading } from './prune.js'
 import { visiblePrices } from './product.js'
 
 interface RouterCounts {
@@ -95,8 +96,9 @@ export interface PageSignals {
   postArticles: number
   /**
    * Whether the page's microdata Product scopes are cards of one listing: at
-   * least PRODUCT_CARDS of them, the outermost ones all of one tag and class,
-   * none holding an h1.
+   * least PRODUCT_CARDS of them, the outermost ones all of one tag and the
+   * same classes (some), none holding an h1, none inside an element named for
+   * recommendations, and no recommendation heading before the first.
    */
   productCards: boolean
 }
@@ -186,7 +188,12 @@ function collectPageSignals(doc: Document): PageSignals {
   }
 }
 
-/** Whether the outermost microdata Product scopes are PRODUCT_CARDS or more of one tag and class, none holding an h1 (PageSignals.productCards). */
+/**
+ * Whether the outermost microdata Product scopes are a listing's cards
+ * (PageSignals.productCards). Cards a product page shows beside its own
+ * product are its recommendations: under a heading or in an element that says
+ * so, or without a class to tell them from the page's own scope.
+ */
 function productCards(doc: Document): boolean {
   const scopes = new Set(qsa(doc, '[itemtype]').filter((el) => splitTokens(el.getAttribute('itemtype') ?? '').some((t) => normalizeTypeName(t) === 'product')))
   const outer = [...scopes].filter((el) => {
@@ -194,8 +201,17 @@ function productCards(doc: Document): boolean {
     return true
   })
   if (outer.length < PRODUCT_CARDS) return false
-  const shapes = new Set(outer.map((el) => `${tagOf(el)} ${splitTokens(el.getAttribute('class') ?? '').sort().join(' ')}`))
-  return shapes.size === 1 && outer.every((el) => el.querySelector('h1') === null)
+  const classes = (el: Element): string => splitTokens(el.getAttribute('class') ?? '').sort().join(' ')
+  const shapes = new Set(outer.map((el) => `${tagOf(el)} ${classes(el)}`))
+  if (shapes.size !== 1 || classes(outer[0]!) === '' || outer.some((el) => el.querySelector('h1') !== null)) return false
+  for (const card of outer) {
+    for (let up = card.parentElement; up !== null; up = up.parentElement) {
+      if (hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)) return false
+    }
+  }
+  const all = qsa(doc, '*')
+  const first = all.indexOf(outer[0]!)
+  return !all.some((el, at) => at < first && /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el)))
 }
 
 /** Exact, case-insensitive membership across all tokens. */
@@ -261,7 +277,7 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Alike Product cards with no product declared in JSON-LD are a listing of
   // products (a category page), not one: the product strategy would cut them
   // as recommendations.
-  if (s.productCards && !hasToken(s.jsonLdTypes, 'product')) {
+  if (s.productCards && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }
   }
   if (hasProductSignals(s)) {

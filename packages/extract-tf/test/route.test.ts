@@ -195,6 +195,18 @@ describe('routePage', () => {
     const declared = parse(wrap(`<main><h1>Teapots</h1><div class="row">${grid}</div></main>`, PRODUCT_LD()))
     expect(routePage(declared.document).type).toBe('product')
     declared.close()
+    // A product page that marks up only the cards beside it: its buy box, the heading over the cards, a container named for
+    // recommendations, or cards with no class to tell them from the page's own product keep it a product page.
+    const unmarked = (cards: string) => parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><span class="price">$49.00</span><button>Add to cart</button><p>Hand-thrown stoneware.</p></div>${cards}</main>`))
+    for (const page of [
+      unmarked(`<div class="row">${grid}</div>`),
+      parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><section><h2>You may also like</h2><div class="row">${grid}</div></section></main>`)),
+      parse(wrap(`<main><div class="pdp"><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div><div class="related-products">${grid}</div></main>`)),
+      parse(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p><div>${grid.replaceAll(' class="card thumbnail"', '')}</div></main>`)),
+    ]) {
+      expect(routePage(page.document).type).toBe('product')
+      page.close()
+    }
   })
 
   it('does not route an article with JSON-LD comments to forum', () => {

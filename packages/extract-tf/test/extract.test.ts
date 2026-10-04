@@ -101,6 +101,7 @@ ${card('ways-of-seeing_94', 'Ways of Seeing', '£44.46')}
     expect(out.escalate).toBe(false)
     expect(out.strategy).toBe('list')
     expect(out.mainHtml).toContain('<h1>Art</h1>')
+    expect(out.lastResort).toBeUndefined()
     expect(out.mainHtml).toContain('This is a demo website')
     expect(out.mainHtml).toContain('Wall and Piece')
     expect(out.mainHtml).toContain('£44.46')
@@ -129,6 +130,8 @@ ${quote('You may not be her first, her last, or her only. She loved before she m
     expect(out.mainHtml).toContain('This life is what you make it')
     expect(out.mainHtml).toContain('Bob Marley')
     expect(out.mainHtml).not.toContain('GoodReads.com')
+    // Found only by the last resort: the lanes still look for a wall on the page, as on one with nothing found.
+    expect(out.lastResort).toBe(true)
   })
 
   it('keeps a grid of product cards on a page with two h1s', () => {

@@ -526,7 +526,8 @@ export class ProviderSubject implements SubjectAdapter {
     // it is the answer; so is what includeTags names, on any page that is not
     // blocked.
     let wholePage: string | null = null
-    if (extracted.escalate && gate !== null) return blocked(gate)
+    // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
+    if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options)) {
       wholePage = wholePageMarkdown(res.body, res.finalUrl, options)
       if (options.onlyMainContent !== false || wholePage === null) return {
