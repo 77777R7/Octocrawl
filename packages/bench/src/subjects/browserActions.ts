@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { Page } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import {
   LIST_DEFAULTS,
   LIST_WAIT_MS,
@@ -177,7 +177,7 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       if (count === 0) throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
       const targets = action.all === true ? count : 1
       for (let i = 0; i < targets; i++) {
-        await raceWithSignal(matches.nth(i).click({ timeout: stepTimeout(ctx) }), signal)
+        await clickControl(ctx, matches.nth(i), action.selector)
       }
       await documentLoaded(ctx)
       await ctx.settle(Math.min(SETTLE_AFTER_STEP_MS, timeLeft(ctx)))
@@ -453,7 +453,7 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
       }
       if (rounds >= max) { stoppedBy = 'max'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
-      await raceWithSignal(ctx.page.locator(action.selector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      await clickControl(ctx, ctx.page.locator(action.selector).first(), action.selector)
       rounds++
       await afterRound(ctx, waitMs)
       // Many sites hide or disable the control while the items it asked for load: the round is judged once it is back or the
@@ -526,7 +526,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
       if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
       loadsAtClick = ctx.loadedDocuments().length
-      await raceWithSignal(ctx.page.locator(action.nextSelector).first().click({ timeout: stepTimeout(ctx) }), ctx.execution.signal)
+      await clickControl(ctx, ctx.page.locator(action.nextSelector).first(), action.nextSelector)
       await afterRound(ctx, waitMs)
       // The next page goes through the same checks as any page a step reaches, before it is read.
       await guard()
@@ -579,12 +579,75 @@ function isTimeout(error: unknown): boolean {
   return error instanceof Error && error.name === 'TimeoutError'
 }
 
-function message(error: unknown): string {
+/** How long a click waits on a control something else covers (a modal, a consent banner) before the step gives it up. */
+const COVERED_GIVE_UP_MS = 5_000
+
+/**
+ * A click on the control, within the step's own time (stepTimeout, taken
+ * once: at most MAX_ACTION_WAIT_MS, as a click always had). Its checks come
+ * first, alone (Playwright's trial: the control's own handlers get no click;
+ * a listener the page puts on window ahead of them can still see the trial's
+ * mouse events), in tries of at most COVERED_GIVE_UP_MS. A try that saw the
+ * control covered at every check, after one that ended covered, fails the
+ * step at once, naming what covers it: covered for a whole try, the control
+ * is not waited for through the rest of the step's time. Any other timed-out
+ * try (not shown yet, still moving, a cover that came late in it) is tried
+ * again. Then the click itself, once, with the time left: it waits for a
+ * navigation it starts (a slow next page), as a click always did, and is
+ * never sent twice.
+ */
+async function clickControl(ctx: ActionRunContext, control: Locator, selector: string): Promise<void> {
+  const started = Date.now()
+  const until = started + stepTimeout(ctx)
+  let endedCovered = false
+  while (until - Date.now() > COVERED_GIVE_UP_MS) {
+    try {
+      await raceWithSignal(control.click({ trial: true, timeout: COVERED_GIVE_UP_MS }), ctx.execution.signal)
+      break
+    } catch (error) {
+      // A stopped fetch stops here, whatever its reason (a batch's spent budget is a TimeoutError too): never tried again.
+      if (ctx.execution.signal?.aborted === true || !isTimeout(error)) throw error
+      const cover = coverOf(error)
+      if (endedCovered && cover.whole !== null) throw new StepFailure('action_error', `the click on ${selector} could not reach it: ${cover.whole} (covered for ${COVERED_GIVE_UP_MS / 1000} s and more)`)
+      endedCovered = cover.last !== null
+    }
+  }
+  try {
+    await raceWithSignal(control.click({ timeout: Math.max(1, Math.min(stepTimeout(ctx), until - Date.now())) }), ctx.execution.signal)
+  } catch (error) {
+    if (ctx.execution.signal?.aborted === true || !isTimeout(error)) throw error
+    // The last try's own timeout is a part of the wait: the step says how long the click was waited for in all.
+    throw new StepFailure(deadlinePassed(ctx) ? 'deadline_exceeded' : 'action_error', `the click on ${selector} did not land within ${Math.round((Date.now() - started) / 1000)} s: ${message(error)}`)
+  }
+}
+
+/** A Playwright error's call log, line by line, without the colour codes a terminal that takes colour gets, nor the list marks. */
+function callLog(error: unknown): string[] {
   const text = error instanceof Error ? error.message : String(error)
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;]*m/g, '').split('\n').map((line) => line.trim().replace(/^- /, ''))
+}
+
+/**
+ * What covered the control in a trial click that timed out, from Playwright's
+ * call log: `last`, what covered it at its last check (null when that check
+ * found anything else, or there was none); `whole`, the same when no check of
+ * the try found it hidden, disabled or out of view. A check that found it
+ * moving ("not stable", as when a page scrolls smoothly to it) does not make a
+ * try less covered, but a try that ends on one did not end covered.
+ */
+export function coverOf(error: unknown): { last: string | null; whole: string | null } {
+  const outcomes = callLog(error).filter((line) => /intercepts pointer events$|^element is not (visible|enabled|stable)|^element is outside of the viewport/.test(line))
+  const covered = (line: string | undefined) => line !== undefined && line.endsWith('intercepts pointer events')
+  const last = covered(outcomes.at(-1)) ? outcomes.at(-1)!.slice(0, 300) : null
+  return { last, whole: last !== null && outcomes.every((line) => covered(line) || line === 'element is not stable') ? last : null }
+}
+
+function message(error: unknown): string {
   // Playwright appends a call log; the first line says what happened, and a click that never landed says why: what covers
   // the control (a modal, a banner), its last report of it.
-  const lines = text.split('\n')
-  const covered = lines.map((line) => line.trim().replace(/^- /, '')).filter((line) => line.endsWith('intercepts pointer events')).at(-1)
+  const lines = callLog(error)
+  const covered = lines.filter((line) => line.endsWith('intercepts pointer events')).at(-1)
   return `${lines[0]!.slice(0, 300)}${covered === undefined ? '' : ` (${covered.slice(0, 300)})`}`
 }
 

@@ -35,6 +35,17 @@ beforeAll(async () => {
     if (req.url === '/private/red') return html(`<style>body{background:rgb(255,0,0)}</style><h1>Secret red</h1>${PROSE}<p>Not for crawlers.</p><script>location.href = '/private/z'</script>`)
     // A button an overlay covers (a subscription modal, as NPR's is): a click cannot reach it.
     if (req.url === '/covered') return html(`<h1>Covered</h1>${PROSE}<button id="go">Go</button><div class="tp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
+    // A link whose page answers 8 s after it is asked for (a slow search or "Next").
+    if (req.url === '/slowlink') return html(`<h1>Slow link</h1>${PROSE}<a id="go" href="/slowpage">Go</a>`)
+    if (req.url === '/slowpage') { setTimeout(() => html(`<h1>Slow page</h1>${PROSE}<p>The slow page arrived.</p>`), 8000); return }
+    // A button that stays disabled: a click can never reach it.
+    if (req.url === '/disabled') return html(`<h1>Disabled</h1>${PROSE}<button id="go" disabled>Go</button>`)
+    // A button shown 8 s after load under a banner that goes 4 s later: covered for less than a try, though a try ends covered.
+    if (req.url === '/late-cover') return html(`<h1>Late cover</h1>${PROSE}<button id="go" style="display:none" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => { document.getElementById('go').style.display = ''; document.getElementById('banner').style.display = '' }, 8000); setTimeout(() => document.getElementById('banner').remove(), 12000)</script>`)
+    // /covered on a long page that scrolls smoothly (as many site themes set): the button moves while Playwright scrolls to it.
+    if (req.url === '/covered-smooth') return html(`<style>html{scroll-behavior:smooth}</style><h1>Covered smooth</h1>${PROSE}<button id="go">Go</button><div style="height:3000px"></div><div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
+    // A banner over the button for 2 s, then gone: a click waits it out.
+    if (req.url === '/briefly-covered') return html(`<h1>Briefly covered</h1>${PROSE}<button id="go" onclick="document.getElementById('out').textContent = 'The button was clicked.'">Go</button><p id="out"></p><div id="banner" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div><script>setTimeout(() => document.getElementById('banner').remove(), 2000)</script>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
     if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p><a id="real" href="/gotab">Real</a>`)
     if (req.url === '/gotab') { res.writeHead(302, { location: '/private/tab' }); res.end(); return }
@@ -218,6 +229,70 @@ describe('actions, real browser', () => {
     const result = await run('/covered', [{ type: 'click', selector: '#go' }], 10_000)
     expect(result.actions?.failed).toMatchObject({ index: 0, type: 'click' })
     expect(result.actions?.failed?.message).toMatch(/<div class="tp-modal"[^]*intercepts pointer events/)
+  }, 60_000)
+
+  it('a control an overlay keeps covering fails its click or loadMore within seconds, not the step\'s whole time, naming what covers it', async () => {
+    for (const step of [{ type: 'click', selector: '#go' }, { type: 'loadMore', selector: '#go' }] as PageAction[]) {
+      const started = Date.now()
+      const result = await run('/covered', [step])
+      expect(Date.now() - started).toBeLessThan(15_000)
+      expect(result.actions?.failed).toMatchObject({ index: 0, type: step.type, code: 'action_error' })
+      expect(result.actions?.failed?.message).toMatch(/the click on #go could not reach it: <div class="tp-modal"[^]*intercepts pointer events \(covered for 5 s and more\)/)
+    }
+  }, 120_000)
+
+  it('a click whose page takes longer than a covered control is waited for still waits for that page, and clicks once', async () => {
+    requested.length = 0
+    const result = await run('/slowlink', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The slow page arrived.')
+    expect(requested.filter((url) => url === '/slowpage')).toHaveLength(1)
+  }, 90_000)
+
+  it('a click that can never land still gives up after the step\'s own 60 s, as action_error, however long the scrape may run', async () => {
+    const started = Date.now()
+    const result = await run('/disabled', [{ type: 'click', selector: '#go' }], 100_000)
+    expect(Date.now() - started).toBeLessThan(75_000)
+    expect(result.actions?.failed).toMatchObject({ index: 0, code: 'action_error' })
+    expect(result.actions?.failed?.message).toMatch(/the click on #go did not land within 60 s/)
+  }, 150_000)
+
+  it('a fetch stopped with a timeout reason while a click waits stops at once, the event loop free', async () => {
+    // As a batch's wall-time budget stops its pages: the abort's reason is a TimeoutError.
+    const browser = new BrowserLocalSubject('standard')
+    const controller = new AbortController()
+    let ticks = 0
+    const ticker = setInterval(() => { ticks++ }, 100)
+    try {
+      const stop = setTimeout(() => controller.abort(new DOMException('Crawl wall-time budget exhausted', 'TimeoutError')), 3000)
+      const started = Date.now()
+      await browser.fetch(`${base}/disabled`, Date.now() + 20_000, controller.signal, undefined, { actions: [{ type: 'click', selector: '#go' }] }).catch(() => undefined)
+      clearTimeout(stop)
+      expect(Date.now() - started).toBeLessThan(8_000)
+      expect(ticks).toBeGreaterThan(20)
+    } finally {
+      clearInterval(ticker)
+      await browser.teardown()
+    }
+  }, 60_000)
+
+  it('a covered control on a page that scrolls smoothly fails its click within seconds too', async () => {
+    const started = Date.now()
+    const result = await run('/covered-smooth', [{ type: 'click', selector: '#go' }])
+    expect(Date.now() - started).toBeLessThan(20_000)
+    expect(result.actions?.failed?.message).toMatch(/could not reach it: <div class="modal-backdrop"/)
+  }, 120_000)
+
+  it('a control covered for less than 5 s is clicked, even when the cover came late in a try', async () => {
+    const result = await run('/late-cover', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The button was clicked.')
+  }, 90_000)
+
+  it('a control covered for a moment is clicked once the cover goes', async () => {
+    const result = await run('/briefly-covered', [{ type: 'click', selector: '#go' }])
+    expect(result.actions?.failed).toBeUndefined()
+    expect(result.markdown).toContain('The button was clicked.')
   }, 60_000)
 
   it('a step that hangs fails as deadline_exceeded within the deadline, keeping what the steps before it produced and the page', async () => {
