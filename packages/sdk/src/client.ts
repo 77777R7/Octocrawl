@@ -22,6 +22,7 @@ import type {
   BatchHandoffRequest,
   BatchHandoffResponse,
   LoginImportRequest,
+  LoginImportResponse,
   SavedLogin,
   CompactScrapeResponse,
   FetchResult,
@@ -495,8 +496,8 @@ export class W2L {
    * The saved login's cookies never leave the server: the answer names the
    * domain, how many cookies and their hash.
    */
-  async importLogin(site: string, opts: Omit<LoginImportRequest, 'site'> = {}, request: RequestOptions = {}): Promise<SavedLogin> {
-    return this.post<SavedLogin>('/v1/logins/import', { ...opts, site }, 200, request, (opts.approveTimeoutMs ?? 120_000) + 30_000)
+  async importLogin(site: string, opts: Omit<LoginImportRequest, 'site'> = {}, request: RequestOptions = {}): Promise<LoginImportResponse> {
+    return this.post<LoginImportResponse>('/v1/logins/import', { ...opts, site }, 200, request, (opts.approveTimeoutMs ?? 120_000) + 30_000)
   }
 
   /** The person's saved logins, without their cookies. */
