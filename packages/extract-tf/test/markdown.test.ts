@@ -179,7 +179,8 @@ describe('htmlToMarkdown', () => {
     stacked += `${'<tr></tr>'.repeat(100)}</table>`
     const started = Date.now()
     expect(htmlToMarkdown(stacked.repeat(90)).length).toBeLessThan(2 * stacked.length * 90)
-    expect(Date.now() - started).toBeLessThan(5_000)
+    // About 1 s here and 5 s on a loaded CI runner; visiting every rowspan's columns in every row is some 10^10 steps.
+    expect(Date.now() - started).toBeLessThan(20_000)
   })
 
   it('writes a table whose padded grid would be too large as its rows of cells, still one GFM table', () => {
