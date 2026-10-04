@@ -436,9 +436,18 @@ async function loadMore(action: Extract<PageAction, { type: 'loadMore' }>, ctx: 
   try {
     for (;;) {
       // The control gone, hidden or disabled is the list's end. Gone before the first click, it was never there.
-      const why = await unusable(ctx, action.selector)
+      let why = await unusable(ctx, action.selector)
+      if (rounds === 0 && why === 'gone') throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
+      // Before the first click, a control the page has not shown or enabled yet (a script that reveals it after load) is
+      // waited for, as one hidden while it loads is after a click: within COME_BACK_WAIT_MS.
+      if (rounds === 0 && why !== null) {
+        const until = comeBackUntil(ctx)
+        while (why !== null && why !== 'gone' && Date.now() < until) {
+          await abortableSleep(250, ctx.execution.signal)
+          why = await unusable(ctx, action.selector)
+        }
+      }
       if (why !== null) {
-        if (rounds === 0 && why === 'gone') throw new StepFailure('selector_not_found', `no element matched ${action.selector}`)
         stoppedBy = 'end'
         break
       }
@@ -572,8 +581,11 @@ function isTimeout(error: unknown): boolean {
 
 function message(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
-  // Playwright appends a call log; the first line says what happened.
-  return text.split('\n')[0]!.slice(0, 300)
+  // Playwright appends a call log; the first line says what happened, and a click that never landed says why: what covers
+  // the control (a modal, a banner), its last report of it.
+  const lines = text.split('\n')
+  const covered = lines.map((line) => line.trim().replace(/^- /, '')).filter((line) => line.endsWith('intercepts pointer events')).at(-1)
+  return `${lines[0]!.slice(0, 300)}${covered === undefined ? '' : ` (${covered.slice(0, 300)})`}`
 }
 
 function withoutHash(url: string): string {

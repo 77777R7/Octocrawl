@@ -33,6 +33,8 @@ beforeAll(async () => {
     if (req.url === '/fontnav') return html(`<h1>Font</h1>${PROSE}`)
     if (req.url === '/go3') { res.writeHead(302, { location: '/private/red' }); res.end(); return }
     if (req.url === '/private/red') return html(`<style>body{background:rgb(255,0,0)}</style><h1>Secret red</h1>${PROSE}<p>Not for crawlers.</p><script>location.href = '/private/z'</script>`)
+    // A button an overlay covers (a subscription modal, as NPR's is): a click cannot reach it.
+    if (req.url === '/covered') return html(`<h1>Covered</h1>${PROSE}<button id="go">Go</button><div class="tp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>`)
     if (req.url === '/late') return html(`<h1>Late</h1>${PROSE}<button id="go" onclick="setTimeout(() => { location.href = '/private/late' }, 700)">Go</button>`)
     if (req.url === '/spa') return html(`<h1>Tabs</h1>${PROSE}<button id="tab" onclick="history.pushState({}, '', '/private/tab'); document.getElementById('panel').textContent = 'Second tab'">Tab</button><p id="panel">First tab</p><a id="real" href="/gotab">Real</a>`)
     if (req.url === '/gotab') { res.writeHead(302, { location: '/private/tab' }); res.end(); return }
@@ -210,6 +212,12 @@ describe('actions, real browser', () => {
     expect(result.status).toBe('success')
     expect(result.actions?.failed).toBeUndefined()
     expect(result.markdown).toContain('Second tab')
+  }, 60_000)
+
+  it('a click an overlay intercepts fails saying what covers the control', async () => {
+    const result = await run('/covered', [{ type: 'click', selector: '#go' }], 10_000)
+    expect(result.actions?.failed).toMatchObject({ index: 0, type: 'click' })
+    expect(result.actions?.failed?.message).toMatch(/<div class="tp-modal"[^]*intercepts pointer events/)
   }, 60_000)
 
   it('a step that hangs fails as deadline_exceeded within the deadline, keeping what the steps before it produced and the page', async () => {
