@@ -476,6 +476,28 @@ describe('htmlToTables', () => {
     expect(Date.now() - started).toBeLessThan(5_000)
   })
 
+  it('tells layout tables from data tables in time linear in the page, however deep its tables are nested', () => {
+    // Two-row tables, each nested in the last row of the one around it: each is asked whether it lays out the others.
+    const chain = (n: number) => `${'<table><tr><td>a</td></tr><tr><td>'.repeat(n)}x${'</td></tr></table>'.repeat(n)}`
+    const run = (html: string): number => {
+      const started = performance.now()
+      htmlToMarkdown(html)
+      htmlToTables(html)
+      return performance.now() - started
+    }
+    expect(htmlToTables(chain(3)).map((table) => table.rows)).toEqual([[['a'], ['x']]])
+    run(chain(100))
+    // The two sizes take turns, so a busy moment of the machine slows both.
+    let smallBest = Infinity
+    let largeBest = Infinity
+    for (let i = 0; i < 3; i++) {
+      smallBest = Math.min(smallBest, run(chain(1_000)))
+      largeBest = Math.min(largeBest, run(chain(2_000)))
+    }
+    // Twice the depth takes about twice the time; it took four times as long when each table measured all it holds.
+    expect(largeBest / smallBest).toBeLessThan(3)
+  })
+
   it('shares one budget among a page\'s tables, so many tables just under the cap cannot add up to a huge response', () => {
     const near = `<table><tr><td colspan="1000">${'x'.repeat(1990)}</td></tr><tr><td>y</td></tr></table>`
     const tables = htmlToTables(near.repeat(150))
