@@ -158,57 +158,92 @@ function shownText(el: Element, ctx: Context): string {
 }
 
 /**
- * One rendered Markdown block, without surrounding blank lines, as its
- * lines: a list item or quote around it adds a prefix to each line instead
- * of writing the text again, so a list nested thousands deep costs the size
- * of its Markdown, not that size at each level.
+ * One rendered Markdown block, without surrounding blank lines: text, or a
+ * list item, quote or list of the blocks in it. Kept as that tree and written
+ * out once (see writeBlocks), so a list nested thousands deep costs the size
+ * of its Markdown in time and the size of the tree in memory, not that at
+ * each level.
  */
-interface Block {
-  lines: Line[]
-  /** A list that may follow a paragraph without a blank line (bullets, or numbers from 1). */
-  interrupts?: boolean
-}
+type Block =
+  | { kind: 'text'; text: string }
+  /** `interrupts`: a list that may follow a paragraph without a blank line (bullets, or numbers from 1). */
+  | { kind: 'item'; marker: string; blocks: Block[]; interrupts?: boolean }
+  | { kind: 'quote'; blocks: Block[] }
+  | { kind: 'list'; items: Block[]; interrupts: boolean }
 
-/** A line of a block: its prefixes, outermost first (a list item's indent, a quote's `>`), then its text. */
-interface Line {
-  prefix: Prefix | null
-  body: string
-}
-
-/** A prefix of a line, and the one inside it. */
-interface Prefix {
-  text: string
-  inner: Prefix | null
-}
-
-function textBlock(text: string, interrupts?: boolean): Block {
-  const lines = text.split('\n').map((body): Line => ({ prefix: null, body }))
-  return interrupts ? { lines, interrupts } : { lines }
+function textBlock(text: string): Block {
+  return { kind: 'text', text }
 }
 
 /** Whether a block's text is empty. */
 function blockEmpty(block: Block): boolean {
-  return block.lines.length === 1 && block.lines[0]!.prefix === null && block.lines[0]!.body === ''
+  return block.kind === 'text' && block.text === ''
 }
 
-function lineText(line: Line): string {
-  let text = ''
-  for (let prefix = line.prefix; prefix !== null; prefix = prefix.inner) text += prefix.text
-  return text + line.body
+/** A list item or quote that a line being written is in, and the one it is in. */
+interface Around {
+  /** A list item's marker (null for a quote), the indent of its later lines, and whether its first line is written. */
+  marker: string | null
+  indent: string
+  started: boolean
+  outer: Around | null
 }
 
-function blockText(block: Block): string {
-  return block.lines.map(lineText).join('\n')
-}
-
-/** The lines of blocks written one after another: a blank line between two, none before one that `interrupts` when `interrupting`. */
-function joinedLines(blocks: Block[], interrupting: boolean): Line[] {
-  const lines: Line[] = []
-  for (let i = 0; i < blocks.length; i++) {
-    if (i > 0 && !(interrupting && blocks[i]!.interrupts)) lines.push({ prefix: null, body: '' })
-    for (const line of blocks[i]!.lines) lines.push(line)
+/**
+ * Blocks as Markdown, a blank line between two, depth first on a stack (a
+ * list nested thousands deep costs no stack frames). Each line gets the
+ * prefixes of the items and quotes it is in, innermost first, as each was
+ * written around the text inside it: an item's marker on its first line and
+ * its indent on each later one with a first character (one a regular
+ * expression's `.` matches: not \r, \u2028 or \u2029), a quote's `> `, or
+ * `>` alone on a blank line. An item's blocks are separated by a blank line
+ * except before one that `interrupts`, a list's items by none.
+ */
+function writeBlocks(top: Block[]): string {
+  const lines: string[] = []
+  const write = (body: string, around: Around | null): void => {
+    let prefix = ''
+    // Whether the line so far is empty, or starts with a character `.` does not match.
+    let empty = body === ''
+    let unmatched = !empty && /^[\r\u2028\u2029]/.test(body)
+    for (let a = around; a !== null; a = a.outer) {
+      let added = ''
+      if (a.marker === null) added = empty ? '>' : '> '
+      else if (!a.started) {
+        a.started = true
+        added = `${a.marker} `
+      } else if (!empty && !unmatched) added = a.indent
+      if (added !== '') {
+        prefix = added + prefix
+        empty = false
+        unmatched = false
+      }
+    }
+    lines.push(prefix + body)
   }
-  return lines
+  const levels: { blocks: Block[]; next: number; around: Around | null; separator: 'blank' | 'item' | 'none' }[] = [
+    { blocks: top, next: 0, around: null, separator: 'blank' },
+  ]
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!
+    if (level.next === level.blocks.length) {
+      levels.pop()
+      continue
+    }
+    const index = level.next++
+    const block = level.blocks[index]!
+    if (index > 0 && (level.separator === 'blank' || (level.separator === 'item' && !('interrupts' in block && block.interrupts)))) {
+      write('', level.around)
+    }
+    if (block.kind === 'text') for (const line of block.text.split('\n')) write(line, level.around)
+    else if (block.kind === 'item') {
+      const around = { marker: block.marker, indent: ' '.repeat(block.marker.length + 1), started: false, outer: level.around }
+      levels.push({ blocks: block.blocks, next: 0, around, separator: 'item' })
+    } else if (block.kind === 'quote') {
+      levels.push({ blocks: block.blocks, next: 0, around: { marker: null, indent: '', started: true, outer: level.around }, separator: 'blank' })
+    } else levels.push({ blocks: block.items, next: 0, around: level.around, separator: 'none' })
+  }
+  return lines.join('\n')
 }
 
 // ---------------------------------------------------------------- tables
@@ -1402,8 +1437,7 @@ function flowNode(node: Node, flow: Flow, walk: FlowWalk): void {
         flowLevel(el, inner, walk, () => {
           inner.flush()
           // (An empty one still ends the paragraph before it.)
-          const item = listItem('-', inner.blocks)
-          flow.add(item === null ? null : { lines: item, interrupts: true })
+          flow.add(inner.blocks.length === 0 ? null : { kind: 'item', marker: '-', blocks: inner.blocks, interrupts: true })
         }),
       )
       return
@@ -1553,30 +1587,9 @@ function codeBlock(pre: Element, ctx: Context): Block | null {
   return textBlock(`${fence}${codeLanguage(pre)}\n${text}\n${fence}`)
 }
 
-/** A quote of the blocks inside a <blockquote>: `> ` before each line, `>` alone for a blank one. */
+/** A quote of the blocks inside a <blockquote> (see writeBlocks). */
 function blockquote(blocks: Block[]): Block | null {
-  if (blocks.length === 0) return null
-  const lines = joinedLines(blocks, false)
-  for (const line of lines) line.prefix = { text: line.prefix !== null || line.body !== '' ? '> ' : '>', inner: line.prefix }
-  return { lines }
-}
-
-/**
- * One list item: the marker, then the item's blocks indented under it. A
- * nested list follows the text before it directly; other blocks are
- * separated by a blank line. An item with no content is dropped.
- */
-function listItem(marker: string, blocks: Block[]): Line[] | null {
-  if (blocks.length === 0) return null
-  const lines = joinedLines(blocks, true)
-  lines[0]!.prefix = { text: `${marker} `, inner: lines[0]!.prefix }
-  const indent = ' '.repeat(marker.length + 1)
-  // Each line after the first that has a first character (one a regular expression's `.` matches: not \r, \u2028 or \u2029).
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!
-    if (line.prefix !== null || (line.body !== '' && !/^[\r\u2028\u2029]/.test(line.body))) line.prefix = { text: indent, inner: line.prefix }
-  }
-  return lines
+  return blocks.length === 0 ? null : { kind: 'quote', blocks }
 }
 
 function hasItemChild(el: Element): boolean {
@@ -1635,16 +1648,12 @@ function list(el: Element, flow: Flow, walk: FlowWalk): void {
   })
   walk.push(
     visit(el, () => {
-      // The items one per line (an empty one left out); the list interrupts a paragraph when its first item is `- ` or `1. `.
-      const lines: Line[] = []
-      let first: string | undefined
-      for (const item of items) {
-        const itemLines = listItem(item.marker, item.blocks)
-        if (itemLines === null) continue
-        first ??= item.marker
-        for (const line of itemLines) lines.push(line)
-      }
-      flow.add(...before, first === undefined ? null : { lines, interrupts: first === '-' || first === '1.' })
+      // The items one per line, each its marker and its blocks indented under it (see writeBlocks), an empty one left out; the
+      // list interrupts a paragraph when its first item is `- ` or `1. `.
+      const written: Block[] = []
+      for (const item of items) if (item.blocks.length > 0) written.push({ kind: 'item', marker: item.marker, blocks: item.blocks })
+      const first = written[0]
+      flow.add(...before, first === undefined ? null : { kind: 'list', items: written, interrupts: first.kind === 'item' && (first.marker === '-' || first.marker === '1.') })
     }),
   )
 }
@@ -1724,9 +1733,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
     return ''
   }
   const layout = document.querySelector(`[${LAYOUT_MARKERS.display}],[${LAYOUT_MARKERS.hidden}]`) !== null
-  const markdown = blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) })
-    .map(blockText)
-    .join('\n\n')
+  const markdown = writeBlocks(blocksOf(root, { base, blockMemo: new Map(), layout, keepDataUriImages: options.dataUriImages === 'keep', tablePadding: { left: MAX_PAGE_TABLE_PADDING }, ...(tables === undefined ? {} : { tables, tableBudget: { left: MAX_PAGE_TABLE_CHARS } }) }))
   doc.close()
   return markdown
 }
