@@ -2,6 +2,8 @@
 import { hostedProxyNotice } from '@w2l/contracts'
 import { createHostedService, hostedConfigFromEnv } from './host.js'
 
+// Experimental and not deployed: see host.ts and docs/archive/hosted-mcp-pilot.md.
+console.error('w2l-hosted-mcp: experimental; not deployed or accepted (docs/archive/hosted-mcp-pilot.md)')
 const config=hostedConfigFromEnv()
 const proxyNotice=hostedProxyNotice(process.env)
 if(proxyNotice)console.log(`w2l-hosted-mcp: ${proxyNotice}`)

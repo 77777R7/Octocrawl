@@ -32,4 +32,4 @@
 ## 后果
 
 - 浏览器进程生命周期、并发限制、重试与 session 复用需自行实现（对应 P01/P03/P04 痛点）。
-- Chromium 的 SSRF 约束需单独方案（CDP 请求拦截或网络隔离容器），见 PHASE1_ENGINEERING_NOTES §2.6。
+- Chromium 的 SSRF 约束需单独方案（CDP 请求拦截或网络隔离容器），见 docs/archive/PHASE1_ENGINEERING_NOTES.md §2.6。

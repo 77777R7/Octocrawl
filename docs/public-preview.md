@@ -176,7 +176,7 @@ The initial Cloud Run settings are:
 | Environment | `W2L_FIRESTORE_PROJECT_ID`, `W2L_AMAZON_PUBLIC_STATE_FILE=/var/secrets/amazon-state.json`, `W2L_PREVIEW_ENABLED=true`, `W2L_SOURCE_COMMIT` |
 | Secrets | Mount Amazon state at `/var/secrets/amazon-state.json`; expose quota hash key and evaluation token as server environment variables |
 
-The image is built from `Dockerfile.public-preview` and includes Chromium. Do not deploy the existing `render.yaml` managed MCP service as this anonymous page: that service has durable Monitor/Delivery semantics and a different authentication policy. Cloud Run's local files are ephemeral, so they cannot back persistent tasks. [Cloud Run browser support](https://docs.cloud.google.com/run/docs/browser-automation) · [container filesystem](https://docs.cloud.google.com/run/docs/container-contract)
+The image is built from `Dockerfile.public-preview` and includes Chromium. Do not deploy the archived `docs/archive/render.yaml` managed MCP service as this anonymous page: that service has durable Monitor/Delivery semantics and a different authentication policy. Cloud Run's local files are ephemeral, so they cannot back persistent tasks. [Cloud Run browser support](https://docs.cloud.google.com/run/docs/browser-automation) · [container filesystem](https://docs.cloud.google.com/run/docs/container-contract)
 
 ### Public domain
 

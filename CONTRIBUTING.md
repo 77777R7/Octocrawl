@@ -34,7 +34,7 @@ Full DCO text: https://developercertificate.org/
 
 1. **Check existing issues** — someone may already be working on it
 2. **Open an issue first** for non-trivial changes — discuss the approach before writing code
-3. **Read the engineering notes** — [PHASE1_ENGINEERING_NOTES.md](PHASE1_ENGINEERING_NOTES.md) explains the design decisions
+3. **Read the engineering notes** — [docs/archive/PHASE1_ENGINEERING_NOTES.md](docs/archive/PHASE1_ENGINEERING_NOTES.md) explains the design decisions
 
 ## Development Setup
 

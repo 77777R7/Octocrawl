@@ -24,7 +24,7 @@ Open a **new** Codex task so it loads the MCP configuration, then ask it to
 call `preview_monitor` with the `firecrawl-introduction` preset. The service
 starts at login, restarts on a crash and keeps the SQLite task state under
 `.w2l/api`. It listens only on `127.0.0.1`; REST is internal and there is no
-public URL or WorkOS login on this local path. Keep this checkout in place
+public URL or sign-in on this local path. Keep this checkout in place
 while the LaunchAgent points at it. On a non-macOS system, run
 `npm run local:mcp` in one terminal instead.
 
@@ -75,7 +75,7 @@ configures delivery, resumes it, checks the initial event, then uses actual
 `SIGKILL` process crashes with a pending delivery and a queued Monitor run.
 After each restart it reconnects, finishes the work, and checks the same
 `eventId` at both ends.
-This loopback check does not validate WorkOS or a deployed Codex login.
+This loopback check does not validate a hosted sign-in or a deployed Codex login.
 `npm run verify:c2-first-use` remains the authenticated-host test seam.
 Detailed, potentially sensitive
 evidence stays under ignored `.w2l/c2-first-use-*/evidence.json`.
@@ -108,34 +108,9 @@ For a conversational client, use these MCP calls in order:
 accept `debug: true` where the full audit is needed. A missing or invalid
 sample should be resolved before enabling a recurring task.
 
-## Unified self-hosted process
+## Hosted MCP (experimental)
 
-`npm run hosted:mcp` runs the in-process REST API, Monitor scheduler, delivery
-worker, and Streamable HTTP endpoint in one process. REST is internal; the
-public listener exposes `/mcp`, `/.well-known/oauth-protected-resource`, and
-`/healthz`. It requires these environment variables:
-
-| Variable | Meaning |
-| --- | --- |
-| `W2L_MCP_URL` | Exact external `https://.../mcp` resource URL |
-| `WORKOS_ISSUER` | AuthKit access-token issuer origin |
-| `W2L_OWNER_SUBJECT` | Howard's WorkOS user ID (`sub`) |
-| `W2L_RECEIVER_URL` | Exact controlled `https://.../webhook` URL |
-| `W2L_WEBHOOK_SECRET_DEMO` | Delivery signing secret, equal to receiver `WEBHOOK_SECRET` |
-| `W2L_AMAZON_PUBLIC_STATE_FILE` | Persistent anonymous Singapore/SGD browser preference; `/var/data/w2l/amazon-public-state.json` on Render |
-| `W2L_TASK_ROOT` | Persistent task directory, `/var/data/w2l/tasks` on Render |
-| `W2L_CAPTURE_RAW_DIR` | Optional raw HTML evidence directory, `/var/data/w2l/raw-html` on Render |
-
-The protected-resource metadata advertises the exact MCP URL and WorkOS
-authorization server. The server verifies signed access tokens against the
-issuer JWKS, exact audience and owner subject, expiration, and `openid`
-scope. Browser OAuth setup must use the same MCP resource identifier. Remote
-tools are limited to reviewed public-document Monitor/Delivery and anonymous
-Amazon.sg product JSON/batches. Documentation capture uses HTTP; Amazon uses
-the browser with an Amazon.sg-only preference state and a reviewed HTTPS
-subresource host list. `scrape_product` and `batch_products` use the fixed
-schema without caller-supplied model prompts. One active batch, at most 1000
-distinct products, and a 90-minute run budget bound the initial host.
+`npm run hosted:mcp` runs the API, the Monitor scheduler, the delivery worker and an authenticated Streamable HTTP endpoint in one process. It is experimental and not deployed. Its setup is archived in [archive/hosted-mcp-pilot.md](archive/hosted-mcp-pilot.md).
 
 ## Mapping a site
 
@@ -183,39 +158,3 @@ After a `notifications/cancelled`, the call's own request is answered with
 the JSON-RPC error `Request cancelled` (code 0), as the MCP Python SDK
 answers a cancelled request; the client ignores it. Over stdio (`npm run mcp`) the MCP SDK
 delivers `notifications/cancelled` to the call itself.
-
-## Render pilot deployment
-
-The [Blueprint](../render.yaml) defines **two** Singapore web services,
-each with its own persistent disk. Deploy the Blueprint to the intended
-workspace, then set the `sync: false` variables in the Render dashboard.
-The main service installs Chromium in the image and, on first start, creates
-the unsigned-in Singapore 238823 / SGD preference on its persistent disk;
-later restarts reuse and validate that state. Use the actual assigned service domains for `W2L_MCP_URL` and
-`W2L_RECEIVER_URL`; do not assume the names in the Blueprint become those
-domains. Create/configure the WorkOS AuthKit MCP application for the exact
-`W2L_MCP_URL`, obtain the issuer and Howard user ID, and enter those values
-in Render. Put the same random signing secret in the main service's
-`W2L_WEBHOOK_SECRET_DEMO` and receiver's `WEBHOOK_SECRET` variables.
-
-After both `/healthz` and `/health` report healthy, connect a Codex client:
-
-```bash
-codex mcp add w2l --url https://ACTUAL-MCP-DOMAIN/mcp
-```
-
-Complete browser sign-in in the client and run the sequence above, then call
-`scrape_product` for one Amazon.sg `/dp/{ASIN}` and `batch_products` for two
-known products. Validate
-connection, task completion with matching `eventId`, and continued Monitor
-operation after disconnect and an actual Render service restart **separately**.
-Also exercise invalid Origin, missing token, another user, forbidden source,
-delivery failure, Retry-After and dead-letter. A successful tool listing
-alone is not an accepted product flow.
-
-The first hosted pilot is one owner and one Render instance: a SQLite disk
-cannot be shared by multiple instances. Do not use this deployment as a
-multi-tenant arbitrary-URL crawler. The actual Render deployment, WorkOS
-browser login, browser egress and 1000-page gate remain open. Independent human onboarding, a real
-customer downstream consumer, and the two-week Gate 5 trial remain separate
-acceptance work.

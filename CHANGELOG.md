@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Repository cleanup (ROADMAP P0): the earlier product documents (`PHASE1_ENGINEERING_NOTES.md`, `PRODUCT_PLAN_V2.md`, `PRODUCT_STRATEGY.md`) and the Render Blueprint move from the root to `docs/archive/`; the hosted MCP pilot's Render and WorkOS setup moves from `docs/mcp-first-use.md` to `docs/archive/hosted-mcp-pilot.md`, and its code (`packages/mcp/src/host.ts`, `npm run hosted:mcp`) is marked experimental, saying so when it starts. The README gains a table of the local ports (8787 API, 8791 local MCP, 8788 first-use webhook receiver, 8798 site preview).
 - Security, before the first publish:
   - A local server on an address other than 127.0.0.1, localhost or ::1 (`--host 0.0.0.0`, a LAN address, `W2L_API_HOST`) refuses to start without a token. Before, it answered anyone, other machines and rebinding web pages included, and fetched the person's localhost and network for them.
   - Mode `authed` refuses `executeJavascript` (a script could read the session's cookies and storage) and, on a batch, a `webhook` (pages read with the session are not sent to another address). A batch with a webhook is no longer handed to the person (its stopped items carry no handoff, and `handOffBatch` refuses it): a page read in their own Chrome is read signed in as them, and was sent to the webhook as a handoff `page` event. Click, write, press, scroll and the list steps stay available. The MCP tools say so, and tell the model to ask the person before using a saved login.

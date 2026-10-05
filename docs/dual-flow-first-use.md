@@ -1,6 +1,6 @@
 # 双流程首次使用：文档监控与 Amazon.sg 商品
 
-当前状态：**本机可运行；永久 HTTPS MCP 地址、WorkOS 登录和 Render 上的整条流程尚待验收。** 两个流程共用一个 MCP 服务和持久任务状态。Amazon 商品是 JSON 采集与批次查询，**不是**价格变化提醒。
+当前状态：**本机可运行。** 托管版（远程 HTTPS MCP 加登录）是实验性代码，没有部署，设置说明已归档到 [archive/hosted-mcp-pilot.md](archive/hosted-mcp-pilot.md)。 两个流程共用一个 MCP 服务和持久任务状态。Amazon 商品是 JSON 采集与批次查询，**不是**价格变化提醒。
 
 ## Howard 本机先用
 

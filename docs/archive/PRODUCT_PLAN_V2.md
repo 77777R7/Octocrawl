@@ -1,9 +1,9 @@
 # 产品方案 V2：核查修正后的落地计划
 
-> Historical planning document. The current phase plan lives in [ROADMAP.md](ROADMAP.md); the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). This file is retained for milestone history, decisions, and evidence references; its older Phase numbering is not replaced globally.
+> Historical planning document. The current phase plan lives in [ROADMAP.md](../../ROADMAP.md); the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](../roadmap/sections-abc-roadmap-2026-09-28.md). This file is retained for milestone history, decisions, and evidence references; its older Phase numbering is not replaced globally.
 
 更新日期：2026-08-17
-前置文档：[PRODUCT_STRATEGY.md](PRODUCT_STRATEGY.md)、[research/market_validation_root_branch_model.md](research/market_validation_root_branch_model.md)
+前置文档：[PRODUCT_STRATEGY.md](PRODUCT_STRATEGY.md)、[research/market_validation_root_branch_model.md](../../research/market_validation_root_branch_model.md)
 本文档基于对上一轮评审中六项质疑的逐条事实核查，给出修正后的战略与可执行计划。
 
 ---
