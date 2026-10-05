@@ -217,8 +217,16 @@ describe('routePage', () => {
         wrap(`<main><h1>Cobalt teapot</h1><div class="product product-main" itemscope itemtype="https://schema.org/Product"><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><h2>You may also like</h2>${cards('product product-card')}</main>`),
         // The buy box shows its price above the h1.
         wrap(`<main><div class="product-info"><span class="price">$84.00</span><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div>${cards('card')}</main>`),
-        // Only the related products are declared, in JSON-LD; the page's own price follows its h1.
-        wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, listed(names.slice(0, 3))),
+        // Only the related products are declared, in JSON-LD; the page's own price follows its h1, alone, beside the
+        // price it was before (Shopify's Dawn theme puts them in sibling boxes), or in a list of facts.
+        ...[
+          '<span class="price">$84.00</span>',
+          '<div class="buy-box"><span class="price price--sale">$84.00</span> <span class="price price--compare">$100.00</span></div>',
+          // A size picker: each size its own price, none of them a link.
+          '<fieldset class="variants"><label class="variant"><input type="radio" name="size"> 600 ml <span class="price">$84.00</span></label><label class="variant"><input type="radio" name="size"> 900 ml <span class="price">$96.00</span></label><label class="variant"><input type="radio" name="size"> 1.2 l <span class="price">$112.00</span></label></fieldset>',
+          '<div class="price__regular"><span class="price-item">$84.00</span></div><div class="price__sale"><s class="price-item">$100.00</s><span class="price-item">$84.00</span></div>',
+          '<ul class="facts"><li><span class="price">$84.00</span></li><li>Stoneware, 600 ml</li></ul>',
+        ].map((price) => wrap(`<main><h1>Cobalt teapot</h1>${price}<p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, listed(names.slice(0, 3)))),
       ]) {
         const doc = parse(html)
         expect(routePage(doc.document).type).toBe('product')

@@ -62,19 +62,23 @@ function hasVisibleBuyBox(doc: Document): boolean {
 /**
  * A product page's price, whether or not the page shows others: the page's
  * one h1, then a visible price before any other heading that is not a card's.
- * A card's price is inside a list item, or inside an element with a sibling
- * of its tag that shows a price too: a listing's prices are its cards'.
+ * A card's price is inside an element with at least two siblings of its tag
+ * that each hold a price and a link: a listing's prices
+ * are its cards'. A sale price beside the price it was before, in boxes of one
+ * tag, or in a list of the product's facts, is the page's own.
  */
 function hasPriceUnderH1(doc: Document): boolean {
   const h1s = qsa(doc, 'h1')
   if (h1s.length !== 1) return false
   const prices = visiblePrices(doc)
-  const priced = (el: Element) => prices.some((price) => el.contains(price))
+  const linked = (el: Element) => qsa(el, 'a[href]').length > 0 || (tagOf(el) === 'a' && el.hasAttribute('href'))
+  const pricedCard = (el: Element) => linked(el) && prices.some((price) => el.contains(price))
   const inCard = (price: Element): boolean => {
-    if (price.closest('li') !== null) return true
     for (let up = price.parentElement; up !== null && up !== doc.body; up = up.parentElement) {
       const parent = up.parentElement
-      if (parent !== null && Array.from(parent.children).some((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && priced(sibling))) return true
+      if (parent === null) continue
+      const alike = Array.from(parent.children).filter((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && pricedCard(sibling))
+      if (alike.length >= 2) return true
     }
     return false
   }
