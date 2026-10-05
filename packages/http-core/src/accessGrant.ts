@@ -2,10 +2,9 @@
  * AccessGrant: what an operator or a user allows enhanced access to do for a
  * run (ADR 0005). This module validates a grant; it does not apply one.
  *
- * Nothing in the API reads a grant yet. Its runtime source (a file or an
- * environment variable on a local server) is the next step; until then the
- * vendor adapters see only the operational keys the ladder CLI passes, so
- * every grant-gated capability stays off.
+ * A server reads one at startup (`--access-grant` or `W2L_ACCESS_GRANT`, through
+ * accessGrantFromText), as do the `octocrawl` commands and the ladder CLI; without
+ * one every grant-gated capability stays off.
  *
  * The validation encodes three rules from ADR 0005:
  *  - a name from REFUSED_FOREVER or DEFERRED is a problem, reported with its
@@ -62,9 +61,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/** A budget in US dollars: positive, or absent. Zero is refused: a cap reached before anything is spent would stop every run at once. */
 function usd(v: unknown): number | null | undefined {
   if (v === undefined || v === null) return null
-  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined
 }
 
 /** Validate a grant. Every problem is reported, not just the first. */
@@ -111,13 +111,13 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
   } else {
     const req = usd(budgetIn.perRequestUsd)
     const run = usd(budgetIn.perRunUsd)
-    if (req === undefined) problems.push({ field: 'budget.perRequestUsd', kind: 'invalid', reason: 'a non-negative number of US dollars, or null' })
-    if (run === undefined) problems.push({ field: 'budget.perRunUsd', kind: 'invalid', reason: 'a non-negative number of US dollars, or null' })
+    if (req === undefined) problems.push({ field: 'budget.perRequestUsd', kind: 'invalid', reason: 'a positive number of US dollars, or null' })
+    if (run === undefined) problems.push({ field: 'budget.perRunUsd', kind: 'invalid', reason: 'a positive number of US dollars, or null' })
     perRequestUsd = req ?? null
     perRunUsd = run ?? null
   }
   const costed = capabilities.filter((c) => AUTHORIZABLE.find((e) => e.capability === c)!.thirdPartyCost)
-  if (costed.length > 0 && !(perRunUsd !== null && perRunUsd > 0)) {
+  if (costed.length > 0 && perRunUsd === null && !problems.some((p) => p.field === 'budget.perRunUsd')) {
     problems.push({
       field: 'budget.perRunUsd',
       kind: 'budget_required',
@@ -154,4 +154,27 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
 
   if (problems.length > 0) return { ok: false, problems }
   return { ok: true, grant: { tier: tier as AccessTier, capabilities, budget: { perRequestUsd, perRunUsd }, scope: { hosts }, attestation } }
+}
+
+/**
+ * A grant from its JSON text, for a server or a CLI that reads one from a file or an environment
+ * variable. Throws with every problem listed: a caller that silently dropped a refused or deferred
+ * capability would run with less than the operator thinks.
+ */
+export function accessGrantFromText(text: string): AccessGrant {
+  let input: unknown
+  try {
+    input = JSON.parse(text)
+  } catch {
+    throw new Error('access grant: not valid JSON')
+  }
+  const result = normalizeAccessGrant(input)
+  if (!result.ok) {
+    throw new Error(`access grant refused (ADR 0005):\n${result.problems.map((p) => `  - ${p.field}: ${p.reason}`).join('\n')}`)
+  }
+  // Nothing limits the routes to these hosts yet; taking the list would grant more than it says.
+  if (result.grant.scope.hosts !== null) {
+    throw new Error('access grant refused: scope.hosts is not enforced yet, so a grant that names hosts would reach every host; leave scope out')
+  }
+  return result.grant
 }

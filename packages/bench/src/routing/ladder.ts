@@ -322,10 +322,10 @@ export class LadderRunner {
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides) }
+    try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides)) }
     catch (error) {
       if (!deadlineReached(scope)) throw error
-      return carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides)
+      return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides))
     } finally { scope.dispose() }
   }
 
@@ -722,7 +722,7 @@ export class LadderRunner {
     const outcome: VendorOutcome = {
       contentful: CONTENTFUL_STATUS.has(result.status),
       wallMs: result.usage.wallMs,
-      costUsd: result.usage.externalCostUsd ?? 0,
+      costUsd: result.usage.externalCostUsd,
       failureClass: cls,
     }
     await this.history?.record(safeHost(url), vendorId, outcome)
@@ -873,7 +873,7 @@ export class LadderRunner {
         attemptCount: 0,
         contentTokens: null,
         browserMs: 0,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace: [{ at: 0, lane: 'http', event: 'governance_refusal', detail: { reason } }],
     }
@@ -956,7 +956,19 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: evidence === null ? detail : { ...detail, evidence: evidence.channel } }
     result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
   }
-  return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...summarize(channelsTried, attempts), totalMs: at } }
+  const summary = summarize(channelsTried, attempts)
+  // A provider rung the deadline cut before it returned may have billed: its cost is unknown, not the 0 of the rungs that did return.
+  const providerUnmeasured = interrupted !== null && attempts.length < channelsTried.length && laneOf(interrupted) === 'provider'
+  const costed = providerUnmeasured ? { ...summary, externalCostUsd: null, externalCost: { ...summary.externalCost, unknown: true } } : summary
+  return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...costed, totalMs: at } }
+}
+
+/**
+ * The answer's third-party spend is the whole run's, not the kept rung's: a local answer kept after a provider attempt still
+ * cost what the provider charged, and an unknown charge anywhere in the run makes it unknown.
+ */
+function withRunCost(run: LadderRunResult): LadderRunResult {
+  return { ...run, result: { ...run.result, usage: { ...run.result.usage, externalCostUsd: run.summary.externalCostUsd } } }
 }
 
 /**
@@ -988,7 +1000,8 @@ function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
     compliance: null,
     evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
     // The interrupted rung's traffic was not measured; the ladder summary holds what was.
-    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: null },
+    // A vendor rung may have billed before the deadline; a local one calls no third party.
+    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: lane === 'provider' ? null : 0 },
     trace: [],
   }
 }
@@ -1049,7 +1062,7 @@ function identityRefusedResult(
       attemptCount: 0,
       contentTokens: null,
       browserMs: 0,
-      externalCostUsd: null,
+      externalCostUsd: 0,
     },
     trace: [
       {

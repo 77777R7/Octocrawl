@@ -139,7 +139,7 @@ export function cacheMissResult(url: string, bounds: PageCacheBounds): FetchResu
     truncatedAt: null,
     compliance: null,
     evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
-    usage: { wallMs: 0, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: null },
+    usage: { wallMs: 0, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: 0 },
     trace: [{ at: 0, lane: 'http', event: 'cache_miss', detail: { lockdown: true, ...bounds } }],
   }
 }

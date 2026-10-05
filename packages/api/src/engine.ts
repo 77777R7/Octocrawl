@@ -104,7 +104,7 @@ import {
   cacheStateOf,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, evaluateGovernance, type CrawlPolicy } from '@w2l/http-core'
+import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { ChannelsFiltered } from '@w2l/bench'
@@ -346,6 +346,13 @@ export interface ApiEngineOptions {
    * engine takes https to a public address only, whatever this says.
    */
   webhookPolicy?: { allowHttpLoopback: boolean }
+  /**
+   * The server's access grant (ADR 0005), validated at startup. Its capabilities are the vendor
+   * policy every vendor rung is built with, its run budget caps each batch's and crawl's
+   * third-party spend, and it enters the page cache key so a page fetched under one grant is not
+   * reused under another. Null or absent: no grant, so every grant-gated capability stays off.
+   */
+  accessGrant?: AccessGrant | null
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -430,6 +437,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** The saved logins a run of `mode` may use: mode `authed` alone. */
   const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
   const headed = options.headed === true
+  const accessGrant = options.accessGrant ?? null
+  /**
+   * A run's budget under the server's grant: the stricter of the task's own cost cap and the grant's run budget, applied every time
+   * a task runs, so a task created before the grant, resumed, or appended to is capped as one created under it.
+   */
+  const grantedBudget = (budget: Task['budget']): Task['budget'] => {
+    const cap = accessGrant?.budget.perRunUsd ?? null
+    if (cap === null) return budget
+    return { ...budget, maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }
+  }
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
     ...basePolicy,
@@ -466,7 +483,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const { timeout: _timeout, ...shape } = fetchOptions(page, formats)
     const rungs = channels.map((channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`)
     const build = { extractor: EXTRACTOR_VERSION, pdf: PDF_TEXT_VERSION, file: FILE_TEXT_VERSION, commit: sourceCommitFromEnv() }
-    const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build })
+    // Absent without a grant, so a server without one keeps every key it had.
+    const access = accessGrant === null ? undefined : { tier: accessGrant.tier, capabilities: [...accessGrant.capabilities].sort() }
+    const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build, ...(access === undefined ? {} : { access }) })
     return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store, robotsSetAside }
   }
   /**
@@ -652,7 +671,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode) })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] } })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1062,6 +1081,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const orchestrator = new CrawlOrchestrator({
       store, atom,
+      // A page whose scrape threw called a provider only if this mode has one: otherwise its third-party cost is a known 0.
+      scrapeErrorCostUsd: channelsFor(mode).some((channel) => channel.vendorId !== undefined) ? null : 0,
       workerCount,
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,
@@ -1082,7 +1103,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.batch ? { seedUrls: task.batch.urls } : {}),
         taskDir: task.taskDir,
         mode,
-        budget: task.budget,
+        budget: grantedBudget(task.budget),
         maxDepth: req.maxDepth,
         allowlistedDomains: req.allowlistedDomains,
         resumeFrom: req.resume ? task.id : null,
@@ -1185,12 +1206,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
       const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
+      // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
+      const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) }
       const full: ScrapeRun = {
         ...result,
+        // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
+        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd },
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
-        // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
-        summary: read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) },
+        summary,
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
       // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
@@ -1366,7 +1390,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         budget: {
           maxPages: req.maxPages ?? defaultMaxPages,
           maxWallMs: null,
-          maxCostUsd: null,
+          maxCostUsd: accessGrant?.budget.perRunUsd ?? null,
           maxTokens: null,
         },
         crawl: {
@@ -1455,7 +1479,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
-        budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
+        budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: accessGrant?.budget.perRunUsd ?? null, maxTokens: null },
         batch,
         ...attributionOf(req),
         createdAt: now, updatedAt: now,
@@ -1902,7 +1926,7 @@ function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(res
     ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
     ...(timings.totalMs === undefined ? {} : { totalMs: timings.totalMs }),
   }
-  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: null, ...(own === undefined ? {} : { timings: own }) } }
+  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

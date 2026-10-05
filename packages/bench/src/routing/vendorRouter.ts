@@ -38,7 +38,10 @@ export interface VendorHistoryEntry {
   latencyTotalMs: number
   /** One sample per attempt, so the ranker can take a true median. */
   latencySamplesMs: number[]
+  /** Sum over the attempts whose cost the vendor stated. */
   costTotalUsd: number
+  /** Attempts whose cost the vendor did not state: unknown, never counted as free. */
+  costUnknownAttempts: number
   lastFailureClass: RoutingFailureClass | null
 }
 
@@ -56,7 +59,8 @@ export interface RoutingHistory {
 export interface VendorOutcome {
   contentful: boolean
   wallMs: number
-  costUsd: number
+  /** Null when the vendor did not state the cost. */
+  costUsd: number | null
   failureClass: RoutingFailureClass | null
 }
 
@@ -68,6 +72,7 @@ function freshEntry(): VendorHistoryEntry {
     latencyTotalMs: 0,
     latencySamplesMs: [],
     costTotalUsd: 0,
+    costUnknownAttempts: 0,
     lastFailureClass: null,
   }
 }
@@ -87,7 +92,8 @@ function applyOutcome(entry: VendorHistoryEntry, outcome: VendorOutcome): void {
   if (entry.latencySamplesMs.length > MAX_LATENCY_SAMPLES) {
     entry.latencySamplesMs = entry.latencySamplesMs.slice(-MAX_LATENCY_SAMPLES)
   }
-  entry.costTotalUsd += outcome.costUsd
+  if (outcome.costUsd === null) entry.costUnknownAttempts += 1
+  else entry.costTotalUsd += outcome.costUsd
   entry.lastFailureClass = outcome.failureClass
 }
 
@@ -114,6 +120,10 @@ function normalizeEntry(raw: Partial<VendorHistoryEntry> | undefined): VendorHis
   entry.costTotalUsd =
     typeof raw.costTotalUsd === 'number' && Number.isFinite(raw.costTotalUsd)
       ? raw.costTotalUsd
+      : 0
+  entry.costUnknownAttempts =
+    typeof raw.costUnknownAttempts === 'number' && Number.isFinite(raw.costUnknownAttempts) && raw.costUnknownAttempts >= 0
+      ? Math.floor(raw.costUnknownAttempts)
       : 0
   entry.lastFailureClass = raw.lastFailureClass ?? null
   if (Array.isArray(raw.latencySamplesMs)) {
@@ -214,7 +224,10 @@ export interface VendorScore {
   score: number
   successRate: number
   medianLatencyMs: number | null
+  /** Over the attempts whose cost is known. */
   totalCostUsd: number
+  /** Whether any attempt's cost is unknown; such a vendor earns no cost bonus. */
+  costUnknown: boolean
 }
 
 const EXPLORE_BONUS = 0.05
@@ -234,6 +247,7 @@ export function rankVendors(
         successRate: 0,
         medianLatencyMs: null,
         totalCostUsd: 0,
+        costUnknown: false,
       })
       continue
     }
@@ -252,13 +266,17 @@ export function rankVendors(
           : samples[half]!
     }
     const cost = entry.costTotalUsd
-    const score = successRate + 0.3 / (1 + mid / 1_000) + 0.1 / (1 + cost / 0.1)
+    // Cheapness earns a bonus only when every attempt's cost is known: an
+    // unknown cost scored as zero would rank the vendor that hides its price first.
+    const costUnknown = entry.costUnknownAttempts > 0
+    const score = successRate + 0.3 / (1 + mid / 1_000) + (costUnknown ? 0 : 0.1 / (1 + cost / 0.1))
     scores.push({
       vendorId: id,
       score,
       successRate,
       medianLatencyMs: mid,
       totalCostUsd: cost,
+      costUnknown,
     })
   }
   return scores.sort((a, b) => b.score - a.score)

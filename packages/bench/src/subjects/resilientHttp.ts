@@ -491,7 +491,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         attemptCount: out.attemptCount,
         contentTokens: null as number | null,
         browserMs: 0,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace,
     }
@@ -827,7 +827,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         attemptCount: 0,
         contentTokens: null,
         browserMs: 0,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace,
     }

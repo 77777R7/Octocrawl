@@ -75,7 +75,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
       attemptCount: 0,
       contentTokens: null as number | null,
       browserMs: wallMs,
-      externalCostUsd: null,
+      externalCostUsd: 0,
     },
     trace,
   }

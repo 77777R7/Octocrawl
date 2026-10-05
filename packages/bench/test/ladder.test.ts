@@ -1187,3 +1187,40 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(sessionCoversHost('example.com', 'badexample.com')).toBe(false)
   })
 })
+
+describe('LadderRunner — third-party cost of a run', () => {
+  const url = 'https://example.com/p'
+  const free = (r: FetchResult): FetchResult => ({ ...r, usage: { ...r.usage, externalCostUsd: 0 } })
+  const unpriced = (r: FetchResult): FetchResult => ({ ...r, usage: { ...r.usage, externalCostUsd: null } })
+  /** An http success the extractor found thin, which the ladder offers to the next rung. */
+  const thin = (): FetchResult => {
+    const r = contentfulResult(url, 'http')
+    return { ...r, markdown: 'tiny', usage: { ...r.usage, contentTokens: 3 }, trace: [{ at: 5, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 3, confidence: 0.1 } }] }
+  }
+  const hanging = (id: string, vendorId?: string): Channel => ({
+    id,
+    vendorId,
+    identity: COHERENT,
+    fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
+  })
+
+  it('counts a provider rung the deadline cut before it returned as unknown, not as the 0 of the rungs that returned', async () => {
+    const cut = await new LadderRunner([channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), hanging('provider', 'steel')], { mode: 'authed' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.summary).toMatchObject({ externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true } })
+    expect(cut.result.usage.externalCostUsd).toBeNull()
+    // A local rung cut the same way called no third party: still a known 0.
+    const local = await new LadderRunner([channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), hanging('browser_local')], { mode: 'authed' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(local.summary).toMatchObject({ externalCostUsd: 0, externalCost: { unknown: false } })
+    expect(local.result.usage.externalCostUsd).toBe(0)
+  })
+
+  it("reports the whole run's cost on the answer, so a local page kept after a provider attempt is not called free", async () => {
+    const run = await new LadderRunner([channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), channel('provider', [unpriced(contentfulResult(url, 'provider'))], 'steel')], { mode: 'authed' }).run(url)
+    expect(run.result).toMatchObject({ lane: 'provider', usage: { externalCostUsd: null } })
+    const priced = await new LadderRunner([channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), channel('provider', [{ ...contentfulResult(url, 'provider'), usage: { ...contentfulResult(url, 'provider').usage, externalCostUsd: 0.02 } }], 'steel')], { mode: 'authed' }).run(url)
+    expect(priced.result.usage.externalCostUsd).toBe(0.02)
+    const kept = await new LadderRunner([channel('http', [free(thin())]), channel('provider', [unpriced(providerErrorResult(url, 'steel'))], 'steel')], { mode: 'authed' }).run(url)
+    expect(kept.result.lane).toBe('http')
+    expect(kept.result.usage.externalCostUsd).toBeNull()
+  })
+})
