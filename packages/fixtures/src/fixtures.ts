@@ -1300,6 +1300,46 @@ var captchajs = "/px/" + window._pxAppId + "/captcha/captcha.js?a=c&m=0&g=b"</sc
   }),
 }
 
+const blockPerimeterX429: Fixture = {
+  truth: {
+    id: 'block-perimeterx-429',
+    target: '/block/perimeterx-429',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Press & Hold'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'captcha',
+    notes:
+      'Shaped like the PerimeterX stock block template Wayfair (and its sibling stores) served ' +
+      'with HTTP 429 and no Retry-After on 2026-10-05. The status says rate limit, the page is ' +
+      'the press-and-hold challenge: captcha, because a person can get through it and slowing ' +
+      'down does not.',
+  },
+  respond: () => ({
+    status: 429,
+    headers: { 'content-type': 'text/html' },
+    body: `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="description" content="px-captcha"><title>Access to this page has been denied</title></head>
+<body><script>
+window._pxVid = ''; window._pxUuid = '00000000-0000-4000-8000-000000000000'; window._pxAppId = 'PXfixture2';
+window._pxHostUrl = '/fixture2/xhr'; window._pxJsClientSrc = '/fixture2/init.js'; window._pxFirstPartyEnabled = true;
+var pxCaptchaSrc = '/fixture2/captcha/captcha.js?a=c&u=00000000-0000-4000-8000-000000000000&v=&m=0';
+var script = document.createElement('script'); script.src = pxCaptchaSrc; script.onerror = onScriptError; document.head.appendChild(script);
+function onScriptError() { script = document.createElement('script');
+  script.src = 'https://captcha.px-cloud.net/PXfixture2/captcha.js?a=c&u=00000000-0000-4000-8000-000000000000&v=&m=0';
+  document.head.appendChild(script); }
+window._pxOnError = function () { var div = document.createElement('div');
+  div.innerHTML = '<div>Before we continue...</div><div>Press & Hold to confirm you are a human (and not a bot).</div>';
+  document.body.appendChild(div); };
+</script></body></html>`,
+  }),
+}
+
 // ---------------------------------------------------------------------------
 // Wrong-page content
 // ---------------------------------------------------------------------------
@@ -1882,6 +1922,7 @@ export const FIXTURES: readonly Fixture[] = [
   blockLoginWall,
   blockLoginWallBenefits,
   blockPerimeterX,
+  blockPerimeterX429,
   soft404,
   redirectToHome,
   redirectChain,

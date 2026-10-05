@@ -84,6 +84,12 @@ const GATES: ReadonlyArray<{
     why: '200 PerimeterX press-and-hold page (Walmart, 2026-10-05) that browser_local returned as success',
     evidence: null,
   },
+  {
+    path: '/block/perimeterx-429',
+    reason: 'captcha',
+    why: '429 carrying the PerimeterX block template (Wayfair, 2026-10-05): the challenge, not a rate limit',
+    evidence: null,
+  },
 ]
 
 describe.each([
@@ -120,6 +126,15 @@ describe.each([
     // No lane clears a rate limit; offering one would just move the hammering.
     const rateLimit = await subject.fetch(`${server.url}/block/rate-limit`)
     expect(rateLimit.escalations).toEqual([])
+  })
+
+  it('offers a human handoff for a challenge served with 429', async () => {
+    const out = await subject.fetch(`${server.url}/block/perimeterx-429`)
+    expect(out.escalations).toEqual([
+      { from: 'http', to: 'browser_local_authed', trigger: 'blocked:captcha', improved: null },
+    ])
+    const gate = out.trace.find((t) => t.event === 'gate_detected')
+    expect(gate?.detail?.signals).toEqual(['px_captcha_script', 'px_app_id', 'status_429'])
   })
 
   it('offers a human handoff for a login wall, never a bypass', async () => {

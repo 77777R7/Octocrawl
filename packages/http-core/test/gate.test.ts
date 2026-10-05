@@ -210,6 +210,25 @@ script.src = 'https://captcha.px-cloud.net/PXHYx10rg3/captcha.js?a=c';</script><
     expect(classifyGate(res({ status: 403, body, contentful: true }))).toEqual({ reason: 'captcha', signals: ['px_captcha_script', 'px_app_id'] })
   })
 
+  it('names the stock block template captcha when it is served with 429, keeping the status as a signal', () => {
+    // Wayfair and its sibling stores served exactly this shape with HTTP 429
+    // and no Retry-After on 2026-10-05. A person can get through it; slowing
+    // down does not, so rate_limit (terminal, no handoff) would be the wrong claim.
+    const body = `<head><meta name="description" content="px-captcha"><title>Access to this page has been denied</title></head><body><script>
+window._pxAppId = 'PX3Vk96I6i'; var pxCaptchaSrc = '/3Vk96I6i/captcha/captcha.js?a=c&u=1&v=&m=0';
+script.src = 'https://captcha.px-cloud.net/PX3Vk96I6i/captcha.js?a=c';</script></body>`
+    const want = { reason: 'captcha', signals: ['px_captcha_script', 'px_app_id', 'status_429'] }
+    expect(classifyGate(res({ status: 429, body }))).toEqual(want)
+    expect(classifyGate(res({ status: 429, body, contentful: true }))).toEqual(want)
+    expect(classifyGate(withHeaders({ 'retry-after': '30' }, { status: 429, body }))).toEqual(want)
+  })
+
+  it('keeps a 429 rate_limit when it carries only the sensor or the copy, not the challenge', () => {
+    const rateLimit = { reason: 'rate_limit', signals: ['status_429'] }
+    expect(classifyGate(res({ status: 429, body: `<h1>Too Many Requests</h1>${PX_SENSOR}` }))).toEqual(rateLimit)
+    expect(classifyGate(res({ status: 429, body: '<h1>Robot or human?</h1><p>Activate and hold the button to confirm that you’re human.</p>' }))).toEqual(rateLimit)
+  })
+
   it('names the page from its copy alone when no PerimeterX plumbing survived, on a page with no content', () => {
     const copy = '<h1>Robot or human?</h1><p>Activate and hold the button to confirm that you’re human. Thank You!</p>'
     expect(classifyGate(res({ status: 200, body: copy }))).toEqual({ reason: 'captcha', signals: ['text_activate_and_hold'] })
