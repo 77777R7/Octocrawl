@@ -46,10 +46,10 @@ describe('agent hints', () => {
     expect(hints(wall)).toEqual(['the page asks for a login; W2L does not create accounts; use mode authed with your own session'])
     // The saved login was used and refused: the fix is a fresh import, not mode authed.
     const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
-    expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run w2l login import example.test'])
+    expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
-        'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (w2l scrape --handoff), or a batch handoff (w2l batch --handoff, POST /v1/batches/:id/handoff)',
+        'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])

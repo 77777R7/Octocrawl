@@ -424,7 +424,7 @@ export const TOOLS = [
   },
   {
     name: 'list_logins',
-    description: "The person's saved logins (import_login, w2l login import): { logins: [{ domain, savedAt, cookieCount, localStorage, sessionSha256 }] }, never a cookie or a stored value.",
+    description: "The person's saved logins (import_login, octocrawl login import): { logins: [{ domain, savedAt, cookieCount, localStorage, sessionSha256 }] }, never a cookie or a stored value.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {

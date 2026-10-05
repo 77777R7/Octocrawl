@@ -4,9 +4,12 @@
 // built by tsc for the repository); a published package is a bundle with a
 // package.json of its own:
 //
-//   @w2l/sdk  MIT         ESM + CJS, @w2l/contracts bundled in (and its declarations beside the SDK's), no dependencies
-//   @w2l/cli  AGPL-3.0    bin w2l, every @w2l/* package bundled in, their third-party dependencies declared
-//   @w2l/mcp  AGPL-3.0    bin w2l-mcp (stdio; a client of a running W2L API), bundled the same way
+//   @octocrawl/sdk  MIT       ESM + CJS, @w2l/contracts bundled in (and its declarations beside the SDK's), no dependencies
+//   @octocrawl/cli  AGPL-3.0  bin octocrawl, every @w2l/* workspace package bundled in, their third-party dependencies declared
+//   octocrawl       AGPL-3.0  the same CLI under the unscoped name, so `npx octocrawl` runs it
+//   @octocrawl/mcp  AGPL-3.0  bin octocrawl-mcp (stdio; a client of a running Octocrawl API), bundled the same way
+//
+// The workspace keeps its @w2l/* names; only the published packages carry the Octocrawl names.
 //
 // Usage: node scripts/pack-packages.mjs [--skip-tarballs]
 // Publishing is a separate, deliberate step: npm publish .w2l/pack/tarballs/<file>.tgz --access public
@@ -24,7 +27,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const out = join(root, '.w2l', 'pack')
 const read = (path) => JSON.parse(readFileSync(join(root, path), 'utf8'))
 const rootPackage = read('package.json')
-const repository = { type: 'git', url: 'git+https://github.com/77777R7/w2l.git' }
+const repository = { type: 'git', url: 'git+https://github.com/77777R7/Octocrawl.git' }
 
 /** Every third-party dependency of the workspace packages a bundle takes in, with the range they declare. */
 function thirdPartyDependencies(names) {
@@ -106,8 +109,8 @@ function importedPackages(outDir) {
 
 const targets = [
   {
-    name: '@w2l/sdk', dir: 'sdk', license: 'MIT', licenseFile: 'packages/sdk/LICENSE',
-    description: 'TypeScript client for the W2L API: scrape, map, crawl and batch with an Evidence Record on every page.',
+    name: '@octocrawl/sdk', dir: 'sdk', license: 'MIT', licenseFile: 'packages/sdk/LICENSE',
+    description: 'TypeScript client for the Octocrawl API: scrape, map, crawl and batch with an Evidence Record on every page.',
     entry: { index: 'packages/sdk/src/index.ts' }, formats: ['esm', 'cjs'], types: true,
     manifest: () => ({
       main: './dist/index.cjs', module: './dist/index.js', types: './dist/types/esm/index.d.ts',
@@ -116,16 +119,16 @@ const targets = [
     }),
   },
   {
-    name: '@w2l/cli', dir: 'cli', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
-    description: 'W2L on the command line: scrape, crawl, batch and map with an Evidence Record on every page, or serve the local API.',
+    name: '@octocrawl/cli', dir: 'cli', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
+    description: 'Octocrawl on the command line: scrape, crawl, batch and map with an Evidence Record on every page, or serve the local API.',
     entry: { cli: 'packages/cli/src/cli.ts' }, formats: ['esm'],
-    manifest: () => ({ bin: { w2l: './dist/cli.js' }, engines: { node: rootPackage.engines?.node ?? '>=22.13.0' }, dependencies: thirdPartyDependencies(['@w2l/cli']) }),
+    manifest: () => ({ bin: { octocrawl: './dist/cli.js' }, engines: { node: rootPackage.engines?.node ?? '>=22.13.0' }, dependencies: thirdPartyDependencies(['@w2l/cli']) }),
   },
   {
-    name: '@w2l/mcp', dir: 'mcp', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
-    description: 'W2L as an MCP server over stdio, a client of a running W2L API (w2l serve).',
+    name: '@octocrawl/mcp', dir: 'mcp', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
+    description: 'Octocrawl as an MCP server over stdio, a client of a running Octocrawl API (octocrawl serve).',
     entry: { stdio: 'packages/mcp/src/stdio.ts' }, formats: ['esm'], plugins: [inlineAmazonSchema],
-    manifest: () => ({ bin: { 'w2l-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
+    manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
   },
 ]
 
@@ -168,7 +171,7 @@ for (const target of targets) {
     description: target.description,
     license: target.license,
     repository,
-    homepage: 'https://github.com/77777R7/w2l#readme',
+    homepage: 'https://github.com/77777R7/Octocrawl#readme',
     type: 'module',
     files: ['dist', 'README.md', 'LICENSE'],
     ...target.manifest(source.version),
@@ -184,6 +187,21 @@ for (const target of targets) {
     console.log(`${target.name}@${source.version} → .w2l/pack/tarballs/${file}`)
   } else {
     console.log(`${target.name}@${source.version} → .w2l/pack/${target.dir}`)
+  }
+}
+
+// The CLI again under the unscoped name `octocrawl`, so `npx octocrawl <command>` runs it: the same files, its own name.
+{
+  const cli = join(out, 'cli')
+  const alias = join(out, 'octocrawl')
+  cpSync(cli, alias, { recursive: true })
+  const manifest = JSON.parse(readFileSync(join(alias, 'package.json'), 'utf8'))
+  writeFileSync(join(alias, 'package.json'), `${JSON.stringify({ ...manifest, name: 'octocrawl' }, null, 2)}\n`)
+  if (!process.argv.includes('--skip-tarballs')) {
+    const file = execFileSync('npm', ['pack', '--pack-destination', tarballs, '--silent'], { cwd: alias, encoding: 'utf8' }).trim().split('\n').pop()
+    console.log(`octocrawl@${manifest.version} → .w2l/pack/tarballs/${file}`)
+  } else {
+    console.log(`octocrawl@${manifest.version} → .w2l/pack/octocrawl`)
   }
 }
 

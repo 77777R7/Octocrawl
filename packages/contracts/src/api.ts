@@ -625,7 +625,7 @@ export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_
 
 /**
  * `POST /v1/logins/import`: save the person's login to `site` (a domain or a
- * page URL) from the Chrome they use, as `w2l login import` does, on a server
+ * page URL) from the Chrome they use, as `octocrawl login import` does, on a server
  * on their machine. `approveTimeoutMs`: how long to wait for them to click
  * Allow in Chrome, 10 s to 10 min; default 2 min.
  */

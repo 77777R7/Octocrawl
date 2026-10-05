@@ -490,7 +490,7 @@ export class W2L {
 
   /**
    * Save the person's login to a site (a domain or a page URL) from the
-   * Chrome they use, as `w2l login import` does, on a server on their
+   * Chrome they use, as `octocrawl login import` does, on a server on their
    * machine. Chrome asks them "Allow remote debugging?": the answer comes
    * once they click Allow (within `approveTimeoutMs`, default 2 minutes).
    * The saved login's cookies never leave the server: the answer names the

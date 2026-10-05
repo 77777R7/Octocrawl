@@ -65,7 +65,7 @@ def to_pandas(rows: list[dict[str, Any]]):
     try:
         import pandas as pd
     except ImportError as error:  # pragma: no cover - depends on the environment
-        raise ImportError("to_pandas needs pandas: pip install 'w2l[pandas]'") from error
+        raise ImportError("to_pandas needs pandas: pip install 'octocrawl-client[pandas]'") from error
     columns = [column for column in EVIDENCE_COLUMNS if not rows or column in rows[0]]
     frame = pd.DataFrame(rows, columns=columns)
     # Unknown stays missing: an HTTP status W2L did not observe is <NA>, not 0.

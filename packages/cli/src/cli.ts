@@ -15,6 +15,6 @@ runCli(process.argv.slice(2), {
   stderr: (text) => process.stderr.write(`${text}\n`),
   signal: controller.signal,
 }).then((code) => { process.exitCode = code }, (error: unknown) => {
-  process.stderr.write(`w2l: ${error instanceof Error ? error.message : String(error)}\n`)
+  process.stderr.write(`octocrawl: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 1
 })

@@ -493,7 +493,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     catch (error) { return fail(c, 'conflict', error instanceof Error ? error.message : 'retry conflict') }
   })
 
-  /** The person's saved logins, as `w2l login` keeps them: imported from their Chrome, listed without cookies, forgotten. A server on their machine alone. */
+  /** The person's saved logins, as `octocrawl login` keeps them: imported from their Chrome, listed without cookies, forgotten. A server on their machine alone. */
   app.post('/v1/logins/import', async (c) => {
     const req = parseLoginImportRequest(await c.req.json())
     try { return c.json(await engine.importLogin(req), 200) }

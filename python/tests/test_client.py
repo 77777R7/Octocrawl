@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-import w2l
-from w2l import EVIDENCE_COLUMNS, W2L, W2LError, api_name
+import octocrawl_client as w2l
+from octocrawl_client import EVIDENCE_COLUMNS, W2L, W2LError, api_name
 
 RECORD = {
     "schemaVersion": "w2l.evidence/1", "requestedUrl": "https://a.example/", "finalUrl": "https://a.example/", "fetchedAt": "2026-10-03T08:00:00.000Z",

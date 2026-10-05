@@ -49,7 +49,7 @@ function fakeChrome(cookies = COOKIES, tabs: Tab[] = [], defaultContext: string 
   return { calls, connect }
 }
 
-describe('w2l login import from the user\'s Chrome', () => {
+describe('octocrawl login import from the user\'s Chrome', () => {
   let root: string
   let userDataDir: string
   let sessionsFile: string
@@ -227,7 +227,7 @@ describe('w2l login import from the user\'s Chrome', () => {
     ]
     expect(cookiesForDomain(underSuffix, 'co.uk')).toEqual([])
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9333\n/devtools/browser/abc\n')
-    await expect(importChromeLogin({ site: 'co.uk', sessionsFile, userDataDir, connect: fakeChrome(underSuffix).connect })).rejects.toThrow(/sets no cookie on co.uk itself.*w2l login import bbc.co.uk/)
+    await expect(importChromeLogin({ site: 'co.uk', sessionsFile, userDataDir, connect: fakeChrome(underSuffix).connect })).rejects.toThrow(/sets no cookie on co.uk itself.*octocrawl login import bbc.co.uk/)
     await expect(readFile(sessionsFile, 'utf8')).rejects.toThrow()
   })
 

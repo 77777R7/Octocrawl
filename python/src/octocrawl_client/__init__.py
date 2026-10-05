@@ -1,9 +1,9 @@
-"""W2L: web pages as Markdown, tables and JSON, each with its Evidence Record.
+"""Octocrawl: web pages as Markdown, tables and JSON, each with its Evidence Record.
 
-    import w2l
-    df = w2l.batch(["https://example.com/a", "https://example.com/b"], formats=["markdown", "tables"]).to_pandas()
+    import octocrawl_client
+    df = octocrawl_client.batch(["https://example.com/a", "https://example.com/b"], formats=["markdown", "tables"]).to_pandas()
 
-The client talks to a W2L API: `npx @w2l/cli serve` runs one locally (http://127.0.0.1:8787,
+The client talks to an Octocrawl API: `npx octocrawl serve` runs one locally (http://127.0.0.1:8787,
 or set W2L_API_URL; W2L_API_TOKEN for a hosted one).
 """
 

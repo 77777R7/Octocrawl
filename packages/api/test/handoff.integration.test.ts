@@ -323,7 +323,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       const notRead = await engine.scrape({ url: `${base}/never`, handoff: { waitMs: 1_000 } } as never, {}, {}) as Record<string, any>
       expect(notRead.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
       expect(notRead.handoff.rationale).toContain('it was not read there')
-      expect(notRead.handoff.rationale).not.toContain('handoff: true (w2l scrape --handoff)')
+      expect(notRead.handoff.rationale).not.toContain('handoff: true (octocrawl scrape --handoff)')
     } finally {
       stop()
       await engine.close()
