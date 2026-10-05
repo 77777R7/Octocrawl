@@ -157,6 +157,11 @@ describe('octocrawl against a local site', () => {
     expect((await cli(['scrape'])).err).toMatch(/takes one URL/)
     // Every message names the command the person types.
     expect((await cli(['bogus'])).err).toMatch(/^octocrawl: unknown command bogus/)
+    // A one-off command listens nowhere: a listen address for the API server in the environment is not its concern.
+    const out: string[] = []
+    const err: string[] = []
+    const code = await runCli(['scrape', `${origin}/tides/a`, '--markdown'], { env: { W2L_TASK_ROOT: join(root, 'tasks'), W2L_API_HOST: '0.0.0.0' }, stdout: (text) => out.push(text), stderr: (text) => err.push(text) })
+    expect({ code, err: err.join('\n') }).toMatchObject({ code: 0 })
   })
 
   it('runs a batch and a crawl to the end and answers with the report and every page; maps a site', async () => {

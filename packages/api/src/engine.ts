@@ -730,7 +730,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
-      const waitingForPerson = userChrome === null || handoffUnread(task) !== null ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
+      const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -808,7 +808,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && handoffUnread(task) === null)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && offersHandoff(task))),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -889,6 +889,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
       const unread = handoffUnread(task)
       if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
+      if (webhookOf(task) !== undefined) throw new CrawlStateError(`batch ${taskId} has a webhook: a page read in your own Chrome is read signed in as you, and is not sent to another address; its stopped items are not handed over`)
       handoffs.add(taskId)
       try {
         const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
@@ -2046,6 +2047,11 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
  */
 function handoffUnread(task: Task): string | null {
   return task.batch === undefined ? null : unreadByPerson(fetchOptions(task.batch, task.batch.formats))
+}
+
+/** Whether a batch's stopped items can be handed to the person: not when it asked for what their Chrome cannot give, nor when it has a webhook, which would send pages read signed in as them to another address. */
+function offersHandoff(task: Task): boolean {
+  return handoffUnread(task) === null && webhookOf(task) === undefined
 }
 
 /** What a request asks for that a page read in the person's Chrome cannot give: page actions or a screenshot, W2L's browser's to take; null when nothing. */

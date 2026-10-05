@@ -22,7 +22,7 @@ describe('job ids', () => {
     await mkdir(join(root, 'victim'))
     const climbs = ['..%2Fvictim', '..%2F..%2Fetc', '%2E%2E%2Fvictim']
     for (const id of climbs) {
-      for (const [method, path] of [['POST', `/v1/crawl/${id}/cancel`], ['POST', `/v1/crawl/${id}/resume`], ['GET', `/v1/crawl/${id}`], ['GET', `/v1/batches/${id}`], ['GET', `/v1/batches/${id}/errors`], ['DELETE', `/v1/batches/${id}`]] as const) {
+      for (const [method, path] of [['POST', `/v1/crawl/${id}/cancel`], ['POST', `/v1/crawl/${id}/resume`], ['GET', `/v1/crawl/${id}`], ['GET', `/v1/batches/${id}`], ['GET', `/v1/batches/${id}/errors`], ['GET', `/v1/batches/${id}/items`], ['GET', `/v1/crawl/${id}/errors`], ['POST', `/v1/batches/${id}/handoff`]] as const) {
         const res = await app.request(path, { method, headers: { 'content-type': 'application/json' } })
         expect(res.status, `${method} ${path}`).toBe(404)
       }

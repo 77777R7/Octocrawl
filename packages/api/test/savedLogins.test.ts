@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { connect, type AddressInfo } from 'node:net'
+import { serve } from '@hono/node-server'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -123,6 +125,23 @@ describe('saved logins in the API engine', () => {
     expect(bare.status).toBe(400)
     // A POST without a body (cancel, resume) needs no type.
     expect((await app.request('http://127.0.0.1:8787/v1/crawl/00000000-0000-4000-8000-000000000000/cancel', { method: 'POST', headers: { host: '127.0.0.1:8787' } })).status).toBe(404)
+    // Over a real socket too: curl -X POST sends neither a length nor a type, and the server still sees a body stream.
+    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })
+    try {
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+      const { port } = server.address() as AddressInfo
+      // The bytes curl -X POST sends: no Content-Length, no Transfer-Encoding, no body.
+      const status = await new Promise<number>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () => socket.write(`POST /v1/crawl/00000000-0000-4000-8000-000000000000/cancel HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nAccept: */*\r\nConnection: close\r\n\r\n`))
+        let reply = ''
+        socket.on('data', (chunk) => { reply += String(chunk) })
+        socket.on('end', () => resolve(Number(/^HTTP\/1\.1 (\d+)/.exec(reply)?.[1] ?? 0)))
+        socket.on('error', reject)
+      })
+      expect(status).toBe(404)
+    } finally {
+      server.close()
+    }
     expect(isLoopbackAuthority('[::1]:8787', false)).toBe(true)
     expect(isLoopbackAuthority('localhost.evil.example', false)).toBe(false)
   })
