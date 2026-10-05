@@ -23,7 +23,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
@@ -448,7 +448,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // the warnings and the compliance record, and the fetch goes ahead. A
       // robots.txt unread because the host's certificate does not verify is
       // reported as that below: the page would fail the same way.
-      const override = options.robotsOverride
+      const override = applicableOverride(options.robotsOverride, robotsDecision)
       const overridden = identity.respectsRobots && robotsDecision.decision === 'disallowed' && override !== undefined
         && !(robotsDecision.unreachable !== undefined && cachedRobots?.error?.tls === true)
       if (override !== undefined && overridden) {

@@ -141,6 +141,13 @@ describe('MapRunner', () => {
     ])
     expect(map.refused.robots).toBe(0)
     expect(map.warnings.map((warning) => warning.code)).toEqual([])
+    // A rule robots.txt writes for Octocrawl by name holds under ignoreRobotsTxt: the URL is refused, the start page not read.
+    const named = sources(startPage([link('/docs/x')]), fakeSitemap([{ url: `${SITE}/docs/owner-out` }]).source, async (url) => (url === START || url.includes('owner-out') ? { disallowed: true, octocrawl: true } : 'allowed'))
+    const targeted = await new MapRunner(named.wired).run({ id: 'm-octocrawl', url: START, ignoreRobotsTxt: true })
+    expect(named.reads).toEqual([])
+    expect(targeted.sources.startPage).toMatchObject({ status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' })
+    expect(targeted.links.map((l) => l.url)).toEqual([])
+    expect(targeted.refused.robots).toBe(2)
     // Without it the same site keeps them out, as before.
     const obeying = await new MapRunner(sources(startPage([link('/docs/private/a'), link('/docs/down')]), fakeSitemap([{ url: `${SITE}/docs/open` }]).source, verdicts).wired).run({ id: 'm-obey', url: START })
     expect(obeying.sources.startPage).toMatchObject({ status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' })

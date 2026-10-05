@@ -11,6 +11,7 @@ import {
   modeIdentity,
   operatorContact,
   researchUserAgent,
+  isOctocrawlRobotsGroup,
   robotsAgent,
   withOperatorContact,
   type CrawlMode,
@@ -108,7 +109,10 @@ describe('declared research contact (W2L_CONTACT)', () => {
     expect(identityBundleIssues({ ...sec, clientHints: browserClientHints(128) })).toContain('research UA must not send Chromium client hints')
     expect(formatIdentitySummary(sec)).toBe('w2l-research · en-US')
     expect(robotsAgent(sec.userAgent)).toContain('w2l-research')
-    expect(robotsAgent(researchUserAgent(contact))).toBe(researchUserAgent(contact))
+    // Every User-Agent is matched with the product token added, so a group for Octocrawl governs it in any mode.
+    expect(robotsAgent(researchUserAgent(contact))).toBe(`${researchUserAgent(contact)} octocrawl`)
+    expect(robotsAgent(modeIdentity('standard').userAgent)).toBe(`${modeIdentity('standard').userAgent} octocrawl`)
+    expect([isOctocrawlRobotsGroup('octocrawl'), isOctocrawlRobotsGroup('w2l-research'), isOctocrawlRobotsGroup('*'), isOctocrawlRobotsGroup(null)]).toEqual([true, true, false, false])
   })
 
   it('reads W2L_CONTACT as printable ASCII of at most 200 characters, and refuses anything else', () => {

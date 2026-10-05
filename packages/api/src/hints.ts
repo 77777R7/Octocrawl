@@ -8,7 +8,7 @@
  * response (`agentHints`) only when there is one.
  */
 
-import { DEFAULT_SCRAPE_TIMEOUT_MS, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
+import { DEFAULT_SCRAPE_TIMEOUT_MS, isOctocrawlRobotsGroup, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -130,11 +130,15 @@ function robotsHint(result: HintedResult, host: string): string | null {
     .filter((rule): rule is { pattern: string; allow: boolean } => rule !== null && typeof rule === 'object' && typeof (rule as { pattern?: unknown }).pattern === 'string')
     .filter((rule) => rule.allow === false)
     .map((rule) => rule.pattern)
-  return `robots.txt of ${host} disallows this URL for W2L's identity (rule ${rules.length === 0 ? 'unknown' : rules.join(', ')}). ${ROBOTS_ROUTE}`
+  const group = result.trace.find((event) => event.event === 'robots_checked')?.detail?.matchedGroup
+  if (typeof group === 'string' && isOctocrawlRobotsGroup(group)) {
+    return `robots.txt of ${host} disallows this URL for Octocrawl by name (User-agent: ${group}; rule ${rules.length === 0 ? 'unknown' : rules.join(', ')}): the site owner's opt-out, which a named URL and ignoreRobotsTxt do not set aside; only a robotsOverride with your recorded reason does, on a local server`
+  }
+  return `robots.txt of ${host} disallows this URL for Octocrawl's identity (rule ${rules.length === 0 ? 'unknown' : rules.join(', ')}). ${ROBOTS_ROUTE}`
 }
 
 /** Where robots.txt is set aside, on the record: a robots refusal now comes from a crawl's or map's link, a Monitor, or a hosted server. */
-const ROBOTS_ROUTE = 'A local W2L server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL'
+const ROBOTS_ROUTE = 'A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL'
 
 /**
  * The hints of one scrape, in the order they apply; empty when there is

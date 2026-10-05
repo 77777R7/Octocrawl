@@ -174,7 +174,7 @@ export interface MapStartPageRead {
 }
 
 /** A robots.txt verdict for one URL under the map's declared identity. */
-export type MapRobotsVerdict = 'allowed' | 'no_robots' | { disallowed: true; unreachable?: string }
+export type MapRobotsVerdict = 'allowed' | 'no_robots' | { disallowed: true; unreachable?: string; /** A rule robots.txt wrote for Octocrawl itself, which ignoreRobotsTxt does not set aside. */ octocrawl?: true }
 
 /** The fetch paths a map uses; the API engine wires the real ones, tests inject fakes. */
 export interface MapSources {

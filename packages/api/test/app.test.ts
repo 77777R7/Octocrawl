@@ -659,7 +659,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(await plain.json()).toMatchObject({
         status: 'failed', failureReason: 'policy_denied',
         evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } },
-        agentHints: [expect.stringContaining("robots.txt of 127.0.0.1 disallows this URL for W2L's identity (rule /)")],
+        agentHints: [expect.stringContaining("robots.txt of 127.0.0.1 disallows this URL for Octocrawl's identity (rule /)")],
       })
       expect(requests).toEqual(['/robots.txt'])
     } finally {

@@ -84,6 +84,8 @@ const READ_STATUSES: ReadonlySet<ResultStatus> = new Set<ResultStatus>(['success
 type Found = { via: 'link'; url: string; text: string | null } | { via: 'sitemap'; entry: SitemapEntry }
 /** `unreachable`: robots.txt could not be read (5xx, network error, its lookup's timeout, the egress policy), which counts as a complete disallow but is no rule the publisher wrote. */
 type Verdict = 'allowed' | 'no_robots' | 'disallowed' | { unreachable: string } | 'unchecked'
+/** `octocrawl`: a rule robots.txt wrote for Octocrawl itself; it refuses the URL even with ignoreRobotsTxt. */
+type FullVerdict = Verdict | 'octocrawl'
 
 export class MapRunner {
   constructor(private readonly sources: MapSources) {}
@@ -140,7 +142,7 @@ export class MapRunner {
       const unreachableOrigins = new Map<string, { reason: string; refused: number }>()
 
       /** The robots.txt verdict for a candidate: its origin's file is read once, for at most the start host and maxRobotsHosts others. */
-      const verdictFor = async (canonicalUrl: string): Promise<Verdict> => {
+      const verdictFor = async (canonicalUrl: string): Promise<FullVerdict> => {
         const origin = new URL(canonicalUrl).origin
         if (!origins.has(origin)) {
           if (origins.size >= 1 + maxRobotsHosts) { hostCapped++; return 'unchecked' }
@@ -149,6 +151,7 @@ export class MapRunner {
         try {
           const verdict = await this.sources.robotsVerdict(canonicalUrl, scope)
           if (typeof verdict === 'string') return verdict
+          if (verdict.octocrawl === true) return 'octocrawl'
           return verdict.unreachable === undefined ? 'disallowed' : { unreachable: verdict.unreachable }
         } catch (error) {
           if (cancelled()) throw error
@@ -282,6 +285,7 @@ export class MapRunner {
       const admit = async (canonicalUrl: string, found: Found): Promise<boolean> => {
         const verdict = await verdictFor(canonicalUrl)
         if (verdict === 'unchecked') { refused.robotsUnchecked++; return false }
+        if (verdict === 'octocrawl') { refuseRobots(canonicalUrl, 'disallowed'); return false }
         if ((verdict === 'disallowed' || typeof verdict === 'object') && !ignoreRobots) { refuseRobots(canonicalUrl, verdict); return false }
         if (links.length >= limit) { refused.overLimit++; limitReached = true; return true }
         add(canonicalUrl, found, linkVerdict(verdict))
@@ -292,9 +296,11 @@ export class MapRunner {
       let startPage: MapStartPage | null = null
       let clientRendered = false
       if (sitemapMode !== 'only') {
-        const startVerdict = await verdictFor(startCanonical)
+        const fullStartVerdict = await verdictFor(startCanonical)
+        const startVerdict: Verdict = fullStartVerdict === 'octocrawl' ? 'disallowed' : fullStartVerdict
+        const startRefused = fullStartVerdict === 'octocrawl' || !ignoreRobots
         const blank = { url: spec.url, finalUrl: null, httpStatus: null, lane: 'http' as const, rawBodySha256: null, linksFound: 0, title: null, description: null }
-        if ((startVerdict === 'disallowed' || typeof startVerdict === 'object') && !ignoreRobots) {
+        if ((startVerdict === 'disallowed' || typeof startVerdict === 'object') && startRefused) {
           refuseRobots(startCanonical, startVerdict)
           startPage = typeof startVerdict === 'object'
             ? { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'unreachable', robotsUnreachable: startVerdict.unreachable }

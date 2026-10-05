@@ -28,6 +28,7 @@ import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelect
 import {
   DEFAULT_SCRAPE_TIMEOUT_MS,
   defaultApiMode,
+  isOctocrawlRobotsGroup,
   localNetworkPolicy,
   maxFileBytesFromEnv,
   type FetchOptions,
@@ -1260,7 +1261,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           lookups.set(origin, lookup)
         }
         const decision = robots.decision(await lookup, url, userAgent)
-        return decision.decision === 'disallowed' ? { disallowed: true, ...(decision.unreachable === undefined ? {} : { unreachable: decision.unreachable }) } : decision.decision
+        return decision.decision === 'disallowed'
+          ? { disallowed: true, ...(decision.unreachable === undefined ? {} : { unreachable: decision.unreachable }), ...(isOctocrawlRobotsGroup(decision.matchedUserAgentGroup) ? { octocrawl: true as const } : {}) }
+          : decision.decision
       },
       identity: { mode, userAgent: userAgentFor(req.url) },
     }

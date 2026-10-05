@@ -217,6 +217,39 @@ describe('ResilientHttpSubject robots', () => {
     }
   })
 
+  it('obeys a rule robots.txt writes for Octocrawl by name, for a named URL too; only a recorded override sets it aside', async () => {
+    let pageHits = 0
+    const server = createServer((req, res) => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: Octocrawl\nDisallow: /\n\nUser-agent: *\nDisallow: /blocked\n'); return }
+      pageHits++
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<html><body><main><article><h1>Owner page</h1><p>The owner of this site tells Octocrawl by name to stay out, while every other crawler may read this page; a targeted opt-out must hold even for a URL a person names.</p><p>Only a decision the caller records for this one URL, with a reason, may set it aside, and the record says so.</p></article></main></body></html>')
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const url = `http://127.0.0.1:${address.port}/page`
+    const subject = new ResilientHttpSubject()
+    try {
+      // The `*` group allows /page; the group for Octocrawl decides.
+      const plain = await subject.fetch(url)
+      expect(plain).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      expect(plain.trace.find((t) => t.event === 'robots_checked')?.detail).toMatchObject({ decision: 'disallowed', matchedGroup: 'octocrawl' })
+      for (const basis of ['user_named_url', 'ignore_robots_txt'] as const) {
+        const ruled = await subject.fetch(url, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'by rule', basis } })
+        expect(ruled, basis).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+        expect(ruled.trace.some((t) => t.event === 'robots_overridden'), basis).toBe(false)
+      }
+      expect(pageHits).toBe(0)
+      const recorded = await subject.fetch(url, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'The publisher asked us to archive this page.' } })
+      expect(recorded.status).toBe('success')
+      expect(recorded.trace.find((t) => t.event === 'robots_overridden')?.detail).toMatchObject({ basis: 'robots_override' })
+      expect(pageHits).toBe(1)
+    } finally {
+      await subject.teardown()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('honours a more-specific Allow beneath a Disallow', async () => {
     const subject = new ResilientHttpSubject()
     const out = await subject.fetch(`${robotsUrl}/private/ok`)

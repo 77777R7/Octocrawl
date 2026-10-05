@@ -28,6 +28,7 @@
 
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
+import { isOctocrawlRobotsGroup } from '@w2l/contracts'
 import type { CrawlMode, ExecutionContext, IdentityDevice, NetworkPolicy, SitemapEntry, SitemapFileRecord, SitemapLoadRequest, SitemapLoadResult, SitemapSource } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, isGzipBytes, isTlsError, looksGzipped, parseSitemapXml, raceWithSignal, throwIfExecutionStopped, type SitemapEntryDetail } from '@w2l/http-core'
 import { request } from 'undici'
@@ -188,7 +189,8 @@ export class HttpSitemapSource implements SitemapSource {
         this.crawlDelays.set(origin, Math.max(this.crawlDelays.get(origin) ?? 0, decision.crawlDelayMs))
       }
       record.robots = decision.decision === 'allowed' ? 'allowed' : decision.decision === 'no_robots' ? 'no_robots' : 'disallowed'
-      if (decision.decision === 'disallowed' && !this.ignoreRobotsTxt) {
+      // A rule written for Octocrawl itself binds a crawl or map with ignoreRobotsTxt too.
+      if (decision.decision === 'disallowed' && (!this.ignoreRobotsTxt || isOctocrawlRobotsGroup(decision.matchedUserAgentGroup))) {
         return { record: { ...record, kind: 'refused', error: decision.unreachable === undefined ? null : `robots_unreachable_${decision.unreachable}` }, locs: null }
       }
       const response = await this.fetch(url, identity.headers, scope)

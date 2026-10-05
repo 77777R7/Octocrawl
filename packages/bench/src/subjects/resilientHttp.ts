@@ -19,7 +19,7 @@ import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, Deco
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -302,7 +302,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         // publisher wrote or the complete disallow an unreachable robots.txt
         // implies. The verdict stays in the trace above; this says on whose
         // word it was set aside and why, and the result's warnings repeat it.
-        const override = options.robotsOverride
+        const override = applicableOverride(options.robotsOverride, robotsDecision)
         if (robotsDecision.unreachable !== undefined && cached?.error?.tls === true) {
           // robots.txt could not be read because the host's certificate does not
           // verify; the page would fail the same way. That is the fact to report.

@@ -10,7 +10,7 @@
  * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type AppliedRobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
+import { isOctocrawlRobotsGroup, robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type AppliedRobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -74,6 +74,18 @@ export function robotsOverrideWarning(decision: ComplianceRobotsDecision, overri
       ? 'it was fetched because the crawl or map was started with ignoreRobotsTxt'
       : `it was fetched under an override recorded${who}: ${override.reason}`
   return { code: 'robots_overridden', message: `${verdict}; ${why}` }
+}
+
+/**
+ * The override a lane applies to this verdict. A rule a robots.txt wrote for
+ * Octocrawl itself (`User-agent: Octocrawl`) is the site owner's targeted
+ * opt-out: a URL the request names and ignoreRobotsTxt do not set it aside,
+ * only the caller's recorded robotsOverride for this URL does. A rule for
+ * every crawler gives way to any override.
+ */
+export function applicableOverride(override: AppliedRobotsOverride | undefined, decision: ComplianceRobotsDecision): AppliedRobotsOverride | undefined {
+  if (override?.basis !== undefined && isOctocrawlRobotsGroup(decision.matchedUserAgentGroup)) return undefined
+  return override
 }
 
 /** The `robots_overridden` trace event's detail: the URL, the rules or unreachable reason set aside, and on whose word. */

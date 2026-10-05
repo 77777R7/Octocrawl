@@ -168,13 +168,29 @@ export function isResearchUserAgent(userAgent: string): boolean {
 }
 
 /**
+ * The product token a robots.txt names to address Octocrawl itself
+ * (`User-agent: Octocrawl`), whatever User-Agent header a request sends. It
+ * is matched in every mode. A rule written for it (or for research mode's own
+ * token) is not set aside for a URL the request names or for a crawl or map
+ * started with ignoreRobotsTxt; only a recorded robotsOverride sets it aside.
+ */
+export const PRODUCT_ROBOTS_TOKEN = 'octocrawl'
+
+/**
  * The text robots.txt `User-agent` lines are matched against for a
- * User-Agent W2L sends. SEC's format names no product token, so the research
- * token is added: a group for w2l-research governs research requests to
- * SEC.gov as it does on every other host.
+ * User-Agent Octocrawl sends: the header, with the product token added. SEC's
+ * format names no product token, so the research token is added as well: a
+ * group for w2l-research governs research requests to SEC.gov as it does on
+ * every other host.
  */
 export function robotsAgent(userAgent: string): string {
-  return userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
+  const declared = userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
+  return `${declared} ${PRODUCT_ROBOTS_TOKEN}`
+}
+
+/** Whether the robots.txt group that decided names Octocrawl itself (its product token, or research mode's) rather than every crawler (`*`). */
+export function isOctocrawlRobotsGroup(matchedAgent: string | null | undefined): boolean {
+  return matchedAgent === PRODUCT_ROBOTS_TOKEN || matchedAgent === RESEARCH_PRODUCT_TOKEN
 }
 
 /** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
