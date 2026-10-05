@@ -1,0 +1,2399 @@
+{
+  "schema": "octocrawl.access-tasks/1",
+  "note": "Candidates until frozen. At freeze, each task becomes `frozen` (not verified in both baseline windows), `healthy` (verified in both) or `unstable` (the windows disagree; kept in the denominator), and the blind set is added with part `blind`.",
+  "createdAt": "2026-10-05",
+  "frozenAt": null,
+  "baselineCommit": null,
+  "healthyBatches": [
+    "1",
+    "L",
+    "F",
+    "tables",
+    "lists",
+    "list-records",
+    "actions"
+  ],
+  "excluded": [
+    {
+      "url": "https://nowsecure.nl/",
+      "reason": "a bot-detection test page; ROADMAP measures access on real tasks only"
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/1878848/000187884826000015/iren-20251231.htm",
+      "reason": "answers 403 without a declared contact and 200 in research mode with W2L_CONTACT; an identity policy, not an access block"
+    },
+    {
+      "url": "https://hn.algolia.com/",
+      "reason": "the browser lane loads it and reads no main content; an extraction case, not an access block"
+    },
+    {
+      "url": "pages that need actions (quotes.toscrape.com/scroll, /js-delayed, webscraper.io scroll)",
+      "reason": "feature tasks covered by the actions and lists batches"
+    },
+    {
+      "url": "deliberate failures (404 pages, httpbin delays, badssl)",
+      "reason": "test pages whose correct answer is a failure"
+    },
+    {
+      "url": "https://www.target.com/c/laptops-electronics/-/N-5xtfm",
+      "reason": "the category link was stale (404); dropped before freezing"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T001",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://studylib.net/doc/28545749/google-2025-environmental-report",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Google",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "environmental report",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: coos-pilot URL"
+    },
+    {
+      "id": "T002",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://ember-energy.org/data/electricity-data-explorer/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "electricity",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "generation",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: real-site-test-set"
+    },
+    {
+      "id": "T003",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "product",
+      "url": "https://demoshop.oxid-esales.com/Merchandise/Uhren/Gold-Spirit.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Gold Spirit",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 1
+        }
+      ],
+      "provenance": "harvest: parity J05"
+    },
+    {
+      "id": "T004",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "product",
+      "url": "https://www.jpc.de/jpcng/books/detail/-/art/die-augenheilkunde/hnum/11617379",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Augenheilkunde",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 1
+        }
+      ],
+      "provenance": "harvest: parity J04"
+    },
+    {
+      "id": "T005",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.etsy.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Etsy",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: canary tier 2"
+    },
+    {
+      "id": "T006",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.amazon.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Amazon",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: canary tier 2"
+    },
+    {
+      "id": "T007",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.ironmountain.com/data-centers/colocation",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "colocation",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "data cent",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: coos-pilot URL"
+    },
+    {
+      "id": "T008",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "page",
+      "url": "https://github.com/scrapinghub/spidyquotes/blob/master/README.md",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "spidyquotes",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "quotes",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: real-site-test-set"
+    },
+    {
+      "id": "T009",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://fred.stlouisfed.org/series/UNRATE",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Unemployment Rate",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\b\\d\\.\\d\\b",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: real-site-test-set"
+    },
+    {
+      "id": "T010",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://data-explorer.oecd.org/s/1xl",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "OECD",
+          "flags": "i"
+        }
+      ],
+      "provenance": "harvest: real-site-test-set"
+    },
+    {
+      "id": "T011",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "dynamic",
+      "url": "https://www.tiktok.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "TikTok",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "harvest: canary tier 2"
+    },
+    {
+      "id": "T012",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T013",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.bestbuy.com/site/searchpage.jsp?st=laptop",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T014",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.homedepot.com/b/Tools-Power-Tools-Drills/N-5yc1vZc27f",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "drill",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T015",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.nike.com/w/mens-running-shoes-37v7jznik1zy7ok",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "running",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T016",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.zara.com/us/en/man-shirts-l737.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "shirt",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T017",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www2.hm.com/en_us/men/products/shirts.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "shirt",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T018",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.wayfair.com/furniture/sb0/sofas-c413892.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "sofa",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T019",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.costco.com/laptops.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T020",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.newegg.com/p/pl?d=laptop",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T021",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.ebay.com/b/Laptops-Netbooks/175672/bn_1648276",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T022",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.ikea.com/us/en/cat/sofas-fu003/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "sofa",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T023",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.sephora.com/shop/moisturizing-cream-oils-mists",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "moisturi",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T024",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.ulta.com/shop/skin-care/moisturizers",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "moisturi",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T025",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.nordstrom.com/browse/women/clothing/dresses",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "dress",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T026",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.zalando.de/herrenschuhe/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "schuh",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T027",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.otto.de/technik/laptop/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T028",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.mediamarkt.de/de/category/notebooks-27.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "notebook",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T029",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.idealo.de/preisvergleich/ProductCategory/3751.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "notebook|laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T030",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.aliexpress.com/category/702/laptops.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T031",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.temu.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Temu",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T032",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.shein.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "SHEIN",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T033",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.amazon.com/s?k=laptop",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T034",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.etsy.com/c/jewelry/necklaces",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "necklace",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T035",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.booking.com/city/fr/paris.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T036",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.airbnb.com/paris-france/stays",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T037",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.expedia.com/Paris-Hotels.d179898.Travel-Guide-Hotels",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T038",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.tripadvisor.com/Hotels-g187147-Paris_Ile_de_France-Hotels.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T039",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T040",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.kayak.com/flight-routes/London-LON/Paris-PAR",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T041",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.zillow.com/homes/for_sale/Seattle,-WA_rb/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T042",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.realtor.com/realestateandhomes-search/Seattle_WA",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T043",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.redfin.com/city/16163/WA/Seattle",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T044",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.rightmove.co.uk/property-for-sale/London.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "London",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T045",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.idealista.com/venta-viviendas/madrid-madrid/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Madrid",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T046",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.g2.com/categories/crm",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "reviews?",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "CRM",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T047",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.capterra.com/customer-relationship-management-software/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "reviews?",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "CRM",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T048",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.crunchbase.com/organization/openai",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "OpenAI",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Founded",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T049",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.yelp.com/search?find_desc=coffee&find_loc=San+Francisco%2C+CA",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "coffee",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "San Francisco",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T050",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.similarweb.com/website/wikipedia.org/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "wikipedia\\.org",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "visits",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T051",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.indeed.com/jobs?q=data+analyst&l=Remote",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "data analyst",
+          "flags": "i",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion; Howard to confirm against ROADMAP.md:48"
+    },
+    {
+      "id": "T052",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Population",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion; sites.md line 206 candidate"
+    },
+    {
+      "id": "T053",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.imf.org/en/Publications/WEO",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "World Economic Outlook",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T054",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.statista.com/statistics/262966/number-of-apple-iphones-sold/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "iPhone",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "million",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T055",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://ec.europa.eu/eurostat/databrowser/view/tps00001/default/table",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Population",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T056",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "GDP",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})+(\\.\\d+)?",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion; window 1 rejudged: the heading alone had passed, the values were not rendered"
+    },
+    {
+      "id": "T057",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.investing.com/indices/us-spx-500-historical-data",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "S&P 500",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T058",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://finance.yahoo.com/quote/AAPL/history/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T059",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.marketwatch.com/investing/stock/aapl",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 3
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T060",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple|AAPL",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T061",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.morningstar.com/stocks/xnas/aapl/quote",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 3
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T062",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "table",
+      "url": "https://www.coingecko.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Bitcoin",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T063",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "table",
+      "url": "https://coinmarketcap.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Bitcoin",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T064",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.reuters.com/markets/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Markets",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T065",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.bloomberg.com/markets/stocks",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Stocks",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T066",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.wsj.com/market-data/stocks",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Dow",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T067",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.ft.com/technology",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Technology",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T068",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.economist.com/finance-and-economics",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Finance",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T069",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.carvana.com/cars",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "car",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T070",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.autotrader.com/cars-for-sale/all-cars/seattle-wa",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T071",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.cars.com/shopping/results/?stock_type=used&zip=98101",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "used",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T072",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.ticketmaster.com/discover/concerts",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "concert",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T073",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.stubhub.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "tickets",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T074",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://medium.com/tag/programming",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "programming",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T075",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.reddit.com/r/datascience/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "datascience",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T076",
+      "part": "candidate",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://stackoverflow.com/questions/tagged/web-scraping",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "web-scraping",
+          "flags": "i",
+          "min": 5
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T077",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://openai.com/research/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "research",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T078",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "login",
+      "url": "https://www.instagram.com/nasa/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "NASA",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\d[\\d.,]*\\s*[KMB]?\\s+(followers|Followers)",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T079",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "login",
+      "url": "https://x.com/NASA",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "NASA",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\d[\\d.,]*\\s*[KMB]?\\s+(followers|Followers)",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T080",
+      "part": "candidate",
+      "audience": "researcher",
+      "kind": "login",
+      "url": "https://www.linkedin.com/company/microsoft/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Microsoft",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\d[\\d.,]*\\s*[KMB]?\\s+(followers|Followers)",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "T081",
+      "part": "candidate",
+      "audience": "non_programmer",
+      "kind": "login",
+      "url": "https://www.facebook.com/NASA/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "NASA",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\d[\\d.,]*\\s*[KMB]?\\s+(followers|Followers)",
+          "flags": "i"
+        }
+      ],
+      "provenance": "expansion"
+    },
+    {
+      "id": "B001",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.bhphotovideo.com/c/buy/laptops/ci/18818",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B002",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.macys.com/shop/womens-clothing/womens-dresses?id=5449",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "dress",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B003",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.tesla.com/inventory/new/m3",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Model 3",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B004",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.apartments.com/seattle-wa/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B005",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.trulia.com/WA/Seattle/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B006",
+      "part": "blind",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.producthunt.com/topics/developer-tools",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "reviews",
+          "flags": "i",
+          "min": 5
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching; predicate corrected after window 1 (the page lists the products but never says \"developer tools\")"
+    },
+    {
+      "id": "B007",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.goodreads.com/genres/science-fiction",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "science fiction",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B008",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.imdb.com/chart/top/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "The Shawshank Redemption",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\b\\d\\.\\d\\b",
+          "min": 25
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B009",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.allrecipes.com/recipes/17562/dinner/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "dinner",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B010",
+      "part": "blind",
+      "audience": "non_programmer",
+      "kind": "table",
+      "url": "https://www.espn.com/nba/standings",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Celtics|Lakers",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B011",
+      "part": "blind",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.bls.gov/cpi/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Consumer Price Index",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\d\\.\\d percent",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B012",
+      "part": "blind",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.federalreserve.gov/releases/h15/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Treasury",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B013",
+      "part": "blind",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "US dollar",
+          "flags": "i"
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B014",
+      "part": "blind",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.marketbeat.com/stocks/NASDAQ/AAPL/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 3
+        }
+      ],
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    }
+  ]
+}
