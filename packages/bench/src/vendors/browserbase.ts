@@ -9,12 +9,10 @@
  * packages/http-core/src/vendor.ts. The policy arrives here as a decision
  * object; the adapter only obeys it.
  *
- * The refused capabilities (captcha_solving, advanced stealth / fingerprint
- * forging) are structurally absent from the policy input, so the opt-outs
- * below are unconditional — not because this file believes they are wrong
- * (that would be policy in the adapter), but because the decision object can
- * never enable them, and Browserbase defaults them ON. An explicit false is
- * therefore the only honest wire encoding of the policy's structural refusal.
+ * Captcha solving and the vendor's stealth mode need the access grants
+ * `vendor_captcha_solving` and `vendor_stealth` (ADR 0005). Browserbase
+ * defaults solveCaptchas ON, so without the grant the body sends an explicit
+ * false: leaving the default would buy the capability by omission.
  *
  * API shape (docs.browserbase.com, checked 2026-08-22):
  *   create context : POST https://api.browserbase.com/v1/contexts {name}
@@ -23,6 +21,9 @@
  *                    body {projectId?, keepAlive?, browserSettings:{...}}
  *                    browserSettings.context: {id, persist} — context id from
  *                    the create-context call; persist saves changes back.
+ *                    browserSettings.solveCaptchas defaults true;
+ *                    advancedStealth is deprecated for `verified` (Verified
+ *                    Browser Mode); checked 2026-10-05, not run live.
  *   debug          : GET  https://api.browserbase.com/v1/sessions/{id}/debug
  *                    response: {debuggerUrl, debuggerFullscreenUrl, wsUrl, pages}
  *   release        : POST https://api.browserbase.com/v1/sessions/{id}
@@ -53,14 +54,13 @@ export const BROWSERBASE_CAPABILITIES: readonly CapabilityOffer[] = [
   { capability: 'retry_orchestration', vendorDefaultOn: false, enableKey: 'retry_orchestration' },
   { capability: 'session_persistence', vendorDefaultOn: false, enableKey: 'session_persistence' },
   { capability: 'live_view_handoff', vendorDefaultOn: true, enableKey: 'live_view_handoff' },
-  { capability: 'captcha_solving', vendorDefaultOn: true, enableKey: 'captcha_solving' },
-  { capability: 'fingerprint_spoofing', vendorDefaultOn: false, enableKey: 'fingerprint_spoofing' },
+  { capability: 'captcha_solving', vendorDefaultOn: true, enableKey: 'vendor_captcha_solving' },
+  { capability: 'fingerprint_spoofing', vendorDefaultOn: false, enableKey: 'vendor_stealth' },
 ]
 
 /**
- * The session body is the wire encoding of the policy decision. The policy
- * layer's structural refusals become unconditional opt-outs here; the
- * authorized capabilities become their wire fields (context persistence).
+ * The session body is the wire encoding of the policy decision: withheld
+ * capabilities become explicit opt-outs, enabled ones their wire fields.
  */
 export function browserbaseSessionBody(
   decision: PolicyDecision,
@@ -68,16 +68,18 @@ export function browserbaseSessionBody(
   resume?: VendorResumeContext | null,
 ): unknown {
   const persistEnabled = decision.enabled.some((c) => c.capability === 'session_persistence')
+  const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
+  const stealthEnabled = decision.enabled.some((c) => c.capability === 'fingerprint_spoofing')
 
   return {
     ...(projectId === undefined ? {} : { projectId }),
     browserSettings: {
-      // Policy-level structural refusal. Browserbase defaults both to true;
-      // leaving the default in place would be buying the refused capability
-      // by omission, so the wire always says false.
-      solveCaptchas: false,
-      // The vendor's stealth mode forges fingerprint signals. Same refusal.
-      advancedStealth: false,
+      // Browserbase defaults solveCaptchas to true, so the off state is an
+      // explicit false, never an omission.
+      solveCaptchas: solveEnabled,
+      // Without the grant the body keeps the opt-out it has always sent;
+      // with it, the current field (`verified` replaced `advancedStealth`).
+      ...(stealthEnabled ? { verified: true } : { advancedStealth: false }),
       ...(persistEnabled && resume?.browserbaseContextId !== undefined
         ? { context: { id: resume.browserbaseContextId, persist: true } }
         : {}),

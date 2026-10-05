@@ -205,7 +205,7 @@ export class ProviderSubject implements SubjectAdapter {
     // decided before any network call — and must be, so a refused provider
     // never causes us to touch the origin at all.
     const preflight = evaluateProviderGate(this.provider, null, '/')
-    if (preflight.refusal === 'refused_capability' || preflight.refusal === 'undeclared_user_agent') {
+    if (preflight.refusal === 'refused_capability' || preflight.refusal === 'ungranted_capability' || preflight.refusal === 'undeclared_user_agent') {
       return this.denied(url, start, trace, preflight, {
         robotsUrl: null,
         robotsSha256: null,

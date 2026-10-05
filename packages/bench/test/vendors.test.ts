@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { verifyLedger } from '@w2l/http-core'
+import { evaluateProviderGate, evaluateVendorPolicy, verifyLedger } from '@w2l/http-core'
 import { ProviderSubject, type RobotsFetcher } from '../src/subjects/provider.js'
 import { scrubSecret, type VendorApi, type VendorApiRequest, type VendorApiResponse } from '../src/vendors/api.js'
 import type { CdpBrowser, CdpConnector, CdpContext, CdpPage, CdpResponse } from '../src/vendors/cdp.js'
@@ -233,6 +233,24 @@ describe('vendor identity', () => {
     // We do not impose an identity on the vendor, so this is false — and the
     // gate's "you could pass through our UA" hint correctly stays silent.
     expect(declaration.honoursCallerUserAgent).toBe(false)
+  })
+
+  it('checks the declared capabilities against the run grant, not against the decision', async () => {
+    // A decision that enables captcha solving and stealth, as a hand-built
+    // VendorOps could carry: the gate must still refuse without the grant.
+    const ops = {
+      ...browserbaseOps({ apiKey: 'k' }, sessionServing('bb_1').handler),
+      decision: evaluateVendorPolicy(
+        [{ capability: 'captcha_solving', vendorDefaultOn: true, enableKey: null }, { capability: 'fingerprint_spoofing', vendorDefaultOn: true, enableKey: null }],
+        { authorized: ['vendor_captcha_solving', 'vendor_stealth'] },
+      ),
+    }
+    const ungranted = await connectVendor(ops, connectorFor(fakeBrowser()).connector)
+    expect(ungranted.declaration.capabilities).toEqual(['captcha_solving', 'fingerprint_spoofing'])
+    expect(evaluateProviderGate(ungranted.declaration, null, '/').refusal).toBe('ungranted_capability')
+
+    const granted = await connectVendor(ops, connectorFor(fakeBrowser()).connector, null, undefined, undefined, ['vendor_captcha_solving', 'vendor_stealth'])
+    expect(evaluateProviderGate(granted.declaration, null, '/').allowed).toBe(true)
   })
 
   it('measures the UA without touching any origin', async () => {
@@ -554,20 +572,47 @@ describe('scrubSecret', () => {
 // --- three-layer split: capability manifest vs product policy ----------------
 
 describe('capability/policy split (transport declares, policy decides)', () => {
-  it('browserbase default decision enables route capabilities only, and refuses the evasion set', () => {
+  it('browserbase default decision enables route capabilities only, and withholds the grant-gated ones', () => {
     const ops = browserbaseOps({ apiKey: 'k' }, sessionServing('bb_1').handler)
     const enabled = ops.decision.enabled.map((c) => c.capability)
     expect(enabled).toEqual(['headless_browser', 'datacenter_proxy'])
-    expect(ops.decision.refused).toContain('captcha_solving')
-    expect(ops.decision.refused).toContain('fingerprint_spoofing')
+    expect(ops.decision.withheld).toEqual(['captcha_solving', 'fingerprint_spoofing'])
   })
 
-  it('steel default decision enables route capabilities only, and refuses the evasion set', () => {
+  it('steel default decision enables route capabilities only, and withholds the grant-gated ones', () => {
     const ops = steelOps({ apiKey: 'k' }, sessionServing('st_1').handler)
     const enabled = ops.decision.enabled.map((c) => c.capability)
     expect(enabled).toEqual(['headless_browser', 'datacenter_proxy'])
-    expect(ops.decision.refused).toContain('captcha_solving')
-    expect(ops.decision.refused).toContain('fingerprint_spoofing')
+    expect(ops.decision.withheld).toEqual(['captcha_solving', 'fingerprint_spoofing'])
+  })
+
+  it('browserbase turns solving and Verified mode on only with their grants', async () => {
+    const api = sessionServing('bb_1')
+    await browserbaseOps({ apiKey: 'k' }, api.handler, { authorized: ['vendor_captcha_solving', 'vendor_stealth'] }).createSession()
+    const body = api.requests[0]!.body as { browserSettings: Record<string, unknown> }
+    expect(body.browserSettings.solveCaptchas).toBe(true)
+    expect(body.browserSettings.verified).toBe(true)
+    expect(body.browserSettings).not.toHaveProperty('advancedStealth')
+  })
+
+  it('steel keeps its fingerprint and turns solving on only with their grants', async () => {
+    const api = sessionServing('st_1')
+    await steelOps({ apiKey: 'k' }, api.handler, { authorized: ['vendor_captcha_solving', 'vendor_stealth'] }).createSession()
+    const body = api.requests[0]!.body as { solveCaptcha: boolean; stealthConfig: Record<string, unknown> }
+    expect(body.solveCaptcha).toBe(true)
+    expect(body.stealthConfig).toEqual({ skipFingerprintInjection: false, autoCaptchaSolving: true, humanizeInteractions: false })
+  })
+
+  it('a deferred or forever-refused name in the policy changes nothing on the wire', async () => {
+    const api = sessionServing('bb_1')
+    const ops = browserbaseOps({ apiKey: 'k' }, api.handler, { authorized: ['camoufox', 'identity_rotation', 'captcha_solving'] })
+    await ops.createSession()
+    const body = api.requests[0]!.body as { browserSettings: Record<string, unknown> }
+    expect(body.browserSettings.solveCaptchas).toBe(false)
+    expect(body.browserSettings.advancedStealth).toBe(false)
+    expect(ops.decision.declined.map((v) => [v.capability, v.decision])).toEqual([
+      ['camoufox', 'deferred'], ['identity_rotation', 'refused'], ['captcha_solving', 'unknown'],
+    ])
   })
 
   it('browserbase session body gains context persistence ONLY when authorized', async () => {

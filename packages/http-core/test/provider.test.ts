@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { parseRobotsTxt } from '../src/robots.js'
 import {
   evaluateProviderGate,
-  REFUSED_CAPABILITIES,
   type ProviderDeclaration,
 } from '../src/provider.js'
+
+const GRANT_GATED = ['captcha_solving', 'cdp_patching', 'fingerprint_spoofing'] as const
 
 /**
  * The gate's job is to stop us paying someone else to commit a violation we
  * would not commit ourselves. The tests are organized around the three ways
- * that could happen: the provider won't say who it is, the provider's product
- * is evasion, or the target has already banned the UA it sends.
+ * that could happen: the provider won't say who it is, the provider offers a
+ * capability the run's grant does not cover (ADR 0005), or the target has
+ * already banned the UA it sends.
  */
 
 /**
@@ -48,15 +50,34 @@ function provider(over: Partial<ProviderDeclaration> = {}): ProviderDeclaration 
 }
 
 describe('capability refusal', () => {
-  it.each(REFUSED_CAPABILITIES)('refuses a provider offering %s', (cap) => {
+  it.each(GRANT_GATED)('refuses a provider offering %s without the grant that governs it', (cap) => {
     const verdict = evaluateProviderGate(
       provider({ capabilities: ['headless_browser', cap] }),
       AMAZON_SHAPED,
       '/dp/B0TEST',
     )
     expect(verdict.allowed).toBe(false)
-    expect(verdict.refusal).toBe('refused_capability')
+    expect(verdict.refusal).toBe('ungranted_capability')
     expect(verdict.refusedCapabilities).toContain(cap)
+  })
+
+  it('allows a grant-gated capability when the grant names its access capability', () => {
+    const verdict = evaluateProviderGate(
+      provider({ capabilities: ['headless_browser', 'captcha_solving', 'cdp_patching'], grants: ['vendor_captcha_solving', 'vendor_stealth'] }),
+      AMAZON_SHAPED,
+      '/dp/B0TEST',
+    )
+    expect(verdict.allowed).toBe(true)
+  })
+
+  it('refuses identity rotation whatever the grant names', () => {
+    const verdict = evaluateProviderGate(
+      provider({ capabilities: ['identity_rotation'], grants: ['identity_rotation', 'vendor_stealth'] }),
+      null,
+      '/anything',
+    )
+    expect(verdict.refusal).toBe('refused_capability')
+    expect(verdict.refusedCapabilities).toEqual(['identity_rotation'])
   })
 
   it('allows the route-changing capabilities', () => {
@@ -76,7 +97,7 @@ describe('capability refusal', () => {
   })
 
   it('refuses on capability even where robots would have allowed the path', () => {
-    // Order matters: a captcha-solving provider is refused everywhere, so a
+    // Order matters: an ungranted capability is refused everywhere, so a
     // permissive robots.txt must not be able to launder it.
     const verdict = evaluateProviderGate(
       provider({ capabilities: ['captcha_solving'] }),
@@ -84,7 +105,7 @@ describe('capability refusal', () => {
       '/anything',
     )
     expect(verdict.allowed).toBe(false)
-    expect(verdict.refusal).toBe('refused_capability')
+    expect(verdict.refusal).toBe('ungranted_capability')
   })
 
   it('reports every refused capability, not just the first', () => {

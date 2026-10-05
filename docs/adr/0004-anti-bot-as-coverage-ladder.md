@@ -2,6 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-09-18
+- 部分被取代：能力分级与"永不做"清单改由 [ADR 0005](0005-enhanced-access-policy.md)（2026-10-05）决定
 - 前置：[0001-direct-playwright.md](0001-direct-playwright.md)、PHASE1 §2.5、`research/anti_bot_redesign_2026-09-18.md`
 
 ## 背景
