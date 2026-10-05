@@ -833,7 +833,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
   function checkHandoff(req: ScrapeRequest): void {
     if (req.handoff === undefined) return
-    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (octocrawl serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
     const unread = unreadByPerson(fetchOptions(req, req.formats))
     if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
   }
@@ -869,7 +869,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
-    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI) to open them in your Chrome')
     if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.open(join(taskRoot, taskId))

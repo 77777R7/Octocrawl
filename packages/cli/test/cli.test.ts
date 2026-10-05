@@ -118,7 +118,7 @@ describe('octocrawl against a local site', () => {
     const unreachable = 'http://127.0.0.1:1/gone'
     const written = await cli(['batch', `${origin}/tides/a`, unreachable, '--out', dir])
     expect(written.code).toBe(0)
-    expect(written.err).toMatch(/wrote 2 results \(results.jsonl, results.csv\), 1 Markdown files/)
+    expect(written.err).toMatch(/^octocrawl: wrote 2 results \(results.jsonl, results.csv\), 1 Markdown files/m)
     const lines = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
     expect(lines.at(-1)).toBe('')
     expect(lines[0]).toBe(EVIDENCE_COLUMNS.join(','))
@@ -155,6 +155,8 @@ describe('octocrawl against a local site', () => {
     expect(refused.err).toMatch(/maxAge must be an integer number of milliseconds/)
     expect((await cli(['fetch', 'x'])).code).toBe(2)
     expect((await cli(['scrape'])).err).toMatch(/takes one URL/)
+    // Every message names the command the person types.
+    expect((await cli(['bogus'])).err).toMatch(/^octocrawl: unknown command bogus/)
   })
 
   it('runs a batch and a crawl to the end and answers with the report and every page; maps a site', async () => {

@@ -44,7 +44,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   if (name === 'serve') return serve(rest, io)
   if (name === 'login') return login(rest, io)
   if (!(COMMANDS as readonly string[]).includes(name)) {
-    io.stderr(`w2l: unknown command ${name}\n\n${usage(null)}`)
+    io.stderr(`octocrawl: unknown command ${name}\n\n${usage(null)}`)
     return 2
   }
   const command = name as Command
@@ -55,7 +55,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
     const listen = parseListen([], io.env)
-    for (const notice of listen.notices) io.stderr(`w2l: ${notice}`)
+    for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
       taskRoot,
       networkPolicy: listen.networkPolicy,
@@ -238,7 +238,7 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
     }
   }
   await writeFile(join(dir, 'results.csv'), rows.map((row) => `${row}\r\n`).join(''))
-  io.stderr(`w2l: wrote ${pages.length} results (results.jsonl, results.csv), ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
+  io.stderr(`octocrawl: wrote ${pages.length} results (results.jsonl, results.csv), ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
 }
 
 /**
