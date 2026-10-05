@@ -78,6 +78,12 @@ const GATES: ReadonlyArray<{
     why: '200 with a password field and a list beside it the extractor takes only as a last resort',
     evidence: null,
   },
+  {
+    path: '/block/perimeterx',
+    reason: 'captcha',
+    why: '200 PerimeterX press-and-hold page (Walmart, 2026-10-05) that browser_local returned as success',
+    evidence: null,
+  },
 ]
 
 describe.each([
@@ -145,6 +151,13 @@ describe.each([
     expect(out.status).toBe('success')
     expect(out.blockReason).toBeNull()
     expect(out.markdown).toContain('The kiln reached 1240 degrees')
+  })
+
+  it('does not block an article on a PerimeterX-protected site that says "Robot or human?"', async () => {
+    const out = await subject.fetch(`${server.url}/static/article-robot-or-human`)
+    expect(out.status).toBe('success')
+    expect(out.blockReason).toBeNull()
+    expect(out.markdown).toContain('Robot or human?')
   })
 })
 
