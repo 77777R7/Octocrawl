@@ -523,7 +523,7 @@ docs/
 - [x] Phase 3 Benchmark Gate harness: fixed W2L run, comparator evidence, and blocked-until-real-comparators decision
 - [ ] Hosted Egress Gate: browser subresource policy enforcement and DNS-to-connection binding
 
-See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
+See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](docs/archive/PRODUCT_PLAN_V2.md) remains the historical detailed plan.
 
 ## Contributing
 
