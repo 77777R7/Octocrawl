@@ -1679,13 +1679,13 @@ function readParsers(value: unknown): readonly PdfParser[] | undefined {
   value.forEach((entry: unknown, index) => {
     const name = `parsers[${index}]`
     const type = typeof entry === 'string' ? entry : entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>).type : undefined
-    if (type === 'image') throw new RequestError(`${name} is refused: W2L reads no image as a document (no OCR)`, 'unsupported_parameter', { parameters: [name] })
+    if (type === 'image') throw new RequestError(`${name} is refused: Octocrawl reads no image as a document (no OCR)`, 'unsupported_parameter', { parameters: [name] })
     if (type !== 'pdf') throw new RequestError(`${name} must be "pdf" or { type: "pdf", mode, maxPages, pages, pageMarkers }`)
     if (parsers.length > 0) throw new RequestError('parsers must contain at most one pdf entry')
     if (typeof entry === 'string') { parsers.push({ type: 'pdf' }); return }
     const rec = entry as Record<string, unknown>
     rejectUnknownKeys(rec, PDF_PARSER_KEYS, name)
-    if (rec.mode === 'ocr') throw new RequestError(`${name}.mode "ocr" is refused: W2L reads a PDF's text layer and runs no OCR`, 'unsupported_parameter', { parameters: [`${name}.mode`] })
+    if (rec.mode === 'ocr') throw new RequestError(`${name}.mode "ocr" is refused: Octocrawl reads a PDF's text layer and runs no OCR`, 'unsupported_parameter', { parameters: [`${name}.mode`] })
     if (rec.mode !== undefined && rec.mode !== 'fast' && rec.mode !== 'auto') throw new RequestError(`${name}.mode must be "fast" or "auto"`)
     const maxPages = rec.maxPages
     if (maxPages !== undefined && (typeof maxPages !== 'number' || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_PDF_PAGES)) {
