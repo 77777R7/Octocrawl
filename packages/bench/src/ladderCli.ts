@@ -311,12 +311,15 @@ export function buildChannels(
     })
   }
 
-  // Provider rungs exist only when a key is present AND the mode permits the
+  // Provider rungs exist only when the vendor is named (W2L_VENDORS) with its key, or a key is passed, AND the mode permits the
   // lane. connectVendor is deferred to the first fetch.
   if (mode === 'standard') return channels
 
-  const bbKey = opts.keys?.browserbase ?? process.env.BROWSERBASE_API_KEY ?? ''
-  const steelKey = opts.keys?.steel ?? process.env.STEEL_API_KEY ?? ''
+  // A paid browser service is used when the person names it in W2L_VENDORS (comma-separated: browserbase, steel), not
+  // because its key happens to be in the environment: it bills them and sees the URLs.
+  const named = new Set((process.env.W2L_VENDORS ?? '').split(',').map((name) => name.trim().toLowerCase()).filter((name) => name !== ''))
+  const bbKey = opts.keys?.browserbase ?? (named.has('browserbase') ? process.env.BROWSERBASE_API_KEY : undefined) ?? ''
+  const steelKey = opts.keys?.steel ?? (named.has('steel') ? process.env.STEEL_API_KEY : undefined) ?? ''
   // The vendor's browser fetches the page; robots.txt is the one request this
   // lane sends from this machine, so it takes the operator's proxy like the HTTP lane.
   const routedPolicy = opts.robotsFetcher === undefined && opts.networkPolicy?.egressProxy ? opts.networkPolicy : null

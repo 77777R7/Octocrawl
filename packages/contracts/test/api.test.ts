@@ -129,6 +129,13 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     // A crawl would follow a sign-out link with the user's live Chrome session; a batch fetches only the pages it names.
     expect(() => parseCrawlStartRequest({ url, mode: 'authed' })).toThrow(/not available for crawl.*batch in mode authed/)
     expect(parseBatchStartRequest({ urls: [url], mode: 'authed' }).mode).toBe('authed')
+    // A page read with the person's session never leaves for a webhook, and no script runs in it: a script could read its cookies and storage.
+    expect(() => parseBatchStartRequest({ urls: [url], mode: 'authed', webhook: 'https://hooks.example/w' })).toThrow(/webhook is not available in mode 'authed'/)
+    expect(() => parseScrapeRequest({ url, mode: 'authed', actions: [{ type: 'executeJavascript', script: 'return document.cookie' }] })).toThrow(/executeJavascript is not available in mode 'authed'/)
+    expect(() => parseBatchStartRequest({ urls: [url], mode: 'authed', actions: [{ type: 'executeJavascript', script: 'return 1' }] })).toThrow(/executeJavascript is not available in mode 'authed'/)
+    // Steps that click, type and scroll stay available, as does a webhook outside mode authed.
+    expect(parseScrapeRequest({ url, mode: 'authed', actions: [{ type: 'click', selector: 'a.next' }, { type: 'scroll', direction: 'down' }] }).actions).toHaveLength(2)
+    expect(parseBatchStartRequest({ urls: [url], webhook: 'https://hooks.example/w' }).webhook).toBeDefined()
     expect(() => parseScrapeRequest({ url, formats: [] })).toThrow('formats must be a non-empty array')
   })
 

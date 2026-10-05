@@ -3,7 +3,7 @@
  * One crawl is CrawlOrchestrator. No second fetcher.
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
@@ -402,6 +402,7 @@ type CacheAnswer =
 
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
+  prepareTaskRoot(taskRoot)
   const monitorStore = MonitorStore.open(join(taskRoot, 'section-b-control.sqlite'), {leaseMs: options.monitorLeaseMs, attemptTimeoutMs: options.monitorAttemptTimeoutMs})
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
   const shutdownController = new AbortController()
@@ -694,6 +695,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   async function loadCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -711,6 +714,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   /** A batch's status: the latest attempt's report with the batch's totals, the cap in force, the skipped entries and its webhook's standing. */
   async function loadBatch(taskId: string): Promise<BatchStatusResponse | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -785,6 +790,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   async function loadCrawlPageList(taskId: string, query: CrawlPageQuery | undefined, kind: StepPageQuery['kind'], allAttempts = false): Promise<CrawlPageList<CrawlPage> | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -869,6 +876,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI) to open them in your Chrome')
     if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
@@ -1440,6 +1449,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async getBatchErrors(taskId, query = {}) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
       try {
@@ -1473,6 +1484,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     getCrawlWithSteps: loadCrawlWithSteps,
 
     async getCrawlStatusPage(taskId, query) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       if (query.cursor !== undefined) {
         try { decodeStepCursor(query.cursor) } catch { throw new RequestError('cursor is not one this API issued') }
@@ -1513,6 +1526,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async cancelCrawl(taskId) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId))) return null
       const store = SqliteTaskStore.open(join(taskRoot, taskId))
       try {
@@ -1535,6 +1550,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async resumeCrawl(taskId) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       const store = SqliteTaskStore.open(join(taskRoot, taskId))
       let launched = false
@@ -1719,7 +1736,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function appendToBatch(req: ParsedBatchStartRequest, canonical: readonly string[], submission: Submission<BatchAccepted>): Promise<BatchAccepted> {
     const id = req.appendToId!
-    if (!existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw new TaskNotFoundError(`batch not found: ${id}`)
+    if (!UUID.test(id) || !existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw new TaskNotFoundError(`batch not found: ${id}`)
     const store = SqliteTaskStore.open(join(taskRoot, id))
     let launched = false
     try {
@@ -1847,6 +1864,18 @@ function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(res
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * A task root holds pages read with the person's session, saved files and
+ * job databases: one this engine creates is readable by them alone, with a
+ * .gitignore so a repository it sits in does not take it in. A root that
+ * exists is theirs, and is left as it is.
+ */
+function prepareTaskRoot(taskRoot: string): void {
+  if (existsSync(taskRoot)) return
+  mkdirSync(taskRoot, { recursive: true, mode: 0o700 })
+  writeFileSync(join(taskRoot, '.gitignore'), '*\n')
+}
 
 /** `origin` and `integration` as the request said them, for the task's `attribution`; nothing when it named neither. */
 function attributionOf(req: RequestAttribution): Pick<Task, 'attribution'> {

@@ -114,6 +114,15 @@ describe('saved logins in the API engine', () => {
     expect((await post({ host: '127.0.0.1:8787', origin: 'https://evil.example' })).status).toBe(401)
     const ok = await post({ host: '127.0.0.1:8787', origin: 'http://localhost:3000' })
     expect(ok.status).toBe(200)
+    // A page on another local port can send a form or a text body without asking the server first; a body that is not JSON is refused before it is read.
+    for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x']) {
+      const res = await app.request('http://127.0.0.1:8787/v1/scrape', { method: 'POST', headers: { host: '127.0.0.1:8787', origin: 'http://localhost:3000', 'content-type': type }, body: JSON.stringify({ url: URL_, mode: 'authed' }) })
+      expect(res.status, type).toBe(400)
+    }
+    const bare = await app.request('http://127.0.0.1:8787/v1/scrape', { method: 'POST', headers: { host: '127.0.0.1:8787' }, body: JSON.stringify({ url: URL_ }) })
+    expect(bare.status).toBe(400)
+    // A POST without a body (cancel, resume) needs no type.
+    expect((await app.request('http://127.0.0.1:8787/v1/crawl/00000000-0000-4000-8000-000000000000/cancel', { method: 'POST', headers: { host: '127.0.0.1:8787' } })).status).toBe(404)
     expect(isLoopbackAuthority('[::1]:8787', false)).toBe(true)
     expect(isLoopbackAuthority('localhost.evil.example', false)).toBe(false)
   })

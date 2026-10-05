@@ -103,7 +103,7 @@ export interface ModeIdentity {
  * sec-ch-ua — that contradiction is the inconsistency the probe showed gets a
  * request blocked, and it is exactly the lie the signed record exposes.
  */
-const RESEARCH_UA_COMMENT = 'compatible; w2l-research/0.1; +https://github.com/77777R7/w2l; research benchmark, one request per page'
+const RESEARCH_UA_COMMENT = 'compatible; w2l-research/0.1; +https://github.com/77777R7/Octocrawl; research benchmark, one request per page'
 export const RESEARCH_USER_AGENT = `Mozilla/5.0 (${RESEARCH_UA_COMMENT})`
 
 /** Longest operator contact (`W2L_CONTACT`) the research User-Agent declares. */

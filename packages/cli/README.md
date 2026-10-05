@@ -14,6 +14,8 @@ Every option of the REST API is a flag under its kebab-case name (`maxAge` is `-
 
 - Node.js 22.13 or later. The browser lane uses Playwright's Chromium: run `npx playwright install chromium` once; without it, pages are read over HTTP only.
 - `better-sqlite3` builds or downloads its native binding when installed. If your npm holds install scripts back, allow it (`npm install-scripts approve better-sqlite3`, or `allowScripts` in your package.json).
-- robots.txt is obeyed, and every fetch declares its identity; there is no stealth mode.
+- robots.txt is obeyed. By default pages are requested with the user agent and client hints of the Chrome the browser lane runs; `--mode research` names itself as a research crawler instead, with your contact from `W2L_CONTACT`. There is no stealth mode.
+- Paid browser services (Browserbase, Steel) are used only when you name them in `W2L_VENDORS` (for example `W2L_VENDORS=browserbase`) and their key is set; a key alone does nothing.
+- `octocrawl serve` listens on 127.0.0.1. On any other address it needs a token (`--token` or `W2L_API_TOKEN`), since other machines could otherwise use it to reach your localhost and network.
 
 Licence: AGPL-3.0-only. Source, documentation and the API reference: https://github.com/77777R7/Octocrawl

@@ -39,6 +39,17 @@ describe('parseListen', () => {
     expect(() => parseListen(['--hosted'], {})).toThrow(/W2L_API_TOKEN/)
   })
 
+  it('refuses a local server reachable from other machines without a token', () => {
+    // Open to other machines and to web pages that rebind a name to it, it would fetch the person's own localhost and network for them.
+    for (const host of ['0.0.0.0', '::', '192.168.1.20', '127.0.0.2', 'localhost.']) {
+      expect(() => parseListen(['--host', host], {}), host).toThrow(/needs a token.*--token.*127\.0\.0\.1/)
+      expect(() => parseListen([], { W2L_API_HOST: host }), host).toThrow(/needs a token/)
+      expect(parseListen(['--host', host, '--token', 'secret'], {})).toMatchObject({ mode: 'local', host, tokens: ['secret'] })
+    }
+    for (const host of ['127.0.0.1', 'localhost', '::1', '[::1]']) expect(parseListen(['--host', host], {})).toMatchObject({ mode: 'local', host, tokens: [] })
+    expect(parseListen([], {})).toMatchObject({ host: '127.0.0.1', tokens: [] })
+  })
+
   it('hosted mode binds 0.0.0.0, requires a token, and denies private ranges', () => {
     const listen = parseListen(['--hosted', '--token', 'secret'], {})
     expect(listen.mode).toBe('hosted')

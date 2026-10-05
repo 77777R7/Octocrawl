@@ -2,6 +2,9 @@ import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIV
 
 export type ApiMode = 'local' | 'hosted'
 
+/** The listen hosts that reach this machine alone: a local server on any other host needs a token. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+
 /**
  * How the API process delivers job webhooks, apart from how it fetches
  * pages: TLS always verified, the shell's HTTP(S)_PROXY never used
@@ -92,9 +95,15 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
+  const host = readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '127.0.0.1'
+  // A local server fetches the person's localhost and network for its callers: one other machines can reach, or a web page that
+  // rebinds a name to it, answers only callers that hold a token.
+  if (!LOOPBACK_HOSTS.has(host.toLowerCase()) && tokens.length === 0) {
+    throw new Error(`listening on ${host} needs a token: other machines, and web pages, could use this server to read your localhost and network. Give one with --token or W2L_API_TOKEN, or listen on 127.0.0.1`)
+  }
   return {
     mode: 'local',
-    host: readFlag(argv, '--host') ?? env['W2L_API_HOST'] ?? '127.0.0.1',
+    host,
     port,
     workerCount,
     tokens,

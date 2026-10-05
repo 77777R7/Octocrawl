@@ -161,7 +161,8 @@ export class FileSessionStore implements SessionStore {
   private async write(all: readonly SessionSnapshot[]): Promise<void> {
     // A temporary file of its own: another process writing the same file at once renames its own.
     const tmp = `${this.file}.${process.pid}.${randomUUID()}.tmp`
-    await mkdir(dirname(this.file), { recursive: true })
+    // The folder of the saved logins is the person's alone, like the file.
+    await mkdir(dirname(this.file), { recursive: true, mode: 0o700 })
     await writeFile(tmp, JSON.stringify({ sessions: all }, null, 2), { mode: 0o600 })
     await chmod(tmp, 0o600)
     await rename(tmp, this.file)
