@@ -6,6 +6,10 @@ Read the "Current phase" section of [ROADMAP.md](ROADMAP.md) before starting. Wo
 
 A change is done when it moves the current phase's exit condition. In P1 that means a core feature becomes solid (it works, has tests, passes its real-site test and behaves as documented) or a real-site test passes. A merged PR, a green test run or a new evidence document is not by itself progress on the roadmap.
 
+## Naming
+
+The product is **Octocrawl** (decided 2026-10-05). Write Octocrawl, never `W2L`, in documentation, ROADMAP, PR titles and descriptions, commit messages, user-facing text and replies. Identifiers that still carry the old name stay as they are until a change renames them on purpose, because renaming breaks users and records: the `W2L_*` environment variables, the internal `@w2l/*` workspace packages and the repository's `w2l` bin, the SDK classes `W2L` and `W2LError`, the `.w2l/` data directory, the Evidence Record version `w2l.evidence/1`, and the research identity `w2l-research` / `W2L Research` that sites' robots.txt and SEC see. Messages the code prints are quoted as the code prints them. Dated records under `docs/evidence/`, `docs/archive/` and `research/` keep the wording they were written with.
+
 ## Parity work
 
 - Reproduce a reported gap with a failing test before changing code: a local fixture, plus the matching real-site case in [research/parity/sites.md](research/parity/sites.md) where one exists. The audit's first pass was wrong in 90 places, so a gap nobody has reproduced is not yet a task.
@@ -20,7 +24,7 @@ A change is done when it moves the current phase's exit condition. In P1 that me
 
 ## Evidence honesty
 
-W2L sells traceable data, so its own reports must be traceable too.
+Octocrawl sells traceable data, so its own reports must be traceable too.
 
 - Unknown is not zero. Leave unmeasured values null or "unknown"; never fill them with 0, an estimate or a value from another source.
 - Keep every failed, blocked or incomplete item in the denominator. Do not replace or drop URLs after a test set is frozen.

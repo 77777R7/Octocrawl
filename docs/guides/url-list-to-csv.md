@@ -1,12 +1,12 @@
 # From a URL list to a CSV with evidence
 
-You have a list of web pages and PDFs, and you want a table: one row per URL, saying what W2L read, when, from where, and what it could not read and why. This guide builds that table for ten public data-centre sources, first with the `octocrawl` command line and then with the Python client. The two give the same columns.
+You have a list of web pages and PDFs, and you want a table: one row per URL, saying what Octocrawl read, when, from where, and what it could not read and why. This guide builds that table for ten public data-centre sources, first with the `octocrawl` command line and then with the Python client. The two give the same columns.
 
-The example list is [data-centre-urls.txt](data-centre-urls.txt). It holds ten URLs taken from the seed user's public source list ([research/coos-pilot/coos-links.csv](../../research/coos-pilot/coos-links.csv)): operator pages, two PDFs, a sustainability page that needs a browser, and four sources W2L could not read on 2026-10-03. Every output shown below is from that day's run, through an HTTP proxy, on commit `8356314` ([run record](../../research/parity/runs/2026-10-03-p2-guides.md)).
+The example list is [data-centre-urls.txt](data-centre-urls.txt). It holds ten URLs taken from the seed user's public source list ([research/coos-pilot/coos-links.csv](../../research/coos-pilot/coos-links.csv)): operator pages, two PDFs, a sustainability page that needs a browser, and four sources Octocrawl could not read on 2026-10-03. Every output shown below is from that day's run, through an HTTP proxy, on commit `8356314` ([run record](../../research/parity/runs/2026-10-03-p2-guides.md)).
 
 ## 1. Install
 
-W2L is not on npm or PyPI yet, so run it from a checkout. You need Node.js 22.13 or later, and Python 3.9 or later for the Python path.
+Octocrawl is not on npm or PyPI yet, so run it from a checkout. You need Node.js 22.13 or later, and Python 3.9 or later for the Python path.
 
 ```bash
 git clone https://github.com/77777R7/w2l.git
@@ -16,11 +16,11 @@ npx playwright install chromium
 npx tsc -b
 ```
 
-`npx playwright install chromium` is for pages that only render in a browser; W2L escalates to it on its own when the plain HTTP read is not enough.
+`npx playwright install chromium` is for pages that only render in a browser; Octocrawl escalates to it on its own when the plain HTTP read is not enough.
 
 `npx octocrawl` can replace `npm run w2l --` below, and `pip install 'octocrawl-client[pandas]'` the local install: the packages are published (0.3.0, 2026-10-05). The run below was made from a checkout.
 
-If your shell sets `HTTPS_PROXY`, W2L sends its requests through that proxy and says so on its first line of output. Results can differ with and without a proxy, so note which one you used.
+If your shell sets `HTTPS_PROXY`, Octocrawl sends its requests through that proxy and says so on its first line of output. Results can differ with and without a proxy, so note which one you used.
 
 ## 2. The command-line path
 
@@ -33,7 +33,7 @@ W2L_SOURCE_COMMIT=$(git rev-parse HEAD) npm run w2l -- batch \
 
 - `--urls-file` reads one URL per line; blank lines and lines starting with `#` are skipped. A batch takes up to 1,000 URLs.
 - `--formats markdown,tables` asks for the page text as Markdown and every HTML table as its own CSV.
-- `W2L_SOURCE_COMMIT` records which W2L code read the pages. Without it, `source_commit` stays empty.
+- `W2L_SOURCE_COMMIT` records which Octocrawl code read the pages. Without it, `source_commit` stays empty.
 
 The run took about 10 seconds and ended with:
 
@@ -55,7 +55,7 @@ Rows are in the order the pages finished, not the order of your list. Sort by `u
 
 ## 3. The Python path
 
-The Python client talks to a running W2L server. Start one in a second terminal:
+The Python client talks to a running Octocrawl server. Start one in a second terminal:
 
 ```bash
 W2L_SOURCE_COMMIT=$(git rev-parse HEAD) npm run w2l -- serve --port 8787
@@ -116,14 +116,14 @@ These are the rows the command line wrote, shortened. Hashes are cut to 8 charac
 | `http_status` | The server's HTTP status. Empty when no request was made. |
 | `lane` | How the page was read: `http` (a plain request) or `browser_local` (a local headless Chromium, used when the page needs scripts to render). |
 | `robots_decision` | What the site's robots.txt said about this URL: `allowed`, `disallowed`, or `no_robots` when the site has none. |
-| `raw_sha256` | SHA-256 of the page as W2L read it, before extraction: the bytes of a file such as a PDF; the HTML text on the `http` lane (decompressed, as UTF-8); the HTML after rendering on a browser lane, as in the AWS row. |
-| `markdown_sha256` | SHA-256 of the Markdown W2L delivered, the text in the `.md` file. |
+| `raw_sha256` | SHA-256 of the page as Octocrawl read it, before extraction: the bytes of a file such as a PDF; the HTML text on the `http` lane (decompressed, as UTF-8); the HTML after rendering on a browser lane, as in the AWS row. |
+| `markdown_sha256` | SHA-256 of the Markdown Octocrawl delivered, the text in the `.md` file. |
 | `extractor` | The program and version that turned the page into text: `extract-tf/6` for HTML, `pdf-text/1` for PDF text. |
-| `source_commit` | The W2L commit that ran, when `W2L_SOURCE_COMMIT` was set. |
-| `cache_state`, `cached_at` | `hit` or `miss` when you asked W2L to reuse earlier results with `--max-age`. On a hit, `cached_at` is when the reused copy was fetched. Empty otherwise: by default nothing is reused. |
+| `source_commit` | The Octocrawl commit that ran, when `W2L_SOURCE_COMMIT` was set. |
+| `cache_state`, `cached_at` | `hit` or `miss` when you asked Octocrawl to reuse earlier results with `--max-age`. On a hit, `cached_at` is when the reused copy was fetched. Empty otherwise: by default nothing is reused. |
 | `markdown_file` | Command line only: the `.md` file beside the CSV. |
 
-An empty cell means W2L did not observe that value. It is never a stand-in for 0. The Equinix PDF has no `http_status` because W2L never requested it.
+An empty cell means Octocrawl did not observe that value. It is never a stand-in for 0. The Equinix PDF has no `http_status` because Octocrawl never requested it.
 
 A `blocked` or `failed` row can still have a `markdown_file`, as the Iron Mountain and SEC rows do: that file is the error page the site sent, kept as evidence of what happened. It is not data. Filter on `status`, never on whether a file exists.
 
@@ -133,9 +133,9 @@ The four rows that did not succeed are part of the result. Deleting them, or swa
 
 Each one says why, in terms you can act on:
 
-- **Equinix 2025 Data Summary (PDF): `failed`, `policy_denied`, robots `disallowed`.** The host's robots.txt disallows every path, so W2L did not request the file. If the publisher's own report is the only source and you need one copy for citation, a local server can record a per-URL `robotsOverride`; the override is written into the Evidence Record.
+- **Equinix 2025 Data Summary (PDF): `failed`, `policy_denied`, robots `disallowed`.** The host's robots.txt disallows every path, so Octocrawl did not request the file. If the publisher's own report is the only source and you need one copy for citation, a local server can record a per-URL `robotsOverride`; the override is written into the Evidence Record.
 - **GDS ESG report: `failed`, `policy_denied`, robots `disallowed`.** Here the robots.txt itself did not answer within 5 seconds. A robots.txt that cannot be read counts as a full disallow (RFC 9309), and `results.jsonl` records `"unreachable": "timeout"` so it is not mistaken for a rule the site wrote. Try again later.
-- **Iron Mountain: `blocked`, `rate_limit`, HTTP 429.** The site answered "too many requests". Run the URL again later; W2L will not get around a rate limit.
+- **Iron Mountain: `blocked`, `rate_limit`, HTTP 429.** The site answered "too many requests". Run the URL again later; Octocrawl will not get around a rate limit.
 - **SEC 10-Q: `failed`, `http_error`, HTTP 403.** SEC refuses requests that do not identify their sender. Run it with `--mode research` and `W2L_CONTACT="Your Name you@example.org"`, which SEC's fair-access policy asks for. This guide did not re-run it that way.
 
 When you report your data, report these counts too: here, 6 of 10 sources read, 4 not, each with its reason.
@@ -146,7 +146,7 @@ When you report your data, report these counts too: here, 6 of 10 sources read, 
 
 ## 7. Check a hash
 
-The hashes let anyone confirm later that a file is the one W2L recorded.
+The hashes let anyone confirm later that a file is the one Octocrawl recorded.
 
 ```bash
 shasum -a 256 results/data-centres/0001-datacenters.google-efficiency.md
