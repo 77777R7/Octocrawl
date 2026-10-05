@@ -348,6 +348,19 @@ describe('recommendation pruning: precision guards', () => {
     doc.close()
   })
 
+  it('still cuts a grid whose cards each carry an h1 of their own', () => {
+    // The guard is for the page's one h1; cards that each hold one are no product's title.
+    const doc = parse(`<!doctype html><html><body>
+<div class="product"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+<div class="shelf">${[1, 2, 3].map((n) => `<div class="card"><h1><a href="/p/${n}">Other teapot ${n}</a></h1><span class="price">$${n}9.00</span></div>`).join('')}</div>
+</body></html>`)
+    pruneRecommendations(doc.document)
+    const html = doc.document.body.innerHTML
+    expect(html).toContain('reduction kiln')
+    expect(html).not.toContain('Other teapot')
+    doc.close()
+  })
+
   it('cuts CJK recommendation headings too', () => {
     const doc = parse(`<!doctype html><html><body>
 <div id="main"><h1>四嘴泡茶壶</h1><p>手工拉坯的炻器茶壶，四个壶嘴使茶汤浸出更均匀，在还原焰中烧至一千二百六十度。</p></div>

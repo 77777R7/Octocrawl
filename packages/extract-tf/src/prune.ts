@@ -193,10 +193,11 @@ function recommendationRegion(heading: Element): Element[] {
  * must not cause is deleting the product being described.
  */
 export function pruneRecommendations(doc: Document): void {
-  // The element that holds the page's h1 holds the product: the grid and
-  // token triggers never cut it.
+  // The element that holds the page's one h1 holds the product: the grid and
+  // token triggers never cut it. A page of several h1s (cards that each carry
+  // one) has no such title to keep.
   const h1s = qsa(doc, 'h1')
-  const holdsH1 = (el: Element) => h1s.some((h1) => el.contains(h1))
+  const holdsH1 = (el: Element) => h1s.length === 1 && el.contains(h1s[0]!)
 
   // Trigger 1: labelled sections.
   for (const heading of qsa(doc, 'h1,h2,h3,h4,h5,h6')) {
