@@ -1,0 +1,63 @@
+name: Install check
+
+# The one-line install (ROADMAP P1) on clean machines: the published packages,
+# installed the way a new user installs them, on macOS, Windows and Linux.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: npm and PyPI version to check
+        default: latest
+  schedule:
+    - cron: '17 3 * * 1'
+  pull_request:
+    paths:
+      - .github/workflows/install-check.yml
+      - scripts/install-check.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  npx:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/install-check.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Header of the summary
+        shell: bash
+        run: |
+          echo '| Platform | Node | Installed | URL | Answer | Time | Result |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | --- | --- | --- | --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+      - name: npx octocrawl scrape, from an empty cache, within 5 minutes
+        shell: bash
+        run: node scripts/install-check.mjs --version "${{ inputs.version || 'latest' }}" --url https://example.com --limit-ms 300000
+
+  pip:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: pip install octocrawl-client
+        shell: bash
+        run: |
+          version="${{ inputs.version || 'latest' }}"
+          if [ "$version" = latest ]; then spec='octocrawl-client[pandas]'; else spec="octocrawl-client[pandas]==$version"; fi
+          python -m pip install --no-cache-dir "$spec"
+          python -c "import octocrawl_client as o; assert o.batch and o.scrape and o.EVIDENCE_COLUMNS; print(o.__version__)"
