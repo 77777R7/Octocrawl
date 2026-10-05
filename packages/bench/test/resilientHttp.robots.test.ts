@@ -220,8 +220,8 @@ describe('ResilientHttpSubject robots', () => {
   it('obeys a rule robots.txt writes for Octocrawl by name, for a named URL too; only a recorded override sets it aside', async () => {
     let pageHits = 0
     const server = createServer((req, res) => {
-      // Octocrawl is not the group's first token, and an earlier one (Mozilla) is in the User-Agent too: the group still names Octocrawl.
-      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: Mozilla\nUser-agent: Octocrawl\nDisallow: /\n\nUser-agent: *\nDisallow: /blocked\n'); return }
+      // Octocrawl is not the group's first token, and a longer one (AppleWebKit) is in the User-Agent too: the group still names Octocrawl.
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: AppleWebKit\nUser-agent: Octocrawl\nDisallow: /\n\nUser-agent: *\nDisallow: /blocked\n'); return }
       pageHits++
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<html><body><main><article><h1>Owner page</h1><p>The owner of this site tells Octocrawl by name to stay out, while every other crawler may read this page; a targeted opt-out must hold even for a URL a person names.</p><p>Only a decision the caller records for this one URL, with a reason, may set it aside, and the record says so.</p></article></main></body></html>')
     })

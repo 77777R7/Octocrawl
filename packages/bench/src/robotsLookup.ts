@@ -18,6 +18,7 @@ import {
   raceWithSignal,
   throwIfExecutionStopped,
   evaluateRobots,
+  matchRobotsGroup,
   parseRobotsTxt,
   sha256Hex,
   type ComplianceRobotsDecision,
@@ -273,11 +274,15 @@ export class RobotsOriginCache {
     }
 
     // The research product token governs SEC's format too (robotsAgent).
-    const match = evaluateRobots(cached.robots, robotsAgent(userAgent), path)
+    const agent = robotsAgent(userAgent)
+    const match = evaluateRobots(cached.robots, agent, path)
+    // A deciding group that names Octocrawl is Octocrawl's, whichever of its tokens is longest: that is what makes a rule
+    // written for Octocrawl hold for a named URL and ignoreRobotsTxt (applicableOverride).
+    const own = matchRobotsGroup(cached.robots, agent)?.agents.find((token) => isOctocrawlRobotsGroup(token))
     return {
       robotsUrl: cached.robotsUrl,
       robotsSha256: cached.sha256,
-      matchedUserAgentGroup: match.matchedAgent,
+      matchedUserAgentGroup: own ?? match.matchedAgent,
       appliedRules: match.appliedRules.map((r) => ({ pattern: r.pattern, allow: r.allow })),
       decision: match.allowed ? 'allowed' : 'disallowed',
       skippedFetch: false,
