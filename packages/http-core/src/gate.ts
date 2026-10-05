@@ -202,9 +202,10 @@ const CF_JSD_PATH = '/cdn-cgi/challenge-platform/scripts/jsd/'
  * page of a protected site (Walmart's home page, 2026-10-05), and a site
  * using in-page blocking keeps an empty `#px-captcha` on its ordinary pages
  * (the vendor's ABR sample), loading the script only once a request is
- * blocked. The script and the app id together are.
+ * blocked. The script and the app id together are. Only the script's URL
+ * counts: a protected page may name the captcha hosts in a CSP or preconnect.
  */
-const PX_CAPTCHA_SCRIPTS: readonly string[] = ['/captcha/captcha.js', 'captcha.px-cdn.net', 'captcha.px-cloud.net']
+const PX_CAPTCHA_SCRIPT = /\/captcha\/captcha\.js|captcha\.px-(?:cdn|cloud)\.net\/[^"'\s<>]*captcha\.js/
 const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/i
 
 function challengePlatformBeyondJsd(lower: string): boolean {
@@ -296,7 +297,7 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // PerimeterX's press-and-hold, served with HTTP 200 (Walmart, after a 307
   // to /blocked) or 403. Its button needs a person to press and hold it: a
   // widget, not an interstitial a browser clears by running its JS.
-  if (lower.includes('_pxappid') && PX_CAPTCHA_SCRIPTS.some((path) => lower.includes(path))) {
+  if (lower.includes('_pxappid') && PX_CAPTCHA_SCRIPT.test(lower)) {
     const signals = ['px_captcha_script', 'px_app_id']
     if (PX_CAPTCHA_CONTAINER.test(head)) signals.push('px_captcha_container')
     return { reason: 'captcha', signals }

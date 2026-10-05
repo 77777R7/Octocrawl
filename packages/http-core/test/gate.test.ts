@@ -231,6 +231,10 @@ script.src = 'https://captcha.px-cloud.net/PXHYx10rg3/captcha.js?a=c';</script><
     // Nor an in-page (ABR) placeholder the site keeps hidden until a request is blocked.
     const abr = `${page}<div class="modalWindow"><h5>We think you might be a bot...</h5><div id="px-captcha"></div></div>`
     expect(classifyGate(res({ status: 200, body: abr, contentful: true }))).toBeNull()
+    // Nor the captcha hosts named in a CSP or a preconnect, with no script loaded from them.
+    const hosts = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' captcha.px-cdn.net captcha.px-cloud.net">` +
+      `<link rel="preconnect" href="https://captcha.px-cdn.net">${page}`
+    expect(classifyGate(res({ status: 200, body: hosts, contentful: true }))).toBeNull()
   })
 })
 

@@ -31,4 +31,6 @@ These requests went through the same proxy with `curl` and a Chrome user agent, 
 
 The same captures classified with `origin/main`'s gate (`a48c9c4`), without `contentful`: Walmart's `/blocked` page `null`, the bug; Walmart's home page `null`; Zillow `bot_detected_generic` (weak_access_to_page_denied, status_403), now `captcha`; Fiverr already `captcha` (widget_recaptcha); Wayfair `rate_limit`.
 
+A follow-up commit on the same branch narrows the script match to a captcha script URL, so a page that only names the captcha hosts (a CSP or preconnect) is not blocked. The five captures above give the same verdicts and signals under it. The API run was not repeated.
+
 Not checked here: a run where the API itself receives the challenge (the case observed earlier in the day), a direct (unproxied) run, and the `g=a` "Check the box" variant of Walmart's page.
