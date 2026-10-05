@@ -670,6 +670,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           emptyTables: render.emptyTables,
           textChars: render.textChars,
           scriptChars: render.scriptChars,
+          ...(render.listRecords === undefined ? {} : { listRecords: render.listRecords }),
         },
       })
       return [{
