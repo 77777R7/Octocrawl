@@ -965,7 +965,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // Either is the last step's, which keeps nothing it produced: what it captured may show that page, the page having moved on
         // before the step's checks saw it.
         if (late !== undefined && ran.actions.result.failed === undefined) {
-          ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which W2L does not fetch (${late.reason}); the page stayed where it was` }
+          ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page tried to go to ${late.url}, which Octocrawl does not fetch (${late.reason}); the page stayed where it was` }
           dropLastStep(ran.actions)
         }
         // Documents the page loaded after the steps were checked (a late redirect the guard does not see) are checked as the steps' were:
@@ -976,7 +976,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           if (landed === null) continue
           trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigation_refused', detail: { url: loadedUrl, reason: landed } })
           if (ran.actions.result.failed === undefined) {
-            ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which W2L does not fetch (${landed}); it is not read` }
+            ran.actions.result.failed = { index: last, type: options.actions![last]!.type, code: 'navigation_refused', message: `after the steps, the page loaded ${loadedUrl}, which Octocrawl does not fetch (${landed}); it is not read` }
             dropLastStep(ran.actions)
           }
           return this.notRead(url, start, trace, finalUrl)

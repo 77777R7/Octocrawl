@@ -36,11 +36,11 @@ describe('agent hints', () => {
     ] })
     expect(hints(targeted)).toEqual(["robots.txt of example.test disallows this URL for Octocrawl by name (User-agent: octocrawl; rule /): the site owner's opt-out, which a named URL and ignoreRobotsTxt do not set aside; only a robotsOverride with your recorded reason does, on a local server"])
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
-      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; W2L asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
+      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; Octocrawl asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
     ])
     // A denial that was not robots.txt's (an address the policy refuses) names the egress policy and the recorded reason instead of a rule.
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied', detail: { to: URL_, error: 'private address 10.0.0.1' } }] }))).toEqual([
-      'the egress policy refused example.test (private address 10.0.0.1) and nothing was fetched; W2L reaches public addresses, and a local server the addresses its policy allowlists',
+      'the egress policy refused example.test (private address 10.0.0.1) and nothing was fetched; Octocrawl reaches public addresses, and a local server the addresses its policy allowlists',
     ])
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 0, lane: 'http', event: 'governance_refusal', detail: { reason: 'host outside allowlist' } }] }))[0]).toContain('(host outside allowlist)')
     // A policy_denied with neither event (a lane that recorded nothing) has nothing to name.
@@ -49,13 +49,13 @@ describe('agent hints', () => {
 
   it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
     const wall = result({ status: 'blocked', blockReason: 'login_wall', markdown: null })
-    expect(hints(wall)).toEqual(['the page asks for a login; W2L does not create accounts; use mode authed with your own session'])
+    expect(hints(wall)).toEqual(['the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'])
     // The saved login was used and refused: the fix is a fresh import, not mode authed.
     const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
     expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
-        'example.test gates automated access on the lanes tried (http, browser_local); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
+        'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
@@ -124,25 +124,25 @@ describe('agent hints', () => {
   })
 
   it('names a certificate that did not verify, a deadline that passed, and a page without main content, each with its honest option', () => {
-    expect(hints(result({ status: 'failed', failureReason: 'tls_error', markdown: null }))).toEqual(['the certificate of example.test did not verify and W2L keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it'])
+    expect(hints(result({ status: 'failed', failureReason: 'tls_error', markdown: null }))).toEqual(['the certificate of example.test did not verify and Octocrawl keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it'])
     expect(hints(result({ status: 'failed', failureReason: 'timeout', markdown: null }))).toEqual(["no lane answered within the request's deadline; raise timeout (up to 300000 ms)"])
     expect(hints(result({ status: 'partial' }))).toEqual(['the result is partial: the deadline passed with this much of the page read; raise timeout (up to 300000 ms) for the rest'])
     const empty = result({ status: 'failed', failureReason: 'empty_unverified', markdown: '# Chrome only' })
-    expect(hints(empty)).toEqual(["W2L found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
+    expect(hints(empty)).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
     // A shell or thin answer already carries its own sentence; under fastMode that option's sentence stands alone.
     expect(hints({ ...empty, warnings: [{ code: 'client_rendered_suspected', message: 'shell' }] })).toEqual(['the page fills its data with JavaScript; the browser lane was not tried'])
     expect(hints({ ...empty, trace: [{ at: 1, lane: 'http', event: 'quality_low_yield' }] }, ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
     // A PDF with no text layer is the one empty page W2L cannot read differently.
     const pdf = { kind: 'pdf', detectedBy: 'content_type', contentType: 'application/pdf', declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path: 'files/aaa.pdf', markdownFrom: null, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']>
-    expect(hints(result({ status: 'failed', failureReason: 'empty_unverified', markdown: null, file: pdf }))).toEqual(['the PDF has no text layer, and W2L runs no OCR', 'the response was a pdf file kept at files/aaa.pdf; it has no markdown'])
+    expect(hints(result({ status: 'failed', failureReason: 'empty_unverified', markdown: null, file: pdf }))).toEqual(['the PDF has no text layer, and Octocrawl runs no OCR', 'the response was a pdf file kept at files/aaa.pdf; it has no markdown'])
   })
 
   it('names the required json fields the page did not state and a model fallback that did not run, and keeps at most five hints', () => {
     const json = (issues: NonNullable<HintedResult['json']>['issues']): HintedResult => result({ json: { status: 'incomplete', data: { title: 'Report' }, evidence: [], issues } })
     expect(hints(json([{ code: 'missing_required', message: 'no source', path: '/price' }]))).toEqual(['json is incomplete: the required field /price was not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL'])
-    expect(hints(json([{ code: 'missing_required', message: 'no source', path: '/price' }, { code: 'missing_required', message: 'no source', path: '/sku' }, { code: 'model_unavailable', message: 'model fallback requested but W2L extraction model is not configured' }]))).toEqual([
+    expect(hints(json([{ code: 'missing_required', message: 'no source', path: '/price' }, { code: 'missing_required', message: 'no source', path: '/sku' }, { code: 'model_unavailable', message: 'model fallback requested but Octocrawl extraction model is not configured' }]))).toEqual([
       'json is incomplete: the required fields /price, /sku were not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL',
-      'the json model fallback did not run: model fallback requested but W2L extraction model is not configured',
+      'the json model fallback did not run: model fallback requested but Octocrawl extraction model is not configured',
     ])
     expect(hints(result({ json: { status: 'complete', data: { title: 'Report' }, evidence: [], issues: [] } }))).toEqual([])
     expect(hints(json([{ code: 'field_unavailable', message: 'nullable field not found', path: '/isbn' }]))).toEqual([])

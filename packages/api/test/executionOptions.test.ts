@@ -102,12 +102,12 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
   it('refuses by name the headers the lanes never send on a caller\'s behalf, on the native API and /fc, before anything is fetched', async () => {
     const { origin, post, requests } = await setup()
     const url = `${origin}/echo-headers`
-    const identity = { error: "headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity", code: 'invalid_request' }
+    const identity = { error: "headers.user-agent is refused: the User-Agent and client hints are Octocrawl's declared identity", code: 'invalid_request' }
     expect(await post('/v1/scrape', { url, headers: { 'User-Agent': 'curl/8' } })).toEqual({ status: 400, body: identity })
     expect(await post('/fc/v1/scrape', { url, headers: { 'User-Agent': 'curl/8' } })).toEqual({ status: 400, body: { success: false, ...identity } })
     expect(await post('/v1/scrape', { url, headers: { Cookie: 'sid=1' } })).toEqual({ status: 400, body: { error: "headers.cookie is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record", code: 'invalid_request' } })
     expect(await post('/v1/batches', { urls: [url], headers: { 'Accept-Encoding': 'br' } })).toEqual({ status: 400, body: { error: 'headers.accept-encoding is refused: transport headers are set by the lane', code: 'invalid_request' } })
-    expect(await post('/v1/crawl', { url, headers: { 'Sec-CH-UA': '"Other"' } })).toEqual({ status: 400, body: { error: "headers.sec-ch-ua is refused: the User-Agent and client hints are W2L's declared identity", code: 'invalid_request' } })
+    expect(await post('/v1/crawl', { url, headers: { 'Sec-CH-UA': '"Other"' } })).toEqual({ status: 400, body: { error: "headers.sec-ch-ua is refused: the User-Agent and client hints are Octocrawl's declared identity", code: 'invalid_request' } })
     expect(await post('/v1/scrape', { url, mode: 'research', mobile: true })).toEqual({ status: 400, body: { error: 'mobile is not available in research mode: the research identity declares a bot, not a device', code: 'invalid_request' } })
     expect(requests).toEqual([])
   })
@@ -183,7 +183,7 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
 
   it('a hosted engine refuses skipTlsVerification before anything is fetched; a local one hands the wire options to the lanes', async () => {
     const hosted = await setup({ hosted: true })
-    const refused = { status: 400, body: { error: 'skipTlsVerification is not available in hosted mode', code: 'invalid_request', agentHints: ['a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning'] } }
+    const refused = { status: 400, body: { error: 'skipTlsVerification is not available in hosted mode', code: 'invalid_request', agentHints: ['a hosted server verifies every certificate; run Octocrawl locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning'] } }
     expect(await hosted.post('/v1/scrape', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual(refused)
     expect(await hosted.post('/v1/crawl', { url: `${hosted.origin}/chrome`, skipTlsVerification: true })).toEqual(refused)
     expect(await hosted.post('/v1/batches', { urls: [`${hosted.origin}/chrome`], skipTlsVerification: true })).toEqual(refused)

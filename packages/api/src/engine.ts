@@ -517,7 +517,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           continue
         }
         if (refusal.kind === 'syntax') throw new RequestError(`${name} entry is not a valid CSS selector: ${selector}`)
-        throw new RequestError(`${name} entry uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`${name}[${index}]`] })
+        throw new RequestError(`${name} entry uses ${refusal.reason}, which Octocrawl does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`${name}[${index}]`] })
       }
       if (parts > MAX_SELECTOR_PARTS) {
         throw new RequestError(`${name} must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and holds ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
@@ -537,7 +537,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         continue
       }
       if (refusal.kind === 'syntax') throw new RequestError(`attributes selectors[${index}].selector is not a valid CSS selector: ${selector}`)
-      throw new RequestError(`attributes selectors[${index}].selector uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].selectors[${index}]`] })
+      throw new RequestError(`attributes selectors[${index}].selector uses ${refusal.reason}, which Octocrawl does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].selectors[${index}]`] })
     }
     if (parts > MAX_SELECTOR_PARTS) {
       throw new RequestError(`attributes selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts} (a tag name, *, a class, an id, an attribute test and a pseudo-class each count as one)`)
@@ -557,7 +557,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         continue
       }
       if (refusal.kind === 'syntax') throw new RequestError(`list ${path} is not a valid CSS selector: ${selector}`)
-      throw new RequestError(`list ${path} uses ${refusal.reason}, which W2L does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].${path}`] })
+      throw new RequestError(`list ${path} uses ${refusal.reason}, which Octocrawl does not match: ${selector} (supported: ${SUPPORTED_SELECTORS})`, 'unsupported_parameter', { parameters: [`formats[${at}].${path}`] })
     }
     if (parts > MAX_SELECTOR_PARTS) throw new RequestError(`list selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts}`)
   }
@@ -567,7 +567,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A server that sets robots.txt aside for no caller refuses the fields that ask it to by name, before anything is fetched or stored. */
   const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides' | 'ignoreRobotsTxt', value: unknown): void => {
     if (!robotsSetAside && value !== undefined && value !== false) {
-      throw new RequestError(`unsupported parameter: ${parameter} (this server obeys robots.txt for every URL; setting it aside is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
+      throw new RequestError(`unsupported parameter: ${parameter} (this server obeys robots.txt for every URL; setting it aside is for a local Octocrawl server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
   }
   /**
@@ -586,7 +586,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
-    if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run W2L locally to use them')
+    if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
   }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
@@ -858,7 +858,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const judged = { ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }), ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }), ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }) }
       const read = await chrome.read(url, { ...(waitMs === undefined ? {} : { waitMs }), ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }), ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }), ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }), signal, ...judged })
       const result = pageFromUserBrowser(read, prior, fetchOpts)
-      if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page W2L read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
+      if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page Octocrawl read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the page` }
       return { result }
     } catch (error) {
       if (!(error instanceof HandoffNotThrough)) throw error
@@ -869,14 +869,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
   function checkHandoff(req: ScrapeRequest): void {
     if (req.handoff === undefined) return
-    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
     const unread = unreadByPerson(fetchOptions(req, req.formats))
     if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
   }
 
   /** The scrape's stopped page handed to the person, with its own Chrome connection: the page read, or why not. */
   async function handOffScrape(req: ScrapeRequest, prior: FetchResult, context: ExecutionContext, hooks: HandoffHooks): Promise<{ result: FetchResult } | { reason: string }> {
-    if (handoffClosing.signal.aborted) return { reason: 'W2L is shutting down' }
+    if (handoffClosing.signal.aborted) return { reason: 'Octocrawl is shutting down' }
     // The caller going away, or this engine shutting down, ends it; the scrape's own timeout does not: the person's time is theirs.
     const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
     let chrome: UserChrome
@@ -896,10 +896,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   function withHandoffHint(result: FetchResult, req: ScrapeRequest, tried = false): FetchResult {
     if (userChrome === null || !handoffResult(result) || unreadByPerson(fetchOptions(req, req.formats)) !== null) return result
     const blockReason = result.blockReason!
-    const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass`
+    const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} Octocrawl does not pass`
     const rationale = tried
       ? `${stopped}, and handed to you in your own Chrome it was not read there (the handoff_not_through warning says why): send the request again with handoff to try once more, with a longer handoff.waitMs if you needed more time`
-      : `${stopped}: send the request again with handoff: true (octocrawl scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
+      : `${stopped}: send the request again with handoff: true (octocrawl scrape --handoff) to get through it yourself in your own Chrome, and Octocrawl reads the page there`
     return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale } }
   }
 
@@ -907,8 +907,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
     // A job id names a directory under the task root: anything but an id this server issues names none.
     if (!UUID.test(taskId)) return null
-    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI) to open them in your Chrome')
-    if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI) to open them in your Chrome')
+    if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('Octocrawl is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.open(join(taskRoot, taskId))
     try {
@@ -949,7 +949,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 }
                 // An engine shutting down writes nothing more.
                 if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
-                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'W2L shut down before the page was stored' })
+                  items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'Octocrawl shut down before the page was stored' })
                   continue
                 }
                 // The stopped run's routing audit described that run, not this read: the trace's handoff_from says what was replaced.
@@ -1615,7 +1615,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async importLogin(req) {
-      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (octocrawl serve, the local MCP host, or octocrawl login import)')
+      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or octocrawl login import)')
       try { loginDomain(req.site) }
       catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
       const imported = await importChromeLogin({
@@ -2119,7 +2119,7 @@ function handoffRequestOf(step: StepRecord): { reason: string; liveViewUrl: null
   return {
     reason: HANDOFF_REASONS[blockReason]!,
     liveViewUrl: null,
-    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or octocrawl batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
+    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} Octocrawl does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or octocrawl batch --handoff) opens it in your own Chrome, where you get through it, and Octocrawl reads the page there`,
   }
 }
 

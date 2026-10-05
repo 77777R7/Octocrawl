@@ -829,7 +829,7 @@ export async function extractStructured(
     return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
   }
   if (modelConfig === null) {
-    issues.push({ code: 'model_unavailable', message: 'model fallback requested but W2L extraction model is not configured' }, ...missingIssues)
+    issues.push({ code: 'model_unavailable', message: 'model fallback requested but Octocrawl extraction model is not configured' }, ...missingIssues)
     return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
   }
   // Values read from the page or the fetch stay, with their evidence: the

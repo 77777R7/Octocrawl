@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const leaders = metricLeaders(reports)
   const evidenceComplete = tools.every((tool) => recordsPresent(outputDir, tool)) && !Object.values(reports).some((report) => (report as { caseCount: number }).caseCount !== cases.length)
   const measured = { verifiedCompletion: true, falseSuccessRate: true, failureExplainability: true, p95Latency: true, costPerVerifiedPage: false, recoveryCorrectness: false }
-  const comparison = { generatedAt: new Date().toISOString(), evidenceComplete, measured, tools: reports, leaders, decision: evidenceComplete ? `page-quality evidence complete; W2L leads: ${leaders.filter((leader) => leader.tool === 'w2l').map((leader) => leader.metric).join(', ') || 'none'}. Cost and recovery remain unmeasured.` : 'blocked: raw evidence is missing for one or more comparator' }
+  const comparison = { generatedAt: new Date().toISOString(), evidenceComplete, measured, tools: reports, leaders, decision: evidenceComplete ? `page-quality evidence complete; Octocrawl leads: ${leaders.filter((leader) => leader.tool === 'w2l').map((leader) => leader.metric).join(', ') || 'none'}. Cost and recovery remain unmeasured.` : 'blocked: raw evidence is missing for one or more comparator' }
   await writeFile(`${outputDir}/comparison.json`, JSON.stringify(comparison, null, 2) + '\n')
   const rows = Object.entries(reports).map(([tool, report]) => {
     const value = report as { verifiedCompletion: number; falseSuccessRate: number | null; failureExplainability: number | null; p95WallMs: number; statusMatches: number; caseCount: number }

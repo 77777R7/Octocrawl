@@ -97,7 +97,7 @@ describe('Firecrawl /scrape /crawl shim', () => {
     expect((await (await app.request(`/v1/maps/${body.id}`)).json()).response).toMatchObject({ status: 'completed', refused: { subtreeDenied: 3 }, sources: { sitemap: { mode: 'include' } } })
     expect(await post({ url, useIndex: true, threatProtection: true })).toEqual({
       status: 400,
-      body: { success: false, error: 'unsupported parameters: useIndex, threatProtection', code: 'unsupported_parameter', details: { parameters: ['useIndex', 'threatProtection'] }, agent_hints: ['W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] },
+      body: { success: false, error: 'unsupported parameters: useIndex, threatProtection', code: 'unsupported_parameter', details: { parameters: ['useIndex', 'threatProtection'] }, agent_hints: ['Octocrawl keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] },
     })
     expect(await post({ url, ignoreSitemap: true, sitemapOnly: true })).toEqual({ status: 400, body: { success: false, error: 'ignoreSitemap and sitemapOnly cannot both be true', code: 'invalid_request' } })
     // A sitemap-only map of a site without a sitemap found nothing: success false, with why.
