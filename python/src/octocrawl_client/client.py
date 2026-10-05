@@ -1,4 +1,4 @@
-"""The W2L API over HTTP: scrape, map, batch and crawl, each page with its Evidence Record."""
+"""The Octocrawl API over HTTP: scrape, map, batch and crawl, each page with its Evidence Record."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ class JobResult:
 
 
 class W2L:
-    """A client of one W2L API: a local `octocrawl serve` (default `W2L_API_URL`, else http://127.0.0.1:8787) or a hosted one with a token."""
+    """A client of one Octocrawl API: a local `octocrawl serve` (default `W2L_API_URL`, else http://127.0.0.1:8787) or a hosted one with a token."""
 
     def __init__(
         self,

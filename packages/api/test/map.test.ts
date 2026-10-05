@@ -148,7 +148,7 @@ describe('POST /v1/map', () => {
     expect(await hostedPost({ url, timeout: 60_001 })).toEqual({ status: 400, body: { error: 'timeout must be at most 60000 on this server', code: 'invalid_request' } })
     expect(await post({ url, limit: 0 })).toEqual({ status: 400, body: { error: 'limit must be an integer from 1 to 100000', code: 'invalid_request' } })
     expect(await post({ url, mode: 'authed' })).toMatchObject({ status: 400, body: { error: 'mode authed is not available for map: a map reads public sitemaps and one public page' } })
-    expect((await post({ url, useIndex: true })).body).toMatchObject({ code: 'unsupported_parameter', agentHints: ['W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] })
+    expect((await post({ url, useIndex: true })).body).toMatchObject({ code: 'unsupported_parameter', agentHints: ['Octocrawl keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] })
     expect(requests).toEqual([])
     // The local engine takes the largest limit.
     expect((await post({ url, limit: 100_000 })).body).toMatchObject({ status: 'completed', stoppedBy: null })

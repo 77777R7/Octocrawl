@@ -278,7 +278,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(await postJson('/v1/crawl', { url, excludeTags: ['nav', 'p::before'] })).toEqual({ status: 400, body: { error: 'excludeTags entry is not a valid CSS selector: p::before', code: 'invalid_request' } })
     // What the selector uses, and its place in the request.
     expect(await postJson('/v1/scrape', { url, excludeTags: ['nav', 'li:nth-child(2)'] })).toEqual({ status: 400, body: {
-      error: 'excludeTags entry uses :nth-child, which W2L does not match: li:nth-child(2) (supported: tag, class, id and attribute selectors, the descendant and child combinators, :root, :empty, and :not(), :is() and :where() around selectors without combinators)',
+      error: 'excludeTags entry uses :nth-child, which Octocrawl does not match: li:nth-child(2) (supported: tag, class, id and attribute selectors, the descendant and child combinators, :root, :empty, and :not(), :is() and :where() around selectors without combinators)',
       code: 'unsupported_parameter',
       details: { parameters: ['excludeTags[1]'] },
     } })
@@ -460,7 +460,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
         return { status: res.status, body: await res.json() }
       }
       const wall = `${server.url}/block/login-wall`
-      const login = 'the page asks for a login; W2L does not create accounts; use mode authed with your own session'
+      const login = 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'
       const full = (await post('/v1/scrape', { url: wall })).body
       expect(full).toMatchObject({ status: 'blocked', blockReason: 'login_wall', agentHints: [login] })
       expect((await post('/v1/scrape', { url: wall, debug: false })).body).toMatchObject({ status: 'blocked', agentHints: [login] })

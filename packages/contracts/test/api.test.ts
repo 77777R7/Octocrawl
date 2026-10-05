@@ -470,9 +470,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseCrawlStartRequest({ url, headers: { 'x-test': 'a'.repeat(4097) } })).toThrow('headers.x-test must be a string of at most 4096 characters without control characters')
     expect(parseScrapeRequest({ url, headers: { 'x-test': 'a'.repeat(4096) } }).headers?.['x-test']).toHaveLength(4096)
     const refused: Array<[string, string]> = [
-      ['User-Agent', "headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity"],
-      ['Sec-CH-UA-Mobile', "headers.sec-ch-ua-mobile is refused: the User-Agent and client hints are W2L's declared identity"],
-      ['Sec-Fetch-Site', "headers.sec-fetch-site is refused: the User-Agent and client hints are W2L's declared identity"],
+      ['User-Agent', "headers.user-agent is refused: the User-Agent and client hints are Octocrawl's declared identity"],
+      ['Sec-CH-UA-Mobile', "headers.sec-ch-ua-mobile is refused: the User-Agent and client hints are Octocrawl's declared identity"],
+      ['Sec-Fetch-Site', "headers.sec-fetch-site is refused: the User-Agent and client hints are Octocrawl's declared identity"],
       ['Cookie', "headers.cookie is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record"],
       ['Authorization', "headers.authorization is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record"],
       ['Accept-Encoding', 'headers.accept-encoding is refused: transport headers are set by the lane'],

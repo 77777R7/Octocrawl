@@ -218,8 +218,8 @@ export function usage(command: Command | null): string {
   }
   const synopsis: Record<Command, string> = {
     crawl: 'usage: octocrawl crawl <url> [options] [--out <dir>] | octocrawl crawl --resume <taskId>',
-    scrape: 'usage: octocrawl scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand W2L answers with it. W2L passes no check itself.',
-    batch: 'usage: octocrawl batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and W2L reads the page. W2L passes no check itself.',
+    scrape: 'usage: octocrawl scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand Octocrawl answers with it. Octocrawl passes no check itself.',
+    batch: 'usage: octocrawl batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and Octocrawl reads the page. Octocrawl passes no check itself.',
     map: 'usage: octocrawl map <url> [options]',
   }
   const lines = optionKeys(command).map((key) => {

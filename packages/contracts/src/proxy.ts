@@ -115,7 +115,7 @@ function proxyServer(name: string, raw: string | undefined): ProxyServer | null 
     password = decodeURIComponent(url.password)
   } catch { throw new ProxyConfigError(`${name} is not a valid proxy URL.`) }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new ProxyConfigError(`${name} names a ${url.protocol.slice(0, -1)} proxy; W2L supports http:// and https:// proxies.`)
+    throw new ProxyConfigError(`${name} names a ${url.protocol.slice(0, -1)} proxy; Octocrawl supports http:// and https:// proxies.`)
   }
   const endpoint = `${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`
   return {

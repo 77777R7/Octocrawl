@@ -352,7 +352,7 @@ describe('MCP tools', () => {
         blockAds: { type: 'boolean' },
       })
     }
-    await expect(callTool(client, 'scrape', { url: 'https://example.com/', headers: { 'User-Agent': 'curl/8' } })).rejects.toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', headers: { 'User-Agent': 'curl/8' } })).rejects.toThrow("headers.user-agent is refused: the User-Agent and client hints are Octocrawl's declared identity")
     await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], headers: { Cookie: 'sid=1' } })).rejects.toThrow('headers.cookie is refused')
     await expect(callTool(client, 'crawl', { url: 'https://example.com/', mode: 'research', mobile: true })).rejects.toThrow('mobile is not available in research mode')
     expect(bodies).toHaveLength(3)

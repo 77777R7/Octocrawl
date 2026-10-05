@@ -179,8 +179,8 @@ async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string
 function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
   return {
     onWaiting: (url, check) => io.stderr(`octocrawl ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
-    onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (W2L reads it only once you act in its tab)`),
-    onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab W2L opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
+    onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (Octocrawl reads it only once you act in its tab)`),
+    onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab Octocrawl opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
     ...(io.signal === undefined ? {} : { signal: io.signal }),
   }
 }

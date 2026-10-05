@@ -8,7 +8,7 @@ import type { SubjectAdapter } from '../subject.js'
 export class LadderSubject implements SubjectAdapter {
   readonly meta: Subject = {
     id: 'w2l-ladder',
-    displayName: 'W2L ladder (HTTP → browser)',
+    displayName: 'Octocrawl ladder (HTTP → browser)',
     version: '0.3.0',
     hosting: 'self_hosted',
   }

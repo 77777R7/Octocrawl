@@ -897,10 +897,10 @@ export class RequestError extends Error {
 
 /** The hints a refusal carries for the options W2L does not offer: the next honest step, never a way around the refusal. */
 export const REFUSAL_HINTS = {
-  stealth: "W2L does not offer a stealth mode or stealth proxies; a proxy or session you own (mode authed) is the supported route",
+  stealth: "Octocrawl does not offer a stealth mode or stealth proxies; a proxy or session you own (mode authed) is the supported route",
   ignoreRobotsTxt: 'robots.txt is always read and recorded; on a local server a URL a scrape or batch names is fetched whatever it says, and ignoreRobotsTxt on a crawl or map fetches the links it disallows, on the record',
-  hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
-  useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
+  hostedSkipTlsVerification: 'a hosted server verifies every certificate; run Octocrawl locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
+  useIndex: 'Octocrawl keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
   actions: 'actions run on scrape and batch, where each page named gets the same steps; a crawl or a map does not take them',
 } as const
 
@@ -1235,11 +1235,11 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
       if (SCHEMA_ROOT.includes(key)) {
         if (depth > 0) unsupported(where, key, 'only the root may declare it')
       } else if (!SCHEMA_KEYS.has(key)) {
-        unsupported(where, key, 'W2L extraction does not support it')
+        unsupported(where, key, 'Octocrawl extraction does not support it')
       }
     }
     if (rec.$schema !== undefined && (typeof rec.$schema !== 'string' || !SCHEMA_DIALECTS.test(rec.$schema))) {
-      unsupported(where, '$schema', `W2L follows JSON Schema draft-07, 2019-09 and 2020-12, not ${JSON.stringify(rec.$schema)}`)
+      unsupported(where, '$schema', `Octocrawl follows JSON Schema draft-07, 2019-09 and 2020-12, not ${JSON.stringify(rec.$schema)}`)
     }
     if (rec.$id !== undefined && typeof rec.$id !== 'string') invalid(where, '$id must be a string')
     if (rec.$ref !== undefined) {
@@ -1299,7 +1299,7 @@ function readSchema(value: unknown, at = 'schema'): import('./structured.js').Js
       // Extraction maps a value by one schema: a schema or null, or primitive types.
       const union = branches as unknown[]
       const nullable = union.length === 2 && union.some(isNullSchema)
-      if (!nullable && !union.every(isPrimitiveSchema)) unsupported(where, key, 'W2L maps a schema-or-null union or a union of primitive types, not a union of objects, arrays or references')
+      if (!nullable && !union.every(isPrimitiveSchema)) unsupported(where, key, 'Octocrawl maps a schema-or-null union or a union of primitive types, not a union of objects, arrays or references')
       union.forEach((branch, index) => visit(branch, depth + 1, `${where}.${key}[${index}]`))
     }
   }
@@ -1357,7 +1357,7 @@ function readListFormat(rec: Record<string, unknown>, name: string): ListFormatR
   }
   // Without itemSelector the list is found on the page, and its fields with it: fields alone would name nothing to read them from.
   if (rec.itemSelector === undefined) {
-    if (rec.fields !== undefined) throw new RequestError(`${name}.fields needs an itemSelector: without one, W2L finds the list and its fields itself`)
+    if (rec.fields !== undefined) throw new RequestError(`${name}.fields needs an itemSelector: without one, Octocrawl finds the list and its fields itself`)
     return { type: 'list' }
   }
   const itemSelector = selectorOf(rec.itemSelector, `${name}.itemSelector`)
@@ -1603,7 +1603,7 @@ const TRANSPORT_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length'
  * the lane's. The lanes apply the same rule to what reaches them.
  */
 export function headerRefusal(name: string): string | null {
-  if (name === 'user-agent' || name.startsWith('sec-ch-') || name.startsWith('sec-fetch-')) return `headers.${name} is refused: the User-Agent and client hints are W2L's declared identity`
+  if (name === 'user-agent' || name.startsWith('sec-ch-') || name.startsWith('sec-fetch-')) return `headers.${name} is refused: the User-Agent and client hints are Octocrawl's declared identity`
   if (CREDENTIAL_HEADERS.has(name)) return `headers.${name} is refused: credentials are not sent as headers; mode 'authed' carries your own session on the record`
   if (TRANSPORT_HEADERS.has(name)) return `headers.${name} is refused: transport headers are set by the lane`
   return null
@@ -1679,13 +1679,13 @@ function readParsers(value: unknown): readonly PdfParser[] | undefined {
   value.forEach((entry: unknown, index) => {
     const name = `parsers[${index}]`
     const type = typeof entry === 'string' ? entry : entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>).type : undefined
-    if (type === 'image') throw new RequestError(`${name} is refused: W2L reads no image as a document (no OCR)`, 'unsupported_parameter', { parameters: [name] })
+    if (type === 'image') throw new RequestError(`${name} is refused: Octocrawl reads no image as a document (no OCR)`, 'unsupported_parameter', { parameters: [name] })
     if (type !== 'pdf') throw new RequestError(`${name} must be "pdf" or { type: "pdf", mode, maxPages, pages, pageMarkers }`)
     if (parsers.length > 0) throw new RequestError('parsers must contain at most one pdf entry')
     if (typeof entry === 'string') { parsers.push({ type: 'pdf' }); return }
     const rec = entry as Record<string, unknown>
     rejectUnknownKeys(rec, PDF_PARSER_KEYS, name)
-    if (rec.mode === 'ocr') throw new RequestError(`${name}.mode "ocr" is refused: W2L reads a PDF's text layer and runs no OCR`, 'unsupported_parameter', { parameters: [`${name}.mode`] })
+    if (rec.mode === 'ocr') throw new RequestError(`${name}.mode "ocr" is refused: Octocrawl reads a PDF's text layer and runs no OCR`, 'unsupported_parameter', { parameters: [`${name}.mode`] })
     if (rec.mode !== undefined && rec.mode !== 'fast' && rec.mode !== 'auto') throw new RequestError(`${name}.mode must be "fast" or "auto"`)
     const maxPages = rec.maxPages
     if (maxPages !== undefined && (typeof maxPages !== 'number' || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_PDF_PAGES)) {

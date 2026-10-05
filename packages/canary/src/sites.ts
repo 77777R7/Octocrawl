@@ -175,7 +175,7 @@ const SITES: readonly GroundTruth[] = [
     'canary2-indeed',
     'https://www.indeed.com/',
     'blocked',
-    '403 challenge at curation — jobs listings are a core vertical for W2L.',
+    '403 challenge at curation — jobs listings are a core vertical for Octocrawl.',
     2,
   ),
   truth(
