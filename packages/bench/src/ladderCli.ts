@@ -41,6 +41,7 @@ import {
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText } from '@w2l/http-core'
+import { browserEngineChoice } from './subjects/browserEngine.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
@@ -151,6 +152,11 @@ export function buildChannels(
     }
     /** Opt-in headed Chromium on the browser arm only. Default remains headless. */
     headed?: boolean
+    /**
+     * The engine the public browser rung launches, as the entry point chose it after checking the
+     * access grant (browserEngineChoice). Default stock Playwright.
+     */
+    browserEngine?: import('./subjects/browserEngine.js').BrowserEngineName
     networkPolicy?: import('@w2l/contracts').NetworkPolicy
     originScheduler?: OriginScheduler
     /** Operator-created anonymous marketplace preferences; never a user login. */
@@ -184,7 +190,8 @@ export function buildChannels(
   const preview = opts.previewProductToken === true
   if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
   const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview, opts.robotsCache)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview)
+  // The public browser alone may run another engine; the saved-login rung below is always stock Playwright.
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
 
   // ----------------------------------------------------------------------
@@ -576,6 +583,7 @@ export async function runLadder(args: Args): Promise<number> {
   const fileStore = new FileStore(join(process.env.W2L_TASK_ROOT ?? '.w2l/api', 'files'))
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    browserEngine: browserEngineChoice(process.env, grant, false),
     networkPolicy,
     fileStore,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
+import { loadPatchrightEngine } from '@w2l/bench'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { parseListen, parsePort } from './listen.js'
@@ -22,6 +23,11 @@ export { parseListen, parsePort }
 export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void } = {}): Promise<{ url: string; close: () => Promise<void> }> {
   const log = options.log ?? ((line: string) => console.log(line))
   const listen = parseListen([...argv], env)
+  // Patchright is an optional install: a server asked for it checks it loads before it listens, not on the first browser page.
+  if (listen.browserEngine === 'patchright') {
+    const engine = await loadPatchrightEngine()
+    log(`w2l-api: patchright ${engine.version ?? '(version unknown)'} loaded`)
+  }
   const taskRoot = env.W2L_TASK_ROOT ?? '.w2l/api'
   // The user's saved logins are read by a local server that listens on loopback alone, and it then answers loopback requests only.
   const servesLogins = listen.mode === 'local' && isLoopbackAuthority(listen.host.includes(':') && !listen.host.startsWith('[') ? `[${listen.host}]` : listen.host, false)
@@ -40,6 +46,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
     workerCount: listen.workerCount,
     accessGrant: listen.accessGrant,
+    browserEngine: listen.browserEngine,
   })
   const app = createApp(engine, { loopbackOnly: servesLogins, tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).

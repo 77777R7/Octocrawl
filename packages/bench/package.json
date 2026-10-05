@@ -30,5 +30,8 @@
     "@w2l/runtime": "*",
     "playwright": "^1.62.1",
     "undici": "^7.4.0"
+  },
+  "optionalDependencies": {
+    "patchright": "1.63.0"
   }
 }

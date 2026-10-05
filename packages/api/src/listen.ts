@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
+import { browserEngineChoice, type BrowserEngineName } from '@w2l/bench'
 import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
@@ -65,6 +66,11 @@ export interface ListenConfig {
    * then every capability ADR 0005 puts behind a grant stays off.
    */
   accessGrant: AccessGrant | null
+  /**
+   * The engine the public browser rung launches (`W2L_BROWSER_ENGINE`): stock Playwright unless the
+   * grant names `enhanced_browser` and Patchright is asked for; a hosted server refuses Patchright.
+   */
+  browserEngine: BrowserEngineName
 }
 
 /**
@@ -109,6 +115,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const rateLimit = parseRateLimit(argv, env)
   const workerCount = parseWorkerCount(env)
   const accessGrant = readAccessGrant(argv, env, hosted)
+  const browserEngine = browserEngineChoice(env, accessGrant, hosted)
+  const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -130,6 +138,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       delivery: deliveryConfig('hosted', env),
       jobStreams: jobStreamsEnabled(env),
       accessGrant,
+      browserEngine,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -150,11 +159,12 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)])],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
     accessGrant,
+    browserEngine,
   }
 }
 
