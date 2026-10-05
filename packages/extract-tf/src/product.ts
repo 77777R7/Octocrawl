@@ -350,14 +350,33 @@ function isLabelled(el: Element, doc: Document): boolean {
   return id !== null && id !== '' && qsa(doc, 'label[for]').some((label) => label.getAttribute('for') === id)
 }
 
+/** Words in a form's action, id or class that make it the add-to-cart form. */
+const CART_FORM = /cart|basket|bag/i
+/** Words in a control's or its container's name, id or class that name a product option. */
+const OPTION_NAME = /swatch|variant|variation|attribute/i
+
+/**
+ * Whether a control group is one of the product's options, not some other
+ * labelled control on its page (a review sort, a gift-date picker, a video
+ * player's settings): it sits in the add-to-cart form, or it or its
+ * container is named for a variant, a variation, an attribute or a swatch.
+ */
+function isProductOption(el: Element): boolean {
+  const form = el.closest('form')
+  if (form !== null && CART_FORM.test(`${form.getAttribute('action') ?? ''} ${form.getAttribute('id') ?? ''} ${form.getAttribute('class') ?? ''}`)) return true
+  return [el, el.parentElement, ...Array.from(el.children)].some((node) =>
+    node !== null && OPTION_NAME.test(`${node.getAttribute('name') ?? ''} ${node.getAttribute('id') ?? ''} ${node.getAttribute('class') ?? ''}`))
+}
+
 /**
  * A product's options shown as controls, which cleaning removes with every
  * other control: each labelled <select>, and each labelled element whose
- * children are two or more buttons (swatches). Each is replaced by an empty
+ * children are two or more buttons (swatches), that is one of the product's
+ * options (isProductOption). Each is replaced by an empty
  * placeholder, returned with the option values it stands for: a select's
  * choices without its empty-valued prompt, the buttons' texts. Run before
  * cleanTree; settleOptionGroups decides once the page is routed. A quantity
- * picker, whose choices count up from 0 or 1, is not an option group.
+ * picker, whose choices count up from 0 or 1 ("01" too), is not an option group.
  */
 export function markOptionGroups(doc: Document, excluded: ReadonlySet<Element> = new Set()): Map<Element, string> {
   const marked = new Map<Element, string>()
@@ -370,16 +389,16 @@ export function markOptionGroups(doc: Document, excluded: ReadonlySet<Element> =
     marked.set(placeholder, unique.join(', '))
   }
   for (const select of qsa(doc, 'select')) {
-    if (!outside(select) || !isLabelled(select, doc)) continue
+    if (!outside(select) || !isLabelled(select, doc) || !isProductOption(select)) continue
     const choices = qsa(select, 'option').filter((option) => option.getAttribute('value') !== '').map((option) => textOf(option).trim())
     // A quantity picker (1, 2, 3, …) is how many to buy, not one of the product's options.
-    const counts = choices.every((choice, at) => /^\d+$/.test(choice) && Number(choice) === Number(choices[0]) + at) && ['0', '1'].includes(choices[0] ?? '')
+    const counts = choices.every((choice, at) => /^\d+$/.test(choice) && Number(choice) === Number(choices[0]) + at) && [0, 1].includes(Number(choices[0]))
     if (!counts) place(select, choices)
   }
   for (const group of qsa(doc, 'div,span,ul,fieldset,p')) {
     const kids = Array.from(group.children)
     if (kids.length < 2 || !kids.every((kid) => tagOf(kid) === 'button' && (kid.getAttribute('type') ?? '').toLowerCase() !== 'submit')) continue
-    if (!outside(group) || !isLabelled(group, doc)) continue
+    if (!outside(group) || !isLabelled(group, doc) || !isProductOption(group)) continue
     place(kids[0]!, kids.map((kid) => textOf(kid)))
   }
   return marked

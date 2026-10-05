@@ -408,18 +408,39 @@ ${options}
       expect(out.mainHtml).not.toContain('<button')
     })
 
+    // WooCommerce's variation form: the picker is a table inside the add-to-cart form.
+    const cartForm = (cells: string) => `<form class="variations_form cart" action="/cart/"><table class="variations"><tr><th class="label">${cells.split('|')[0]}</th><td class="value">${cells.split('|')[1]}</td></tr></table><button type="submit">Add to cart</button></form>`
+
     it('keeps the choices of a select, without its placeholder', () => {
-      const select = '<label for="size">Size</label><select id="size"><option value="">Choose an option</option><option value="S">S</option><option value="M">M</option><option value="L">L</option></select>'
+      const select = cartForm('<label for="size">Size</label>|<select id="size" name="attribute_size"><option value="">Choose an option</option><option value="S">S</option><option value="M">M</option><option value="L">L</option></select>')
       const out = extractTf.extract(product(select))
       expect(htmlToMarkdown(out.mainHtml)).toContain('S, M, L')
       expect(out.mainHtml).not.toContain('Choose an option')
     })
 
     it('leaves a quantity picker out, and keeps a link after a select apart from its values', () => {
-      const quantity = '<label for="qty">Quantity</label><select id="qty">' + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('') + '</select>'
+      const quantity = cartForm('<label for="qty">Quantity</label>|<select id="qty" name="quantity">' + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('') + '</select>')
       expect(htmlToMarkdown(extractTf.extract(product(quantity)).mainHtml)).not.toContain('1, 2, 3')
-      const colour = '<label for="color">Color</label><select id="color"><option value="">Choose an option</option><option value="blue">Blue</option><option value="red">Red</option></select><a class="reset_variations" href="#">Clear</a>'
+      const padded = cartForm('<label for="qty">Qty</label>|<select id="qty" name="qty">' + Array.from({ length: 10 }, (_, i) => `<option>${String(i + 1).padStart(2, '0')}</option>`).join('') + '</select>')
+      expect(htmlToMarkdown(extractTf.extract(product(padded)).mainHtml)).not.toContain('01, 02, 03')
+      // Named for nothing but its place in the add-to-cart form.
+      const colour = cartForm('<label for="color">Color</label>|<select id="color" name="pa_colour"><option value="">Choose an option</option><option value="blue">Blue</option><option value="red">Red</option></select><a class="reset_variations" href="#">Clear</a>')
       expect(htmlToMarkdown(extractTf.extract(product(colour)).mainHtml)).toContain('Blue, Red [Clear](#)')
+    })
+
+    it('leaves a product page\'s other labelled controls out: review sorting, dates, a player\'s settings', () => {
+      // Amazon's product pages carry a gift-date picker and a video player's caption settings; any shop, a review sort.
+      const others = [
+        '<section class="reviews"><h2>Reviews</h2><label for="sort">Sort by</label><select id="sort"><option>Most recent</option><option>Highest rated</option><option>Lowest rated</option></select></section>',
+        '<div class="delivery"><select id="onlineMonth" aria-label="Select Month">' + Array.from({ length: 12 }, (_, i) => `<option>${String(i + 1).padStart(2, '0')}</option>`).join('') + '</select></div>',
+        '<div role="dialog" class="captions"><label for="fg">Color</label><select id="fg"><option>White</option><option>Black</option><option>Red</option></select></div>',
+        '<section class="reviews"><label>Filter:</label><div class="review-filters"><button type="button">All stars</button><button type="button">5 stars</button><button type="button">4 stars</button></div></section>',
+      ]
+      for (const other of others) {
+        const markdown = htmlToMarkdown(extractTf.extract(product(swatches + other)).mainHtml)
+        expect(markdown).toContain('128, 256, 512, 1024')
+        for (const noise of ['Most recent, Highest rated', '01, 02, 03', 'White, Black, Red', 'All stars, 5 stars']) expect(markdown).not.toContain(noise)
+      }
     })
 
     it('leaves a product page\'s unlabelled buttons out', () => {
