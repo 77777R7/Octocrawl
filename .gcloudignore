@@ -12,7 +12,6 @@ scripts
 !apps/public-web/scripts/
 !apps/public-web/scripts/build-docs.mjs
 .github
-render.yaml
 Dockerfile
 .dockerignore
 .gitignore

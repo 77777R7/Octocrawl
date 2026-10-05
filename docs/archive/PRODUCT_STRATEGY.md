@@ -1,10 +1,10 @@
 # 产品战略：树根与工作流分支
 
-> Historical strategy context. The current phase plan is in [ROADMAP.md](ROADMAP.md); the Section A/B/C order that followed this document is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). SEO is not an automatically approved next branch.
+> Historical strategy context. The current phase plan is in [ROADMAP.md](../../ROADMAP.md); the Section A/B/C order that followed this document is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](../roadmap/sections-abc-roadmap-2026-09-28.md). SEO is not an automatically approved next branch.
 
 更新日期：2026-08-18
 
-市场验证记录：[research/market_validation_root_branch_model.md](research/market_validation_root_branch_model.md)
+市场验证记录：[research/market_validation_root_branch_model.md](../../research/market_validation_root_branch_model.md)
 
 ## 1. 核心判断
 

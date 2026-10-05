@@ -111,6 +111,15 @@ For one page, ask for it in the request: `octocrawl scrape <url> --handoff`, or 
 
 For researchers, two guides walk through a real run: [From a URL list to a CSV with evidence](docs/guides/url-list-to-csv.md) (the command line and the Python client, every evidence column, and why failed rows stay) and [Citing web data in a paper](docs/guides/citing-web-data.md) (a methods section, a reference with its access date and hash, and personal data).
 
+The ports the local services listen on, all on 127.0.0.1:
+
+| Port | Service | Started by | Changed with |
+| --- | --- | --- | --- |
+| 8787 | The REST API, and the API the stdio MCP server (`octocrawl-mcp`) and the Python client call by default (the TypeScript SDK takes a `baseUrl`) | `octocrawl serve`, `npm run api` | `--port`, `W2L_API_PORT`; those clients `W2L_API_URL` |
+| 8791 | The local MCP service (API, Monitor scheduler, delivery worker and MCP endpoint at `/mcp`) | `npm run local:mcp`, or the LaunchAgent from `npm run local:mcp:install` | `W2L_LOCAL_MCP_PORT` |
+| 8788 | The HTTPS webhook receiver of the first-use walkthrough | `npm run first-use:local` | fixed |
+| 8798 | The public site's local preview | `npm run public:preview:local` | `W2L_PUBLIC_PREVIEW_PORT` |
+
 For local MCP use, one background service runs the API, Monitor scheduler,
 delivery worker and MCP endpoint. On macOS, install it as a LaunchAgent and
 connect Codex to its loopback URL:
@@ -121,7 +130,7 @@ codex mcp add w2l-local --url http://127.0.0.1:8791/mcp
 npm run local:mcp:status
 ```
 
-It restarts after a process crash and at login. No Render or WorkOS account is
+It restarts after a process crash and at login. No hosting or sign-in account is
 needed for this local path. `npm run local:mcp:uninstall` removes the agent;
 `codex mcp remove w2l-local` removes the client entry. On other systems, run
 `npm run local:mcp` in one terminal. The state stays in `.w2l/api` by default.
@@ -164,8 +173,8 @@ Research mode (`mode: "research"`, `--mode research` on the command line) declar
 The unified local MCP covers scrape, map, Crawl, persistent URL-array batches, and
 Monitor/Delivery without separate worker terminals. A unified service also
 implements authenticated Streamable HTTP for the reviewed public-document
-Monitor and anonymous Amazon.sg product JSON/batch flows; its permanent Render
-URL and final hosted acceptance are paused on the roadmap
+Monitor and anonymous Amazon.sg product JSON/batch flows (experimental; its setup is
+archived in [docs/archive/hosted-mcp-pilot.md](docs/archive/hosted-mcp-pilot.md)); hosting is paused on the roadmap
 ([ROADMAP.md](ROADMAP.md#paused)). For both flows on one Mac, run
 `npm run first-use:local` after `npm ci`; see the
 [two-flow first-use guide](docs/dual-flow-first-use.md),
@@ -359,7 +368,7 @@ See [onboarding](docs/onboarding.md) for the HTTPS receiver, authentication, wor
 
 The [Gate 2–4 acceptance record](docs/roadmap/gate-2-4-acceptance.md) links the process-crash, concurrent-claim, public HTTPS and agent clean-install evidence. Gate 2/3 engineering acceptance passed; Gate 4 awaits a non-author human, and Gate 5 external two-week/repeat-use validation has not started. `npm run package:handoff` captures review source with per-file hashes. The existing tested archive is a preserved pre-commit snapshot, not a package of subsequent roadmap edits.
 
-C2 Monitor/Delivery MCP and its local HTTPS first-use workflow are implemented. C3 has a unified process and authenticated Streamable HTTP implementation; Render hosting, WorkOS browser login, real-client connection, and a hosted restart drill remain unverified. B1/B2 and C1 remain in_progress for their broader operational/adoption gates. See the [first-use walkthrough](docs/mcp-first-use.md) and [dated local evidence](docs/evidence/c2-c3-mcp-local-2026-09-23.md).
+C2 Monitor/Delivery MCP and its local HTTPS first-use workflow are implemented. C3 has a unified process and authenticated Streamable HTTP implementation, experimental and not deployed ([archived setup](docs/archive/hosted-mcp-pilot.md)). B1/B2 and C1 remain in_progress for their broader operational/adoption gates. See the [first-use walkthrough](docs/mcp-first-use.md) and [dated local evidence](docs/evidence/c2-c3-mcp-local-2026-09-23.md).
 
 ## Files: PDF, CSV, XLSX, ZIP, JSON
 
@@ -470,8 +479,7 @@ docs/
   roadmap/section-a-foundation.md  Section A phases and A4 gate
   roadmap/section-b-continuous-data.md  Section B future direction
   roadmap/section-c-delivery.md    Section C future delivery direction
-  PHASE1_ENGINEERING_NOTES.md    Decision log
-  PRODUCT_PLAN_V2.md              Product roadmap
+  archive/                        Earlier plans and the hosted-pilot setup: PHASE1_ENGINEERING_NOTES.md (decision log), PRODUCT_PLAN_V2.md, PRODUCT_STRATEGY.md, hosted-mcp-pilot.md, render.yaml
   firecrawl-shim.md               Firecrawl v1 scrape/crawl snapshot + diffs
   benchmark-gate.md               Phase 3 comparator versions, evidence contract, and blockers
 ```
@@ -510,12 +518,12 @@ docs/
 - [x] C2 Monitor/Delivery MCP and local conversational first-use flow
 - [ ] C2 n8n and narrow task UI
 - [x] C3 unified single-instance process and authenticated Streamable HTTP implementation
-- [ ] C3 permanent Render URL, WorkOS/Codex OAuth acceptance and hosted restart drill
+- [ ] C3 hosted MCP: deployment, sign-in acceptance and hosted restart drill (experimental code; setup archived in docs/archive/hosted-mcp-pilot.md; hosting is a P5 item)
 - [ ] Gate 5 two external trial users, two weeks, repeat use and real downstream consumption
 - [x] Phase 3 Benchmark Gate harness: fixed W2L run, comparator evidence, and blocked-until-real-comparators decision
 - [ ] Hosted Egress Gate: browser subresource policy enforcement and DNS-to-connection binding
 
-See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](PRODUCT_PLAN_V2.md) remains the historical detailed plan.
+See [ROADMAP.md](ROADMAP.md) for the current phase plan; the Section A/B/C roadmap is archived in [docs/roadmap/sections-abc-roadmap-2026-09-28.md](docs/roadmap/sections-abc-roadmap-2026-09-28.md). [PRODUCT_PLAN_V2.md](docs/archive/PRODUCT_PLAN_V2.md) remains the historical detailed plan.
 
 ## Contributing
 
@@ -532,7 +540,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 Server-side code, the CLI (`@octocrawl/cli`, `octocrawl`) and the MCP server (`@octocrawl/mcp`): [AGPL-3.0](LICENSE)  
 Client libraries: MIT: the TypeScript SDK (`@octocrawl/sdk`, which includes the workspace's `@w2l/contracts`, also MIT) and the Python client (`octocrawl-client`)
 
-See [PHASE1_ENGINEERING_NOTES.md §1.3](PHASE1_ENGINEERING_NOTES.md) for the rationale.
+See [PHASE1_ENGINEERING_NOTES.md §1.3](docs/archive/PHASE1_ENGINEERING_NOTES.md) for the rationale.
 
 ## Why AGPL?
 

@@ -1,3 +1,10 @@
+/**
+ * Experimental: the hosted MCP service (one owner, WorkOS AuthKit sign-in,
+ * Streamable HTTP over the in-process API). It has not been deployed or
+ * accepted; its setup is archived in docs/archive/hosted-mcp-pilot.md, and
+ * hosting is a P5 item on the roadmap. The local MCP host (localHost.ts) and
+ * the stdio server are the supported ways to use MCP.
+ */
 import { createServer, type Server as HttpServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
