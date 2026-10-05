@@ -37,6 +37,21 @@
     {
       "url": "https://www.target.com/c/laptops-electronics/-/N-5xtfm",
       "reason": "the category link was stale (404); dropped before freezing"
+    },
+    {
+      "url": "https://www.mediamarkt.de/de/category/notebooks-27.html",
+      "id": "T028",
+      "reason": "the category link was stale: it redirects to a baking-accessories page; dropped after window 1, before freezing"
+    },
+    {
+      "url": "https://www.statista.com/statistics/262966/number-of-apple-iphones-sold/",
+      "id": "T054",
+      "reason": "the statistic id was stale: it redirects to another statistic; dropped after window 1, before freezing"
+    },
+    {
+      "url": "https://www.shein.com/",
+      "id": "T032",
+      "reason": "window 1 fetched the product tiles with their prices and the product still answered empty_unverified: a verdict case, not access (like hn.algolia); dropped after window 1, before freezing"
     }
   ],
   "tasks": [
@@ -109,7 +124,7 @@
         },
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 1
         }
       ],
@@ -134,7 +149,7 @@
         },
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 1
         }
       ],
@@ -154,7 +169,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -179,7 +194,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -328,7 +343,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -353,7 +368,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -378,7 +393,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -403,7 +418,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -428,7 +443,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -453,7 +468,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -478,7 +493,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -503,7 +518,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -528,7 +543,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -553,7 +568,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -578,7 +593,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -603,7 +618,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -628,7 +643,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -653,7 +668,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -678,7 +693,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -703,37 +718,12 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
           "type": "markdownMatches",
           "pattern": "laptop",
-          "flags": "i"
-        }
-      ],
-      "provenance": "expansion"
-    },
-    {
-      "id": "T028",
-      "part": "candidate",
-      "audience": "non_programmer",
-      "kind": "listing",
-      "url": "https://www.mediamarkt.de/de/category/notebooks-27.html",
-      "request": {
-        "formats": [
-          "markdown"
-        ]
-      },
-      "predicates": [
-        {
-          "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
-          "min": 3
-        },
-        {
-          "type": "markdownMatches",
-          "pattern": "notebook",
           "flags": "i"
         }
       ],
@@ -753,7 +743,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -778,7 +768,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -803,37 +793,12 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
           "type": "markdownMatches",
           "pattern": "Temu",
-          "flags": "i"
-        }
-      ],
-      "provenance": "expansion"
-    },
-    {
-      "id": "T032",
-      "part": "candidate",
-      "audience": "non_programmer",
-      "kind": "listing",
-      "url": "https://www.shein.com/",
-      "request": {
-        "formats": [
-          "markdown"
-        ]
-      },
-      "predicates": [
-        {
-          "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
-          "min": 5
-        },
-        {
-          "type": "markdownMatches",
-          "pattern": "SHEIN",
           "flags": "i"
         }
       ],
@@ -853,7 +818,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -878,7 +843,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -903,7 +868,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -928,7 +893,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -953,7 +918,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -978,7 +943,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 5
         },
         {
@@ -1003,7 +968,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1028,7 +993,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1053,7 +1018,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1078,7 +1043,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1103,7 +1068,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1128,7 +1093,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1153,7 +1118,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1352,31 +1317,6 @@
         {
           "type": "markdownMatches",
           "pattern": "World Economic Outlook",
-          "flags": "i"
-        }
-      ],
-      "provenance": "expansion"
-    },
-    {
-      "id": "T054",
-      "part": "candidate",
-      "audience": "researcher",
-      "kind": "page",
-      "url": "https://www.statista.com/statistics/262966/number-of-apple-iphones-sold/",
-      "request": {
-        "formats": [
-          "markdown"
-        ]
-      },
-      "predicates": [
-        {
-          "type": "markdownMatches",
-          "pattern": "iPhone",
-          "flags": "i"
-        },
-        {
-          "type": "markdownMatches",
-          "pattern": "million",
           "flags": "i"
         }
       ],
@@ -1670,7 +1610,7 @@
       "predicates": [
         {
           "type": "markdownMatches",
-          "pattern": "Dow",
+          "pattern": "\\bDow\\b",
           "flags": "i"
         },
         {
@@ -1745,12 +1685,12 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
           "type": "markdownMatches",
-          "pattern": "car",
+          "pattern": "\\bcars?\\b",
           "flags": "i"
         }
       ],
@@ -1770,7 +1710,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -1795,12 +1735,12 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
           "type": "markdownMatches",
-          "pattern": "used",
+          "pattern": "\\bused\\b",
           "flags": "i"
         }
       ],
@@ -2066,7 +2006,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -2091,7 +2031,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -2116,7 +2056,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -2141,7 +2081,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {
@@ -2166,7 +2106,7 @@
       "predicates": [
         {
           "type": "markdownCountMin",
-          "pattern": "(?:[$€£]\\s*\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
           "min": 3
         },
         {

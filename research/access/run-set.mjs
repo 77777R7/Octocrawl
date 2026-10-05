@@ -4,10 +4,14 @@
 // judges each answer by the task's own predicates, writes one JSON line per attempt under
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
-// Usage: node research/access/run-set.mjs [--set frozen|blind|all] [--only T01,T02] [--warm]
+// Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
 //          [--access '{"tier":"standard"}'] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp>
-//   Env: W2L_API_URL (default http://127.0.0.1:8787)
+//   Env: W2L_API_URL (default http://127.0.0.1:8787). W2L_EGRESS_ECHO_URL, when set, is fetched
+//   once through the environment proxy at the start, and the first IPv4 address in its answer is
+//   recorded as the exit address (for example https://api.ipify.org).
+//   --set frozen (the default) selects the frozen and the unstable tasks: PA's denominator. healthy,
+//   blind and candidate select that part alone; all selects every task.
 //   --rejudge re-evaluates a finished run's saved Markdown against the current predicates in
 //   tasks.v1.json, without fetching, and rewrites that run's attempts.jsonl and summary.json.
 //
@@ -58,20 +62,31 @@ const isData = (p) => DATA_TYPES.has(p.type) || (p.type === 'field' && /^(json|l
 const taskText = await readFile(join(here, 'tasks.v1.json'), 'utf8')
 const tasksSha256 = createHash('sha256').update(taskText).digest('hex')
 const taskFile = JSON.parse(taskText)
-const tasks = taskFile.tasks.filter((t) => (setFilter === 'all' || t.part === setFilter) && (only === undefined || only.includes(t.id)))
-for (const t of tasks) {
+const inSet = (t) => setFilter === 'all' || t.part === setFilter || (setFilter === 'frozen' && t.part === 'unstable')
+const tasks = taskFile.tasks.filter((t) => inSet(t) && (only === undefined || only.includes(t.id)))
+for (const t of rejudgeDir === undefined ? tasks : taskFile.tasks) {
   if (!t.predicates.some(isData)) throw new Error(`${t.id} has no data predicate; a status check alone cannot verify a task`)
 }
 
 const sh = (cmd) => execSync(cmd, { cwd: repo }).toString().trim()
 const environment = {
   commit: sh('git rev-parse --short HEAD'),
-  dirty: sh('git status --porcelain --untracked-files=no') !== '',
+  // Tracked changes anywhere, or any change under research/access (new files included): the
+  // runner and the task file must be in the commit the record names.
+  dirty: sh('git status --porcelain --untracked-files=no') !== '' || sh('git status --porcelain --untracked-files=all -- research/access') !== '',
   proxied: Boolean(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy),
   proxyEnv: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null },
   api,
+  exitIp: null,
   tasksSha256,
   startedAt: new Date().toISOString(),
+}
+if (rejudgeDir === undefined && process.env.W2L_EGRESS_ECHO_URL) {
+  try {
+    const { fetch: proxiedFetch, EnvHttpProxyAgent } = await import('undici')
+    const res = await proxiedFetch(process.env.W2L_EGRESS_ECHO_URL, { dispatcher: new EnvHttpProxyAgent(), signal: AbortSignal.timeout(15_000) })
+    environment.exitIp = (await res.text()).match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/)?.[0] ?? null
+  } catch { environment.exitIp = null }
 }
 const runDir = rejudgeDir === undefined ? join(repo, '.w2l/access/runs', environment.startedAt.replace(/[:.]/g, '-')) : join(repo, rejudgeDir)
 await mkdir(join(runDir, 'pages'), { recursive: true })
@@ -117,7 +132,7 @@ async function attempt(task, temperature) {
   const dataFailed = results.some((r) => isData(r.p) && !r.pass)
   const events = doc === null ? [] : [...new Set([...(doc.trace ?? []).map((t) => t.event), ...(doc.ladderTrace ?? []).map((t) => t.event)])]
   return {
-    taskId: task.id, part: task.part, temperature,
+    taskId: task.id, url: task.url, part: task.part, temperature,
     observed: {
       apiStatus, httpStatus: doc?.evidence?.httpStatus ?? null, status: doc?.status ?? null,
       reason: doc?.failureReason ?? doc?.blockReason ?? doc?.budgetExceeded ?? doc?.error?.code ?? error,
@@ -140,13 +155,23 @@ async function attempt(task, temperature) {
 const rows = []
 let rejudged = null
 let priorRun = null
+const droppedRows = []
 if (rejudgeDir !== undefined) {
   // Re-check saved Markdown against the current predicates. Status, reason and timings stay as
   // the run observed them; only the predicate verdicts are recomputed.
   const byId = new Map(taskFile.tasks.map((t) => [t.id, t]))
-  const old = (await readFile(linesFile, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const old = (await readFile(linesFile, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((r) => { delete r.droppedAfterRun; return r })
   for (const row of old) {
     const task = byId.get(row.taskId)
+    if (task === undefined || (row.url !== undefined && row.url !== task.url)) {
+      // The task was dropped from the file (or its id now names another URL) after this run:
+      // the row is kept in attempts.jsonl for the record but leaves every count.
+      row.droppedAfterRun = true
+      droppedRows.push(row)
+      continue
+    }
+    row.url = task.url
+    row.part = task.part
     let markdown = null
     try { markdown = await readFile(join(runDir, 'pages', `${row.taskId}-${row.temperature}.md`), 'utf8') } catch {}
     const doc = { markdown }
@@ -159,7 +184,7 @@ if (rejudgeDir !== undefined) {
     row.rejudgedAt = environment.startedAt
     rows.push(row)
   }
-  await writeFile(linesFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n')
+  await writeFile(linesFile, [...rows, ...droppedRows].map((r) => JSON.stringify(r)).join('\n') + '\n')
   const prior = JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8'))
   rejudged = { at: environment.startedAt, command: `node research/access/run-set.mjs ${args.join(' ')}`, commit: environment.commit, tasksSha256 }
   Object.assign(environment, prior.environment)
@@ -196,12 +221,13 @@ await writeFile(join(runDir, 'summary.json'), JSON.stringify({ command, environm
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
   const md = [
-    `# Access task set run: ${setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
+    `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
     ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against tasks.v1.json with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''})` : 'direct'}`,
-    `- API: ${api}; access option: ${access === undefined ? 'none' : `\`${JSON.stringify(access)}\``}`,
+    `- API: ${environment.api}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}`,
+    `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
     `- Run: ${environment.startedAt} → ${finishedAt}`,
     `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`, '',
     '| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |',
@@ -211,6 +237,7 @@ if (recordFile !== undefined) {
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |`),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
+    ...(droppedRows.length === 0 ? [] : [`Dropped from the task file after this run, so outside every count above: ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')} (the reasons are in tasks.v1.json \`excluded\`).`, '']),
   ].join('\n')
   await mkdir(dirname(join(repo, recordFile)), { recursive: true })
   await writeFile(join(repo, recordFile), md)
