@@ -51,6 +51,7 @@ beforeAll(async () => {
     if (req.url === '/slowpass') return cookie.includes('slowpass=1') ? html(ARTICLE) : html(captcha('slowpass'))
     // A scrape's page, behind its own captcha.
     if (req.url === '/single') return cookie.includes('single=1') ? html(ARTICLE.replace('The member page', 'The single page')) : html(captcha('single'))
+    if (req.url === '/unpriced') return cookie.includes('unpriced=1') ? html(ARTICLE.replace('The member page', 'The unpriced page')) : html(captcha('unpriced'))
     // A page that keeps the widget's script once the person is through it (as a Turnstile page does).
     if (req.url === '/turnstile') return cookie.includes('turnstile=1') ? html(`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>${ARTICLE}`) : html(`<div class="cf-turnstile" data-sitekey="k"></div>${captcha('turnstile')}`)
     // Behind its captcha, a page that keeps the widget's script and has its prose in what blockAds takes for an ad.
@@ -292,6 +293,23 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(response.summary.browserMs).toBe(response.usage.browserMs)
       expect(response.summary.bytesDecompressed).toBeGreaterThan(response.usage.bytesDecompressed)
       expect(JSON.stringify(response.agentHints ?? [])).not.toContain('lane served')
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
+
+  it("a scrape handed to the person after a rung that did not state its cost answers with the call's unknown cost, not the read's 0", async () => {
+    // The http rung with its cost made unknown stands in for a provider tried before the person.
+    const http = buildChannels('standard', { localSubjects: { browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!
+    const unpriced = { ...http, fetch: async (...args: Parameters<typeof http.fetch>) => { const r = await http.fetch(...args); return { ...r, usage: { ...r.usage, externalCostUsd: null } } } }
+    const engine = createApiEngine({ taskRoot: join(root, 'tasks-unpriced'), channelsFor: () => [unpriced], userChrome: { userDataDir: join(root, 'chrome') } })
+    const stop = person(chrome, { '/unpriced': async (page) => { await page.waitForTimeout(1_500); await page.click('#pass') } })
+    try {
+      const response = await engine.scrape({ url: `${base}/unpriced`, handoff: { waitMs: 20_000 } } as never) as Record<string, any>
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed' })
+      expect(response.summary.externalCostUsd).toBeNull()
+      expect(response.usage.externalCostUsd).toBeNull()
     } finally {
       stop()
       await engine.close()

@@ -410,10 +410,11 @@ function summarize(perUrl: { url: string; arms: ArmOutcome[] }[]): string {
     const falsePos = results.filter((r) => r.falseSuccess).length
     const walls = results.map((r) => r.wallMs).sort((x, y) => x - y)
     const median = walls.length > 0 ? walls[Math.floor(walls.length / 2)] : null
-    const cost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0)
+    // Unknown is not zero: one attempt without a stated cost makes the total unknown.
+    const cost = results.some((r) => r.costUsd === null) ? null : results.reduce((s, r) => s + (r.costUsd ?? 0), 0)
     const handoffs = results.filter((r) => r.handoff !== null).length
     lines.push(
-      `| ${name} | ${contentful}/${results.length} | ${falsePos} | ${median ?? '—'} | ${cost === 0 ? '—' : cost.toFixed(4)} | ${handoffs} |`,
+      `| ${name} | ${contentful}/${results.length} | ${falsePos} | ${median ?? '—'} | ${cost === null ? 'unknown' : cost.toFixed(4)} | ${handoffs} |`,
     )
   }
   return lines.join('\n')

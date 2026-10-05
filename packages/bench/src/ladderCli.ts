@@ -39,6 +39,8 @@ import {
   withOperatorContact,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
+import { readFileSync } from 'node:fs'
+import { accessGrantFromText } from '@w2l/http-core'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
@@ -135,7 +137,11 @@ export function buildChannels(
     vendorOps?: Record<string, import('./vendors/transport.js').VendorOps>
     /** Test seam: robots fetcher for provider subjects. */
     robotsFetcher?: import('./subjects/provider.js').RobotsFetcher
-    /** Product policy for the vendor adapters (persistence / live view). */
+    /**
+     * Product policy for the vendor adapters: operational keys (persistence, live view) and the
+     * ADR 0005 access capabilities a grant names. No vendor rung is built unless it names
+     * `vendor_remote_browser`.
+     */
     vendorPolicy?: import('@w2l/http-core').VendorPolicy
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
@@ -297,7 +303,7 @@ export function buildChannels(
               attemptCount: 0,
               contentTokens: null,
               browserMs: 0,
-              externalCostUsd: null,
+              externalCostUsd: 0,
             },
             trace,
           }
@@ -312,8 +318,9 @@ export function buildChannels(
   }
 
   // Provider rungs exist only when the vendor is named (W2L_VENDORS) with its key, or a key is passed, AND the mode permits the
-  // lane. connectVendor is deferred to the first fetch.
+  // lane, AND the access grant names vendor_remote_browser (ADR 0005). connectVendor is deferred to the first fetch.
   if (mode === 'standard') return channels
+  if (!(opts.vendorPolicy?.authorized ?? []).includes('vendor_remote_browser')) return channels
 
   // A paid browser service is used when the person names it in W2L_VENDORS (comma-separated: browserbase, steel), not
   // because its key happens to be in the environment: it bills them and sees the URLs.
@@ -410,7 +417,7 @@ export function buildChannels(
               attemptCount: 0,
               contentTokens: null,
               browserMs: 0,
-              externalCostUsd: null,
+              externalCostUsd: 0,
             },
             trace: [
               {
@@ -551,11 +558,16 @@ export async function runLadder(args: Args): Promise<number> {
   // The product policy the vendor adapters will evaluate. Only the two
   // authorizable capabilities can ever be turned on, and only by explicit
   // flags on this CLI — never by a default.
+  // W2L_ACCESS_GRANT (a file path, or the JSON itself) adds the ADR 0005 capabilities a grant
+  // names; without one no vendor rung is built.
+  const grantSource = (process.env.W2L_ACCESS_GRANT ?? '').trim()
+  const grant = grantSource === '' ? null : accessGrantFromText(grantSource.startsWith('{') ? grantSource : readFileSync(grantSource, 'utf8'))
   const vendorPolicy = {
     authorized: [
       ...(args.persistSession ? ['session_persistence'] : []),
       ...(args.liveView ? ['live_view_handoff'] : []),
-    ] as const,
+      ...(grant?.capabilities ?? []),
+    ],
   }
   // The CLI runs in local mode: outbound requests follow the operator's proxy
   // variables, and research mode declares W2L_CONTACT. Files are saved where

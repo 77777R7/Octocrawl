@@ -162,6 +162,12 @@ describe('octocrawl against a local site', () => {
     const err: string[] = []
     const code = await runCli(['scrape', `${origin}/tides/a`, '--markdown'], { env: { W2L_TASK_ROOT: join(root, 'tasks'), W2L_API_HOST: '0.0.0.0' }, stdout: (text) => out.push(text), stderr: (text) => err.push(text) })
     expect({ code, err: err.join('\n') }).toMatchObject({ code: 0 })
+    // A grant with a problem is a usage error, named, before anything is fetched: not a stack trace.
+    const grantErr: string[] = []
+    const badGrant = await runCli(['scrape', `${origin}/tides/a`], { env: { W2L_TASK_ROOT: join(root, 'tasks'), W2L_ACCESS_GRANT: JSON.stringify({ tier: 'standard', capabilities: ['camoufox'] }) }, stdout: () => {}, stderr: (text) => grantErr.push(text) })
+    expect(badGrant).toBe(2)
+    expect(grantErr.join('\n')).toMatch(/access grant refused \(ADR 0005\):\n  - capabilities\.camoufox: camoufox is deferred/)
+    expect(grantErr.join('\n')).not.toMatch(/\n\s+at /)
   })
 
   it('runs a batch and a crawl to the end and answers with the report and every page; maps a site', async () => {

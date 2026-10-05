@@ -1,6 +1,50 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { LOCAL_PRIVATE_ALLOWLIST } from '@w2l/contracts'
 import { JOB_STREAMS_OFF_NOTICE, parseListen } from '../src/listen.js'
+
+const ATTESTATION = { principal: 'operator@example.test', at: '2026-10-05T00:00:00Z', statement: 'I accept the provider terms and cost.' }
+
+describe('parseListen: access grant (ADR 0005)', () => {
+  it('has none by default, and then prints nothing about it', () => {
+    const listen = parseListen([], {})
+    expect(listen.accessGrant).toBeNull()
+    expect(listen.notices.join('\n')).not.toContain('access grant')
+  })
+
+  it('reads a grant from --access-grant <file> or W2L_ACCESS_GRANT (a path or the JSON), and says what it allows', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w2l-grant-'))
+    try {
+      const grant = { tier: 'enhanced', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], budget: { perRunUsd: 5 }, attestation: ATTESTATION }
+      const file = join(dir, 'grant.json')
+      writeFileSync(file, JSON.stringify(grant))
+      for (const listen of [parseListen(['--access-grant', file], {}), parseListen([`--access-grant=${file}`], {}), parseListen([], { W2L_ACCESS_GRANT: file }), parseListen([], { W2L_ACCESS_GRANT: JSON.stringify(grant) })]) {
+        expect(listen.accessGrant).toMatchObject({ tier: 'enhanced', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], budget: { perRunUsd: 5, perRequestUsd: null } })
+        expect(listen.notices).toContain('access grant (ADR 0005): tier enhanced; vendor_remote_browser, vendor_captcha_solving; run budget 5 USD; per-request budget none (not enforced yet); accepted by operator@example.test')
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('stops startup on a grant with any problem, listing every one', () => {
+    const bad = JSON.stringify({ tier: 'enhanced', capabilities: ['camoufox', 'identity_rotation', 'vendor_stealth'], attestation: ATTESTATION })
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: bad })).toThrow(/capabilities\.camoufox: camoufox is deferred[\s\S]*capabilities\.identity_rotation: identity_rotation is never enabled[\s\S]*budget\.perRunUsd/)
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: '{not json' })).toThrow('access grant: not valid JSON')
+    expect(() => parseListen(['--access-grant', '/no/such/grant.json'], {})).toThrow(/access grant: cannot read \/no\/such\/grant\.json/)
+  })
+
+  it('refuses a grant that names scope.hosts, which nothing enforces yet', () => {
+    const grant = JSON.stringify({ tier: 'standard', capabilities: ['compatible_transport'], scope: { hosts: ['a.example'] } })
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: grant })).toThrow(/scope\.hosts is not enforced yet/)
+  })
+
+  it("refuses tier my_browser on a hosted server, which has no person's browser", () => {
+    const grant = JSON.stringify({ tier: 'my_browser' })
+    expect(parseListen([], { W2L_ACCESS_GRANT: grant }).accessGrant).toMatchObject({ tier: 'my_browser' })
+    expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant })).toThrow(/tier my_browser/)
+  })
+})
 
 describe('parseListen', () => {
   it('defaults to loopback local mode without a token', () => {

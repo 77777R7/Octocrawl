@@ -72,7 +72,7 @@ export class GoldenConverterSubject implements SubjectAdapter {
           attemptCount: 1,
           contentTokens: markdown !== null ? estimateTokens(markdown) : null,
           browserMs: 0,
-          externalCostUsd: null,
+          externalCostUsd: 0,
         },
         trace: [
           { at: 0, lane: 'http', event: 'request_start' },
@@ -109,7 +109,7 @@ export class GoldenConverterSubject implements SubjectAdapter {
           attemptCount: 1,
           contentTokens: null,
           browserMs: 0,
-          externalCostUsd: null,
+          externalCostUsd: 0,
         },
         trace: [
           { at: 0, lane: 'http', event: 'request_start' },

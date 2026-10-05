@@ -55,7 +55,7 @@ describe('agent hints', () => {
     expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
-        'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
+        'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity unless this server\'s access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])

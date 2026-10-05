@@ -897,7 +897,7 @@ export class RequestError extends Error {
 
 /** The hints a refusal carries for the options W2L does not offer: the next honest step, never a way around the refusal. */
 export const REFUSAL_HINTS = {
-  stealth: "Octocrawl does not offer a stealth mode or stealth proxies; a proxy or session you own (mode authed) is the supported route",
+  stealth: "Octocrawl has no stealth option on a request: a provider's stealth or challenge solving runs only on a server started with an access grant that names it (--access-grant, ADR 0005); a proxy or session you own (mode authed) is the other route",
   ignoreRobotsTxt: 'robots.txt is always read and recorded; on a local server a URL a scrape or batch names is fetched whatever it says, and ignoreRobotsTxt on a crawl or map fetches the links it disallows, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run Octocrawl locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
   useIndex: 'Octocrawl keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',

@@ -10,7 +10,7 @@ import {
   type DomainHistory,
 } from '../src/routing/vendorRouter.js'
 
-function entry(partial: Partial<{ attempts: number; contentful: number; latency: number; cost: number; last: string | null; samples: number[] }>) {
+function entry(partial: Partial<{ attempts: number; contentful: number; latency: number; cost: number; unknown: number; last: string | null; samples: number[] }>) {
   const samples = partial.samples ?? [partial.latency ?? 0]
   return {
     attempts: partial.attempts ?? 1,
@@ -18,6 +18,7 @@ function entry(partial: Partial<{ attempts: number; contentful: number; latency:
     latencyTotalMs: partial.latency ?? 0,
     latencySamplesMs: samples,
     costTotalUsd: partial.cost ?? 0,
+    costUnknownAttempts: partial.unknown ?? 0,
     lastFailureClass: (partial.last ?? null) as DomainHistory['vendors'][string]['lastFailureClass'],
   }
 }
@@ -142,6 +143,16 @@ describe('MemoryRoutingHistory', () => {
     expect(example.vendors.steel).toMatchObject({ attempts: 2, contentful: 1, latencyTotalMs: 300 })
     const other = await h.read('other.example')
     expect(other.vendors.steel).toMatchObject({ attempts: 1, contentful: 1 })
+  })
+
+  it('counts an attempt whose cost the vendor did not state as unknown, never as free', async () => {
+    const h = new MemoryRoutingHistory()
+    await h.record('example.com', 'steel', { contentful: true, wallMs: 100, costUsd: null, failureClass: null })
+    await h.record('example.com', 'steel', { contentful: true, wallMs: 100, costUsd: 0.02, failureClass: null })
+    expect((await h.read('example.com')).vendors.steel).toMatchObject({ costTotalUsd: 0.02, costUnknownAttempts: 1 })
+    // Same success and latency: the vendor whose cost is known ranks first, and the unknown one gets no cost bonus.
+    const ranked = rankVendors({ vendors: { known: entry({ contentful: 1, latency: 100, cost: 0.02 }), hidden: entry({ contentful: 1, latency: 100, unknown: 1 }) }, lastVendor: null }, ['hidden', 'known'])
+    expect(ranked.map((score) => [score.vendorId, score.costUnknown])).toEqual([['known', false], ['hidden', true]])
   })
 })
 

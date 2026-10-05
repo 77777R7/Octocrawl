@@ -521,7 +521,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             attemptCount: 0,
             contentTokens: null,
             browserMs: 0,
-            externalCostUsd: null,
+            externalCostUsd: 0,
           },
           trace,
         }
@@ -1073,7 +1073,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           navigationFollowupCount: variantFollowups,
           contentTokens: null as number | null,
           browserMs,
-          externalCostUsd: null,
+          externalCostUsd: 0,
           timings: {retryWaitMs,totalMs:wallMs},
         },
         trace,
@@ -1280,7 +1280,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           attemptCount: 1,
           contentTokens: null,
           browserMs: wallMs,
-          externalCostUsd: null,
+          externalCostUsd: 0,
         },
         trace,
       }
@@ -1363,7 +1363,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },
         // The file's bytes are counted; what crossed the wire (compressed) is not measured.
-        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: null },
+        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: 0 },
         trace,
       }
     }
@@ -1443,7 +1443,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         artifacts: [],
         ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
       },
-      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: null },
+      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: 0 },
       trace,
     }
   }
@@ -1478,7 +1478,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       truncatedAt: null,
       compliance: null,
       evidence: { finalUrl, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
-      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: null },
+      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: 0 },
       trace,
     }
   }
@@ -1532,7 +1532,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         attemptCount: 0,
         contentTokens: null,
         browserMs: wallMs,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace,
     }
