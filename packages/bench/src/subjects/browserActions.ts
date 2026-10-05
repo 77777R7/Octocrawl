@@ -118,9 +118,9 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
     // navigation the guard stopped: either fails the step. A paginate step checks between its pages, the runner after every step.
     const guard = async (): Promise<void> => {
       const landed = await refusedDocument()
-      if (landed !== null) throw new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
+      if (landed !== null) throw new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which Octocrawl does not fetch (${landed.reason}); it is not read`)
       const refused = ctx.takeRefusedNavigation()
-      if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which W2L does not fetch (${refused.reason}); the request was not sent`)
+      if (refused !== null) throw new StepFailure('navigation_refused', `the step led the page to ${refused.url}, which Octocrawl does not fetch (${refused.reason}); the request was not sent`)
     }
     try {
       const detail = await runStep(action, ctx, result, artifacts, index, guard)
@@ -135,7 +135,7 @@ export async function runPageActions(actions: readonly PageAction[], ctx: Action
       // Whatever made the step fail, a document it loaded that W2L does not fetch is the reason that counts.
       if (failure.code !== 'navigation_refused') {
         const landed = await refusedDocument().catch(() => null)
-        if (landed !== null) failure = new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which W2L does not fetch (${landed.reason}); it is not read`)
+        if (landed !== null) failure = new StepFailure('navigation_refused', `the step led the page to ${landed.url}, which Octocrawl does not fetch (${landed.reason}); it is not read`)
       }
       if (failure.code === 'navigation_refused') dropSince(result, artifacts, before)
       trace.push({ at: ctx.at(), lane: 'browser_local', event: 'action', detail: { index, type: action.type, outcome: 'failed', ms: Math.round(performance.now() - started), code: failure.code, error: failure.message } })

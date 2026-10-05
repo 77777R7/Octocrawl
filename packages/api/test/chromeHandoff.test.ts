@@ -192,7 +192,7 @@ describe('the person\'s Chrome', () => {
   it('a tab the person closed is not read', async () => {
     const chrome = fakeChrome([at('https://site.test/a', GATE), 'closed'])
     const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
-    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).rejects.toThrow('was closed, or Chrome quit, before W2L read it')
+    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })).rejects.toThrow('was closed, or Chrome quit, before Octocrawl read it')
   })
 
   it('a Chrome that stops answering (quit, its socket not yet closed) ends the wait within a read\'s timeout', async () => {
@@ -213,7 +213,7 @@ describe('the person\'s Chrome', () => {
       close() {},
     })
     const reader = await openUserChrome({ userDataDir, connect: frozen })
-    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 60_000 })).rejects.toThrow('was closed, or Chrome quit, before W2L read it')
+    await expect(reader.read('https://site.test/a', { pollMs: 1, waitMs: 60_000 })).rejects.toThrow('was closed, or Chrome quit, before Octocrawl read it')
     expect(asked).toEqual([10_000])
   })
 
@@ -221,7 +221,7 @@ describe('the person\'s Chrome', () => {
     const reader = await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', GATE)]).connect })
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 20)
-    await expect(reader.read('https://site.test/a', { pollMs: 5, waitMs: 60_000, signal: controller.signal })).rejects.toThrow('was cancelled before W2L read it')
+    await expect(reader.read('https://site.test/a', { pollMs: 5, waitMs: 60_000, signal: controller.signal })).rejects.toThrow('was cancelled before Octocrawl read it')
   })
 
   it('a cancel while Chrome waits for Allow drops the connection, and one Chrome opens after is not used', async () => {

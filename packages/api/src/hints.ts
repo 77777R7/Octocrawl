@@ -86,7 +86,7 @@ function egressHint(result: HintedResult, host: string): string | null {
   const denied = result.trace.find((event) => event.event === 'ssrf_denied' || event.event === 'governance_refusal')
   if (denied === undefined) return null
   const why = denied.detail?.error ?? denied.detail?.reason
-  return `the egress policy refused ${host}${typeof why === 'string' ? ` (${why})` : ''} and nothing was fetched; W2L reaches public addresses, and a local server the addresses its policy allowlists`
+  return `the egress policy refused ${host}${typeof why === 'string' ? ` (${why})` : ''} and nothing was fetched; Octocrawl reaches public addresses, and a local server the addresses its policy allowlists`
 }
 
 /**
@@ -124,7 +124,7 @@ function robotsHint(result: HintedResult, host: string): string | null {
   if (disallowed === undefined) return null
   const detail = disallowed.detail ?? {}
   if (typeof detail.unreachable === 'string') {
-    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; W2L asks for it again after five minutes. ${ROBOTS_ROUTE}`
+    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; Octocrawl asks for it again after five minutes. ${ROBOTS_ROUTE}`
   }
   const rules = (Array.isArray(detail.appliedRules) ? detail.appliedRules : [])
     .filter((rule): rule is { pattern: string; allow: boolean } => rule !== null && typeof rule === 'object' && typeof (rule as { pattern?: unknown }).pattern === 'string')
@@ -161,16 +161,16 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
     // A saved login was used and the site refused it: it expired or was signed out.
     const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
     hints.push(rejected === undefined
-      ? 'the page asks for a login; W2L does not create accounts; use mode authed with your own session'
+      ? 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'
       : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run octocrawl login import ${String(rejected.detail?.domain ?? host)}`)
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
-    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); W2L does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
+    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
   }
   const escalated = laneEscalatedHint(run, host)
   if (escalated !== null) hints.push(escalated)
   if (result.status === 'failed' && result.failureReason === 'tls_error') {
-    hints.push(`the certificate of ${host} did not verify and W2L keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it`)
+    hints.push(`the certificate of ${host} did not verify and Octocrawl keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it`)
   }
   if (result.status === 'failed' && result.failureReason === 'timeout') {
     hints.push(`no lane answered within the request's deadline; raise timeout (up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms)`)
@@ -200,8 +200,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   // A page with no main content, when no shell or thin-content caveat already says what it is.
   const shellHinted = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected' || warning.code === 'low_content_yield') === true
   if (result.status === 'failed' && result.failureReason === 'empty_unverified' && !shellHinted && !fastModeDeclined) {
-    if (result.file?.kind === 'pdf') hints.push('the PDF has no text layer, and W2L runs no OCR')
-    else if (result.file === undefined) hints.push('W2L found no main content on the page; onlyMainContent: false returns the whole page\'s Markdown as content, and includeTags names the elements to read instead')
+    if (result.file?.kind === 'pdf') hints.push('the PDF has no text layer, and Octocrawl runs no OCR')
+    else if (result.file === undefined) hints.push('Octocrawl found no main content on the page; onlyMainContent: false returns the whole page\'s Markdown as content, and includeTags names the elements to read instead')
   }
   if (result.status === 'failed' && result.failureReason === 'http_error') {
     const status = result.evidence.httpStatus

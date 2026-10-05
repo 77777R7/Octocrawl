@@ -110,7 +110,7 @@ describe('actions in the API', () => {
     await rm(root, { recursive: true, force: true })
     const hostedApp = await setup({ hosted: true })
     const hosted = await post(hostedApp, '/v1/scrape', { url, actions: [{ type: 'scrape' }] })
-    expect(hosted).toMatchObject({ status: 400, body: { error: 'actions are not available in hosted mode: run W2L locally to use them' } })
+    expect(hosted).toMatchObject({ status: 400, body: { error: 'actions are not available in hosted mode: run Octocrawl locally to use them' } })
     expect(asked).toEqual([])
   })
 

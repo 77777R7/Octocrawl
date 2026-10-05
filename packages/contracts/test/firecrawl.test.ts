@@ -492,7 +492,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     const options = { headers: { 'X-Test': 'w2l' }, mobile: true, skipTlsVerification: true, fastMode: true, blockAds: false }
     expect(parseFirecrawlScrapeRequest({ url, ...options })).toEqual({ url, ...FC_PDF, ...options, headers: { 'x-test': 'w2l' } })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: options })).toMatchObject({ ...options, headers: { 'x-test': 'w2l' } })
-    expect(() => parseFirecrawlScrapeRequest({ url, headers: { 'User-Agent': 'curl/8' } })).toThrow("headers.user-agent is refused: the User-Agent and client hints are W2L's declared identity")
+    expect(() => parseFirecrawlScrapeRequest({ url, headers: { 'User-Agent': 'curl/8' } })).toThrow("headers.user-agent is refused: the User-Agent and client hints are Octocrawl's declared identity")
     expect(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { headers: { Cookie: 'sid=1' } } })).toThrow('headers.cookie is refused')
     expect(() => parseFirecrawlScrapeRequest({ url, mobile: 'yes' })).toThrow('mobile must be a boolean')
     expect(() => parseFirecrawlScrapeRequest({ url, mode: 'research', mobile: true })).toThrow('unsupported parameter: mode')

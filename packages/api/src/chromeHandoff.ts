@@ -151,7 +151,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
   const gone = (error: unknown): HandoffNotThrough | null =>
     error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer Target\.getTargetInfo/i.test(error.message)
-      ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before W2L read it`, sawGate)
+      ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before Octocrawl read it`, sawGate)
       : null
   // Any other refusal from Chrome ends this page alone, not the handoff of the others.
   const ended = (error: unknown): unknown => gone(error) ?? (error instanceof ChromeLoginError ? new HandoffNotThrough(`${url} was not read: ${error.message}`, sawGate) : error)
@@ -209,7 +209,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
-      if (options.signal?.aborted === true) throw new HandoffNotThrough(`the handoff of ${url} was cancelled before W2L read it`, sawGate)
+      if (options.signal?.aborted === true) throw new HandoffNotThrough(`the handoff of ${url} was cancelled before Octocrawl read it`, sawGate)
       if (navigation !== null && gone(navigation) !== null) throw gone(navigation)
       let state: PageState
       try {
@@ -292,7 +292,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     const where = last === null ? 'it never loaded'
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
         : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
-          : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (W2L reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
+          : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (Octocrawl reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
             : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
     throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
   } catch (error) {
