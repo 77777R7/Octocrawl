@@ -58,6 +58,19 @@ npm test
    - Benchmark output (if relevant)
    - Test coverage (if relevant)
 
+## Releasing
+
+The packages are released together, at one version: `octocrawl` and `@octocrawl/cli` (the CLI), `@octocrawl/sdk`, `@octocrawl/mcp` and the Python client `octocrawl-client`.
+
+1. `node scripts/release-version.mjs set X.Y.Z` writes the version everywhere it lives (the three package manifests, the CLI's, MCP server's and SDK's version constants, the Python client's two) and updates the lockfile; `check` confirms they agree.
+2. Add the CHANGELOG entry, merge through a PR as usual, then tag the merge: `git tag -s vX.Y.Z` and push the tag.
+3. The `Release` workflow (`.github/workflows/release.yml`) checks that every version says X.Y.Z, runs the type check and the tests, packs the npm packages and installs them in a new project (`scripts/check-packages.mjs`), builds and checks the Python client, then publishes to npm and PyPI through trusted publishing. No token is stored; npm records each package's provenance. A version already published is skipped, so a failed run can be run again.
+
+Set up once, by a maintainer:
+- On npmjs.com, for each of `octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk` and `@octocrawl/mcp`: Settings → Trusted publishing → GitHub Actions, repository `77777R7/Octocrawl`, workflow `release.yml`, environment `release`.
+- On pypi.org, for `octocrawl-client`: Manage → Publishing → add a GitHub publisher with the same repository, workflow and environment.
+- On GitHub: Settings → Environments → `release`, with the maintainer as a required reviewer, so nothing is published without their approval.
+
 ## Code Standards
 
 - **TypeScript strict mode** — no `any`, no unchecked indexed access
