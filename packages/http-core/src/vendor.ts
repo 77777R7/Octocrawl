@@ -97,42 +97,43 @@ export type ForbiddenCapability = (typeof REFUSED_FOREVER)[number]['capability']
  * Paused for engineering cost, not principle (ADR 0005, class 2). Refused at
  * run time as `deferred`, never as `refused`, with the ROADMAP Paused row that
  * says when the item restarts. `row` and `restartWhen` are that row's first and
- * last cells, verbatim; `source` is the row's line when ADR 0005 was written.
+ * last cells, verbatim; `source` is the row's line in ROADMAP.md. Lines added above the Paused
+ * table move it: update `source` then. The row title is the anchor the tests check.
  */
 export const DEFERRED = [
   {
     capability: 'own_browser_engine',
-    source: 'ROADMAP.md:240',
+    source: 'ROADMAP.md:242',
     row: 'An own browser fork or engine, and broad custom-fingerprint research',
     restartWhen: "A maintained project stops working for a class of tasks that PA's set shows matters",
   },
   {
     capability: 'own_fingerprint_patches',
-    source: 'ROADMAP.md:240',
+    source: 'ROADMAP.md:242',
     row: 'An own browser fork or engine, and broad custom-fingerprint research',
     restartWhen: "A maintained project stops working for a class of tasks that PA's set shows matters",
   },
   {
     capability: 'own_captcha_model',
-    source: 'ROADMAP.md:241',
+    source: 'ROADMAP.md:243',
     row: 'An in-house CAPTCHA model',
     restartWhen: 'Only if solver cost or coverage blocks paying users',
   },
   {
     capability: 'own_residential_network',
-    source: 'ROADMAP.md:242',
+    source: 'ROADMAP.md:244',
     row: 'An own residential IP network',
     restartWhen: 'Not restarted; PA uses providers',
   },
   {
     capability: 'camoufox',
-    source: 'ROADMAP.md:243',
+    source: 'ROADMAP.md:245',
     row: 'A second stealth engine (Camoufox)',
     restartWhen: 'Patchright leaves a clear class of PA tasks unsolved',
   },
   {
     capability: 'hosted_browser_cluster',
-    source: 'ROADMAP.md:244',
+    source: 'ROADMAP.md:246',
     row: 'Hosted API and hosted MCP at scale',
     restartWhen: "P5's hosted-scale item, once P3 has exited; or earlier when users ask for runs while their computer is off and will pay more for it",
   },
