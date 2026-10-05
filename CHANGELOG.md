@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Releases are published from a tag `vX.Y.Z` by the `Release` workflow, through npm and PyPI trusted publishing (no stored token, npm provenance), after the type check, the tests and the package install check. `scripts/release-version.mjs` sets and checks the one version the published packages share; `scripts/check-packages.mjs` reads the expected CLI version from its manifest instead of a fixed 0.3.0.
 - Security, before the first publish:
   - A local server on an address other than 127.0.0.1, localhost or ::1 (`--host 0.0.0.0`, a LAN address, `W2L_API_HOST`) refuses to start without a token. Before, it answered anyone, other machines and rebinding web pages included, and fetched the person's localhost and network for them.
   - Mode `authed` refuses `executeJavascript` (a script could read the session's cookies and storage) and, on a batch, a `webhook` (pages read with the session are not sent to another address). A batch with a webhook is no longer handed to the person (its stopped items carry no handoff, and `handOffBatch` refuses it): a page read in their own Chrome is read signed in as them, and was sent to the webhook as a handoff `page` event. Click, write, press, scroll and the list steps stay available. The MCP tools say so, and tell the model to ask the person before using a saved login.

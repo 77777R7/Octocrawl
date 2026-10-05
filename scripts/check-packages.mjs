@@ -24,6 +24,8 @@ import { textPdf } from '@w2l/fixtures'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const tarballs = join(root, '.w2l', 'pack', 'tarballs')
+/** The version the packages were packed at: the CLI's own, which scripts/release-version.mjs keeps equal to the others. */
+const version = JSON.parse(readFileSync(join(root, 'packages', 'cli', 'package.json'), 'utf8')).version
 const project = mkdtempSync(join(tmpdir(), 'octocrawl-package-check-'))
 const aliasProject = mkdtempSync(join(tmpdir(), 'octocrawl-unscoped-check-'))
 const results = []
@@ -59,7 +61,7 @@ try {
   // Run by its real path, as Windows and pnpm shims run it: only the CLI's own entry may run.
   // The real path: on macOS the temp directory itself is reached through a symlink, which would hide a stray guard.
   const direct = await promisify(execFile)('node', [join(realpathSync(project), 'node_modules', '@octocrawl', 'cli', 'dist', 'cli.js'), '--version'], { cwd: project, env, encoding: 'utf8', timeout: 20_000 }).then((out) => out, (error) => error)
-  check('cli by its real path', direct.stdout?.trim() === '0.3.0' && (direct.stderr ?? '').trim() === '' && direct.code === undefined, JSON.stringify({ stdout: direct.stdout?.trim(), stderr: direct.stderr?.trim().slice(0, 120), code: direct.code, killed: direct.killed }))
+  check('cli by its real path', direct.stdout?.trim() === version && (direct.stderr ?? '').trim() === '' && direct.code === undefined, JSON.stringify({ stdout: direct.stdout?.trim(), stderr: direct.stderr?.trim().slice(0, 120), code: direct.code, killed: direct.killed }))
   let refused = 0
   try { await run('npx', ['octocrawl', 'scrape', `${origin}/tides`, '--max-age', '-1']) } catch (error) { refused = error.code }
   check('cli refusal', refused === 2, `exit ${refused}`)
