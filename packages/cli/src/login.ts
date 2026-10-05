@@ -1,5 +1,5 @@
 /**
- * `w2l login`: the logins mode `authed` reads pages with, taken from the
+ * `octocrawl login`: the logins mode `authed` reads pages with, taken from the
  * user's own Chrome (see `importChromeLogin` in @w2l/api). The file is the
  * one the API server and the local MCP service read, W2L_SESSIONS_FILE else
  * ~/.w2l/sessions.json. Cookie values are never printed.
@@ -9,12 +9,12 @@ import { ChromeLoginError, defaultSessionsFile, importChromeLogin, listSavedLogi
 import type { CliIo } from './run.js'
 
 export const LOGIN_USAGE = [
-  'usage: w2l login import <domain|url> [--chrome-user-data-dir <dir>] [--timeout <seconds>]',
-  '       w2l login list',
-  '       w2l login remove <domain>',
+  'usage: octocrawl login import <domain|url> [--chrome-user-data-dir <dir>] [--timeout <seconds>]',
+  '       octocrawl login list',
+  '       octocrawl login remove <domain>',
   '',
   'import reads the login of one site from the Chrome you already use and saves it, so',
-  '`w2l scrape <url> --mode authed` (and the API and MCP in mode authed) read the page signed in as you.',
+  '`octocrawl scrape <url> --mode authed` (and the API and MCP in mode authed) read the page signed in as you.',
   'First open chrome://inspect/#remote-debugging in Chrome 144 or later and turn on',
   '"Allow remote debugging for this browser instance"; Chrome then asks "Allow remote debugging?": click Allow.',
   'W2L connects once, reads that site\'s cookies and the localStorage of its tabs you have open',
@@ -33,7 +33,7 @@ export async function login(argv: readonly string[], io: CliIo, importLogin: typ
       return 0
     }
     if (action === 'remove') {
-      if (rest.length !== 1) { io.stderr(`w2l login remove takes one domain\n\n${LOGIN_USAGE}`); return 2 }
+      if (rest.length !== 1) { io.stderr(`octocrawl login remove takes one domain\n\n${LOGIN_USAGE}`); return 2 }
       const removed = await removeSavedLogin(sessionsFile, rest[0]!)
       io.stdout(JSON.stringify({ domain: rest[0], removed }))
       return removed ? 0 : 1
@@ -46,26 +46,26 @@ export async function login(argv: readonly string[], io: CliIo, importLogin: typ
         const arg = rest[i]!
         if (arg === '--chrome-user-data-dir') {
           userDataDir = rest[++i]
-          if (userDataDir === undefined) { io.stderr('w2l login: --chrome-user-data-dir takes a directory'); return 2 }
+          if (userDataDir === undefined) { io.stderr('octocrawl login: --chrome-user-data-dir takes a directory'); return 2 }
         } else if (arg === '--timeout') {
           const seconds = Number(rest[++i])
-          if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) { io.stderr('w2l login: --timeout takes whole seconds from 1 to 600'); return 2 }
+          if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) { io.stderr('octocrawl login: --timeout takes whole seconds from 1 to 600'); return 2 }
           timeoutMs = seconds * 1000
         } else if (arg.startsWith('--')) {
-          io.stderr(`w2l login: unknown option ${arg}\n\n${LOGIN_USAGE}`); return 2
+          io.stderr(`octocrawl login: unknown option ${arg}\n\n${LOGIN_USAGE}`); return 2
         } else if (site === undefined) site = arg
-        else { io.stderr(`w2l login import takes one site\n\n${LOGIN_USAGE}`); return 2 }
+        else { io.stderr(`octocrawl login import takes one site\n\n${LOGIN_USAGE}`); return 2 }
       }
-      if (site === undefined) { io.stderr(`w2l login import needs a domain or URL\n\n${LOGIN_USAGE}`); return 2 }
-      io.stderr('w2l login: connecting to your Chrome; if Chrome asks "Allow remote debugging?", click Allow')
+      if (site === undefined) { io.stderr(`octocrawl login import needs a domain or URL\n\n${LOGIN_USAGE}`); return 2 }
+      io.stderr('octocrawl login: connecting to your Chrome; if Chrome asks "Allow remote debugging?", click Allow')
       const imported = await importLogin({ site, sessionsFile, ...(userDataDir === undefined ? {} : { userDataDir }), ...(timeoutMs === undefined ? {} : { timeoutMs }) })
       io.stdout(JSON.stringify(imported, null, 2))
       return 0
     }
-    io.stderr(`w2l login: unknown action ${action}\n\n${LOGIN_USAGE}`)
+    io.stderr(`octocrawl login: unknown action ${action}\n\n${LOGIN_USAGE}`)
     return 2
   } catch (error) {
-    if (error instanceof ChromeLoginError) { io.stderr(`w2l login: ${error.message}`); return 1 }
+    if (error instanceof ChromeLoginError) { io.stderr(`octocrawl login: ${error.message}`); return 1 }
     throw error
   }
 }

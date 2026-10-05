@@ -253,7 +253,7 @@ export interface ApiEngine {
   endHandoffs(): Promise<void>
   /**
    * The person's login to a site, saved from their running Chrome into the
-   * sessions file (`w2l login import`), on an engine that serves them alone;
+   * sessions file (`octocrawl login import`), on an engine that serves them alone;
    * a LoginsUnavailableError elsewhere, a RequestError for a site that is not
    * one, a ChromeLoginError when Chrome cannot give it.
    */
@@ -319,7 +319,7 @@ export interface ApiEngineOptions {
    */
   hosted?: boolean
   /**
-   * The file of the user's saved logins (`w2l login import`), read by mode
+   * The file of the user's saved logins (`octocrawl login import`), read by mode
    * `authed` to fetch a page with the session saved for its domain. The
    * engine only reads it; a run never writes a session there. Absent or
    * null: no saved logins, and mode `authed` has no session to use. A
@@ -365,7 +365,7 @@ export interface ApiEngineOptions {
   /**
    * Whether the engine, as it opens, resumes the batches and crawls of its
    * task root that no process finished, and re-offers finished jobs'
-   * webhooks. Default true: the API server. A one-off command (`w2l scrape`)
+   * webhooks. Default true: the API server. A one-off command (`octocrawl scrape`)
    * passes false, so it neither runs nor waits for earlier jobs.
    */
   resumeOnStart?: boolean
@@ -833,7 +833,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
   function checkHandoff(req: ScrapeRequest): void {
     if (req.handoff === undefined) return
-    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (octocrawl serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
     const unread = unreadByPerson(fetchOptions(req, req.formats))
     if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
   }
@@ -863,13 +863,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass`
     const rationale = tried
       ? `${stopped}, and handed to you in your own Chrome it was not read there (the handoff_not_through warning says why): send the request again with handoff to try once more, with a longer handoff.waitMs if you needed more time`
-      : `${stopped}: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
+      : `${stopped}: send the request again with handoff: true (octocrawl scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
     return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale } }
   }
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
-    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
     if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.open(join(taskRoot, taskId))
@@ -1556,7 +1556,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async importLogin(req) {
-      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (w2l serve, the local MCP host, or w2l login import)')
+      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (octocrawl serve, the local MCP host, or octocrawl login import)')
       try { loginDomain(req.site) }
       catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
       const imported = await importChromeLogin({
@@ -2042,7 +2042,7 @@ function handoffRequestOf(step: StepRecord): { reason: string; liveViewUrl: null
   return {
     reason: HANDOFF_REASONS[blockReason]!,
     liveViewUrl: null,
-    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or w2l batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
+    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or octocrawl batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
   }
 }
 
@@ -2202,7 +2202,7 @@ export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): strin
   return env.W2L_SESSIONS_FILE ?? join(homedir(), '.w2l', 'sessions.json')
 }
 
-/** A session store the engine reads but never writes: saved logins come from `w2l login import` alone. */
+/** A session store the engine reads but never writes: saved logins come from `octocrawl login import` alone. */
 function readOnlySessions(store: SessionStore): SessionStore {
   return { load: (domain) => store.load(domain), save: async () => {} }
 }

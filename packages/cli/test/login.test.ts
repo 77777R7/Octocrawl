@@ -6,7 +6,7 @@ import type { importChromeLogin } from '@w2l/api'
 import { runCli } from '../src/run.js'
 import { login } from '../src/login.js'
 
-describe('w2l login', () => {
+describe('octocrawl login', () => {
   let root: string
   let env: NodeJS.ProcessEnv
   const out: string[] = []

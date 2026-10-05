@@ -64,12 +64,12 @@ class JobResult:
         return evidence_rows(self.items, include_markdown=include_markdown)
 
     def to_pandas(self, include_markdown: bool = True):
-        """A pandas DataFrame with one row per page and the evidence columns; needs `pip install 'w2l[pandas]'`."""
+        """A pandas DataFrame with one row per page and the evidence columns; needs `pip install 'octocrawl-client[pandas]'`."""
         return to_pandas(self.rows(include_markdown=include_markdown))
 
 
 class W2L:
-    """A client of one W2L API: a local `w2l serve` (default `W2L_API_URL`, else http://127.0.0.1:8787) or a hosted one with a token."""
+    """A client of one W2L API: a local `octocrawl serve` (default `W2L_API_URL`, else http://127.0.0.1:8787) or a hosted one with a token."""
 
     def __init__(
         self,
@@ -190,7 +190,7 @@ def map(url: str, **options: Any) -> dict[str, Any]:  # noqa: A001 - the API's o
 
 
 def batch(urls: Sequence[str], **options: Any) -> JobResult:
-    """`W2L().batch(...)`: `w2l.batch(urls).to_pandas()` gives one row per page with its evidence."""
+    """`W2L().batch(...)`: `octocrawl_client.batch(urls).to_pandas()` gives one row per page with its evidence."""
     with _default() as client:
         return client.batch(urls, **options)
 

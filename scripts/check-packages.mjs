@@ -3,10 +3,12 @@
 // project outside the repository and uses each package as a user would,
 // against a site on loopback:
 //
-//   @w2l/cli  `w2l scrape` (a page with a table, as JSON with its CSV; a PDF,
-//             which needs pdfjs-dist's assets), then `w2l serve` for the rest
-//   @w2l/sdk  scrape through that server, imported as ESM and required as CJS
-//   @w2l/mcp  `w2l-mcp` over stdio: initialize, tools/list, a scrape tool call
+//   @octocrawl/cli  `octocrawl scrape` (a page with a table, as JSON with its CSV;
+//                   a PDF, which needs pdfjs-dist's assets), then `octocrawl serve`
+//   @octocrawl/sdk  scrape through that server, imported as ESM and required as CJS
+//   @octocrawl/mcp  `octocrawl-mcp` over stdio: initialize, tools/list, a scrape tool call
+//   octocrawl       the CLI under the unscoped name, in a project of its own
+//                   (both CLI packages install the bin `octocrawl`)
 //
 // Usage: node scripts/check-packages.mjs  (after npx tsc -b and pack-packages.mjs; needs the npm registry)
 
@@ -22,7 +24,8 @@ import { textPdf } from '@w2l/fixtures'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const tarballs = join(root, '.w2l', 'pack', 'tarballs')
-const project = mkdtempSync(join(tmpdir(), 'w2l-package-check-'))
+const project = mkdtempSync(join(tmpdir(), 'octocrawl-package-check-'))
+const aliasProject = mkdtempSync(join(tmpdir(), 'octocrawl-unscoped-check-'))
 const results = []
 const check = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${detail === undefined ? '' : `: ${detail}`}`) }
 
@@ -44,24 +47,25 @@ let serve
 try {
   // better-sqlite3 needs its install script (its native binding); npm 11 runs it only when the project allows it.
   writeFileSync(join(project, 'package.json'), `${JSON.stringify({ name: 'w2l-package-check', version: '1.0.0', private: true, allowScripts: { 'better-sqlite3': true } }, null, 2)}\n`)
-  const files = readdirSync(tarballs).filter((file) => file.endsWith('.tgz')).map((file) => join(tarballs, file))
+  const all = readdirSync(tarballs).filter((file) => file.endsWith('.tgz'))
+  const files = all.filter((file) => file.startsWith('octocrawl-') && !/^octocrawl-\d/.test(file)).map((file) => join(tarballs, file))
   execFileSync('npm', ['install', '--no-audit', '--no-fund', ...files], { cwd: project, stdio: 'inherit', env })
   check('install', true, files.map((file) => file.split('/').pop()).join(', '))
 
-  const scraped = JSON.parse(await run('npx', ['w2l', 'scrape', `${origin}/tides`, '--formats', 'markdown,tables']))
+  const scraped = JSON.parse(await run('npx', ['octocrawl', 'scrape', `${origin}/tides`, '--formats', 'markdown,tables']))
   check('cli scrape', scraped.status === 'success' && scraped.tables?.[0]?.csv === 'Station,Height\r\nNorth,4.2\r\n' && scraped.evidenceRecord?.status === 'success', `${scraped.status}, ${scraped.tables?.length} table`)
-  const pdf = JSON.parse(await run('npx', ['w2l', 'scrape', `${origin}/report.pdf`, '--parsers', '{"type":"pdf","pages":true}']))
+  const pdf = JSON.parse(await run('npx', ['octocrawl', 'scrape', `${origin}/report.pdf`, '--parsers', '{"type":"pdf","pages":true}']))
   check('cli scrape pdf', pdf.status === 'success' && pdf.pages?.length === 2 && pdf.markdown?.includes('Portfolio PUE: 1.32'), `${pdf.status}, ${pdf.pages?.length} pages`)
   // Run by its real path, as Windows and pnpm shims run it: only the CLI's own entry may run.
   // The real path: on macOS the temp directory itself is reached through a symlink, which would hide a stray guard.
-  const direct = await promisify(execFile)('node', [join(realpathSync(project), 'node_modules', '@w2l', 'cli', 'dist', 'cli.js'), '--version'], { cwd: project, env, encoding: 'utf8', timeout: 20_000 }).then((out) => out, (error) => error)
+  const direct = await promisify(execFile)('node', [join(realpathSync(project), 'node_modules', '@octocrawl', 'cli', 'dist', 'cli.js'), '--version'], { cwd: project, env, encoding: 'utf8', timeout: 20_000 }).then((out) => out, (error) => error)
   check('cli by its real path', direct.stdout?.trim() === '0.3.0' && (direct.stderr ?? '').trim() === '' && direct.code === undefined, JSON.stringify({ stdout: direct.stdout?.trim(), stderr: direct.stderr?.trim().slice(0, 120), code: direct.code, killed: direct.killed }))
   let refused = 0
-  try { await run('npx', ['w2l', 'scrape', `${origin}/tides`, '--max-age', '-1']) } catch (error) { refused = error.code }
+  try { await run('npx', ['octocrawl', 'scrape', `${origin}/tides`, '--max-age', '-1']) } catch (error) { refused = error.code }
   check('cli refusal', refused === 2, `exit ${refused}`)
 
   const port = await new Promise((done) => { const probe = netServer().listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => done(port)) }) })
-  serve = spawn('npx', ['w2l', 'serve', '--port', String(port)], { cwd: project, env, stdio: ['ignore', 'ignore', 'pipe'] })
+  serve = spawn('npx', ['octocrawl', 'serve', '--port', String(port)], { cwd: project, env, stdio: ['ignore', 'ignore', 'pipe'] })
   const api = `http://127.0.0.1:${port}`
   for (let i = 0; i < 100; i++) {
     if (await fetch(`${api}/v1/crawl/active`).then((res) => res.ok, () => false)) break
@@ -69,14 +73,14 @@ try {
   }
   check('cli serve', await fetch(`${api}/v1/crawl/active`).then((res) => res.ok, () => false), api)
 
-  writeFileSync(join(project, 'esm.mjs'), `import { W2L, SDK_VERSION } from '@w2l/sdk'\nconst r = await new W2L({ baseUrl: '${api}' }).scrape('${origin}/tides', { formats: ['markdown'] })\nconsole.log(JSON.stringify({ version: SDK_VERSION, status: r.status, lane: r.lane }))\n`)
-  writeFileSync(join(project, 'cjs.cjs'), `const { W2L } = require('@w2l/sdk')\nnew W2L({ baseUrl: '${api}' }).scrape('${origin}/tides').then((r) => console.log(JSON.stringify({ status: r.status })))\n`)
+  writeFileSync(join(project, 'esm.mjs'), `import { W2L, SDK_VERSION } from '@octocrawl/sdk'\nconst r = await new W2L({ baseUrl: '${api}' }).scrape('${origin}/tides', { formats: ['markdown'] })\nconsole.log(JSON.stringify({ version: SDK_VERSION, status: r.status, lane: r.lane }))\n`)
+  writeFileSync(join(project, 'cjs.cjs'), `const { W2L } = require('@octocrawl/sdk')\nnew W2L({ baseUrl: '${api}' }).scrape('${origin}/tides').then((r) => console.log(JSON.stringify({ status: r.status })))\n`)
   const esm = JSON.parse(await run('node', ['esm.mjs']))
   check('sdk esm', esm.status === 'success', JSON.stringify(esm))
   const cjs = JSON.parse(await run('node', ['cjs.cjs']))
   check('sdk cjs', cjs.status === 'success', JSON.stringify(cjs))
   // The types resolve for a TypeScript user of either module system.
-  writeFileSync(join(project, 'types.ts'), `import { W2L, type ScrapeResponse, type EvidenceRecord } from '@w2l/sdk'\nconst client: W2L = new W2L({ baseUrl: 'http://127.0.0.1:1' })\nconst record: EvidenceRecord | undefined = undefined as unknown as ScrapeResponse['evidenceRecord']\nvoid client; void record\n`)
+  writeFileSync(join(project, 'types.ts'), `import { W2L, type ScrapeResponse, type EvidenceRecord } from '@octocrawl/sdk'\nconst client: W2L = new W2L({ baseUrl: 'http://127.0.0.1:1' })\nconst record: EvidenceRecord | undefined = undefined as unknown as ScrapeResponse['evidenceRecord']\nvoid client; void record\n`)
   // The same file as an ES module (.mts) and as CommonJS (.cts): the import and require declarations both resolve.
   writeFileSync(join(project, 'types.mts'), readFileSync(join(project, 'types.ts'), 'utf8'))
   writeFileSync(join(project, 'types.cts'), readFileSync(join(project, 'types.ts'), 'utf8'))
@@ -92,20 +96,28 @@ try {
   check('mcp tools/list', Array.isArray(answers[1]?.result?.tools) && answers[1].result.tools.some((tool) => tool.name === 'scrape'), `${answers[1]?.result?.tools?.length} tools`)
   const text = answers[2]?.result?.content?.[0]?.text ?? ''
   check('mcp scrape', text.includes('"status": "success"') || text.includes('"status":"success"'), text.slice(0, 80).replace(/\s+/g, ' '))
+
+  // The unscoped `octocrawl`, alone in a project of its own: `npx octocrawl` runs the CLI.
+  const unscoped = all.filter((file) => /^octocrawl-\d/.test(file)).map((file) => join(tarballs, file))
+  writeFileSync(join(aliasProject, 'package.json'), readFileSync(join(project, 'package.json'), 'utf8'))
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', ...unscoped], { cwd: aliasProject, stdio: 'inherit', env })
+  const aliasScrape = JSON.parse((await promisify(execFile)('npx', ['octocrawl', 'scrape', `${origin}/tides`], { cwd: aliasProject, env: { ...env, W2L_TASK_ROOT: join(aliasProject, 'tasks') }, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })).stdout)
+  check('unscoped octocrawl', unscoped.length === 1 && aliasScrape.status === 'success', `${unscoped.map((file) => file.split('/').pop()).join(', ')}: ${aliasScrape.status}`)
 } catch (error) {
   check('run', false, error instanceof Error ? `${error.message}\n${error.stderr ?? ''}`.slice(0, 2000) : String(error))
 } finally {
   serve?.kill('SIGINT')
   await new Promise((done) => site.close(done))
   rmSync(project, { recursive: true, force: true })
+  rmSync(aliasProject, { recursive: true, force: true })
 }
 const failed = results.filter((result) => !result.pass).length
 console.log(`${results.length - failed} of ${results.length} checks passed`)
 process.exitCode = failed === 0 ? 0 : 1
 
-/** One stdio session with the installed w2l-mcp: initialize, tools/list, one scrape call; each answer by its id. */
+/** One stdio session with the installed octocrawl-mcp: initialize, tools/list, one scrape call; each answer by its id. */
 async function mcpSession(api) {
-  const child = spawn('npx', ['w2l-mcp', '--base-url', api], { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn('npx', ['octocrawl-mcp', '--base-url', api], { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] })
   const answers = []
   let buffer = ''
   const waiting = new Map()

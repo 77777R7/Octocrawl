@@ -83,7 +83,7 @@ describe('saved logins in the API engine', () => {
     for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine!.getBatch(accepted.taskId) }
     const item = (await engine!.getBatchItems(accepted.taskId))!.items[0]!
     expect(item.status).toBe('blocked')
-    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*w2l login import example\.com/)])
+    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*octocrawl login import example\.com/)])
   })
 
   it('other modes never load a saved login', async () => {

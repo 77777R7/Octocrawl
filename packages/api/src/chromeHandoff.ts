@@ -5,7 +5,7 @@
  * and W2L reads the page once it is through. W2L passes no check itself and
  * changes nothing about the browser: the person does, in their browser.
  *
- * The connection is the one `w2l login import` uses: Chrome's remote
+ * The connection is the one `octocrawl login import` uses: Chrome's remote
  * debugging, turned on by the person at chrome://inspect/#remote-debugging
  * and approved by them in Chrome's "Allow remote debugging?" dialog, once
  * for all the pages of one handoff. W2L touches only the tabs it opens, and
@@ -292,7 +292,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     const where = last === null ? 'it never loaded'
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
         : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
-          : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (W2L reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through w2l login import and mode authed)'
+          : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (W2L reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
             : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
     throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
   } catch (error) {
