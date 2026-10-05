@@ -18,7 +18,7 @@ npx tsc -b
 
 `npx playwright install chromium` is for pages that only render in a browser; W2L escalates to it on its own when the plain HTTP read is not enough.
 
-Once the packages are published, `npx octocrawl` replaces `npm run w2l --` below, and `pip install 'octocrawl-client[pandas]'` replaces the local install.
+`npx octocrawl` can replace `npm run w2l --` below, and `pip install 'octocrawl-client[pandas]'` the local install: the packages are published (0.3.0, 2026-10-05). The run below was made from a checkout.
 
 If your shell sets `HTTPS_PROXY`, W2L sends its requests through that proxy and says so on its first line of output. Results can differ with and without a proxy, so note which one you used.
 

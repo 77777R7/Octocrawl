@@ -46,7 +46,15 @@ Run `npm run public:preview:local` and open `http://127.0.0.1:8798/docs/`.
 These pages are generated from Markdown during the public web build; their
 hosted status labels must be updated only after an actual public acceptance run.
 
-Use Node.js 22.13+ or 24+ and npm (the PDF text engine, pdf.js, needs 22.13 or later). The SDK is currently a private workspace package; build it from this checkout. For the full Monitor → result → HTTPS event → restart workflow, follow [the onboarding guide](docs/onboarding.md) and [independent developer acceptance checklist](docs/independent-developer-acceptance.md).
+Install nothing first: with Node.js 22.13+ or 24+,
+
+```bash
+npx octocrawl scrape https://example.com --markdown
+pip install octocrawl-client      # the Python client of a running API (npx octocrawl serve)
+npm install @octocrawl/sdk        # the TypeScript client; @octocrawl/mcp is the MCP server
+```
+
+The packages are published from this repository (0.3.0 on 2026-10-05); the `Install check` workflow runs the `npx` line from an empty cache on macOS, Windows and Linux each week. To work on the code, use Node.js 22.13+ or 24+ and npm (the PDF text engine, pdf.js, needs 22.13 or later) and build from this checkout. For the full Monitor → result → HTTPS event → restart workflow, follow [the onboarding guide](docs/onboarding.md) and [independent developer acceptance checklist](docs/independent-developer-acceptance.md).
 
 ```bash
 git clone https://github.com/77777R7/w2l.git
