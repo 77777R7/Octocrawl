@@ -47,8 +47,8 @@ export const STEEL_CAPABILITIES: readonly CapabilityOffer[] = [
   { capability: 'retry_orchestration', vendorDefaultOn: false, enableKey: 'retry_orchestration' },
   { capability: 'session_persistence', vendorDefaultOn: false, enableKey: 'session_persistence' },
   { capability: 'live_view_handoff', vendorDefaultOn: true, enableKey: 'live_view_handoff' },
-  { capability: 'captcha_solving', vendorDefaultOn: false, enableKey: 'captcha_solving' },
-  { capability: 'fingerprint_spoofing', vendorDefaultOn: true, enableKey: 'fingerprint_spoofing' },
+  { capability: 'captcha_solving', vendorDefaultOn: false, enableKey: 'vendor_captcha_solving' },
+  { capability: 'fingerprint_spoofing', vendorDefaultOn: true, enableKey: 'vendor_stealth' },
 ]
 
 export function steelSessionBody(
@@ -56,19 +56,21 @@ export function steelSessionBody(
   resume?: VendorResumeContext | null,
 ): unknown {
   const persistEnabled = decision.enabled.some((c) => c.capability === 'session_persistence')
+  const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
+  const stealthEnabled = decision.enabled.some((c) => c.capability === 'fingerprint_spoofing')
 
   return {
     // Steel injects a synthetic fingerprint BY DEFAULT. skipFingerprintInjection
-    // is the opt-out; the policy layer's structural refusal of
-    // fingerprint_spoofing makes this unconditional, exactly as with
-    // Browserbase's solveCaptchas. A session body without it would be buying
-    // the refused capability by omission.
+    // is the opt-out, sent unless the grant names `vendor_stealth` (ADR 0005);
+    // a body without it would buy the capability by omission. Solving follows
+    // `vendor_captcha_solving`. humanizeInteractions stays off under any
+    // grant: ADR 0005 grants no behaviour simulation.
     stealthConfig: {
-      skipFingerprintInjection: true,
-      autoCaptchaSolving: false,
+      skipFingerprintInjection: !stealthEnabled,
+      autoCaptchaSolving: solveEnabled,
       humanizeInteractions: false,
     },
-    solveCaptcha: false,
+    solveCaptcha: solveEnabled,
     // First use persists the profile so the create response's profileId can
     // be saved and resumed later; a later run passes the saved profileId.
     ...(persistEnabled ? { persistProfile: true } : {}),

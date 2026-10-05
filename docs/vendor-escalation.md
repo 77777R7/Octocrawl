@@ -103,6 +103,8 @@
 
 ## 依然拒绝的东西(设计红线,不是缺失)
 
+> 2026-10-05 起，能力分级以 [ADR 0005](adr/0005-enhanced-access-policy.md) 为准：下面第一条中的前三项改为需 grant，`identity_rotation` 仍永不做。本节其余内容是 2026-08 的设计记录。
+
 - `captcha_solving`、`fingerprint_spoofing`、`cdp_patching`、`identity_rotation` 在任何策略下都不可启用 —— 策略层没有对应开关。
 - 绕过 robots.txt 的通道不存在;每个通道(包括厂商)都在发送前用自己的 robots 实现评估目标 UA。
 - 挑战页不算成功:提取器输出为空时返回 `empty_unverified`,挑战页标记命中时 false-success 检查失败;升级链不会把挑战页内容当作内容成功。

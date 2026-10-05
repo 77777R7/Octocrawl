@@ -28,11 +28,13 @@
  *     it is allowed; `appliedRules` goes into the record so the publisher can
  *     re-run the decision themselves.
  *
- *  3. A provider whose product IS evading the target — solving CAPTCHAs,
- *     patching CDP, rotating fingerprints — is refused on capability, before
- *     robots is even consulted. Routing to it would be buying the stealth
- *     layer we declined to build. Changing whose machine runs the browser
- *     does not change what the browser is doing.
+ *  3. A provider capability that changes what the target sees of the client
+ *     — solving CAPTCHAs, patching CDP, forging fingerprints — is refused
+ *     unless the run's grant names the access capability that governs it
+ *     (ADR 0005), and cycling identities is refused under any grant. Both are
+ *     decided before robots is consulted. Changing whose machine runs the
+ *     browser does not change what the browser is doing, so the vendor gets
+ *     exactly the grant our own executors would need.
  *
  * Pure policy, zero dependencies, no clock and no network — the caller
  * supplies the robots document it already fetched.
@@ -40,7 +42,7 @@
 
 import { evaluateRobots, type RobotsTxt } from './robots.js'
 import type { ProviderCapability } from './vendor.js'
-import { REFUSED_CAPABILITIES } from './vendor.js'
+import { evaluateAccessCapability, VENDOR_CAPABILITY_ACCESS } from './vendor.js'
 
 // ---------------------------------------------------------------------------
 // Provider declarations
@@ -53,10 +55,6 @@ import { REFUSED_CAPABILITIES } from './vendor.js'
  * types.
  */
 export type { ProviderCapability } from './vendor.js'
-export { REFUSED_CAPABILITIES } from './vendor.js'
-
-export { evaluateVendorPolicy, DEFAULT_VENDOR_POLICY, AUTHORIZABLE_POLICY_KEYS } from './vendor.js'
-export type { CapabilityOffer, EnabledCapability, PolicyDecision, VendorPolicy } from './vendor.js'
 
 export interface ProviderDeclaration {
   /** Stable id for the record, e.g. `browserbase`. */
@@ -70,6 +68,12 @@ export interface ProviderDeclaration {
    */
   declaredUserAgent: string | null
   capabilities: readonly ProviderCapability[]
+  /**
+   * The access capabilities (ADR 0005) the run's grant names. A capability in
+   * `capabilities` that VENDOR_CAPABILITY_ACCESS maps to one is refused unless
+   * it is here. Omitted means no grant.
+   */
+  grants?: readonly string[]
   /** Whether the provider will pass through our own UA if we ask. */
   honoursCallerUserAgent: boolean
 }
@@ -81,8 +85,10 @@ export interface ProviderDeclaration {
 export type ProviderRefusal =
   /** The provider will not say what UA it sends. */
   | 'undeclared_user_agent'
-  /** The provider's product is evasion; routing to it buys a stealth layer. */
+  /** The provider offers a capability ADR 0005 refuses under any grant. */
   | 'refused_capability'
+  /** The provider offers a capability whose access capability the grant does not name. */
+  | 'ungranted_capability'
   /** The target's robots.txt bans the UA the provider sends. */
   | 'robots_disallowed'
   /** The target's robots.txt could not be fetched, which is a complete disallow. */
@@ -126,22 +132,24 @@ export function evaluateProviderGate(
     refusedCapabilities: [] as readonly ProviderCapability[],
   }
 
-  // Capability check first: a provider whose product is evasion is refused on
-  // every URL, so there is no point asking robots about a route we will not
-  // take under any rules.
-  const refused = provider.capabilities.filter((c) =>
-    (REFUSED_CAPABILITIES as readonly string[]).includes(c),
-  )
-  if (refused.length > 0) {
+  // Capability check first: it does not depend on the URL, so there is no
+  // point asking robots about a route we will not take under this grant.
+  const verdicts = provider.capabilities.flatMap((c) => {
+    const access = VENDOR_CAPABILITY_ACCESS[c]
+    return access === undefined ? [] : [{ capability: c, verdict: evaluateAccessCapability(access, provider.grants ?? []) }]
+  })
+  const blocked = verdicts.filter((v) => v.verdict.decision !== 'granted')
+  if (blocked.length > 0) {
+    const forever = blocked.some((v) => v.verdict.decision === 'refused')
     return {
       ...base,
       allowed: false,
-      refusal: 'refused_capability',
+      refusal: forever ? 'refused_capability' : 'ungranted_capability',
       reason:
-        `Provider ${provider.id} offers ${refused.join(', ')}. Routing to it would ` +
-        'buy the stealth layer we declined to build — changing whose machine runs ' +
-        'the browser does not change what the browser is doing.',
-      refusedCapabilities: refused,
+        `Provider ${provider.id} offers ${blocked.map((v) => v.capability).join(', ')}: ` +
+        blocked.map((v) => ('reason' in v.verdict ? v.verdict.reason : v.capability)).join('; ') +
+        '. Changing whose machine runs the browser does not change what the browser is doing.',
+      refusedCapabilities: blocked.map((v) => v.capability),
     }
   }
 

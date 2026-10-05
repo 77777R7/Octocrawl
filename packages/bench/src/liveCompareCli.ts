@@ -201,6 +201,7 @@ export async function compareChannels(
   // the subject down instead of leaking a session the run already abandoned.
   type SubjectFactory = (
     ops: ReturnType<typeof browserbaseOps>,
+    opts?: { grants?: readonly string[] },
   ) => Promise<{ fetch: (url: string, deadlineMs?: number) => Promise<FetchResult>; teardown?: () => Promise<void> }>
   const bbFactory = (opts.vendorProviderSubjectImpl ?? vendorProviderSubject) as unknown as SubjectFactory
   const steelFactory = (opts.vendorProviderSubjectImpl ?? vendorProviderSubject) as unknown as SubjectFactory
@@ -276,6 +277,7 @@ export async function compareChannels(
         if (bbSubject === null && bbRealPending === null) {
           bbRealPending = bbFactory(
             browserbaseOps({ apiKey: bbKey }, undefined, policy),
+            { grants: policy.authorized ?? [] },
           ) as Promise<Awaited<ReturnType<typeof vendorProviderSubject>>>
           bbSubject = (await bbRealPending) as Awaited<ReturnType<typeof vendorProviderSubject>>
         } else if (bbSubject === null && bbRealPending !== null) {
@@ -318,6 +320,7 @@ export async function compareChannels(
         if (steelSubject === null && steelRealPending === null) {
           steelRealPending = steelFactory(
             steelOps({ apiKey: steelKey }, undefined, policy),
+            { grants: policy.authorized ?? [] },
           ) as Promise<Awaited<ReturnType<typeof vendorProviderSubject>>>
           steelSubject = (await steelRealPending) as Awaited<ReturnType<typeof vendorProviderSubject>>
         } else if (steelSubject === null && steelRealPending !== null) {

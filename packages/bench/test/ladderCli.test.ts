@@ -6,7 +6,7 @@ import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type Execution
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
-import { evaluateVendorPolicy, REFUSED_CAPABILITIES } from '@w2l/http-core'
+import { evaluateVendorPolicy } from '@w2l/http-core'
 import type { SessionSnapshot } from '../src/routing/sessionStore.js'
 import type { CdpBrowser } from '../src/vendors/cdp.js'
 import type { VendorOps, VendorSession } from '../src/vendors/transport.js'
@@ -390,8 +390,10 @@ describe('lazy vendor connection', () => {
     await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
   })
 
-  it('the refusal posture stays intact in the test ops — REFUSED_CAPABILITIES unchanged', () => {
-    expect(REFUSED_CAPABILITIES).toContain('captcha_solving')
+  it('the test ops withhold captcha solving: the ladder passes no grant', () => {
+    const ops = fakeVendorOps('browserbase', () => {})
+    expect(ops.decision.withheld).toContain('captcha_solving')
+    expect(ops.decision.enabled.map((c) => c.capability)).not.toContain('captcha_solving')
   })
 })
 
