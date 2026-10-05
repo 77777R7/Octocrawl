@@ -4,7 +4,7 @@ This guide runs the TypeScript SDK against the actual REST API, a controlled pro
 
 ## 1. Install the checkout you are evaluating
 
-Use Node.js 22.13+ or 24+ and npm; the root manifest requires it (`engines`), as the PDF text engine (pdf.js) does. Git is required; browser capture additionally requires Chromium. `@w2l/sdk` is currently a private workspace package, so these instructions use it from the repository, not an unpublished npm installation.
+Use Node.js 22.13+ or 24+ and npm; the root manifest requires it (`engines`), as the PDF text engine (pdf.js) does. Git is required; browser capture additionally requires Chromium. These instructions use the SDK from the repository, as the workspace package `@w2l/sdk`; the same SDK is published on npm as `@octocrawl/sdk`.
 
 For a fresh checkout:
 
