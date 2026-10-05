@@ -168,13 +168,29 @@ export function isResearchUserAgent(userAgent: string): boolean {
 }
 
 /**
+ * The product token a robots.txt names to address Octocrawl itself
+ * (`User-agent: Octocrawl`), whatever User-Agent header a request sends. It
+ * is matched in every mode. A rule written for it (or for research mode's own
+ * token) is not set aside for a URL the request names or for a crawl or map
+ * started with ignoreRobotsTxt; only a recorded robotsOverride sets it aside.
+ */
+export const PRODUCT_ROBOTS_TOKEN = 'octocrawl'
+
+/**
  * The text robots.txt `User-agent` lines are matched against for a
- * User-Agent W2L sends. SEC's format names no product token, so the research
- * token is added: a group for w2l-research governs research requests to
- * SEC.gov as it does on every other host.
+ * User-Agent Octocrawl sends: the header, with the product token added. SEC's
+ * format names no product token, so the research token is added as well: a
+ * group for w2l-research governs research requests to SEC.gov as it does on
+ * every other host.
  */
 export function robotsAgent(userAgent: string): string {
-  return userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
+  const declared = userAgent.startsWith(`${SEC_DECLARED_NAME} `) ? `${userAgent} ${RESEARCH_PRODUCT_TOKEN}` : userAgent
+  return `${declared} ${PRODUCT_ROBOTS_TOKEN}`
+}
+
+/** Whether the robots.txt group that decided names Octocrawl itself (its product token, or research mode's) rather than every crawler (`*`). */
+export function isOctocrawlRobotsGroup(matchedAgent: string | null | undefined): boolean {
+  return matchedAgent === PRODUCT_ROBOTS_TOKEN || matchedAgent === RESEARCH_PRODUCT_TOKEN
 }
 
 /** The operator's contact from `W2L_CONTACT`, trimmed; null when unset or blank. The error never repeats the value. */
@@ -406,6 +422,25 @@ export interface RobotsOverride {
 }
 
 /**
+ * On whose word a fetch went past robots.txt. `robots_override`: the
+ * caller's recorded decision for this URL (`RobotsOverride`).
+ * `user_named_url`: a local server fetching a URL the request named (a
+ * scrape, a batch entry), since robots.txt addresses crawlers that discover
+ * links, not the pages a person names. `ignore_robots_txt`: a crawl or map
+ * the caller started with `ignoreRobotsTxt` on a local server.
+ */
+export type RobotsOverrideBasis = 'robots_override' | 'user_named_url' | 'ignore_robots_txt'
+
+/**
+ * A robots override as a lane applies it: the caller's recorded one, or one
+ * W2L applies by rule, which says so in `basis` (absent: the caller's,
+ * `robots_override`). Set by W2L, never read from a request.
+ */
+export interface AppliedRobotsOverride extends RobotsOverride {
+  basis?: Exclude<RobotsOverrideBasis, 'robots_override'>
+}
+
+/**
  * The outcome of consulting robots.txt for a single target URL. One record per
  * fetch. `consulted` distinguishes "we checked and it said X" from "there was
  * nothing to check" — a record that skips the check must say so, never pretend.
@@ -436,11 +471,11 @@ export interface RobotsDecision {
    */
   unreachable?: RobotsUnreachable
   /**
-   * Present when a disallow the publisher wrote was set aside by a recorded
-   * decision: the fetch went ahead (`skippedFetch: false`) and this says on
-   * whose word. Never set for an unreachable robots.txt.
+   * Present when a disallow was set aside, the publisher's or the one an
+   * unreachable robots.txt implies: the fetch went ahead (`skippedFetch:
+   * false`) and this says on whose word.
    */
-  override?: RobotsOverride
+  override?: AppliedRobotsOverride
 }
 
 /**

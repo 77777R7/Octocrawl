@@ -94,7 +94,7 @@ export interface SitemapFileRecord {
   kind: SitemapFileKind
   /** `<loc>` entries the file holds (child sitemaps for an index), http(s) ones only; null when the file was not parsed. */
   entries: number | null
-  /** The robots.txt verdict for the file's own URL under the crawl's identity (an unreachable robots.txt is `disallowed`, as for a page); null when the URL failed its egress check before robots.txt was consulted. */
+  /** The robots.txt verdict for the file's own URL under the crawl's identity (an unreachable robots.txt is `disallowed`, as for a page); null when the URL failed its egress check before robots.txt was consulted. A `disallowed` file is `refused`, unless the crawl or map was started with ignoreRobotsTxt and read it. */
   robots: 'allowed' | 'disallowed' | 'no_robots' | null
   /** Whether the request left through the operator's environment proxy (local mode); a hosted server never has one. */
   proxyUsed: boolean

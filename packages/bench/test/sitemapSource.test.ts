@@ -82,6 +82,21 @@ describe('HttpSitemapSource', () => {
     }
   })
 
+  it('reads a file robots.txt disallows under ignoreRobotsTxt, keeping its verdict on the record', async () => {
+    const source = new HttpSitemapSource({ networkPolicy: policy, ignoreRobotsTxt: true })
+    try {
+      const loaded = await source.load({ seedUrl: `${origin}/`, maxUrls: 50, maxFiles: 20 })
+      const hidden = loaded.files.find((file) => file.url === `${origin}/private/hidden.xml`)
+      expect(hidden).toMatchObject({ kind: 'urlset', entries: 1, robots: 'disallowed', error: null })
+      expect(loaded.urls).toContainEqual({ url: `${origin}/secret`, file: `${origin}/private/hidden.xml` })
+      expect(requests.map((request) => request.path)).toContain('/private/hidden.xml')
+      // The egress policy is not robots.txt: a denied address stays unread.
+      expect(loaded.files.find((file) => file.url.startsWith('http://169.254.169.254'))).toMatchObject({ kind: 'unreadable', error: 'ssrf_denied' })
+    } finally {
+      await source.close()
+    }
+  })
+
   it('stops at maxUrls and maxFiles, guesses /sitemap.xml when robots.txt names none, and shares a robots cache without closing it', async () => {
     const bounded = new HttpSitemapSource({ networkPolicy: policy })
     try {

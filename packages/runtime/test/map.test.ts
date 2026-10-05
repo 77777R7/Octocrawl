@@ -125,6 +125,35 @@ describe('MapRunner', () => {
     expect(ruled.warnings[0]!.message).toContain('robots.txt disallows it for the map\'s identity')
   })
 
+  it('with ignoreRobotsTxt reads the start page past robots.txt and returns disallowed and unreachable URLs with their verdict', async () => {
+    const sitemap = fakeSitemap([{ url: `${SITE}/docs/private/listed` }, { url: `${SITE}/docs/open` }])
+    const verdicts = async (url: string): Promise<MapRobotsVerdict> => (url === START || url.includes('private') ? { disallowed: true } : url.includes('down') ? { disallowed: true, unreachable: 'timeout' } : 'allowed')
+    const { wired, reads } = sources(startPage([link('/docs/private/a', 'Private A'), link('/docs/down')]), sitemap.source, verdicts)
+    const map = await new MapRunner(wired).run({ id: 'm-ignore', url: START, ignoreRobotsTxt: true })
+    expect(reads).toEqual([START])
+    expect(map.sources.startPage).toMatchObject({ status: 'success', robots: 'disallowed' })
+    expect(map.links.map((l) => [l.url, l.robots])).toEqual([
+      [START, 'disallowed'],
+      [`${SITE}/docs/private/a`, 'disallowed'],
+      [`${SITE}/docs/down`, 'unreachable'],
+      [`${SITE}/docs/private/listed`, 'disallowed'],
+      [`${SITE}/docs/open`, 'allowed'],
+    ])
+    expect(map.refused.robots).toBe(0)
+    expect(map.warnings.map((warning) => warning.code)).toEqual([])
+    // A rule robots.txt writes for Octocrawl by name holds under ignoreRobotsTxt: the URL is refused, the start page not read.
+    const named = sources(startPage([link('/docs/x')]), fakeSitemap([{ url: `${SITE}/docs/owner-out` }]).source, async (url) => (url === START || url.includes('owner-out') ? { disallowed: true, octocrawl: true } : 'allowed'))
+    const targeted = await new MapRunner(named.wired).run({ id: 'm-octocrawl', url: START, ignoreRobotsTxt: true })
+    expect(named.reads).toEqual([])
+    expect(targeted.sources.startPage).toMatchObject({ status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' })
+    expect(targeted.links.map((l) => l.url)).toEqual([])
+    expect(targeted.refused.robots).toBe(2)
+    // Without it the same site keeps them out, as before.
+    const obeying = await new MapRunner(sources(startPage([link('/docs/private/a'), link('/docs/down')]), fakeSitemap([{ url: `${SITE}/docs/open` }]).source, verdicts).wired).run({ id: 'm-obey', url: START })
+    expect(obeying.sources.startPage).toMatchObject({ status: 'failed', failureReason: 'policy_denied', robots: 'disallowed' })
+    expect(obeying.links.map((l) => l.url)).toEqual([`${SITE}/docs/open`])
+  })
+
   it('stops at limit: exactly limit links, the rest counted over the limit, the sitemap given what is left, robots refusals not counted', async () => {
     const sitemap = fakeSitemap(Array.from({ length: 10 }, (_, i) => ({ url: `${SITE}/docs/s${i}` })))
     const { wired } = sources(startPage([link('/docs/private/p'), link('/docs/1'), link('/docs/2'), link('/docs/3'), link('/docs/4'), link('/docs/5')]), sitemap.source)

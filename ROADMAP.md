@@ -43,7 +43,7 @@ P0 is the user track (weeks 1–2) and P1 the engine track (weeks 1–6). P1 doe
 
 ## Direction
 
-Octocrawl turns a list of URLs into a table where every row can be traced to its source: *web data you can cite*. It runs locally. When a site blocks a plain request, Octocrawl tries the routes the user allows, within a budget, and records each one: a browser-compatible HTTP client, managed proxy sessions, an enhanced browser, a third-party solver, or the user's own browser. It never reports a page it did not verify as content. Enhanced access decides whether a page can be reached, not whether it should be: robots.txt is obeyed by default, and an override is recorded.
+Octocrawl turns a list of URLs into a table where every row can be traced to its source: *web data you can cite*. It runs locally. When a site blocks a plain request, Octocrawl tries the routes the user allows, within a budget, and records each one: a browser-compatible HTTP client, managed proxy sessions, an enhanced browser, a third-party solver, or the user's own browser. It never reports a page it did not verify as content. Enhanced access decides whether a page can be reached, not whether it should be. robots.txt is read and recorded for every URL; decided 2026-10-05, a URL the user names (scrape, batch, a URL list) is fetched on a local server whatever it says, the links a crawl or map discovers obey it unless the user turns that off (`ignoreRobotsTxt`), a hosted server obeys it for every URL, and Crawl-delay and the back-off after a 429 apply throughout.
 
 The audience (widened on 2026-10-03) is developers who would otherwise use Firecrawl, and people who do not program who would otherwise use Octoparse: they paste URLs or describe a site and get a table or JSON whose every row traces back to its page. Researchers (graduate students, academic and policy researchers, data journalists, think-tank analysts) remain the users who need that trace most, and the guides keep serving them. Sales-lead scraping of personal data is out of scope: it values volume over evidence and carries personal-data risk.
 
@@ -157,7 +157,7 @@ Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging i
 | Queue mode (Pro) | Takes a URL queue from the local service, opens each URL in a background tab, waits for load and returns the DOM; pauses and notifies the user at a login or verification page |
 | Local bridge security | WebSocket on `127.0.0.1` only; a one-time pairing code confirmed in both the extension and the CLI; Origin checked; unpaired connections refused. Any web page can try to reach a local port, so none of this is optional |
 | Least privilege | No `debugger` permission; site access requested per domain at run time through `optional_host_permissions` |
-| Access pacing | By default one request at a time per domain with random jitter, visible and adjustable; robots.txt obeyed by default, and a user override recorded in `robotsDecision` |
+| Access pacing | By default one request at a time per domain with random jitter, visible and adjustable; robots.txt read and recorded in `robotsDecision` as in the core: a URL the person queues is a URL they named |
 | MCP | `scrape` / `batch_scrape` accept `lane: "my-browser"` with the same output shape as the other lanes<br>**Status 2026-10-05:** the lane over Chrome remote debugging is PA's item 8; through the extension it waits for this phase |
 | Three-lane comparison | One 200-URL list through HTTP, the local browser and the user's browser; the three success rates published |
 | Evidence Pack (Pro) | One-step export in the [Evidence Pack](#evidence-pack) layout with a generated `methods.md` |
@@ -176,7 +176,7 @@ Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging i
 
 ### P5 · Breadth for developers (after P3)
 
-Decided 2026-10-03: once P3 exits, the items below that are still open are required, in this order, each with its real-site record and status CSV like the M2 groups. They widen the audience from researchers to developers migrating from Firecrawl, without changing the product position. Since 2026-10-05, enhanced access follows [PA](#pa--enhanced-access)'s rules, and robots.txt stays obeyed by default.
+Decided 2026-10-03: once P3 exits, the items below that are still open are required, in this order, each with its real-site record and status CSV like the M2 groups. They widen the audience from researchers to developers migrating from Firecrawl, without changing the product position. Since 2026-10-05, enhanced access follows [PA](#pa--enhanced-access)'s rules, and robots.txt follows the [Direction](#direction)'s rule.
 
 | Item | Accepted when |
 | --- | --- |
@@ -210,7 +210,7 @@ Every result from every lane carries the same record. It is the product's identi
 | `httpStatus` / `status` / `reason` | Transport status and Octocrawl's verdict | Exists; `evidenceRecord.reason` is the failure, block or budget reason in one field |
 | `lane` | `http` / `browser_local` / `my_browser` / `vendor` | In `evidenceRecord` on every default response (lane names as today: `http`, `browser_local`, `provider`, …); `my_browser` arrives with PA item 8 |
 | `access` | How the page was reached: `route` (http, http-compatible, browser, enhanced-browser, vendor, user-browser), `profile` (transport or browser profile and library version), `session` (an id, never the cookies), `egress` (`proxyUsed`, location), `solver` (provider, attempts) and `costUsd` (null when unknown, never 0) | Planned with PA; today `evidence.envProxy`, `proxyUsed` and the vendor lane's records cover part of it |
-| `robotsDecision` | The robots.txt verdict, including a recorded user override | Recorded in `evidenceRecord` (decision, robots.txt URL and hash, unreachable reason, crawl delay); `userOverride` is always false, as no override exists yet |
+| `robotsDecision` | The robots.txt verdict, and whether and on whose word it was set aside | Recorded in `evidenceRecord` (decision, robots.txt URL and hash, unreachable reason, crawl delay, `userOverride`, and `overrideBasis`: `user_named_url`, `robots_override` or `ignore_robots_txt`) |
 | `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | In `evidenceRecord`: the body each lane read, the delivered Markdown and `json.data` as canonical JSON |
 | `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf` and `EXTRACTOR_VERSION` for a page, `pdf-text/1` or `file-text/1` for a file, and the commit when `W2L_SOURCE_COMMIT` is set |
 | `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; a PDF's `Label: value` lines as `pdf` with `page N "label"` |
@@ -250,7 +250,7 @@ Not worked on unless the restart condition occurs or the person asking requests 
 | Risk | Mitigation |
 | --- | --- |
 | The comparison target moves, and the matrix has errors | Firecrawl frozen at v4.42.0; every gap reproduced by a failing real-site test before any code changes |
-| Site terms, personal data and enhanced access | robots.txt obeyed by default with the decision recorded; prohibited uses in the acceptable-use policy (no bypassing paywalls, no reaching beyond the user's own account permissions, no MFA circumvention, no personal data for marketing); every enhanced route recorded on the result; guides remind researchers that personal data may need ethics approval |
+| Site terms, personal data and enhanced access | robots.txt read and recorded for every URL, obeyed for discovered links and on a hosted server (decided 2026-10-05); prohibited uses in the acceptable-use policy (no bypassing paywalls, no reaching beyond the user's own account permissions, no MFA circumvention, no personal data for marketing); every enhanced route recorded on the result; guides remind researchers that personal data may need ethics approval |
 | Arms race and upkeep | Maintained libraries pinned by version; a weekly regression on PA's set and the existing batches; a route that degrades is turned off per site, not patched by hand |
 | Licences of reused code | Each adopted project's licence checked against the AGPL core and the MIT SDK before its code enters the repository; GPL code is reference only |
 | Cost and data sent to third parties | Budgets per request and run; nothing goes to a provider or solver without the user's permission; login state is never sent |

@@ -44,13 +44,18 @@ export interface MapLink {
   sitemapFile?: string
   /** The `<lastmod>` the sitemap gave, as written. */
   lastmod?: string
-  /** The robots.txt verdict for the URL under the map's declared identity; a disallowed URL is never a link. */
-  robots: 'allowed' | 'no_robots'
+  /**
+   * The robots.txt verdict for the URL under the map's declared identity. A
+   * URL robots.txt disallows (`disallowed`), or on a host whose robots.txt
+   * could not be read (`unreachable`), is a link only in a map started with
+   * ignoreRobotsTxt; otherwise it is refused.
+   */
+  robots: 'allowed' | 'no_robots' | 'disallowed' | 'unreachable'
 }
 
 export type MapStatus = 'completed' | 'partial' | 'failed'
 
-/** What the start page read gave, or why it was not read (`failed/policy_denied` when robots.txt disallows the start URL or could not be read). */
+/** What the start page read gave, or why it was not read (`failed/policy_denied` when robots.txt disallows the start URL or could not be read, unless the map was started with ignoreRobotsTxt). */
 export interface MapStartPage {
   url: string
   finalUrl: string | null
@@ -169,7 +174,7 @@ export interface MapStartPageRead {
 }
 
 /** A robots.txt verdict for one URL under the map's declared identity. */
-export type MapRobotsVerdict = 'allowed' | 'no_robots' | { disallowed: true; unreachable?: string }
+export type MapRobotsVerdict = 'allowed' | 'no_robots' | { disallowed: true; unreachable?: string; /** A rule robots.txt wrote for Octocrawl itself, which ignoreRobotsTxt does not set aside. */ octocrawl?: true }
 
 /** The fetch paths a map uses; the API engine wires the real ones, tests inject fakes. */
 export interface MapSources {

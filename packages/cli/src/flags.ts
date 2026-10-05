@@ -17,7 +17,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
   includeLinks: 'boolean', debug: 'boolean', onlyMainContent: 'boolean', mobile: 'boolean', skipTlsVerification: 'boolean', fastMode: 'boolean',
   blockAds: 'boolean', removeBase64Images: 'boolean', storeInCache: 'boolean', lockdown: 'boolean', useCached: 'boolean', ignoreInvalidURLs: 'boolean',
   regexOnFullURL: 'boolean', ignoreQueryParameters: 'boolean', deduplicateSimilarURLs: 'boolean', crawlEntireDomain: 'boolean',
-  allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean', handoff: 'boolean',
+  allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean', handoff: 'boolean', ignoreRobotsTxt: 'boolean',
   waitFor: 'int', timeout: 'int', maxFileBytes: 'int', maxAge: 'int', minAge: 'int', maxPages: 'int', maxDepth: 'int', maxConcurrency: 'int', limit: 'int',
   mode: 'string', sitemap: 'string', idempotencyKey: 'string', appendToId: 'string', search: 'string', integration: 'string',
   allowlistedDomains: 'list', includeTags: 'list', excludeTags: 'list',
