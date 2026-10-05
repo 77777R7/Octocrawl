@@ -370,7 +370,16 @@ function isRootish(doc: Document, el: Element | null): boolean {
  * when no defensible region exists, which is the extractor's signal to fall
  * back to the article cascade rather than emit a guess.
  */
+/**
+ * The shortest block that is a description rather than a label: the block
+ * cascade's own minimum for prose. Table cells and list items count from five
+ * characters, so a variation picker's "Size" and "Color" would otherwise pass
+ * for the product's description.
+ */
+const DESCRIPTION_MIN_CHARS = 25
+
 export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Element | null {
+  const described = blocks.filter((b) => b.length >= DESCRIPTION_MIN_CHARS)
   // A declared microdata scope is the publisher telling us the boundary
   // outright — but only when it is not simply the whole page.
   const scope = microdataProductScope(doc)
@@ -383,12 +392,11 @@ export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Elem
     const lca = commonAncestor(heading, price)
     if (!isRootish(doc, lca)) {
       const region = lca!
-      const prose = blocks.filter((b) => region.contains(b.el))
-      if (prose.length > 0) return region
+      if (described.some((b) => region.contains(b.el))) return region
       // Title + price but no description: widen to the nearest container
       // that reaches it, never to the page itself.
       for (let wider = region.parentElement; !isRootish(doc, wider); wider = wider!.parentElement) {
-        if (blocks.some((b) => wider!.contains(b.el))) return wider
+        if (described.some((b) => wider!.contains(b.el))) return wider
       }
       return region
     }

@@ -205,6 +205,35 @@ describe('PDP region selection', () => {
     expect(out.mainHtml).toContain('describes an item at length')
   })
 
+  it('keeps the description and details a product shows in tabs beside its buy box', () => {
+    // WooCommerce (scrapingcourse.com): the summary holds the title, price, a
+    // one-line excerpt and the size and colour picker, whose labels are short
+    // table cells; the description and the product's attributes are in tabs, a
+    // sibling of the summary in the product's own element.
+    const html = `<!doctype html><html><head><title>Abominable Hoodie</title>${PRODUCT_LD}</head><body>
+<header class="site-header"><a class="cart-contents" href="/cart/"><span class="amount">$0.00</span> 0 items</a></header>
+<main id="main"><div id="product-246" class="product type-product">
+<div class="woocommerce-product-gallery"><img src="/hoodie.jpg" alt=""></div>
+<div class="summary entry-summary"><h1 class="product_title">Abominable Hoodie</h1><p class="price"><span class="amount">$69.00</span></p>
+<div class="woocommerce-product-details__short-description"><p>This is a variable product called a Abominable Hoodie</p></div>
+<form class="variations_form cart"><table class="variations"><tr><th class="label"><label for="size">Size</label></th><td class="value"><select id="size"><option>XS</option><option>S</option></select></td></tr>
+<tr><th class="label"><label for="color">Color</label></th><td class="value"><select id="color"><option>Blue</option></select><a class="reset_variations" href="#">Clear</a></td></tr></table><button type="submit">Add to cart</button></form>
+<div class="product_meta">SKU: MH09</div></div>
+<div class="woocommerce-tabs wc-tabs-wrapper"><ul class="tabs"><li><a href="#tab-description">Description</a></li><li><a href="#tab-additional_information">Additional information</a></li></ul>
+<div id="tab-description" class="woocommerce-Tabs-panel"><h2>Description</h2><p>It took CoolTech weather apparel know-how and lots of wind-resistant fabric to get the Abominable Hoodie just right.</p><ul><li>Blue heather hoodie.</li><li>Relaxed fit.</li><li>Moisture-wicking.</li></ul></div>
+<div id="tab-additional_information" class="woocommerce-Tabs-panel"><h2>Additional information</h2><table><tr><th>Size</th><td>XS, S, M, L, XL</td></tr><tr><th>Color</th><td>Blue, Green, Red</td></tr></table></div></div>
+<section class="related products"><h2>Related products</h2><ul class="products">${[1, 2, 3].map((n) => `<li><a href="/p/${n}/">Other hoodie ${n}</a><span class="amount">$${50 + n}.00</span></li>`).join('')}</ul></section>
+</div></main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.pageType).toBe('product')
+    expect(out.strategy).toBe('product')
+    expect(out.mainHtml).toContain('$69.00')
+    expect(out.mainHtml).toContain('wind-resistant fabric')
+    expect(out.mainHtml).toContain('XS, S, M, L, XL')
+    expect(out.mainHtml).not.toContain('Other hoodie')
+    expect(out.mainHtml).not.toContain('0 items')
+  })
+
   it('widens a bare buy box to the product that holds its description', () => {
     // books.toscrape.com: title, price and stock sit in one column, the
     // description and the Product Information table two levels further up.
