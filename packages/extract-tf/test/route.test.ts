@@ -341,6 +341,72 @@ describe('routePage', () => {
     expect(d.strategy).toBe('list')
   })
 
+  describe('a grid of product cards with no heading in them', () => {
+    // Newegg, Gymshark and sandbox.oxylabs.io lay a category page out this
+    // way: each card is a name link, a price and a line or two of text, so the
+    // page has more text than the link-farm rules allow and too few headings
+    // for the multi-heading one.
+    const name = (i: number) => `Cedar Ridge Garden Trowel Model ${i + 1}`
+    const card = (i: number, tag: string) => `<${tag} class="tile"><a href="/ip/${i + 1}">${name(i)}</a><span class="price">$${12 + i}.99</span><span>4.${i % 10} out of 5 stars</span><div>Forged stainless steel blade with depth markings, a sealed ash handle and a hanging loop. Free shipping, arrives in 3+ days.</div></${tag}>`
+    const grid = (n: number, tag: 'li' | 'div') => {
+      const cards = Array.from({ length: n }, (_, i) => card(i, tag)).join('')
+      return tag === 'li' ? `<ul class="grid">${cards}</ul>` : `<div class="grid">${cards}</div>`
+    }
+    const shop = (n: number, tag: 'li' | 'div') => wrap(`<main><h1>Garden tools</h1><div class="intro">Trowels, transplanters and weeders for beds and borders.</div>${grid(n, tag)}</main>`)
+
+    it('routes it as a listing or collection, not an article, and keeps every card', () => {
+      for (const tag of ['li', 'div'] as const) {
+        for (const n of [4, 9, 16, 40]) {
+          const out = extractTf.extract(shop(n, tag))
+          expect(['listing', 'collection'], `${n} ${tag} cards`).toContain(out.pageType)
+          for (let i = 0; i < n; i++) expect(out.mainHtml).toContain(`>${name(i)}<`)
+        }
+      }
+      // Past the link-farm rule's size, the cards' own rule decides.
+      const doc = parse(shop(40, 'div'))
+      expect(routePage(doc.document)).toEqual({ type: 'collection', strategy: 'article' })
+      doc.close()
+    })
+
+    it('keeps an article with a grid of related posts below it an article', () => {
+      const prose = Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1}: the trowel held its edge through a season of clay soil, and the handle did not split after the first frost.</p>`).join('')
+      const doc = parse(wrap(`<article><h1>Trowel review</h1>${prose}</article><section class="related"><h2>More reviews</h2>${grid(6, 'div')}</section>`))
+      expect(routePage(doc.document).type).toBe('article')
+      doc.close()
+    })
+
+    it('routes cards whose paragraphs are in them to collection, under <main> as well', () => {
+      // GitHub's trending page: each repository is a heading link and a paragraph of description.
+      const repo = (i: number) => `<article class="Box-row"><h2><a href="/owner/repo-${i}">owner / garden-planner-${i}</a></h2><p>Plan beds, rotations and watering schedules for allotment ${i} from one file.</p><span>TypeScript</span><span>${100 + i} stars today</span></article>`
+      const doc = parse(wrap(`<main><h1>Trending</h1><p>See what the community is most excited about today.</p><div class="Box">${Array.from({ length: 12 }, (_, i) => repo(i)).join('')}</div></main>`))
+      expect(routePage(doc.document)).toEqual({ type: 'collection', strategy: 'article' })
+      doc.close()
+    })
+
+    it('does not count a sidebar of filters as the page\'s own text', () => {
+      // Newegg: a long list of facet options beside the grid survives cleaning.
+      const facets = `<div class="filters"><ul>${Array.from({ length: 120 }, (_, i) => `<li><label>Brand option number ${i}</label></li>`).join('')}</ul></div>`
+      const doc = parse(wrap(`<div class="page"><h1>Laptops</h1>${facets}${grid(24, 'div')}</div>`))
+      expect(routePage(doc.document)).toEqual({ type: 'collection', strategy: 'article' })
+      doc.close()
+    })
+
+    it('keeps a documentation page of sections under <main> an article', () => {
+      // MDN: each section is an anchor heading and paragraphs with links in their prose.
+      const section = (i: number) => `<section class="content-section"><h2 id="s${i}"><a href="#s${i}">Attribute ${i}</a></h2><p>The attribute sets how the element is fetched; see the <a href="/docs/fetch">fetch</a> guide for details on mode ${i}.</p><p>Browsers ignore unknown values, and fall back to the default behaviour.</p></section>`
+      const doc = parse(wrap(`<main><h1>The anchor element</h1>${Array.from({ length: 10 }, (_, i) => section(i)).join('')}</main>`))
+      expect(routePage(doc.document)).toEqual({ type: 'article', strategy: 'article' })
+      doc.close()
+    })
+
+    it('does not take paragraphs that carry links for cards', () => {
+      const linked = Array.from({ length: 12 }, (_, i) => `<p>Step ${i + 1}: loosen the soil with a <a href="/tools/${i}">hand fork</a> before you set the plant, and water it in well.</p>`).join('')
+      const doc = parse(wrap(`<article><h1>Planting guide</h1>${linked}</article>`))
+      expect(routePage(doc.document).type).toBe('article')
+      doc.close()
+    })
+  })
+
   it('extracts a div-based listing via the container fallback', () => {
     const html = wrap(
       '<main><h1>Quotes</h1><div class="container">' +

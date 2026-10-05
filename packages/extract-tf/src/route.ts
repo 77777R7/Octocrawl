@@ -15,6 +15,7 @@
  */
 
 import type { PageType } from '@w2l/contracts'
+import { classifyBlocks } from './classify.js'
 import { detectLists } from './detectList.js'
 import { commonAncestor, layoutTables, outerHtml, qsa, tagOf, textOf } from './dom.js'
 import { hasRecommendationToken, isRecommendationHeading } from './prune.js'
@@ -271,7 +272,92 @@ function hasForumSignals(s: PageSignals): boolean {
   return hasToken(s.jsonLdTypes, 'forum') || hasToken(s.itemTypeTokens, 'forum')
 }
 
-function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
+/** The fewest alike cards that make a page with little prose of its own a listing of them. */
+const GRID_CARDS = 4
+/** Elements a listing's card is laid out as: a paragraph that carries a link is prose, not a card. */
+const CARD_TAGS: ReadonlySet<string> = new Set(['li', 'div', 'article', 'section'])
+/** Letters and digits a card may show before its link (a badge such as "Sponsored" or "Best seller"). */
+const CARD_LEAD_CHARS = 24
+/** Blocks that are a list's or a table's items, not the page's prose. */
+const STRUCTURAL_BLOCKS: ReadonlySet<string> = new Set(['li', 'td', 'th'])
+
+/**
+ * Whether a card leads with a link to another page: its item's name, or its
+ * picture. A section of prose whose heading links to itself (`#name`), or
+ * whose links sit inside its sentences, does not.
+ */
+function leadsWithLink(card: Element): boolean {
+  let lead = 0
+  const walk = (node: Node): boolean | null => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) {
+        lead += ((child.textContent ?? '').match(/[\p{L}\p{N}]/gu) ?? []).length
+        if (lead > CARD_LEAD_CHARS) return false
+      } else if (child.nodeType === 1) {
+        const el = child as Element
+        const href = tagOf(el) === 'a' ? (el.getAttribute('href') ?? '').trim() : ''
+        if (href !== '' && !href.startsWith('#')) return true
+        const found = walk(el)
+        if (found !== null) return found
+      }
+    }
+    return null
+  }
+  return walk(card) === true
+}
+
+/** The page's largest group of alike sibling cards (isCard, leading with a link): one tag and class, each a CARD_TAGS element. */
+function largestCardGroup(doc: Document): Element[] {
+  let best: Element[] = []
+  for (const el of qsa(doc, '*')) {
+    if (el.children.length < GRID_CARDS) continue
+    const templates = new Map<string, Element[]>()
+    for (const kid of Array.from(el.children)) {
+      if (!CARD_TAGS.has(tagOf(kid)) || !isCard(kid) || !leadsWithLink(kid)) continue
+      const template = `${tagOf(kid)} ${kid.getAttribute('class') ?? ''}`
+      const group = templates.get(template)
+      if (group === undefined) templates.set(template, [kid])
+      else group.push(kid)
+    }
+    for (const group of templates.values()) if (group.length > best.length) best = group
+  }
+  return best
+}
+
+/**
+ * A grid of cards that is the page's content (a category page whose cards
+ * are a name link, a price and a line of text, with no heading in them): at
+ * least GRID_CARDS alike cards, holding at least twice the text of the
+ * article cascade's prose blocks outside them. An article's grid of related
+ * posts is outweighed by the article's own prose; list items and table cells
+ * outside the cards (a sidebar of filters) are not prose.
+ */
+function hasCardGrid(doc: Document): boolean {
+  const cards = largestCardGroup(doc)
+  if (cards.length < GRID_CARDS) return false
+  const collapsedLength = (el: Element) => textOf(el).replace(/\s+/g, ' ').trim().length
+  const cardSet = new Set(cards)
+  const blocks = classifyBlocks(doc)
+  const blockSet = new Set(blocks.map((b) => b.el))
+  let outside = 0
+  for (const block of blocks) {
+    let counted = true
+    for (let up = block.el.parentElement; up !== null; up = up.parentElement) {
+      // Inside a card, or inside a block already counted.
+      if (cardSet.has(up) || blockSet.has(up)) {
+        counted = false
+        break
+      }
+    }
+    if (counted && !cardSet.has(block.el) && !STRUCTURAL_BLOCKS.has(tagOf(block.el))) outside += block.length
+  }
+  const inside = cards.reduce((sum, card) => sum + collapsedLength(card), 0)
+  return inside >= outside * 2
+}
+
+function routeByCounts(c: RouterCounts, s: PageSignals, doc: Document): RouteDecision {
+  let grid: boolean | undefined
+  const cardGrid = (): boolean => (grid ??= hasCardGrid(doc))
   // Semantic product signals get the dedicated PDP strategy: a product page's
   // payload is a name/price/spec region, not the longest run of prose, and
   // scoring by text volume on a PDP reliably picks the recommendation grid.
@@ -304,7 +390,9 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
 
   // Documentation / reference pages: breadcrumbs and in-page TOC look like
   // lists, but several prose paragraphs under <main> are the payload.
-  if (c.main >= 1 && c.p >= 3 && c.headings >= 2) {
+  // Paragraphs inside a grid of cards (a repository's description on each)
+  // are the cards' text, not a document's: such a page goes on to the rules below.
+  if (c.main >= 1 && c.p >= 3 && c.headings >= 2 && !cardGrid()) {
     return { type: 'article', strategy: 'article' }
   }
 
@@ -349,6 +437,11 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
     return { type: 'collection', strategy: 'article' }
   }
 
+  // A grid of cards with no heading in them, too much text for the link-farm
+  // rules: a category page, not an article. The article cascade still
+  // extracts it, as it did.
+  if (cardGrid()) return { type: 'collection', strategy: 'article' }
+
   // Everything else runs the article cascade; when it finds no blocks the
   // result escalates (empty shell, genuinely empty page).
   return { type: 'article', strategy: 'article' }
@@ -369,7 +462,7 @@ export function pageSignalsFor(doc: Document): PageSignals {
  * (so direct routePage callers keep working on already-cleaned documents).
  */
 export function routePage(doc: Document, signals: PageSignals = collectPageSignals(doc)): RouteDecision {
-  return routeByCounts(countAll(doc), signals)
+  return routeByCounts(countAll(doc), signals, doc)
 }
 
 // ---------------------------------------------------------------------------
