@@ -1,6 +1,6 @@
-# Contributing to W2L
+# Contributing to Octocrawl
 
-Thank you for your interest in contributing to W2L!
+Thank you for your interest in contributing to Octocrawl!
 
 ## Developer Certificate of Origin (DCO)
 
