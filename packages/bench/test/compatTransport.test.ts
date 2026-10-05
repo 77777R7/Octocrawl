@@ -5,7 +5,7 @@ import { createServer as createTlsServer, type Server as TlsServer } from 'node:
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gzipSync } from 'node:zlib'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { identityBundleFrom, identityBundleIssues, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { isTlsError } from '@w2l/http-core'
@@ -37,6 +37,13 @@ beforeAll(async () => {
     if (req.url === '/xgzip') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'x-gzip' }).end(gzipSync(ARTICLE)); return }
     if (req.url === '/double') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip, gzip' }).end(gzipSync(gzipSync(ARTICLE))); return }
     if (req.url === '/corrupt') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' }).end('this is not a gzip stream at all'); return }
+    // Whole responses, correctly framed, whose bytes do not decode: bad data, not a broken connection.
+    if (req.url === '/br-corrupt') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'br' }).end('this is not a brotli stream at all'); return }
+    if (req.url === '/gzip-truncated' || req.url === '/br-truncated') {
+      const coded = req.url === '/br-truncated' ? brotliCompressSync(ARTICLE) : gzipSync(ARTICLE)
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': req.url === '/br-truncated' ? 'br' : 'gzip' }).end(coded.subarray(0, coded.length >> 1))
+      return
+    }
     if (req.url === '/not-modified') { res.writeHead(304, { 'content-encoding': 'gzip', etag: '"v1"' }).end(); return }
     // A redirect, and a 503 the lane retries, whose bodies say gzip and are not: the lane only discards them.
     if (req.url === '/redirect-bad-gzip') { res.writeHead(302, { location: '/article', 'content-type': 'text/html', 'content-encoding': 'gzip' }).end('<a href="/article">Found</a>'); return }
@@ -107,8 +114,10 @@ describe('the compatible transport', () => {
       expect(res.headers.get('content-encoding')).toBe(coding)
     }
     expect(decoded).toEqual([])
-    const corrupt = await transport.fetch(`${origin}/corrupt`, options)
-    await expect(corrupt.bodyBytes()).rejects.toMatchObject({ name: 'ContentDecodingError', contentEncoding: 'gzip' })
+    for (const [path, coding] of [['/corrupt', 'gzip'], ['/br-corrupt', 'br'], ['/gzip-truncated', 'gzip'], ['/br-truncated', 'br']] as const) {
+      const bad = await transport.fetch(`${origin}${path}`, options)
+      await expect(bad.bodyBytes()).rejects.toMatchObject({ name: 'ContentDecodingError', contentEncoding: coding })
+    }
     // A connection that breaks inside a gzip body is a broken connection, not a coding that did not decode.
     const reset = await transport.fetch(`${origin}/gzip-reset`, options)
     await expect(reset.bodyBytes()).rejects.toMatchObject({ name: 'SocketError' })
@@ -235,10 +244,12 @@ describe('the http lane over the compatible transport', () => {
         expect(out.usage.bytesWire).toBe(reference.usage.bytesWire)
         expect(out.trace.map((event) => event.event)).not.toContain('transport_decoded')
       }
-      const corrupt = await http.fetch(`${origin}/corrupt`)
-      expect(corrupt).toMatchObject({ status: 'failed', failureReason: (await plain.fetch(`${origin}/corrupt`)).failureReason })
-      expect(corrupt.failureReason).toBe('parse_error')
-      expect(corrupt.trace).toContainEqual(expect.objectContaining({ event: 'content_decoding_failed' }))
+      for (const path of ['/corrupt', '/br-corrupt', '/gzip-truncated', '/br-truncated']) {
+        const bad = await http.fetch(`${origin}${path}`)
+        expect(bad).toMatchObject({ status: 'failed', failureReason: (await plain.fetch(`${origin}${path}`)).failureReason })
+        expect(bad.failureReason).toBe('parse_error')
+        expect(bad.trace).toContainEqual(expect.objectContaining({ event: 'content_decoding_failed' }))
+      }
     } finally { await http.teardown(); await plain.teardown() }
   })
 

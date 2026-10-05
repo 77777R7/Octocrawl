@@ -137,10 +137,12 @@ export function impitTimeoutMs(deadlineAt: number | undefined, now = Date.now())
 
 /**
  * Whether a body error is a coding that did not decode. impit reports every error while it decodes
- * as `kind: Decode`; the cause inside says which: bad data, or a connection that broke or timed out.
+ * as `kind: Decode`, whatever the cause: bad or cut-short data (`InvalidData`, `UnexpectedEof`,
+ * "brotli error", ...) or the connection under it, which carries hyper's or h2's own error, a reset,
+ * or a timeout. The connection's markers are the short list, so they decide.
  */
 function decodingFault(message: string): boolean {
-  return /InvalidData|DecompressError/.test(message) && !/IncompleteBody|UnexpectedEof|TimedOut/.test(message)
+  return /kind: Decode\b/.test(message) && !/hyper::Error|h2::|IncompleteBody|TimedOut|ConnectionReset|ConnectionAborted|BrokenPipe/.test(message)
 }
 
 /** The codings impit 0.14.5 decodes itself: one of these, exactly as written; any other header it leaves alone. */
