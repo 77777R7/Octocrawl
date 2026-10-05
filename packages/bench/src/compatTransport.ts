@@ -20,7 +20,11 @@
  * deflate, which the lane's own decoder accepts, does not decode in impit: a decoding failure.
  *
  * Timeouts. As on undici: headersTimeoutMs until the response headers, then bodyTimeoutMs between two
- * chunks of the body, not for the whole body.
+ * chunks of the body, not for the whole body. impit also ends every request at a limit of its own
+ * (30 s unless told otherwise): it is set past the caller's deadline, which ends the request first,
+ * and without a deadline to COMPAT_REQUEST_CEILING_MS, so a body still arriving after that is cut as
+ * a timeout where undici would keep reading. The same limit closes the connection of a request the
+ * lane gave up on, which impit otherwise keeps open.
  *
  * Proxy. impit's client reads HTTP_PROXY, HTTPS_PROXY and ALL_PROXY as it is built and, without them,
  * the operating system's proxy settings (macOS), which honour NO_PROXY but not the system's own
@@ -123,6 +127,22 @@ function withLaneProxyOnly<T>(direct: boolean, build: () => T): T {
   }
 }
 
+/** impit's own limit for a request without a deadline; see Timeouts above. */
+export const COMPAT_REQUEST_CEILING_MS = 10 * 60_000
+
+/** impit's own limit for one request: past the caller's deadline, which ends it first; else the ceiling. */
+export function impitTimeoutMs(deadlineAt: number | undefined, now = Date.now()): number {
+  return deadlineAt === undefined ? COMPAT_REQUEST_CEILING_MS : Math.max(1000, deadlineAt - now + 1000)
+}
+
+/**
+ * Whether a body error is a coding that did not decode. impit reports every error while it decodes
+ * as `kind: Decode`; the cause inside says which: bad data, or a connection that broke or timed out.
+ */
+function decodingFault(message: string): boolean {
+  return /InvalidData|DecompressError/.test(message) && !/IncompleteBody|UnexpectedEof|TimedOut/.test(message)
+}
+
 /** The codings impit 0.14.5 decodes itself: one of these, exactly as written; any other header it leaves alone. */
 const IMPIT_DECODES: ReadonlySet<string> = new Set(['gzip', 'deflate', 'br', 'zstd'])
 
@@ -151,6 +171,8 @@ export interface CompatFetchOptions {
   extraHeaders?: Readonly<Record<string, string>>
   /** Certificate checks off for this request (`skipTlsVerification`). */
   ignoreTlsErrors?: boolean
+  /** The caller's deadline (epoch ms), which sets impit's own limit for the request (impitTimeoutMs). */
+  deadlineAt?: number
   /** Called when impit decoded a Content-Encoding the lane will not see. */
   onDecoded?: (contentEncoding: string) => void
   onBodyRead?: (ms: number) => void
@@ -189,6 +211,7 @@ export class CompatTransport {
     try {
       response = await client.fetch(url, {
         redirect: 'manual',
+        timeout: impitTimeoutMs(options.deadlineAt),
         signal: controller.signal,
         ...(options.extraHeaders === undefined || Object.keys(options.extraHeaders).length === 0 ? {} : { headers: { ...options.extraHeaders } }),
       })
@@ -234,9 +257,10 @@ export class CompatTransport {
         if (error instanceof Error && error.name === 'AbortError') throw error
         const message = error instanceof Error ? error.message : String(error)
         // A body impit could not decode is reported as the lane reports one it could not: not the page, a parse error.
-        if (decodedFrom !== null && /kind: Decode\b/.test(message)) throw new ContentDecodingError(decodedFrom, decodedFrom as ContentCoding, 'impit_decode')
+        if (decodedFrom !== null && decodingFault(message)) throw new ContentDecodingError(decodedFrom, decodedFrom as ContentCoding, 'impit_decode')
         // After the headers, the lane reads a timeout as a stalled body and anything else as a broken connection.
-        throw Object.assign(new Error(message.split('\n')[0] ?? message), { name: error instanceof Error && error.name === 'TimeoutError' ? 'BodyTimeoutError' : 'SocketError', cause: error })
+        const timedOut = (error instanceof Error && error.name === 'TimeoutError') || /TimedOut/.test(message)
+        throw Object.assign(new Error(message.split('\n')[0] ?? message), { name: timedOut ? 'BodyTimeoutError' : 'SocketError', cause: error })
       }
       options.onBodyRead?.(Math.max(0, performance.now() - started))
       const out = new Uint8Array(total)
@@ -245,8 +269,15 @@ export class CompatTransport {
       return out
     }
     const bodyBytes = () => bytes ??= readBody().finally(() => options.signal?.removeEventListener('abort', abort))
-    let text: string | undefined
-    return { status: response.status, headers: { get: header }, bodyBytes, bodyText: async () => (text ??= new TextDecoder().decode(await bodyBytes())) }
+    // The resilient loop reads a body as text only to discard it (a redirect's, a retried 503's); the lane reads
+    // the answer's as bytes. undici never decodes a discarded body, so a coding that does not decode ends nothing here.
+    const bodyText = async (): Promise<string> => {
+      try { return new TextDecoder().decode(await bodyBytes()) } catch (error) {
+        if (error instanceof ContentDecodingError) return ''
+        throw error
+      }
+    }
+    return { status: response.status, headers: { get: header }, bodyBytes, bodyText }
   }
 }
 

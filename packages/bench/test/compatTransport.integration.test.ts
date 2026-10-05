@@ -16,13 +16,14 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     // Headers that never come.
     if (req.url === '/silent') return
-    // A body that keeps arriving, a chunk every 100 ms for 1.5 s.
-    if (req.url === '/trickle') {
+    // A body that keeps arriving, a chunk every 100 ms for 1.5 s (or 4 s).
+    if (req.url === '/trickle' || req.url === '/trickle-long') {
       res.writeHead(200, { 'content-type': 'text/plain' })
       let sent = 0
+      const chunks = req.url === '/trickle' ? 15 : 40
       const timer = setInterval(() => {
         res.write('x'.repeat(100))
-        if (++sent === 15) { clearInterval(timer); res.end() }
+        if (++sent === chunks) { clearInterval(timer); res.end() }
       }, 100)
       res.on('close', () => clearInterval(timer))
       return
@@ -48,6 +49,13 @@ describe('the compatible transport keeps the lane timeouts', () => {
     const transport = new CompatTransport(localNetworkPolicy())
     const res = await transport.fetch(`${origin}/trickle`, { headersTimeoutMs: 300, bodyTimeoutMs: 600, capFor: () => 1_000_000 })
     expect((await res.bodyBytes()).byteLength).toBe(1500)
+  })
+
+  it("hands the caller's deadline to impit, whose own limit would otherwise be 30 s", async () => {
+    const transport = new CompatTransport(localNetworkPolicy())
+    // impit's limit is the deadline plus 1 s (2 s here); the body takes 4 s.
+    const res = await transport.fetch(`${origin}/trickle-long`, { headersTimeoutMs: 300, bodyTimeoutMs: 600, capFor: () => 1_000_000, deadlineAt: Date.now() + 1000 })
+    await expect(res.bodyBytes()).rejects.toMatchObject({ name: 'BodyTimeoutError' })
   })
 
   it('reports a body that stops arriving as a body timeout', async () => {

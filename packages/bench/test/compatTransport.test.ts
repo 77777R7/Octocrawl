@@ -9,7 +9,7 @@ import { gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { identityBundleFrom, identityBundleIssues, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { isTlsError } from '@w2l/http-core'
-import { COMPAT_PROFILES, CompatTransport, compatHostListed, compatHostsChoice, compatIdentity, prepareCompatIdentity } from '../src/compatTransport.js'
+import { COMPAT_PROFILES, COMPAT_REQUEST_CEILING_MS, CompatTransport, compatHostListed, compatHostsChoice, compatIdentity, impitTimeoutMs, prepareCompatIdentity } from '../src/compatTransport.js'
 import { BodyTooLargeError } from '../src/egress.js'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 
@@ -21,6 +21,7 @@ import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year. '.repeat(3)
 const ARTICLE = `<!doctype html><html><head><title>Tides</title></head><body><article><h1>Tide ledger</h1><p>${PROSE}</p></article></body></html>`
 const requests: { url: string; headers: [string, string][] }[] = []
+let busyHits = 0
 let server: Server
 let origin: string
 
@@ -37,6 +38,20 @@ beforeAll(async () => {
     if (req.url === '/double') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip, gzip' }).end(gzipSync(gzipSync(ARTICLE))); return }
     if (req.url === '/corrupt') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' }).end('this is not a gzip stream at all'); return }
     if (req.url === '/not-modified') { res.writeHead(304, { 'content-encoding': 'gzip', etag: '"v1"' }).end(); return }
+    // A redirect, and a 503 the lane retries, whose bodies say gzip and are not: the lane only discards them.
+    if (req.url === '/redirect-bad-gzip') { res.writeHead(302, { location: '/article', 'content-type': 'text/html', 'content-encoding': 'gzip' }).end('<a href="/article">Found</a>'); return }
+    if (req.url === '/busy-once') {
+      if ((busyHits += 1) === 1) { res.writeHead(503, { 'content-type': 'text/html', 'content-encoding': 'gzip' }).end('busy, not gzip'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(ARTICLE)
+      return
+    }
+    // Half a gzip body, then the connection breaks.
+    if (req.url === '/gzip-reset') {
+      const gz = gzipSync(ARTICLE.repeat(40))
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip', 'content-length': String(gz.length) })
+      res.write(gz.subarray(0, gz.length >> 1), () => setTimeout(() => res.socket?.destroy(), 50))
+      return
+    }
     if (req.url === '/big') { res.writeHead(200, { 'content-type': 'text/html', 'content-length': '5000' }).end('x'.repeat(5000)); return }
     if (req.url === '/image') { res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.alloc(2048)); return }
     if (req.url === '/redirect') { res.writeHead(302, { location: '/article' }).end(); return }
@@ -94,6 +109,15 @@ describe('the compatible transport', () => {
     expect(decoded).toEqual([])
     const corrupt = await transport.fetch(`${origin}/corrupt`, options)
     await expect(corrupt.bodyBytes()).rejects.toMatchObject({ name: 'ContentDecodingError', contentEncoding: 'gzip' })
+    // A connection that breaks inside a gzip body is a broken connection, not a coding that did not decode.
+    const reset = await transport.fetch(`${origin}/gzip-reset`, options)
+    await expect(reset.bodyBytes()).rejects.toMatchObject({ name: 'SocketError' })
+  })
+
+  it("sets impit's own request limit past the caller's deadline, and to a ceiling without one", () => {
+    expect(impitTimeoutMs(undefined)).toBe(COMPAT_REQUEST_CEILING_MS)
+    expect(impitTimeoutMs(100_000, 40_000)).toBe(61_000)
+    expect(impitTimeoutMs(40_000, 40_000)).toBe(1000)
   })
 
   it('refuses a declared length over the cap unread, and does not download a type the lane does not read', async () => {
@@ -216,6 +240,23 @@ describe('the http lane over the compatible transport', () => {
       expect(corrupt.failureReason).toBe('parse_error')
       expect(corrupt.trace).toContainEqual(expect.objectContaining({ event: 'content_decoding_failed' }))
     } finally { await http.teardown(); await plain.teardown() }
+  })
+
+  it('follows a redirect, and retries a 503, whose discarded bodies do not decode, as the plain lane does', async () => {
+    const http = subject()
+    try {
+      const redirected = await http.fetch(`${origin}/redirect-bad-gzip`)
+      expect(redirected).toMatchObject({ status: 'success', evidence: { finalUrl: `${origin}/article` } })
+      busyHits = 0
+      const retried = await http.fetch(`${origin}/busy-once`)
+      expect(retried).toMatchObject({ status: 'success', usage: { attemptCount: 2 } })
+      // A gzip page whose connection breaks halfway is a connection error on both lanes.
+      const plain = new ResilientHttpSubject('standard', localNetworkPolicy())
+      try {
+        expect((await http.fetch(`${origin}/gzip-reset`)).failureReason).toBe((await plain.fetch(`${origin}/gzip-reset`)).failureReason)
+        expect((await http.fetch(`${origin}/gzip-reset`)).failureReason).toBe('connection_error')
+      } finally { await plain.teardown() }
+    } finally { await http.teardown() }
   })
 
   it('obeys robots.txt before any request for the page goes out', async () => {

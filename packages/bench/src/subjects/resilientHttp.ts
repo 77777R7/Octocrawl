@@ -54,7 +54,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `wire.onWithheld` says so); `routes` are the request's own routes when it
    * relaxed certificate verification, else the subject's.
    */
-  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null, onResponseCoding?: (decodedFrom: string | null) => void) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null, onResponseCoding?: (decodedFrom: string | null) => void, deadlineAt?: number) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -83,7 +83,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.route = new EgressRoute(this.networkPolicy, this.egress, this.localPreviewProxy)
     this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null, onResponseCoding) => async (url, init) => {
+    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null, onResponseCoding, deadlineAt) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
@@ -101,6 +101,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           },
           extraHeaders: url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {},
           ignoreTlsErrors: routes !== null,
+          ...(deadlineAt === undefined ? {} : { deadlineAt }),
           onDecoded: coding => onResponseCoding?.(coding),
           ...(onBodyRead === undefined ? {} : { onBodyRead }),
         })
@@ -369,7 +370,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }, maxFileBytes, {
       headers: prepared.customHeaders,
       onWithheld: (to, names) => trace.push({ at: Date.now() - start, lane: 'http', event: 'custom_headers_withheld', detail: { to, names: [...names] } }),
-    }, relaxed, coding => { transportCoding.decoded = coding }), {
+    }, relaxed, coding => { transportCoding.decoded = coding }, deadlineAt), {
       signal,
       deadlineAt,
       onRetryAfter: (target, retryAt) => {
