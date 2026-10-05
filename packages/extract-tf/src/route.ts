@@ -61,9 +61,13 @@ function hasVisibleBuyBox(doc: Document): boolean {
 /**
  * A product page with no h1 (sandbox.oxylabs.io), titled by its one h2, not
  * a link, then the first visible price after it with no other heading
- * between. Other prices may follow (related products), so that price must not
- * be a card's: not in a list item, and not inside an element with two or
- * more siblings of its tag that show a price too.
+ * between. A few other prices may follow (related products), so that price
+ * must be the title's alone and not a card's: the lowest element holding the
+ * h2 and the price holds no other price, fewer than PRODUCT_CARDS prices
+ * show elsewhere on the page, and the price is not in a list item nor inside
+ * an element with two or more siblings of its tag that show a price too. A
+ * deal, a price filter or a shipping banner over a listing's grid is none of
+ * these.
  */
 function hasBuyBoxUnderH2(doc: Document, prices: readonly Element[]): boolean {
   const h2s = qsa(doc, 'h2')
@@ -79,6 +83,9 @@ function hasBuyBoxUnderH2(doc: Document, prices: readonly Element[]): boolean {
     }
   }
   if (price === null || price.closest('li') !== null) return false
+  const block = commonAncestor(h2s[0]!, price)
+  if (block === null || prices.some((other) => other !== price && block.contains(other))) return false
+  if (prices.length - 1 >= PRODUCT_CARDS) return false
   for (let up = price.parentElement; up !== null && up !== doc.body; up = up.parentElement) {
     const siblings = Array.from(up.parentElement?.children ?? []).filter((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && prices.some((p) => sibling.contains(p)))
     if (siblings.length >= 2) return false

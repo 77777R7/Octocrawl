@@ -160,6 +160,16 @@ describe('routePage', () => {
         `<main><h2>Nintendo games</h2><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
         // A featured game with its own title before the grid.
         `<main><h2>Nintendo games</h2><div class="featured"><a href="/products/9"><h3>Featured game</h3></a><span class="price">59,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+        // A deal, a price filter or a shipping banner between the listing's h2 and its grid.
+        ...[
+          '<div class="deal"><a href="/deal">Deal of the day: kitchen scale</a><span class="price">$59.99</span></div>',
+          '<div class="filters"><span class="price-range">$0 - $500</span></div>',
+          '<p class="banner">Free shipping over <span class="price">$35</span></p>',
+        ].map((x) => `<main><h2>Kitchen widgets</h2>${x}<div class="grid">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join('')}</div></main>`),
+        // The deal shares a hero block with the h2.
+        `<main><div class="hero"><h2>Kitchen widgets</h2><div class="deal"><a href="/deal">Deal of the day</a><span class="price">$59.99</span></div></div><div class="grid">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join('')}</div></main>`,
+        // Two results, or two plans, under one h2.
+        `<main><h2>Search results</h2><div class="results">${[1, 2].map(card).join('')}</div></main>`,
         // The page's one h2 is a promotion's linked title, with a price of its own.
         `<main><div class="promo"><a href="/sale"><h2>Summer sale</h2></a><span class="price">From 9,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
       ]) {
