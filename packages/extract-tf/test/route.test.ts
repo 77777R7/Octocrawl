@@ -399,6 +399,27 @@ describe('routePage', () => {
       doc.close()
     })
 
+    it('keeps an article with its comments or its references an article', () => {
+      const prose = Array.from({ length: 4 }, (_, i) => `<p>Paragraph ${i + 1}: the trowel held its edge through a season of clay soil, and the handle did not split.</p>`).join('')
+      const said = 'I bought the same trowel last spring and the blade bent on the first stony bed, so I sent it back for the forged one, which has held up through two seasons of heavy clay without a mark.'
+      const comment = (tag: string) => (i: number) => `<${tag} class="comment"><a href="/users/gardener-${i}">gardener${i}</a> <time>2 days ago</time><p>${said}</p></${tag}>`
+      const comments = (tag: 'li' | 'div') => {
+        const list = Array.from({ length: 8 }, (_, i) => comment(tag)(i)).join('')
+        return `<section id="comments"><h2>Comments</h2>${tag === 'li' ? `<ol class="comment-list">${list}</ol>` : `<div class="comments">${list}</div>`}</section>`
+      }
+      const reference = (i: number) => `<li id="cite_note-${i}"><a href="#cite_ref-${i}">^</a> <a href="https://example.org/paper-${i}">Field trials of forged garden tools, volume ${i}</a>. Journal of Horticultural Engineering. Retrieved 4 March 2026.</li>`
+      for (const html of [
+        wrap(`<article><h1>Trowel review</h1>${prose}</article>${comments('li')}`),
+        wrap(`<article><h1>Trowel review</h1>${prose}</article>${comments('div')}`),
+        wrap(`<main><h1>Trowel review</h1><h2>Blade</h2>${prose}<h2>Handle</h2>${comments('li')}</main>`),
+        wrap(`<main><h1>Garden trowel</h1>${prose}<p>See the trials below.</p><h2>References</h2><ol class="references">${Array.from({ length: 25 }, (_, i) => reference(i)).join('')}</ol></main>`),
+      ]) {
+        const doc = parse(html)
+        expect(routePage(doc.document).type).toBe('article')
+        doc.close()
+      }
+    })
+
     it('does not take paragraphs that carry links for cards', () => {
       const linked = Array.from({ length: 12 }, (_, i) => `<p>Step ${i + 1}: loosen the soil with a <a href="/tools/${i}">hand fork</a> before you set the plant, and water it in well.</p>`).join('')
       const doc = parse(wrap(`<article><h1>Planting guide</h1>${linked}</article>`))

@@ -280,6 +280,19 @@ const CARD_TAGS: ReadonlySet<string> = new Set(['li', 'div', 'article', 'section
 const CARD_LEAD_CHARS = 24
 /** Blocks that are a list's or a table's items, not the page's prose. */
 const STRUCTURAL_BLOCKS: ReadonlySet<string> = new Set(['li', 'td', 'th'])
+/**
+ * Words that name an article's comments or its references in an id or class
+ * (`comment-list`, `commentlist`, `replies`, `references`, `reflist`,
+ * `cite_note-3`, `footnotes`): such cards lead with a link (the author, the
+ * cited source) and outweigh a short article's prose, yet they are not a
+ * listing. A part of the name counts when it starts with one of them.
+ */
+const NOT_LISTING_NAMES = ['comment', 'reply', 'replies', 'reference', 'reflist', 'cite', 'citation', 'footnote', 'endnote'] as const
+
+function namedNotListing(el: Element): boolean {
+  const name = `${el.getAttribute('id') ?? ''} ${el.getAttribute('class') ?? ''}`.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
+  return name.split(/[\s_-]+/).some((part) => NOT_LISTING_NAMES.some((word) => part.startsWith(word)))
+}
 
 /**
  * Whether a card leads with a link to another page: its item's name, or its
@@ -306,14 +319,37 @@ function leadsWithLink(card: Element): boolean {
   return walk(card) === true
 }
 
-/** The page's largest group of alike sibling cards (isCard, leading with a link): one tag and class, each a CARD_TAGS element. */
+/**
+ * The page's largest group of alike sibling cards (isCard, leading with a
+ * link): one tag and class, each a CARD_TAGS element, neither they nor any
+ * element around them named for comments or references.
+ */
 function largestCardGroup(doc: Document): Element[] {
   let best: Element[] = []
+  // Whether an element or one around it is so named, settled once per element.
+  const inNamed = new Map<Element, boolean>()
+  const insideNamed = (el: Element): boolean => {
+    const unsettled: Element[] = []
+    let answer = false
+    for (let up: Element | null = el; up !== null; up = up.parentElement) {
+      const known = inNamed.get(up)
+      if (known !== undefined) {
+        answer = known
+        break
+      }
+      unsettled.push(up)
+    }
+    for (const up of unsettled.reverse()) {
+      answer ||= namedNotListing(up)
+      inNamed.set(up, answer)
+    }
+    return answer
+  }
   for (const el of qsa(doc, '*')) {
-    if (el.children.length < GRID_CARDS) continue
+    if (el.children.length < GRID_CARDS || insideNamed(el)) continue
     const templates = new Map<string, Element[]>()
     for (const kid of Array.from(el.children)) {
-      if (!CARD_TAGS.has(tagOf(kid)) || !isCard(kid) || !leadsWithLink(kid)) continue
+      if (!CARD_TAGS.has(tagOf(kid)) || namedNotListing(kid) || !isCard(kid) || !leadsWithLink(kid)) continue
       const template = `${tagOf(kid)} ${kid.getAttribute('class') ?? ''}`
       const group = templates.get(template)
       if (group === undefined) templates.set(template, [kid])
