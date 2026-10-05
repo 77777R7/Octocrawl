@@ -48,6 +48,8 @@ export interface HttpSitemapSourceOptions {
   scheduler?: OriginScheduler
   /** The http lane's robots.txt cache, so the start URL's robots.txt is read once for the crawl; without it the source keeps its own. */
   robots?: RobotsOriginCache
+  /** Read a file robots.txt disallows, or whose robots.txt could not be read (a crawl or map started with ignoreRobotsTxt); its verdict is still recorded. Default false: such a file is refused. */
+  ignoreRobotsTxt?: boolean
 }
 
 /** Default waits for a sitemap response's headers and for each chunk of its body, as the http lane's without a caller's timeout. */
@@ -71,6 +73,7 @@ export class HttpSitemapSource implements SitemapSource {
   private readonly route: EgressRoute
   private readonly robots: RobotsOriginCache
   private readonly ownRobots: boolean
+  private readonly ignoreRobotsTxt: boolean
   /** The Crawl-delay of each origin whose robots.txt a file of this source was judged by (the strictest one seen). */
   private readonly crawlDelays = new Map<string, number>()
   /** When this source's last request to each origin left (monotonic). */
@@ -85,6 +88,7 @@ export class HttpSitemapSource implements SitemapSource {
     this.routes = new EgressRoutes(this.policy)
     this.route = new EgressRoute(this.policy, this.routes)
     this.ownRobots = options.robots === undefined
+    this.ignoreRobotsTxt = options.ignoreRobotsTxt === true
     this.robots = options.robots ?? new RobotsOriginCache(this.policy, (url) => this.route.dispatcherFor(url))
   }
 
@@ -184,7 +188,7 @@ export class HttpSitemapSource implements SitemapSource {
         this.crawlDelays.set(origin, Math.max(this.crawlDelays.get(origin) ?? 0, decision.crawlDelayMs))
       }
       record.robots = decision.decision === 'allowed' ? 'allowed' : decision.decision === 'no_robots' ? 'no_robots' : 'disallowed'
-      if (decision.decision === 'disallowed') {
+      if (decision.decision === 'disallowed' && !this.ignoreRobotsTxt) {
         return { record: { ...record, kind: 'refused', error: decision.unreachable === undefined ? null : `robots_unreachable_${decision.unreachable}` }, locs: null }
       }
       const response = await this.fetch(url, identity.headers, scope)

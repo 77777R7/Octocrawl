@@ -521,7 +521,10 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     const url = 'https://example.com/'
     expect(thrown(() => parseScrapeRequest({ url, stealth: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['stealth'] }, agentHints: [REFUSAL_HINTS.stealth] })
     expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'stealth' }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
-    expect(thrown(() => parseCrawlStartRequest({ url, proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], proxy: 'enhanced', ignoreRobotsTxt: true }))).toMatchObject({ details: { parameters: ['proxy', 'ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
+    // A crawl and a map take ignoreRobotsTxt; whether the server sets robots.txt aside is the engine's to say.
+    expect(parseCrawlStartRequest({ url, ignoreRobotsTxt: true })).toMatchObject({ ignoreRobotsTxt: true })
+    expect(() => parseCrawlStartRequest({ url, ignoreRobotsTxt: 'yes' })).toThrow('ignoreRobotsTxt must be a boolean')
     expect((thrown(() => parseScrapeRequest({ url, proxy: 'basic' })) as RequestError).agentHints).toBeUndefined()
     expect((thrown(() => parseScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
     // A crawl or a map takes no actions; the refusal names where they run.
@@ -600,12 +603,13 @@ describe('parseMapRequest', () => {
     const scoped = { url, search: '  sitemap  protocol ', sitemap: 'only', includeSubdomains: true, ignoreQueryParameters: true, includePaths: ['^/docs/'], excludePaths: ['/old/'], regexOnFullURL: false, crawlEntireDomain: true, deduplicateSimilarURLs: false }
     expect(parseMapRequest(scoped)).toEqual({ ...scoped, search: 'sitemap  protocol' })
     // The page options a map has no use for are refused by name, and so are the crawl's host flags: includeSubdomains is a map's.
-    const supported = 'url, mode, limit, timeout, search, sitemap, includeSubdomains, ignoreQueryParameters, regexOnFullURL, crawlEntireDomain, deduplicateSimilarURLs, includePaths, excludePaths, origin, integration'
+    const supported = 'url, mode, limit, timeout, search, sitemap, includeSubdomains, ignoreQueryParameters, regexOnFullURL, crawlEntireDomain, deduplicateSimilarURLs, includePaths, excludePaths, ignoreRobotsTxt, origin, integration'
     for (const key of ['allowSubdomains', 'allowExternalLinks', 'maxPages', 'headers', 'mobile', 'skipTlsVerification', 'formats', 'location']) {
       expect(thrown(() => parseMapRequest({ url, [key]: true })), key).toMatchObject({ code: 'unsupported_parameter', details: { parameters: [key] }, message: `unsupported parameter: ${key} (supported: ${supported})` })
     }
     expect(thrown(() => parseMapRequest({ url, useIndex: true }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['useIndex'] }, agentHints: [REFUSAL_HINTS.useIndex] })
-    expect(thrown(() => parseMapRequest({ url, ignoreRobotsTxt: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
+    expect(parseMapRequest({ url, ignoreRobotsTxt: true })).toEqual({ url, ignoreRobotsTxt: true })
+    expect(() => parseMapRequest({ url, ignoreRobotsTxt: 1 })).toThrow('ignoreRobotsTxt must be a boolean')
     expect(thrown(() => parseMapRequest({ url, stealth: true }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth] })
   })
 

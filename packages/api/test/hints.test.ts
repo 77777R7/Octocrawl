@@ -23,14 +23,14 @@ describe('agent hints', () => {
     expect(hints(result({ status: 'failed', failureReason: 'dns_error', markdown: null }))).toEqual([])
   })
 
-  it('names the robots.txt rule and the recorded override for a policy denial, and an unreachable robots.txt for what it is', () => {
+  it('names the robots.txt rule and where it is set aside for a policy denial, and an unreachable robots.txt for what it is', () => {
     const disallowed = (detail: Record<string, unknown>) => result({ status: 'failed', failureReason: 'policy_denied', markdown: null, evidence: { finalUrl: URL_, httpStatus: null }, trace: [{ at: 1, lane: 'http', event: 'robots_disallowed', detail: { url: URL_, ...detail } }] })
     expect(hints(disallowed({ appliedRules: [{ pattern: '/report', allow: false }, { pattern: '/public', allow: true }] }))).toEqual([
-      "robots.txt of example.test disallows this URL for W2L's identity (rule /report); a robotsOverride with a recorded reason fetches it on the record",
+      "robots.txt of example.test disallows this URL for W2L's identity (rule /report). A local W2L server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL",
     ])
     expect(hints(disallowed({ appliedRules: [] }))[0]).toContain('(rule unknown)')
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
-      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; W2L asks for it again after five minutes, and a robotsOverride does not set that aside',
+      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; W2L asks for it again after five minutes. A local W2L server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
     ])
     // A denial that was not robots.txt's (an address the policy refuses) names the egress policy and the recorded reason instead of a rule.
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied', detail: { to: URL_, error: 'private address 10.0.0.1' } }] }))).toEqual([

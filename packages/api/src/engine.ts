@@ -550,24 +550,27 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     if (parts > MAX_SELECTOR_PARTS) throw new RequestError(`list selectors must hold at most ${MAX_SELECTOR_PARTS} selector parts in all, and hold ${parts}`)
   }
-  /** A server that takes no recorded robots override refuses the field by name, before anything is fetched or stored. */
-  const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides', value: unknown): void => {
-    if (options.allowRobotsOverride === false && value !== undefined) {
-      throw new RequestError(`unsupported parameter: ${parameter} (this server takes no robots override; a recorded override is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
+  const hosted = options.hosted === true
+  /** Whether this server sets robots.txt aside for a caller at all: a local one does, a hosted one, fetching from the operator's addresses, never. */
+  const robotsSetAside = !hosted && options.allowRobotsOverride !== false
+  /** A server that sets robots.txt aside for no caller refuses the fields that ask it to by name, before anything is fetched or stored. */
+  const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides' | 'ignoreRobotsTxt', value: unknown): void => {
+    if (!robotsSetAside && value !== undefined && value !== false) {
+      throw new RequestError(`unsupported parameter: ${parameter} (this server obeys robots.txt for every URL; setting it aside is for a local W2L server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
   }
-  const hosted = options.hosted === true
   /**
    * robots.txt addresses crawlers that discover links. On a local server a
    * URL the request names (a scrape, a batch entry) is fetched whatever it
    * says: the verdict is still read and recorded, Crawl-delay included, with
    * this override and a warning on the result. The links a crawl or map
-   * discovers, a Monitor's scheduled re-reads and every fetch of a hosted
-   * server, which go out from the operator's addresses, obey it.
+   * discovers (unless it was started with ignoreRobotsTxt), a Monitor's
+   * scheduled re-reads and every fetch of a hosted server obey it.
    */
-  const namedUrlOverride: AppliedRobotsOverride | undefined = hosted || options.allowRobotsOverride === false
-    ? undefined
-    : { reason: 'the request named this URL', basis: 'user_named_url' }
+  const namedUrlOverride: AppliedRobotsOverride | undefined = robotsSetAside ? { reason: 'the request named this URL', basis: 'user_named_url' } : undefined
+  /** What a crawl or map started with ignoreRobotsTxt sets aside, on a server that sets robots.txt aside. */
+  const ignoreRobotsOverride = (ignore: boolean | undefined): AppliedRobotsOverride | undefined =>
+    ignore === true && robotsSetAside ? { reason: 'the crawl or map was started with ignoreRobotsTxt', basis: 'ignore_robots_txt' } : undefined
   /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
@@ -983,9 +986,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
-    const recordedOverrideFor = options.allowRobotsOverride === false || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
-    // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered.
-    const namedOverride = task.batch === undefined ? undefined : namedUrlOverride
+    const recordedOverrideFor = !robotsSetAside || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered, and obey robots.txt unless it was started with ignoreRobotsTxt.
+    const namedOverride = task.batch === undefined ? ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) : namedUrlOverride
     const robotsOverrideFor = recordedOverrideFor === null && namedOverride === undefined ? null : (url: string) => recordedOverrideFor?.(url) ?? namedOverride
     const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
@@ -1034,7 +1037,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A crawl that reads a sitemap gets its own reader: the crawl mode's http identity (the mobile one when its
     // pages declare it), the engine's network policy, origin scheduler and this mode's robots.txt cache; a hosted
     // engine's policy has no proxy and no private ranges. A batch never reads one.
-    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode) })
+    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode), ignoreRobotsTxt: ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) !== undefined })
     // Each persisted step is one job event: a webhook delivery when the task has a receiver (a delivery error is logged, never the page's), then the hub's.
     const webhook = webhookOf(task)
     const kind = jobKindOf(task)
@@ -1211,6 +1214,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * is read, so no lane is chosen and a browser-only URL is not refused.
    */
   async function runMap(req: MapRequest, context: ExecutionContext): Promise<MapResponse> {
+    checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
+    const robotsOverride = ignoreRobotsOverride(req.ignoreRobotsTxt)
     if (req.limit !== undefined && req.limit > mapMaxLimit) throw new RequestError(`limit must be at most ${mapMaxLimit} on this server`)
     if (req.timeout !== undefined && req.timeout > mapMaxTimeoutMs) throw new RequestError(`timeout must be at most ${mapMaxTimeoutMs} on this server`)
     const readsPage = req.sitemap !== 'only'
@@ -1224,11 +1229,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const robots = robotsCacheFor(mode)
     const lookups = new Map<string, ReturnType<RobotsOriginCache['lookup']>>()
     const runner = rungs === null ? null : new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
-    const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots })
+    const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots, ignoreRobotsTxt: robotsOverride !== undefined })
     const sources: MapSources = {
       async readStartPage(url, scope) {
         if (runner === null) throw new Error('a sitemap-only map reads no page')
-        const run = await runner.run(url, undefined, scope, fetchOptions(undefined, ['rawHtml']))
+        const run = await runner.run(url, undefined, scope, { ...fetchOptions(undefined, ['rawHtml']), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
         const result = run.result
         const links = typeof result.rawHtml === 'string' ? collectLinkDetails(result.rawHtml, result.evidence.finalUrl || url) : []
         const clientRendered = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected') === true || httpLaneAskedForBrowser(result)
@@ -1266,6 +1271,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           regexOnFullURL: req.regexOnFullURL,
           crawlEntireDomain: req.crawlEntireDomain,
           deduplicateSimilarURLs: req.deduplicateSimilarURLs,
+          ignoreRobotsTxt: robotsOverride !== undefined,
         }, { signal })
         const agentHints = mapAgentHints(run, mapMaxTimeoutMs)
         const { elapsedMs, ...rest } = run
@@ -1312,6 +1318,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async startCrawl(req) {
+      checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
       checkFileCap(req)
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
@@ -1365,6 +1372,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           allowExternalLinks: req.allowExternalLinks === true,
           sitemap: req.sitemap ?? 'include',
           maxConcurrency: req.maxConcurrency ?? null,
+          ...(req.ignoreRobotsTxt === true ? { ignoreRobotsTxt: true } : {}),
           ...pageOptions(req),
           // The destination is registered first (`job:<taskId>`); the task stores everything but the header values.
           ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
@@ -2003,7 +2011,7 @@ async function appendedWithoutStep(taskId: string, store: SqliteTaskStore): Prom
 
 /** The options a running crawl reports: its task's stored options, with the defaults a task stored before an option existed runs under, plus its page budget. */
 function activeCrawlOptions(task: Task): ActiveCrawlOptions {
-  const { formats, includeLinks, includePaths, excludePaths, maxDepth, allowlistedDomains, useCached, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain, allowSubdomains, allowExternalLinks, sitemap, maxConcurrency, webhook: _webhook, ...page } = task.crawl ?? {}
+  const { formats, includeLinks, includePaths, excludePaths, maxDepth, allowlistedDomains, useCached, regexOnFullURL, ignoreQueryParameters, deduplicateSimilarURLs, crawlEntireDomain, allowSubdomains, allowExternalLinks, sitemap, maxConcurrency, ignoreRobotsTxt, webhook: _webhook, ...page } = task.crawl ?? {}
   return {
     maxPages: task.budget.maxPages,
     maxDepth: maxDepth ?? null,
@@ -2019,6 +2027,7 @@ function activeCrawlOptions(task: Task): ActiveCrawlOptions {
     allowExternalLinks: allowExternalLinks ?? false,
     regexOnFullURL: regexOnFullURL ?? false,
     maxConcurrency: maxConcurrency ?? null,
+    ignoreRobotsTxt: ignoreRobotsTxt === true,
     scrapeOptions: { formats: formats ?? ['markdown'], includeLinks: includeLinks === true, ...page },
   }
 }

@@ -220,6 +220,14 @@ describe('Evidence Record: HTTP lane', () => {
     expect(pages.find(page => page.url === `${origin}/article`)?.evidenceRecord).toMatchObject({ status: 'success', outputSha256: { markdown: expect.stringMatching(/^[0-9a-f]{64}$/) } })
     // A link the crawl discovered obeys robots.txt, where the batch's named URL above did not.
     expect(errors.find(page => page.url === `${origin}/private`)?.evidenceRecord).toMatchObject({ reason: 'policy_denied', robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } })
+
+    // A crawl started with ignoreRobotsTxt fetches that link too, and its record says on whose word.
+    const ignoring = await client.crawl(`${origin}/hub`, { maxPages: 4, crawlEntireDomain: true, ignoreRobotsTxt: true })
+    await client.waitCrawl(ignoring.taskId, { pollIntervalMs: 50, timeoutMs: 20_000 })
+    // Its body repeats /article's, so it is listed as that page's duplicate.
+    const fetched = (await client.getCrawlPages(ignoring.taskId, { includeDuplicates: true })).items.find(page => page.url === `${origin}/private`)
+    expect(valid(fetched?.evidenceRecord)).toMatchObject({ robotsDecision: { decision: 'disallowed', userOverride: true, overrideBasis: 'ignore_robots_txt' } })
+    expect(fetched?.warnings).toEqual([expect.objectContaining({ code: 'robots_overridden', message: expect.stringContaining('started with ignoreRobotsTxt') })])
   })
 })
 

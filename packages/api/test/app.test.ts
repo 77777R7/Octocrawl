@@ -646,6 +646,12 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       const batch = await post('/v1/batches', { urls: [url], robotsOverrides: [{ url, reason }] })
       expect(batch.status).toBe(400)
       expect(await batch.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverrides '), code: 'unsupported_parameter', details: { parameters: ['robotsOverrides'] } })
+      // Nor does it set robots.txt aside for a crawl or a map, natively or on /fc.
+      for (const [path, body] of [['/v1/crawl', { url, ignoreRobotsTxt: true }], ['/v1/map', { url, ignoreRobotsTxt: true }], ['/fc/v1/crawl', { url, ignoreRobotsTxt: true }]] as const) {
+        const refused = await post(path, body)
+        expect(refused.status, path).toBe(400)
+        expect(await refused.json(), path).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] } })
+      }
       expect(requests).toEqual([])
       // Without the field the same URL is a scrape like any other, and its rule holds: a hosted server obeys robots.txt for every URL.
       const plain = await post('/v1/scrape', { url })
@@ -970,7 +976,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(active.body.crawls[0]).toMatchObject({ id: crawl.taskId, url: `${server.url}/crawl/listing`, status: expect.stringMatching(/^(pending|running)$/), startedAt: expect.any(String), pagesFetched: 0 })
       expect(active.body.crawls[0]!.options).toEqual({
         maxPages: 4, maxDepth: null, allowlistedDomains: [], includePaths: [], excludePaths: [], useCached: false, sitemap: 'skip',
-        ignoreQueryParameters: false, deduplicateSimilarURLs: true, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false, regexOnFullURL: false, maxConcurrency: 1,
+        ignoreQueryParameters: false, deduplicateSimilarURLs: true, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false, regexOnFullURL: false, maxConcurrency: 1, ignoreRobotsTxt: false,
         scrapeOptions: { formats: ['markdown'], includeLinks: false },
       })
       // The static route is registered before the id routes: the report of a crawl is still served by its id.

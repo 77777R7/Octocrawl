@@ -10,7 +10,9 @@
  * order: the start host's robots.txt, the start page, the sitemap files, and
  * the robots.txt of each further host a candidate is on (at most
  * MAP_MAX_ROBOTS_HOSTS of them). A URL robots.txt disallows for the map's
- * identity, or whose robots.txt could not be read, is never returned.
+ * identity, or whose robots.txt could not be read, is not returned, unless
+ * the map was started with ignoreRobotsTxt: then it is, with that verdict,
+ * and the start page is read past it.
  *
  * Titles are never invented: the start URL's comes from its own page, a
  * page link's from its anchor, a sitemap entry's from its `<news:title>`.
@@ -72,6 +74,8 @@ export interface MapSpec {
   maxSitemapFiles?: number
   /** Hosts beside the start host whose robots.txt is read at most; default MAP_MAX_ROBOTS_HOSTS. */
   maxRobotsHosts?: number
+  /** Return the URLs robots.txt keeps out, with their verdict, and read the start page past it (the sources read it with the override). Default false. */
+  ignoreRobotsTxt?: boolean
 }
 
 /** A start page read that gave the page as content; anything else is a source that failed. */
@@ -153,7 +157,7 @@ export class MapRunner {
         }
       }
 
-      const add = (canonicalUrl: string, found: Found, robots: 'allowed' | 'no_robots'): void => {
+      const add = (canonicalUrl: string, found: Found, robots: MapLink['robots']): void => {
         const title = found.via === 'link' ? found.text ?? undefined : found.entry.title
         const link: MapLink = {
           url: canonicalUrl,
@@ -229,6 +233,10 @@ export class MapRunner {
         }
       }
 
+      const ignoreRobots = spec.ignoreRobotsTxt === true
+      /** A link's verdict as the response states it. */
+      const linkVerdict = (verdict: Exclude<Verdict, 'unchecked'>): MapLink['robots'] => typeof verdict === 'object' ? 'unreachable' : verdict
+
       const titleOf = (found: Found): string | null | undefined => (found.via === 'link' ? found.text : found.entry.title)
 
       /** One candidate's verdict, counted; true when it is taken (or would be, past the limit), which a sitemap load reads as its accept. */
@@ -274,9 +282,9 @@ export class MapRunner {
       const admit = async (canonicalUrl: string, found: Found): Promise<boolean> => {
         const verdict = await verdictFor(canonicalUrl)
         if (verdict === 'unchecked') { refused.robotsUnchecked++; return false }
-        if (verdict === 'disallowed' || typeof verdict === 'object') { refuseRobots(canonicalUrl, verdict); return false }
+        if ((verdict === 'disallowed' || typeof verdict === 'object') && !ignoreRobots) { refuseRobots(canonicalUrl, verdict); return false }
         if (links.length >= limit) { refused.overLimit++; limitReached = true; return true }
-        add(canonicalUrl, found, verdict)
+        add(canonicalUrl, found, linkVerdict(verdict))
         return true
       }
 
@@ -286,7 +294,7 @@ export class MapRunner {
       if (sitemapMode !== 'only') {
         const startVerdict = await verdictFor(startCanonical)
         const blank = { url: spec.url, finalUrl: null, httpStatus: null, lane: 'http' as const, rawBodySha256: null, linksFound: 0, title: null, description: null }
-        if (startVerdict === 'disallowed' || typeof startVerdict === 'object') {
+        if ((startVerdict === 'disallowed' || typeof startVerdict === 'object') && !ignoreRobots) {
           refuseRobots(startCanonical, startVerdict)
           startPage = typeof startVerdict === 'object'
             ? { ...blank, status: 'failed', failureReason: 'policy_denied', robots: 'unreachable', robotsUnreachable: startVerdict.unreachable }
@@ -295,7 +303,8 @@ export class MapRunner {
           refused.robotsUnchecked++
           startPage = { ...blank, status: 'failed', failureReason: 'timeout', robots: null }
         } else {
-          const startLink: MapLink = { url: startCanonical, via: ['start'], robots: startVerdict }
+          const startLink: MapLink = { url: startCanonical, via: ['start'], robots: linkVerdict(startVerdict) }
+          const startRobots = { robots: linkVerdict(startVerdict), ...(typeof startVerdict === 'object' ? { robotsUnreachable: startVerdict.unreachable } : {}) }
           links.push(startLink)
           byKey.set(keyOf(startCanonical), startLink)
           /** The start URL is kept only when it matches the search, by its URL and its page's own title; its page's links are offered either way. */
@@ -311,7 +320,7 @@ export class MapRunner {
           } catch (error) {
             if (cancelled() || Date.now() < deadlineAt) throw error
             timedOut = true
-            startPage = { ...blank, status: 'failed', failureReason: 'timeout', robots: startVerdict }
+            startPage = { ...blank, status: 'failed', failureReason: 'timeout', ...startRobots }
             keepStartIfMatching()
           }
           if (read !== null) {
@@ -325,7 +334,7 @@ export class MapRunner {
               status: result.status,
               failureReason: result.failureReason,
               lane: 'http',
-              robots: startVerdict,
+              ...startRobots,
               rawBodySha256: result.evidence.rawBodySha256,
               linksFound: read.links.length,
               title: title ?? null,
