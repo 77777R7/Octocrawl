@@ -330,9 +330,10 @@ export function evaluateRobots(
     return { allowed: true, appliedRules: [], matchedAgent: null, crawlDelayMs: null }
   }
 
+  // The token that won the match: the group's longest one the User-Agent holds (RFC 9309 §2.2.1), not merely its first.
   const ua = userAgent.toLowerCase()
   const matchedAgent =
-    group.agents.find((a) => a !== '*' && ua.includes(a)) ?? group.agents.find((a) => a === '*') ?? null
+    group.agents.filter((a) => a !== '*' && ua.includes(a)).sort((a, b) => b.length - a.length)[0] ?? group.agents.find((a) => a === '*') ?? null
 
   const appliedRules = group.rules
     .filter((r) => globMatches(r.tokens, path))

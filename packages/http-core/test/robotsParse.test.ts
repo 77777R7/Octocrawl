@@ -148,6 +148,12 @@ describe('matchRobotsGroup', () => {
 // ---------------------------------------------------------------------------
 
 describe('evaluateRobots', () => {
+  it('names the token that won the match, the group\'s longest in the User-Agent, not its first', () => {
+    const robots = parseRobotsTxt('User-agent: Mozilla\nUser-agent: Octocrawl\nDisallow: /\n\nUser-agent: *\nAllow: /\n')
+    const m = evaluateRobots(robots, 'Mozilla/5.0 (Macintosh) Chrome/128.0.0.0 octocrawl', '/page')
+    expect(m).toMatchObject({ allowed: false, matchedAgent: 'octocrawl' })
+  })
+
   const doc = parseRobotsTxt(
     ['User-agent: *', 'Disallow: /private', 'Allow: /private/public', 'Crawl-delay: 1'].join('\n'),
   )
