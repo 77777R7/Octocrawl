@@ -160,12 +160,21 @@ describe('Evidence Record: HTTP lane', () => {
     })
   })
 
-  it('says no request left for a robots.txt disallow', async () => {
-    const denied = await scrape(http, { url: `${origin}/private` })
+  it('says no request left for a robots.txt disallow on a server that obeys it for every URL', async () => {
+    const obeying = engineWith({ allowRobotsOverride: false, channelsFor: mode => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http') })
+    const denied = await scrape(obeying, { url: `${origin}/private` })
     expect(valid(denied.evidenceRecord)).toMatchObject({
       status: 'failed', reason: 'policy_denied', finalUrl: null, redirectChain: { urls: [], complete: true }, httpStatus: null, fetchedAt: null, rawSha256: null,
-      robotsDecision: { decision: 'disallowed', robotsUrl: `${origin}/robots.txt`, robotsSha256: sha256Utf8(ROBOTS) },
+      robotsDecision: { decision: 'disallowed', robotsUrl: `${origin}/robots.txt`, robotsSha256: sha256Utf8(ROBOTS), userOverride: false, overrideBasis: null },
       identity: { userAgent: null },
+    })
+  })
+
+  it('records the disallow and that the request named the URL when a local server fetches it', async () => {
+    const named = await scrape(http, { url: `${origin}/private` })
+    expect(valid(named.evidenceRecord)).toMatchObject({
+      status: 'success', finalUrl: `${origin}/private`, httpStatus: 200,
+      robotsDecision: { decision: 'disallowed', robotsUrl: `${origin}/robots.txt`, robotsSha256: sha256Utf8(ROBOTS), userOverride: true, overrideBasis: 'user_named_url' },
     })
   })
 
@@ -199,7 +208,7 @@ describe('Evidence Record: HTTP lane', () => {
     expect(byUrl.get(`${origin}/product`)).toMatchObject({ status: 'success', fieldEvidence: { '/upc': { source: 'dom' } }, identity: { mode: 'standard' } })
     expect(byUrl.get(`${origin}/product`)!.outputSha256.markdown).toBe(sha256Utf8(items.find(item => item.url === `${origin}/product`)!.markdown!))
     expect(byUrl.get(`${origin}/missing`)).toMatchObject({ status: 'failed', httpStatus: 404 })
-    expect(byUrl.get(`${origin}/private`)).toMatchObject({ reason: 'policy_denied', finalUrl: null })
+    expect(byUrl.get(`${origin}/private`)).toMatchObject({ status: 'success', robotsDecision: { decision: 'disallowed', userOverride: true, overrideBasis: 'user_named_url' } })
 
     // The hub's pages are its siblings, outside the /hub/ subtree a crawl keeps to by default.
     const crawl = await client.crawl(`${origin}/hub`, { maxPages: 4, crawlEntireDomain: true })
@@ -209,6 +218,8 @@ describe('Evidence Record: HTTP lane', () => {
     expect(pages.length + errors.length).toBe(4)
     for (const page of [...pages, ...errors]) expect(valid(page.evidenceRecord)).toMatchObject({ requestedUrl: page.url, lane: 'http', fieldEvidence: null })
     expect(pages.find(page => page.url === `${origin}/article`)?.evidenceRecord).toMatchObject({ status: 'success', outputSha256: { markdown: expect.stringMatching(/^[0-9a-f]{64}$/) } })
+    // A link the crawl discovered obeys robots.txt, where the batch's named URL above did not.
+    expect(errors.find(page => page.url === `${origin}/private`)?.evidenceRecord).toMatchObject({ reason: 'policy_denied', robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } })
   })
 })
 

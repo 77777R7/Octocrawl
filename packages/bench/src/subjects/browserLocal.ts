@@ -23,7 +23,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
@@ -197,7 +197,8 @@ async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promis
  *
  * robots.txt is fetched per origin and evaluated against the mode's declared
  * UA before navigation; a disallow ends the fetch as `policy_denied` and still
- * mints a record. Every record joins one per-run hash chain, so the ledger a
+ * mints a record, unless the fetch carries an override (`FetchOptions.robotsOverride`:
+ * on a local server, a URL the request named), which the record then holds. Every record joins one per-run hash chain, so the ledger a
  * publisher receives is missing-record-evident, not just tamper-evident.
  *
  * A caller may supply their own proxy or session (`AccessConfigInput`). Doing
@@ -441,19 +442,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const host = this.hostOf(url)
 
-      // A recorded override sets a disallow the publisher wrote aside for this
-      // one URL (never an unreachable robots.txt): the verdict, the override
-      // and its reason go into the trace, the warnings and the compliance
-      // record, and the fetch goes ahead.
+      // An override sets a disallow aside for this one URL, a rule the
+      // publisher wrote or the complete disallow an unreachable robots.txt
+      // implies: the verdict, the override and its reason go into the trace,
+      // the warnings and the compliance record, and the fetch goes ahead. A
+      // robots.txt unread because the host's certificate does not verify is
+      // reported as that below: the page would fail the same way.
       const override = options.robotsOverride
-      const overridden = identity.respectsRobots && robotsDecision.decision === 'disallowed' && robotsDecision.unreachable === undefined && override !== undefined
+      const overridden = identity.respectsRobots && robotsDecision.decision === 'disallowed' && override !== undefined
+        && !(robotsDecision.unreachable !== undefined && cachedRobots?.error?.tls === true)
       if (override !== undefined && overridden) {
-        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'robots_disallowed', detail: { url, appliedRules: robotsDecision.appliedRules } })
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'robots_disallowed', detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) } })
         trace.push({
           at: Date.now() - start,
           lane: 'browser_local',
           event: 'robots_overridden',
-          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+          detail: overriddenDetail(url, robotsDecision, override),
         })
         // Said now, before the page is opened: the run's answer keeps the
         // override even when the deadline ends this fetch before it returns.

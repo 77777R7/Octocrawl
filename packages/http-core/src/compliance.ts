@@ -44,8 +44,8 @@ export interface ComplianceRobotsDecision {
   crawlDelayMs?: number | null
   /** Why robots.txt could not be fetched; set only then (RFC 9309 §2.3.1.4). */
   unreachable?: 'server_error' | 'network_error' | 'timeout'
-  /** A recorded decision that set a disallow aside for this URL; set only then, with the fetch gone ahead. */
-  override?: { reason: string; recordedBy?: string }
+  /** The decision that set a disallow (or an unreachable robots.txt) aside for this URL; set only then, with the fetch gone ahead. `basis` absent: the caller's recorded override. */
+  override?: { reason: string; recordedBy?: string; basis?: 'user_named_url' | 'ignore_robots_txt' }
 }
 
 export interface ComplianceSentHeader {
@@ -205,6 +205,11 @@ function serialize(input: ComplianceRecordInput): Uint8Array {
     field(c, 'robots.override')
     field(c, r.override.reason)
     nullableField(c, r.override.recordedBy ?? null)
+    // An override W2L applied by rule says which rule; the caller's own keeps the bytes it had before rules existed.
+    if (r.override.basis !== undefined) {
+      field(c, 'robots.override.basis')
+      field(c, r.override.basis)
+    }
   }
 
   const total = c.reduce((n, arr) => n + arr.length, 0)

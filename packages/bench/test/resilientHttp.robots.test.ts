@@ -141,6 +141,7 @@ describe('ResilientHttpSubject robots', () => {
         appliedRules: [{ pattern: '/private', allow: false }],
         reason: 'The publisher links this report from its own site; the host rule addresses crawlers.',
         recordedBy: 'test researcher',
+        basis: 'robots_override',
       })
       expect(out.warnings).toEqual([{
         code: 'robots_overridden',
@@ -168,23 +169,48 @@ describe('ResilientHttpSubject robots', () => {
     }
   })
 
-  it('does not set an unreachable robots.txt aside, override or not', async () => {
+  it('fetches a URL the request named past a disallow, saying so in the warning', async () => {
+    const subject = new ResilientHttpSubject()
+    const before = privateHits
+    try {
+      const out = await subject.fetch(`${robotsUrl}/private/secret`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'the request named this URL', basis: 'user_named_url' } })
+      expect(privateHits).toBe(before + 1)
+      expect(out.status).toBe('success')
+      expect(out.trace.find((t) => t.event === 'robots_overridden')?.detail).toMatchObject({ basis: 'user_named_url', reason: 'the request named this URL' })
+      expect(out.warnings).toEqual([{
+        code: 'robots_overridden',
+        message: `${robotsUrl}/robots.txt disallows this URL (rule /private); it was fetched because the request named it: robots.txt binds the links a crawl or map discovers, not the URLs a person names`,
+      }])
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('refuses a page whose robots.txt is unreachable without an override, and fetches it under one', async () => {
     let pageHits = 0
     const server = createServer((req, res) => {
       if (req.url === '/robots.txt') res.writeHead(503).end('temporarily unavailable')
-      else { pageHits++; res.writeHead(200).end('<html><body>Must not fetch</body></html>') }
+      else { pageHits++; res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<html><body><main><article><h1>Named page</h1><p>This page is fetched only when the request named it: its host cannot serve robots.txt, which counts as a complete disallow for the links a crawler discovers.</p><p>It is served normally by the origin, so the only thing that could stop the fetch is the robots.txt rule that W2L applies to crawls and maps but not to the URLs a person names.</p></article></main></body></html>') }
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('no fixture address')
     const subject = new ResilientHttpSubject()
     try {
-      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'a rule I know of' } })
+      const out = await subject.fetch(`http://127.0.0.1:${address.port}/page`)
       expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
       expect(out.trace.some((t) => t.event === 'robots_overridden')).toBe(false)
       expect(out.warnings).toBeUndefined()
       expect(pageHits).toBe(0)
+      const named = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, {}, undefined, { robotsOverride: { reason: 'the request named this URL', basis: 'user_named_url' } })
+      expect(named.status).toBe('success')
+      expect(pageHits).toBe(1)
+      expect(named.trace.find((t) => t.event === 'robots_overridden')?.detail).toMatchObject({ unreachable: 'server_error', appliedRules: [], basis: 'user_named_url' })
+      expect(named.warnings).toEqual([{
+        code: 'robots_overridden',
+        message: `http://127.0.0.1:${address.port}/robots.txt could not be read (server_error), which counts as a complete disallow; it was fetched because the request named it: robots.txt binds the links a crawl or map discovers, not the URLs a person names`,
+      }])
     } finally {
       await subject.teardown()
       await new Promise<void>(resolve => server.close(() => resolve()))

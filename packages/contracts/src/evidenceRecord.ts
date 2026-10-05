@@ -16,7 +16,7 @@ import type { PageActionType } from './actions.js'
  * schemaVersion (`w2l.evidence/2`) and a new schema file.
  */
 
-import type { CrawlMode, RobotsUnreachable } from './compliance.js'
+import type { CrawlMode, RobotsOverrideBasis, RobotsUnreachable } from './compliance.js'
 import type { BlockReason, BudgetKind, FailureReason, Lane, ResultStatus } from './status.js'
 
 export const EVIDENCE_SCHEMA_VERSION = 'w2l.evidence/1'
@@ -67,8 +67,10 @@ export interface EvidenceRobotsDecision {
   /** Why robots.txt could not be fetched (then `decision` is `disallowed`, RFC 9309 §2.3.1.4); null when it was. */
   unreachable: RobotsUnreachable | null
   crawlDelayMs: number | null
-  /** Whether the fetch went ahead under a recorded robots override although `decision` is `disallowed`; the reason is in the trace, the warnings and, in the browser lane, the compliance record. */
+  /** Whether the fetch went ahead although `decision` is `disallowed`; on whose word is `overrideBasis`, and the reason is in the trace, the warnings and, in the browser lane, the compliance record. */
   userOverride: boolean
+  /** On whose word the disallow was set aside (`RobotsOverrideBasis`); null when it was not. Optional in the v1 schema file, written on every record. */
+  overrideBasis: RobotsOverrideBasis | null
 }
 
 export interface EvidenceOutputSha256 {
@@ -195,7 +197,7 @@ const keysOf = <T>() => <const K extends readonly (keyof T)[]>(keys: K & EveryKe
 export const EVIDENCE_RECORD_KEYS = {
   record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions']),
   redirectChain: keysOf<EvidenceRedirectChain>()(['urls', 'complete']),
-  robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride']),
+  robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride', 'overrideBasis']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
   extractor: keysOf<EvidenceExtractor>()(['name', 'version', 'commit']),
   fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
@@ -214,4 +216,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   record: ['contentEncoding', 'pageActions'],
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
+  robotsDecision: ['overrideBasis'],
 }

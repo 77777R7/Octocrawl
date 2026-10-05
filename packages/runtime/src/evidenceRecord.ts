@@ -23,6 +23,7 @@ import {
   type JsonValue,
   type Lane,
   type PageActionType,
+  type RobotsOverrideBasis,
   type RobotsUnreachable,
   type ScreenshotEvidence,
   type StructuredExtractionResult,
@@ -173,11 +174,13 @@ function robotsDecision(result: FetchResult): EvidenceRobotsDecision | null {
       robotsSha256: signed.robotsSha256,
       unreachable: signed.unreachable ?? null,
       crawlDelayMs: signed.crawlDelayMs ?? null,
-      // A recorded robots override set the disallow aside; the record carries it.
+      // An override set the disallow aside; the record carries it and on whose word.
       userOverride: signed.override !== undefined,
+      overrideBasis: signed.override === undefined ? null : signed.override.basis ?? 'robots_override',
     }
   }
   const detail = [...result.trace].reverse().find(event => event.event === 'robots_checked')?.detail
+  const overridden = result.trace.find(event => event.event === 'robots_overridden')
   const decision = detail?.decision
   if (decision !== 'allowed' && decision !== 'disallowed' && decision !== 'no_robots') return null
   const robotsUrl = typeof detail?.robotsUrl === 'string' ? detail.robotsUrl : null
@@ -188,9 +191,15 @@ function robotsDecision(result: FetchResult): EvidenceRobotsDecision | null {
     robotsSha256: typeof detail?.robotsSha256 === 'string' ? detail.robotsSha256 : null,
     unreachable: typeof detail?.unreachable === 'string' ? detail.unreachable as RobotsUnreachable : null,
     crawlDelayMs: typeof detail?.crawlDelayMs === 'number' ? detail.crawlDelayMs : null,
-    // The HTTP lane mints no record; its trace says when a recorded override set the disallow aside.
-    userOverride: result.trace.some(event => event.event === 'robots_overridden'),
+    // The HTTP lane mints no record; its trace says when an override set the disallow aside, and on whose word.
+    userOverride: overridden !== undefined,
+    overrideBasis: overridden === undefined ? null : overrideBasisOf(overridden.detail?.basis),
   }
+}
+
+/** A `robots_overridden` event's basis; an event written before bases existed was the caller's recorded override. */
+function overrideBasisOf(value: unknown): RobotsOverrideBasis {
+  return value === 'user_named_url' || value === 'ignore_robots_txt' ? value : 'robots_override'
 }
 
 /** The HTTP lane's `identity_sent` event: the mode and the headers it sent. */

@@ -406,6 +406,25 @@ export interface RobotsOverride {
 }
 
 /**
+ * On whose word a fetch went past robots.txt. `robots_override`: the
+ * caller's recorded decision for this URL (`RobotsOverride`).
+ * `user_named_url`: a local server fetching a URL the request named (a
+ * scrape, a batch entry), since robots.txt addresses crawlers that discover
+ * links, not the pages a person names. `ignore_robots_txt`: a crawl or map
+ * the caller started with `ignoreRobotsTxt` on a local server.
+ */
+export type RobotsOverrideBasis = 'robots_override' | 'user_named_url' | 'ignore_robots_txt'
+
+/**
+ * A robots override as a lane applies it: the caller's recorded one, or one
+ * W2L applies by rule, which says so in `basis` (absent: the caller's,
+ * `robots_override`). Set by W2L, never read from a request.
+ */
+export interface AppliedRobotsOverride extends RobotsOverride {
+  basis?: Exclude<RobotsOverrideBasis, 'robots_override'>
+}
+
+/**
  * The outcome of consulting robots.txt for a single target URL. One record per
  * fetch. `consulted` distinguishes "we checked and it said X" from "there was
  * nothing to check" — a record that skips the check must say so, never pretend.
@@ -436,11 +455,11 @@ export interface RobotsDecision {
    */
   unreachable?: RobotsUnreachable
   /**
-   * Present when a disallow the publisher wrote was set aside by a recorded
-   * decision: the fetch went ahead (`skippedFetch: false`) and this says on
-   * whose word. Never set for an unreachable robots.txt.
+   * Present when a disallow was set aside, the publisher's or the one an
+   * unreachable robots.txt implies: the fetch went ahead (`skippedFetch:
+   * false`) and this says on whose word.
    */
-  override?: RobotsOverride
+  override?: AppliedRobotsOverride
 }
 
 /**

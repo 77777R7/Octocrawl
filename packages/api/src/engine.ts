@@ -69,6 +69,7 @@ import {
   type TaskStatus,
   type CrawlPageQuery,
   type ExecutionContext,
+  type AppliedRobotsOverride,
   type RobotsOverride,
   type RobotsUrlOverride,
   type ScrapeFormat,
@@ -303,11 +304,14 @@ export interface ApiEngineOptions {
    */
   defaultMaxPages?: number | null
   /**
-   * Whether scrape and batch requests may carry a recorded robots override
-   * (`robotsOverride`, `robotsOverrides`). Absent or true (local): the person
-   * running the server decides that for their own fetches. False (hosted):
-   * the field is refused by name with HTTP 400, so no token holder can make
-   * the operator's service set a publisher's rule aside.
+   * Whether robots.txt may be set aside for a caller. Absent or true
+   * (local): the person running the server decides that for their own
+   * fetches: a URL a scrape or batch names is fetched whatever robots.txt
+   * says, on the record, and a request may carry a recorded override
+   * (`robotsOverride`, `robotsOverrides`). False (hosted): robots.txt is
+   * obeyed for every URL, and the field is refused by name with HTTP 400, so
+   * no token holder can make the operator's service set a publisher's rule
+   * aside. A hosted engine (`hosted`) obeys it whatever this says.
    */
   allowRobotsOverride?: boolean
   /**
@@ -553,6 +557,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
   const hosted = options.hosted === true
+  /**
+   * robots.txt addresses crawlers that discover links. On a local server a
+   * URL the request names (a scrape, a batch entry) is fetched whatever it
+   * says: the verdict is still read and recorded, Crawl-delay included, with
+   * this override and a warning on the result. The links a crawl or map
+   * discovers, a Monitor's scheduled re-reads and every fetch of a hosted
+   * server, which go out from the operator's addresses, obey it.
+   */
+  const namedUrlOverride: AppliedRobotsOverride | undefined = hosted || options.allowRobotsOverride === false
+    ? undefined
+    : { reason: 'the request named this URL', basis: 'user_named_url' }
   /** A hosted engine never relaxes certificate verification for a caller; refused before anything is fetched or stored, naming the supported route. */
   const checkHostedOptions = (req: PageOptions): void => {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
@@ -968,7 +983,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
-    const robotsOverrideFor = options.allowRobotsOverride === false || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    const recordedOverrideFor = options.allowRobotsOverride === false || task.batch?.robotsOverrides === undefined ? null : robotsOverrideLookup(task.batch.robotsOverrides)
+    // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered.
+    const namedOverride = task.batch === undefined ? undefined : namedUrlOverride
+    const robotsOverrideFor = recordedOverrideFor === null && namedOverride === undefined ? null : (url: string) => recordedOverrideFor?.(url) ?? namedOverride
     const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
@@ -980,7 +998,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
-        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, robotsOverrideFor?.(url))
+        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url))
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
@@ -1135,10 +1153,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride) : null
+    // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
+    const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
     const operation = (async () => {
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
-        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(req.robotsOverride === undefined ? {} : { robotsOverride: req.robotsOverride }) })
+        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
           .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.

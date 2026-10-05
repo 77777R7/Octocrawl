@@ -19,7 +19,7 @@ import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, Deco
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
-import { RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -298,11 +298,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
           event: 'robots_disallowed',
           detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
         })
-        // The caller's recorded decision sets a rule the publisher wrote
-        // aside for this one URL; an unreachable robots.txt is not a rule and
-        // stays a complete disallow. The verdict stays in the trace above;
-        // this says who set it aside and why, and the result's warnings
-        // repeat it.
+        // An override sets the disallow aside for this one URL, a rule the
+        // publisher wrote or the complete disallow an unreachable robots.txt
+        // implies. The verdict stays in the trace above; this says on whose
+        // word it was set aside and why, and the result's warnings repeat it.
         const override = options.robotsOverride
         if (robotsDecision.unreachable !== undefined && cached?.error?.tls === true) {
           // robots.txt could not be read because the host's certificate does not
@@ -310,12 +309,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
           trace.push({ at: Date.now() - start, lane: 'http', event: 'request_failed', detail: { reason: 'tls_error', url: robotsDecision.robotsUrl, error: cached.error.name, ...(cached.error.code === null ? {} : { code: cached.error.code }) } })
           return timedDenied('tls_error')
         }
-        if (override === undefined || robotsDecision.unreachable !== undefined) return timedDenied('policy_denied')
+        if (override === undefined) return timedDenied('policy_denied')
         trace.push({
           at: Date.now() - start,
           lane: 'http',
           event: 'robots_overridden',
-          detail: { url, appliedRules: robotsDecision.appliedRules, reason: override.reason, ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }) },
+          detail: overriddenDetail(url, robotsDecision, override),
         })
         overrideWarning = robotsOverrideWarning(robotsDecision, override)
         // Said now, before the request goes out: the run's answer keeps the
@@ -458,7 +457,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const file = contentful ? detectFile(contentType, bytes, responseFileName(out.finalUrl, out.headers?.get('content-disposition') ?? null)) : null
     // A web page is read as text and hashed as such; a file's hash is of its bytes (see below).
     const body = file === null ? new TextDecoder().decode(bytes) : ''
-    const rawBodySha256 = file === null && !undecoded ? sha256Utf8(body) : null
+    // No response, no body: a connection that failed before one is not an empty page.
+    const rawBodySha256 = file === null && !undecoded && out.status !== null ? sha256Utf8(body) : null
     const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
 
     const base = {

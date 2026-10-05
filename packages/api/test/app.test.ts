@@ -444,7 +444,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(await postJson('/v1/batches', { urls: [url], integration: 'has space' })).toEqual({ status: 400, body: { error: 'integration must be a string of 1 to 100 printable characters without spaces', code: 'invalid_request' } })
   })
 
-  it('carries agentHints for a login wall, a robots.txt rule and a refused stealth option, and none on a plain success', async () => {
+  it('carries agentHints for a login wall and a refused stealth option, none on a plain success or a named URL robots.txt disallows', async () => {
     // A login wall is answered by the http rung; these channels have no browser rung to offer it to.
     const hintRoot = await mkdtemp(join(tmpdir(), 'w2l-api-hints-'))
     const httpOnly = createApiEngine({ taskRoot: hintRoot, channelsFor: (mode) => httpOnlyChannels(mode).filter((channel) => channel.id === 'http') })
@@ -466,8 +466,11 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect((await post('/v1/scrape', { url: wall, debug: false })).body).toMatchObject({ status: 'blocked', agentHints: [login] })
       expect((await post('/fc/v1/scrape', { url: wall })).body).toMatchObject({ success: false, data: { agent_hints: [login] } })
       expect(await (await app.request(`/v1/scrapes/${full.scrapeId}`)).json()).toMatchObject({ blockReason: 'login_wall', agentHints: [login] })
-      const denied = (await post('/v1/scrape', { url: `http://127.0.0.1:${(local.address() as AddressInfo).port}/private/report`, debug: false })).body
-      expect(denied).toMatchObject({ status: 'failed', failureReason: 'policy_denied', agentHints: ["robots.txt of 127.0.0.1 disallows this URL for W2L's identity (rule /private/); a robotsOverride with a recorded reason fetches it on the record"] })
+      // A URL the request names is fetched on a local server whatever robots.txt says; the warning says so, and there is nothing to hint.
+      const named = (await post('/v1/scrape', { url: `http://127.0.0.1:${(local.address() as AddressInfo).port}/private/report`, debug: false })).body
+      expect(named).toMatchObject({ warnings: expect.arrayContaining([expect.objectContaining({ code: 'robots_overridden' })]) })
+      expect(named.failureReason).not.toBe('policy_denied')
+      expect(named.agentHints ?? []).not.toContainEqual(expect.stringContaining('robots.txt'))
       // A refusal of what W2L does not offer names the supported route, natively and on /fc.
       expect(await post('/v1/scrape', { url: wall, stealth: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['stealth'] }, agentHints: [REFUSAL_HINTS.stealth] } })
       expect(await post('/fc/v1/scrape', { url: wall, proxy: 'stealth' })).toMatchObject({ status: 400, body: { success: false, code: 'unsupported_parameter', agent_hints: [REFUSAL_HINTS.stealth] } })
@@ -585,7 +588,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
-  it('scrapes a robots-disallowed URL under a recorded override, keeps the warning on the full and compact responses, and refuses a blanket ignoreRobotsTxt', async () => {
+  it('scrapes a robots-disallowed URL it was named, under a recorded override or without one, keeps the warning on the full and compact responses, and refuses ignoreRobotsTxt', async () => {
     let reportHits = 0
     const local = createServer((req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /'); return }
@@ -603,12 +606,20 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(full).toMatchObject({ status: 'success', channelsTried: ['http'], warnings: [{ code: 'robots_overridden', message: expect.stringContaining('(rule /); it was fetched under an override recorded by analyst') }] })
       expect(full.trace.map((event: { event: string }) => event.event)).toEqual(expect.arrayContaining(['robots_checked', 'robots_disallowed', 'robots_overridden']))
       const compact = await (await post({ url, robotsOverride, debug: false })).json()
-      expect(compact).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden' }], evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true } } })
+      expect(compact).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden' }], evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true, overrideBasis: 'robots_override' } } })
       expect(reportHits).toBe(2)
+      // Without an override the URL is fetched because the request named it, and the record says so.
+      const named = await (await post({ url, debug: false })).json()
+      expect(named).toMatchObject({
+        status: 'success',
+        warnings: [{ code: 'robots_overridden', message: expect.stringContaining('(rule /); it was fetched because the request named it') }],
+        evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true, overrideBasis: 'user_named_url' } },
+      })
+      expect(reportHits).toBe(3)
       const blanket = await post({ url, ignoreRobotsTxt: true })
       expect(blanket.status).toBe(400)
       expect(await blanket.json()).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] }, agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
-      expect(reportHits).toBe(2)
+      expect(reportHits).toBe(3)
     } finally {
       await new Promise<void>(resolve => local.close(() => resolve()))
     }
@@ -636,10 +647,14 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       expect(batch.status).toBe(400)
       expect(await batch.json()).toMatchObject({ error: expect.stringContaining('unsupported parameter: robotsOverrides '), code: 'unsupported_parameter', details: { parameters: ['robotsOverrides'] } })
       expect(requests).toEqual([])
-      // Without the field the same URL is a scrape like any other, and its rule holds.
+      // Without the field the same URL is a scrape like any other, and its rule holds: a hosted server obeys robots.txt for every URL.
       const plain = await post('/v1/scrape', { url })
       expect(plain.status).toBe(200)
-      expect(await plain.json()).toMatchObject({ status: 'failed', failureReason: 'policy_denied', evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false } } })
+      expect(await plain.json()).toMatchObject({
+        status: 'failed', failureReason: 'policy_denied',
+        evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } },
+        agentHints: [expect.stringContaining("robots.txt of 127.0.0.1 disallows this URL for W2L's identity (rule /)")],
+      })
       expect(requests).toEqual(['/robots.txt'])
     } finally {
       await hosted.close()

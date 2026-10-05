@@ -198,7 +198,7 @@ describe('file download on scrape', () => {
 })
 
 describe('file download in batch and crawl', () => {
-  it('gives batch items their file and Evidence Record, and saves nothing for a refused URL', async () => {
+  it('gives batch items their file and Evidence Record, a URL robots.txt disallows included, since the batch named it', async () => {
     const start = await post('/v1/batches', { urls: [`${origin}/report.pdf`, `${origin}/data.csv`, `${origin}/private/report.pdf`], formats: ['markdown'] })
     const taskId = start.json.taskId as string
     await finished(() => engine.getBatch(taskId))
@@ -208,10 +208,10 @@ describe('file download in batch and crawl', () => {
     expect(byUrl.get(`${origin}/report.pdf`)).toMatchObject({ status: 'success', file: { kind: 'pdf', sha256: sha(REPORT) } })
     expect(byUrl.get(`${origin}/report.pdf`)!.markdown).toContain('<!-- page 1 -->')
     expect(byUrl.get(`${origin}/data.csv`)).toMatchObject({ status: 'success', markdown: CSV, file: { kind: 'csv' } })
-    const refused = byUrl.get(`${origin}/private/report.pdf`)!
-    expect(refused).toMatchObject({ failureReason: 'policy_denied' })
-    expect(refused.file).toBeUndefined()
-    expect(refused.evidenceRecord!.artifacts).toEqual([])
+    // A robots.txt refusal saves nothing (bench fileDownload.test.ts); a URL the batch names is not refused.
+    const named = byUrl.get(`${origin}/private/report.pdf`)!
+    expect(named).toMatchObject({ status: 'success', file: { kind: 'pdf', sha256: sha(REPORT) } })
+    expect(named.evidenceRecord!.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: true, overrideBasis: 'user_named_url' })
   })
 
   it('reads the PDF and CSV a crawled page links to', async () => {
