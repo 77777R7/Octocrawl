@@ -28,7 +28,7 @@ Every Evidence Record has the same fields (schema `w2l.evidence/1`, in [packages
 | What was read, before extraction? | `rawSha256` (a file's bytes; the HTML text on the `http` lane; the rendered HTML on a browser lane); `contentEncoding` | `1c12744d…`, `identity` (not compressed) |
 | What did you analyse? | `outputSha256.markdown`; each table's `csvSha256` | `3235ac0f…`; `cf379cfd…` for table 0 |
 | How was it turned into text? | `extractor.version`, `extractor.commit`; `lane` | `extract-tf/6`, `8356314…`, `http` |
-| Were you allowed to read it? | `robotsDecision.decision`; `robotsDecision.userOverride` | `no_robots` (no robots.txt was found), `false` |
+| Were you allowed to read it? | `robotsDecision.decision`; `robotsDecision.userOverride` and `overrideBasis` | `no_robots` (no robots.txt was found), `false`, `null` |
 | Who asked, and how? | `identity.mode`, `identity.userAgent`, `identity.contact`, `identity.device`, `identity.requestHeaders` | `standard`, a desktop browser User-Agent, no contact, `desktop`, no extra headers |
 | Through what network? | `proxy` | `127.0.0.1:7890`, a local proxy |
 
@@ -48,7 +48,7 @@ Adapt it, but keep three things in it:
 - **The versions.** The W2L commit and the extractor versions. A later extractor may turn the same page into different text.
 - **How you identified yourself.** In `standard` mode W2L presents an ordinary browser User-Agent. With `--mode research` it declares itself as a bot, and with `W2L_CONTACT` it names you. Some sites, such as sec.gov, require that; state which one you used.
 
-If you used a `robotsOverride` for any URL, `robotsDecision.userOverride` is `true` in its record. Say so in the methods, and why: for example, that the file is the publisher's own report and was fetched once for citation.
+If a URL was fetched although its robots.txt disallowed it, `robotsDecision.userOverride` is `true` in its record and `overrideBasis` says why: `user_named_url` (you named the URL, and a local server fetches a named URL whatever robots.txt says), `robots_override` (your recorded reason) or `ignore_robots_txt` (a crawl or map started with that option). Say so in the methods, and why: for example, that the file is the publisher's own report and was fetched once for citation.
 
 ## 4. Citing a single page
 
@@ -78,7 +78,7 @@ A web page can change or disappear after you read it. The hash proves which vers
 
 ## 5. Personal data and permission
 
-W2L follows robots.txt and records what it decided, but robots.txt is not permission to use the content for any purpose. Before you collect:
+W2L reads robots.txt for every URL and records what it said. It obeys it for the links a crawl or map discovers, and on your own machine fetches the URLs you name yourself regardless. Either way, robots.txt is not permission to use the content for any purpose. Before you collect:
 
 - **Personal data.** If your sources contain information about identifiable people (names, contact details, posts, profiles), your project may need ethics approval or another legal basis under the data-protection law that applies to you, such as the GDPR. Ask your institution's ethics board before collecting, not after.
 - **Terms of use and copyright.** A site's terms may restrict automated access or reuse. Quoting and analysing for research is often allowed; republishing the full text is often not. Deposit hashes and your derived data where you cannot deposit the pages themselves.
