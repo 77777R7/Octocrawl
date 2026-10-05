@@ -42,6 +42,7 @@ import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
+import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
@@ -180,6 +181,13 @@ export function buildChannels(
     previewProductToken?: boolean
     /** A robots.txt cache the http rung shares with a crawl's sitemap reader (one read of a host's robots.txt serves both); the rung keeps its own without one. */
     robotsCache?: RobotsOriginCache
+    /**
+     * Standard mode on a local server, as the entry point allowed it (ADR 0005 `compatible_transport`):
+     * an `http_compat` rung after `http`, the same lane over the browser-compatible transport
+     * (compatTransport.ts). The caller keeps one of the two for each URL (the API engine swaps them
+     * for the hosts it was given); with both, the ladder tries `http` first.
+     */
+    compatTransport?: boolean
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -193,6 +201,8 @@ export function buildChannels(
   // The public browser alone may run another engine; the saved-login rung below is always stock Playwright.
   const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
+  if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
+  const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 
   // ----------------------------------------------------------------------
   // authed_session: the ONLY rung that uses login state. It exists solely in
@@ -239,6 +249,12 @@ export function buildChannels(
         await opts.localSubjects?.http?.teardown?.()
       },
     },
+    ...(compat === null ? [] : [{
+      id: 'http_compat',
+      identity: identityBundleFrom(compatIdentity()),
+      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride),
+      close: () => compat.teardown(),
+    } satisfies Channel]),
     {
       id: 'browser_local',
       identity: declared,

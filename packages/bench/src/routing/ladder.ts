@@ -34,6 +34,9 @@ import { identityCompromised } from './identity.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One channel: a lane implementation the ladder can try. */
+/** The rungs of the http lane: undici's, and the browser-compatible transport's (ADR 0005 `compatible_transport`). */
+export const HTTP_CHANNELS: ReadonlySet<string> = new Set(['http', 'http_compat'])
+
 export interface Channel {
   /** Lane id, e.g. 'http', 'browser_local', 'provider'. */
   id: string
@@ -50,6 +53,11 @@ export interface Channel {
    * waits before capture. A request with waitFor skips rungs without it.
    */
   readonly waitsFor?: boolean
+  /**
+   * Whether this rung takes this URL; absent means every URL. A rung that does not is left out of
+   * the run as if it were not configured (the API engine keeps `http` or `http_compat` per host).
+   */
+  serves?(url: string, options: FetchOptions): boolean
   /**
    * Run the channel against url, optionally with a user session attached. A
    * channel that sets a robots.txt rule aside (`options.robotsOverride`) says
@@ -193,7 +201,7 @@ function withLowContentYield(result: FetchResult, channelsTried: readonly string
   const evidence = result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null
   if (!CONTENTFUL_STATUS.has(result.status) && !evidence) return result
   if (result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
-  return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => channel !== 'http'))] }
+  return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => !HTTP_CHANNELS.has(channel)))] }
 }
 
 /**
@@ -389,7 +397,7 @@ export class LadderRunner {
 
     const permitted = new Set(decision.permittedChannels)
     // Local lanes first, in declaration order, then providers (history-ranked).
-    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id))
+    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && (c.serves?.(url, options) ?? true))
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
@@ -533,7 +541,7 @@ export class LadderRunner {
         // lane rather than accepted as the answer. The status is NOT
         // rewritten — the record keeps the real success and its real token
         // count; the ladder just isn't done yet.
-        const qualityEvent = channel.id === 'http' ? qualityEscalationEvent(result) : null
+        const qualityEvent = HTTP_CHANNELS.has(channel.id) ? qualityEscalationEvent(result) : null
         const thinHttp = qualityEvent !== null
 
         // Worse-than-best: a later channel DID answer, but with less content

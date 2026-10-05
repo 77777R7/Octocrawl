@@ -49,6 +49,16 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_BROWSER_ENGINE: 'patchright' })).toThrow(/refused on a hosted server/)
   })
 
+  it('sends the hosts W2L_COMPAT_HOSTS names over the compatible transport only under a grant that names compatible_transport, never hosted', () => {
+    expect(parseListen([], {}).compatHosts).toEqual([])
+    const grant = JSON.stringify({ tier: 'enhanced', capabilities: ['compatible_transport'], attestation: ATTESTATION })
+    const local = parseListen([], { W2L_ACCESS_GRANT: grant, W2L_COMPAT_HOSTS: 'shop.test,www.news.test' })
+    expect(local.compatHosts).toEqual(['shop.test', 'www.news.test'])
+    expect(local.notices).toContain('compatible transport (ADR 0005 compatible_transport): impit 0.14.5, profile chrome142, in place of the http rung for standard-mode pages on shop.test, www.news.test and their subdomains; a request with custom headers or mobile keeps the http rung')
+    expect(() => parseListen([], { W2L_COMPAT_HOSTS: 'shop.test' })).toThrow(/needs an access grant that names compatible_transport/)
+    expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_COMPAT_HOSTS: 'shop.test' })).toThrow(/refused on a hosted server/)
+  })
+
   it("refuses tier my_browser on a hosted server, which has no person's browser", () => {
     const grant = JSON.stringify({ tier: 'my_browser' })
     expect(parseListen([], { W2L_ACCESS_GRANT: grant }).accessGrant).toMatchObject({ tier: 'my_browser' })

@@ -27,7 +27,8 @@ export type GovernedMode = 'standard' | 'research' | 'authed'
 
 /** Which channels a mode permits. */
 export const MODE_CHANNELS: Readonly<Record<GovernedMode, readonly string[]>> = {
-  standard: ['http', 'browser_local'],
+  // http_compat: the http lane over the browser-compatible transport (ADR 0005 compatible_transport); its identity is the standard one.
+  standard: ['http', 'http_compat', 'browser_local'],
   research: ['http', 'browser_local', 'provider'],
   authed: ['http', 'browser_local', 'provider', 'authed_session', 'handoff'],
 }
