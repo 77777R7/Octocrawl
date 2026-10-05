@@ -182,6 +182,62 @@ describe('classifyGate — captcha widgets are distinct from interstitials', () 
   })
 })
 
+describe('classifyGate — PerimeterX press-and-hold', () => {
+  // Shaped like the page Walmart served with HTTP 200 on 2026-10-05, which the
+  // browser lane returned as success. The reason is captcha, not
+  // bot_detected_generic: the button needs a person to press and hold it, and
+  // the browser lane had already run the page's JS when it got this page. That
+  // is what this file calls a widget (escalation: hand off to the person), not
+  // an interstitial a browser clears by running it.
+  const PX_SENSOR = "<script>window._pxAppId='PXu6b0qd2S'</script><script src=\"/px/PXu6b0qd2S/init.js\" async></script>"
+  const PX_PAGE = `<html lang="en"><head><title>Robot or human?</title>
+<script>window._pxAppId = 'PXu6b0qd2S'; window._pxFirstPartyEnabled = true;
+var captchajs = "/px/" + window._pxAppId + "/captcha/captcha.js?a=c&m=0&g=b"</script></head><body>
+<h1 class="heading">Robot or human?</h1>
+<div class="re-captcha"><p class="bot-message" id=message>Activate and hold the button to confirm that you’re human. Thank You!</p>
+<div id="px-captcha" style="margin:16px"></div></div><script id="blockScript"></script></body></html>`
+
+  it('names the challenge captcha from its app id and captcha script, even once extraction found a body', () => {
+    const want = { reason: 'captcha', signals: ['px_captcha_script', 'px_app_id', 'px_captcha_container'] }
+    expect(classifyGate(res({ status: 200, body: PX_PAGE }))).toEqual(want)
+    expect(classifyGate(res({ status: 200, body: PX_PAGE, contentful: true }))).toEqual(want)
+  })
+
+  it('names the stock block template, whose widget the captcha script draws later', () => {
+    const body = `<head><meta name="description" content="px-captcha"><title>Access to this page has been denied</title></head><body><script>
+window._pxAppId = 'PXHYx10rg3'; var pxCaptchaSrc = '/HYx10rg3/captcha/captcha.js?a=c&u=1&v=&m=0';
+script.src = 'https://captcha.px-cloud.net/PXHYx10rg3/captcha.js?a=c';</script></body>`
+    expect(classifyGate(res({ status: 403, body, contentful: true }))).toEqual({ reason: 'captcha', signals: ['px_captcha_script', 'px_app_id'] })
+  })
+
+  it('names the page from its copy alone when no PerimeterX plumbing survived, on a page with no content', () => {
+    const copy = '<h1>Robot or human?</h1><p>Activate and hold the button to confirm that you’re human. Thank You!</p>'
+    expect(classifyGate(res({ status: 200, body: copy }))).toEqual({ reason: 'captcha', signals: ['text_activate_and_hold'] })
+    expect(classifyGate(res({ status: 200, body: '<h1>Robot or human?</h1>' }))).toEqual({ reason: 'bot_detected_generic', signals: ['text_robot_or_human'] })
+    // Copy is not decisive: a page with content ignores it.
+    expect(classifyGate(res({ status: 200, body: copy, contentful: true }))).toBeNull()
+  })
+
+  it('does not block an ordinary article that says "robot or human" in its prose', () => {
+    const body = ARTICLE.replace('<p>A handshake', '<p>Robot or human? The question opens every handshake. A handshake')
+    expect(classifyGate(res({ status: 200, body, contentful: true }))).toBeNull()
+  })
+
+  it('does not take the sensor every protected page carries for the challenge', () => {
+    // Walmart's home page carried exactly this on 2026-10-05.
+    const page = `${ARTICLE}${PX_SENSOR}`
+    expect(classifyGate(res({ status: 200, body: page }))).toBeNull()
+    expect(classifyGate(res({ status: 200, body: page, contentful: true }))).toBeNull()
+    // Nor an in-page (ABR) placeholder the site keeps hidden until a request is blocked.
+    const abr = `${page}<div class="modalWindow"><h5>We think you might be a bot...</h5><div id="px-captcha"></div></div>`
+    expect(classifyGate(res({ status: 200, body: abr, contentful: true }))).toBeNull()
+    // Nor the captcha hosts named in a CSP or a preconnect, with no script loaded from them.
+    const hosts = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' captcha.px-cdn.net captcha.px-cloud.net">` +
+      `<link rel="preconnect" href="https://captcha.px-cdn.net">${page}`
+    expect(classifyGate(res({ status: 200, body: hosts, contentful: true }))).toBeNull()
+  })
+})
+
 describe('classifyGate — login wall needs structure, not a keyword', () => {
   it('classifies a sign-in-to-continue page with a password field', () => {
     const v = classifyGate(

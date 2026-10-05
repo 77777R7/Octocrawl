@@ -118,6 +118,8 @@ const CAPTCHA_MARKERS: readonly (readonly [marker: string, signal: string])[] = 
   ['funcaptcha', 'widget_funcaptcha'],
   ['arkoselabs', 'widget_arkose'],
   ['data-sitekey', 'widget_sitekey'],
+  // PerimeterX's press-and-hold prompt, as Walmart words it: the widget's own instruction.
+  ['activate and hold the button', 'text_activate_and_hold'],
 ]
 
 /** Phrases that make a login the page's purpose rather than one of its widgets. */
@@ -157,6 +159,7 @@ const BOT_STRONG_MARKERS: readonly (readonly [marker: string, signal: string])[]
   ['unusual traffic from your computer network', 'text_unusual_traffic'],
   ['automated queries', 'text_automated_queries'],
   ['are you a robot', 'text_are_you_a_robot'],
+  ['robot or human?', 'text_robot_or_human'],
   ['verify you are human', 'text_verify_you_are_human'],
   ['verifying you are human', 'text_verifying_you_are_human'],
   ['bot detected', 'text_bot_detected'],
@@ -190,6 +193,20 @@ const GATE_SHAPED_STATUS: readonly number[] = [403, 429, 503]
  * path (the challenge's own `/h/.../orchestrate`) is.
  */
 const CF_JSD_PATH = '/cdn-cgi/challenge-platform/scripts/jsd/'
+
+/**
+ * PerimeterX (HUMAN) answers a page it refuses with its press-and-hold
+ * challenge: the page sets `window._pxAppId` and loads the vendor's captcha
+ * script, which draws the widget into `#px-captcha`. Neither the app id nor
+ * the container is the challenge alone. The sensor sets `_pxAppId` on every
+ * page of a protected site (Walmart's home page, 2026-10-05), and a site
+ * using in-page blocking keeps an empty `#px-captcha` on its ordinary pages
+ * (the vendor's ABR sample), loading the script only once a request is
+ * blocked. The script and the app id together are. Only the script's URL
+ * counts: a protected page may name the captcha hosts in a CSP or preconnect.
+ */
+const PX_CAPTCHA_SCRIPT = /\/captcha\/captcha\.js|captcha\.px-(?:cdn|cloud)\.net\/[^"'\s<>]*captcha\.js/
+const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/i
 
 function challengePlatformBeyondJsd(lower: string): boolean {
   const marker = '/cdn-cgi/challenge-platform'
@@ -275,6 +292,15 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     && /\bname\s*=\s*["']js_challenge["']/i.test(head)
     && /\bname\s*=\s*["']jsc_token["']/i.test(head)) {
     return { reason: 'bot_detected_generic', signals: ['reddit_js_verification'] }
+  }
+
+  // PerimeterX's press-and-hold, served with HTTP 200 (Walmart, after a 307
+  // to /blocked) or 403. Its button needs a person to press and hold it: a
+  // widget, not an interstitial a browser clears by running its JS.
+  if (lower.includes('_pxappid') && PX_CAPTCHA_SCRIPT.test(lower)) {
+    const signals = ['px_captcha_script', 'px_app_id']
+    if (PX_CAPTCHA_CONTAINER.test(head)) signals.push('px_captcha_container')
+    return { reason: 'captcha', signals }
   }
 
   if (contentful) return null
