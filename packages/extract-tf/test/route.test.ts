@@ -191,12 +191,11 @@ describe('routePage', () => {
       for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
     })
 
-    // IKEA: the products are declared in JSON-LD only, as a CollectionPage's ItemList.
-    const listed = (names: readonly string[]) => `<script type="application/ld+json">${JSON.stringify({
-      '@context': 'https://schema.org',
-      '@type': 'CollectionPage',
-      mainEntity: { '@type': 'ItemList', itemListElement: names.map((n, i) => ({ '@type': 'ListItem', position: i + 1, item: { '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${12 + i}.00`, priceCurrency: 'USD' } } })) },
-    })}</script>`
+    // IKEA: the products are declared in JSON-LD only, as a CollectionPage's ItemList. A product page that declares its
+    // related products does so as an ItemList of its own.
+    const itemList = (names: readonly string[]) => ({ '@type': 'ItemList', itemListElement: names.map((n, i) => ({ '@type': 'ListItem', position: i + 1, item: { '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${12 + i}.00`, priceCurrency: 'USD' } } })) })
+    const listed = (names: readonly string[]) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'CollectionPage', mainEntity: itemList(names) })}</script>`
+    const related = (names: readonly string[]) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', name: 'You may also like', ...itemList(names) })}</script>`
     const tile = (i: number) => `<div class="plp-product"><a href="/p/trowel-${i + 1}/">${name(i)}</a><span class="price">$${12 + i}.00</span><span>Forged steel blade, ash handle.</span></div>`
     const names = Array.from({ length: 8 }, (_, i) => name(i))
 
@@ -226,7 +225,11 @@ describe('routePage', () => {
           '<fieldset class="variants"><label class="variant"><input type="radio" name="size"> 600 ml <span class="price">$84.00</span></label><label class="variant"><input type="radio" name="size"> 900 ml <span class="price">$96.00</span></label><label class="variant"><input type="radio" name="size"> 1.2 l <span class="price">$112.00</span></label></fieldset>',
           '<div class="price__regular"><span class="price-item">$84.00</span></div><div class="price__sale"><s class="price-item">$100.00</s><span class="price-item">$84.00</span></div>',
           '<ul class="facts"><li><span class="price">$84.00</span></li><li>Stoneware, 600 ml</li></ul>',
-        ].map((price) => wrap(`<main><h1>Cobalt teapot</h1>${price}<p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, listed(names.slice(0, 3)))),
+          // A size picker whose sizes are links.
+          '<div class="variants"><a href="?v=1"><span class="price">$84.00</span> 600 ml</a><a href="?v=2"><span class="price">$96.00</span> 900 ml</a><a href="?v=3"><span class="price">$112.00</span> 1.2 l</a></div>',
+        ].map((price) => wrap(`<main><h1>Cobalt teapot</h1>${price}<p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, related(names.slice(0, 3)))),
+        // A page of sections (Shopify): the product's own, then two of linked, priced tiles.
+        wrap(`<main><div class="shopify-section"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><div class="shopify-section"><h2>You may also like</h2>${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div><div class="shopify-section"><h2>Recently viewed</h2>${Array.from({ length: 3 }, (_, i) => tile(i + 3)).join('')}</div></main>`, related(names.slice(0, 6))),
       ]) {
         const doc = parse(html)
         expect(routePage(doc.document).type).toBe('product')
@@ -236,7 +239,7 @@ describe('routePage', () => {
 
     it('keeps a product page whose JSON-LD also lists related products a product page', () => {
       const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'Cobalt teapot', offers: { '@type': 'Offer', price: '84.00', priceCurrency: 'USD' } })}</script>`
-      const html = wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 4 }, (_, i) => tile(i)).join('')}</div></main>`, own + listed(names.slice(0, 4)))
+      const html = wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 4 }, (_, i) => tile(i)).join('')}</div></main>`, own + related(names.slice(0, 4)))
       const doc = parse(html)
       expect(routePage(doc.document).type).toBe('product')
       doc.close()

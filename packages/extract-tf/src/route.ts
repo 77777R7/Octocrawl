@@ -36,8 +36,6 @@ interface RouterCounts {
   linkDensity: number
   /** A visible buy box (see hasVisibleBuyBox). */
   buyBox: boolean
-  /** A price under the page's lone h1 (see hasPriceUnderH1). */
-  priceUnderH1: boolean
 }
 
 /**
@@ -59,45 +57,12 @@ function hasVisibleBuyBox(doc: Document): boolean {
   return heading === h1s[0]
 }
 
-/**
- * A product page's price, whether or not the page shows others: the page's
- * one h1, then a visible price before any other heading that is not a card's.
- * A card's price is inside an element with at least two siblings of its tag
- * that each hold a price and a link: a listing's prices
- * are its cards'. A sale price beside the price it was before, in boxes of one
- * tag, or in a list of the product's facts, is the page's own.
- */
-function hasPriceUnderH1(doc: Document): boolean {
-  const h1s = qsa(doc, 'h1')
-  if (h1s.length !== 1) return false
-  const prices = visiblePrices(doc)
-  const linked = (el: Element) => qsa(el, 'a[href]').length > 0 || (tagOf(el) === 'a' && el.hasAttribute('href'))
-  const pricedCard = (el: Element) => linked(el) && prices.some((price) => el.contains(price))
-  const inCard = (price: Element): boolean => {
-    for (let up = price.parentElement; up !== null && up !== doc.body; up = up.parentElement) {
-      const parent = up.parentElement
-      if (parent === null) continue
-      const alike = Array.from(parent.children).filter((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && pricedCard(sibling))
-      if (alike.length >= 2) return true
-    }
-    return false
-  }
-  const priceSet = new Set(prices)
-  const all = qsa(doc, '*')
-  for (const el of all.slice(all.indexOf(h1s[0]!) + 1)) {
-    if (/^h[1-6]$/.test(tagOf(el))) return false
-    if (priceSet.has(el)) return !inCard(el)
-  }
-  return false
-}
-
 function countAll(doc: Document): RouterCounts {
   const textLength = (el: Element | null): number => (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length
   const textChars = textLength(doc.body)
   const a = qsa(doc, 'a').length
   return {
     buyBox: hasVisibleBuyBox(doc),
-    priceUnderH1: hasPriceUnderH1(doc),
     li: qsa(doc, 'li').length,
     a,
     table: qsa(doc, 'table').length,
@@ -326,6 +291,9 @@ function hasForumSignals(s: PageSignals): boolean {
   return hasToken(s.jsonLdTypes, 'forum') || hasToken(s.itemTypeTokens, 'forum')
 }
 
+/** JSON-LD page types by which a publisher declares a page a collection of things. */
+const COLLECTION_PAGE_TYPES = ['collectionpage', 'searchresultspage'] as const
+
 function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Semantic product signals get the dedicated PDP strategy: a product page's
   // payload is a name/price/spec region, not the longest run of prose, and
@@ -335,11 +303,13 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // that actually produced the output, not the one it hoped for.
   // Alike Product cards with no product declared in JSON-LD are a listing of
   // products (a category page), not one: the product strategy would cut them
-  // as recommendations. So are products the page declares only as an
-  // ItemList's items, when no microdata scope declares one product and no
-  // price stands under the page's h1 (a product page that declares only its
-  // related products).
-  const listedOnly = s.listedProducts >= PRODUCT_CARDS && (s.productCards || !hasToken(s.itemTypeTokens, 'product')) && !c.priceUnderH1
+  // as recommendations. So are products a page its publisher declares a
+  // collection (CollectionPage, SearchResultsPage) lists as an ItemList's
+  // items, when no microdata scope declares one product. A product page that
+  // lists only its related products declares no such page.
+  const listedOnly = s.listedProducts >= PRODUCT_CARDS &&
+    COLLECTION_PAGE_TYPES.some((type) => hasToken(s.jsonLdTypes, type)) &&
+    (s.productCards || !hasToken(s.itemTypeTokens, 'product'))
   if ((s.productCards || listedOnly) && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }
   }
