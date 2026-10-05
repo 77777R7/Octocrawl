@@ -228,6 +228,9 @@ describe('routePage', () => {
           // A size picker whose sizes are links.
           '<div class="variants"><a href="?v=1"><span class="price">$84.00</span> 600 ml</a><a href="?v=2"><span class="price">$96.00</span> 900 ml</a><a href="?v=3"><span class="price">$112.00</span> 1.2 l</a></div>',
         ].map((price) => wrap(`<main><h1>Cobalt teapot</h1>${price}<p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, related(names.slice(0, 3)))),
+        // The page's graph names the collection it is part of: that is not the page declaring itself one.
+        wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`,
+          `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': [{ '@type': 'WebPage', isPartOf: { '@type': 'CollectionPage', name: 'Teapots' } }, { '@type': 'BreadcrumbList', itemListElement: [] }, itemList(names.slice(0, 4))] })}</script>`),
         // A page of sections (Shopify): the product's own, then two of linked, priced tiles.
         wrap(`<main><div class="shopify-section"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><div class="shopify-section"><h2>You may also like</h2>${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div><div class="shopify-section"><h2>Recently viewed</h2>${Array.from({ length: 3 }, (_, i) => tile(i + 3)).join('')}</div></main>`, related(names.slice(0, 6))),
       ]) {

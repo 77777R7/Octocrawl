@@ -107,6 +107,8 @@ export interface PageSignals {
    * not the page's own product.
    */
   listedProducts: number
+  /** Normalized @type names of the JSON-LD's top-level nodes and @graph members: what the page declares itself. */
+  pageTypes: string[]
 }
 
 /** The fewest alike Product scopes that are a listing's cards rather than one product. */
@@ -132,6 +134,17 @@ function normalizeTypeName(raw: string): string {
     /^([^:]+):(.+)$/.exec(trimmed)?.[2] ??
     trimmed
   return last.toLowerCase()
+}
+
+/** The normalized @type names of a parsed JSON-LD script's top-level nodes and @graph members. */
+function collectPageTypes(root: unknown, out: string[]): void {
+  for (const node of Array.isArray(root) ? root : [root]) {
+    if (typeof node !== 'object' || node === null) continue
+    const record = node as Record<string, unknown>
+    const t = record['@type']
+    for (const type of typeof t === 'string' ? [t] : Array.isArray(t) ? t : []) if (typeof type === 'string') out.push(normalizeTypeName(type))
+    if (Array.isArray(record['@graph'])) collectPageTypes(record['@graph'], out)
+  }
 }
 
 /**
@@ -167,11 +180,14 @@ function collectJsonLdTypes(node: unknown, out: string[], listed: { products: nu
 function collectPageSignals(doc: Document): PageSignals {
   const jsonLdTypes: string[] = []
   const listed = { products: 0 }
+  const pageTypes: string[] = []
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
     try {
-      collectJsonLdTypes(JSON.parse(text), jsonLdTypes, listed)
+      const parsed: unknown = JSON.parse(text)
+      collectJsonLdTypes(parsed, jsonLdTypes, listed)
+      collectPageTypes(parsed, pageTypes)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
@@ -195,6 +211,7 @@ function collectPageSignals(doc: Document): PageSignals {
     postArticles: qsa(doc, 'article.post').length,
     productCards: productCards(doc),
     listedProducts: listed.products,
+    pageTypes,
   }
 }
 
@@ -304,11 +321,12 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Alike Product cards with no product declared in JSON-LD are a listing of
   // products (a category page), not one: the product strategy would cut them
   // as recommendations. So are products a page its publisher declares a
-  // collection (CollectionPage, SearchResultsPage) lists as an ItemList's
+  // collection (a top-level CollectionPage or SearchResultsPage node; one the
+  // page is only part of does not count) lists as an ItemList's
   // items, when no microdata scope declares one product. A product page that
   // lists only its related products declares no such page.
   const listedOnly = s.listedProducts >= PRODUCT_CARDS &&
-    COLLECTION_PAGE_TYPES.some((type) => hasToken(s.jsonLdTypes, type)) &&
+    COLLECTION_PAGE_TYPES.some((type) => hasToken(s.pageTypes, type)) &&
     (s.productCards || !hasToken(s.itemTypeTokens, 'product'))
   if ((s.productCards || listedOnly) && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }
