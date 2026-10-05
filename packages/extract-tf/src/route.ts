@@ -36,6 +36,8 @@ interface RouterCounts {
   linkDensity: number
   /** A visible buy box (see hasVisibleBuyBox). */
   buyBox: boolean
+  /** A price under the page's lone h1 (see hasPriceUnderH1). */
+  priceUnderH1: boolean
 }
 
 /**
@@ -57,12 +59,41 @@ function hasVisibleBuyBox(doc: Document): boolean {
   return heading === h1s[0]
 }
 
+/**
+ * A product page's price, whether or not the page shows others: the page's
+ * one h1, then a visible price before any other heading that is not a card's.
+ * A card's price is inside a list item, or inside an element with a sibling
+ * of its tag that shows a price too: a listing's prices are its cards'.
+ */
+function hasPriceUnderH1(doc: Document): boolean {
+  const h1s = qsa(doc, 'h1')
+  if (h1s.length !== 1) return false
+  const prices = visiblePrices(doc)
+  const priced = (el: Element) => prices.some((price) => el.contains(price))
+  const inCard = (price: Element): boolean => {
+    if (price.closest('li') !== null) return true
+    for (let up = price.parentElement; up !== null && up !== doc.body; up = up.parentElement) {
+      const parent = up.parentElement
+      if (parent !== null && Array.from(parent.children).some((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && priced(sibling))) return true
+    }
+    return false
+  }
+  const priceSet = new Set(prices)
+  const all = qsa(doc, '*')
+  for (const el of all.slice(all.indexOf(h1s[0]!) + 1)) {
+    if (/^h[1-6]$/.test(tagOf(el))) return false
+    if (priceSet.has(el)) return !inCard(el)
+  }
+  return false
+}
+
 function countAll(doc: Document): RouterCounts {
   const textLength = (el: Element | null): number => (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length
   const textChars = textLength(doc.body)
   const a = qsa(doc, 'a').length
   return {
     buyBox: hasVisibleBuyBox(doc),
+    priceUnderH1: hasPriceUnderH1(doc),
     li: qsa(doc, 'li').length,
     a,
     table: qsa(doc, 'table').length,
@@ -212,13 +243,16 @@ function productCards(doc: Document): boolean {
     return true
   })
   if (outer.length < PRODUCT_CARDS) return false
-  // One template: one tag, and classes every card carries. A card's own
-  // classes may differ from its neighbours' (WooCommerce marks each with its
-  // post id, its place in the row, its stock and its categories).
-  const classes = (el: Element): Set<string> => new Set(splitTokens(el.getAttribute('class') ?? ''))
-  const cardClasses = outer.map(classes)
-  const shared = [...cardClasses[0]!].filter((name) => cardClasses.every((set) => set.has(name)))
-  if (new Set(outer.map(tagOf)).size !== 1 || shared.length === 0 || outer.some((el) => el.querySelector('h1') !== null)) return false
+  // One template: one tag and the same classes. Siblings of one container
+  // need only share a class, as a card's own classes may differ from its
+  // neighbours' (WooCommerce marks each with its post id, its place in the
+  // row, its stock and its categories); a product page's own scope is not a
+  // sibling of the cards beside it.
+  const classes = (el: Element): string[] => splitTokens(el.getAttribute('class') ?? '')
+  const exact = new Set(outer.map((el) => `${tagOf(el)} ${classes(el).sort().join(' ')}`)).size === 1 && classes(outer[0]!).length > 0
+  const siblings = outer.every((el) => el.parentElement === outer[0]!.parentElement) && new Set(outer.map(tagOf)).size === 1
+  const shared = classes(outer[0]!).some((name) => outer.every((el) => classes(el).includes(name)))
+  if (!(exact || (siblings && shared)) || outer.some((el) => el.querySelector('h1') !== null)) return false
   for (const card of outer) {
     for (let up = card.parentElement; up !== null; up = up.parentElement) {
       if (hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)) return false
@@ -227,12 +261,10 @@ function productCards(doc: Document): boolean {
   const all = qsa(doc, '*')
   const first = all.indexOf(outer[0]!)
   if (all.some((el, at) => at < first && /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el)))) return false
-  // A lone h1 with a price of its own outside the cards is a product page's buy box, whatever the cards show. The
-  // buy box's price follows the h1; a price before it is the header's (a cart total).
+  // A lone h1 with a price of its own outside the cards is a product page's buy box, whatever the cards show. A
+  // price in the page's header or navigation is not one (a cart total).
   const h1s = qsa(doc, 'h1')
-  if (h1s.length !== 1) return true
-  const h1At = all.indexOf(h1s[0]!)
-  return !visiblePrices(doc).some((price) => all.indexOf(price) > h1At && !outer.some((card) => card.contains(price)))
+  return !(h1s.length === 1 && visiblePrices(doc).some((price) => price.closest('header, nav') === null && !outer.some((card) => card.contains(price))))
 }
 
 /** Exact, case-insensitive membership across all tokens. */
@@ -262,7 +294,9 @@ function hasProductSignals(s: PageSignals): boolean {
     hasToken(s.itemTypeTokens, 'product') ||
     hasToken(s.itempropTokens, 'product') ||
     hasToken(s.itempropTokens, 'offer')
-  if (strong) return true
+  // Products a page lists in JSON-LD made it a product page before they were
+  // counted apart; a page they do not make a listing (routeByCounts) stays one.
+  if (strong || s.listedProducts > 0) return true
   return countTokens(s.itempropTokens, PRICE_ITEMPROPS) >= 2
 }
 
@@ -298,8 +332,10 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // Alike Product cards with no product declared in JSON-LD are a listing of
   // products (a category page), not one: the product strategy would cut them
   // as recommendations. So are products the page declares only as an
-  // ItemList's items, when no microdata scope declares one product.
-  const listedOnly = s.listedProducts >= PRODUCT_CARDS && (s.productCards || !hasToken(s.itemTypeTokens, 'product'))
+  // ItemList's items, when no microdata scope declares one product and no
+  // price stands under the page's h1 (a product page that declares only its
+  // related products).
+  const listedOnly = s.listedProducts >= PRODUCT_CARDS && (s.productCards || !hasToken(s.itemTypeTokens, 'product')) && !c.priceUnderH1
   if ((s.productCards || listedOnly) && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }
   }

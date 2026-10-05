@@ -209,6 +209,23 @@ describe('routePage', () => {
       for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
     })
 
+    it('keeps product pages beside cards that share a class with them, or that show their price first, product pages', () => {
+      const card = (i: number, cls: string) => `<div class="${cls}" itemscope itemtype="https://schema.org/Product"><a href="/p/${i}">Teapot ${i}</a><span class="price">$1${i}.00</span></div>`
+      const cards = (cls: string) => `<div class="grid">${Array.from({ length: 4 }, (_, i) => card(i + 1, cls)).join('')}</div>`
+      for (const html of [
+        // The page's own scope shares the class "product" with the cards around it.
+        wrap(`<main><h1>Cobalt teapot</h1><div class="product product-main" itemscope itemtype="https://schema.org/Product"><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><h2>You may also like</h2>${cards('product product-card')}</main>`),
+        // The buy box shows its price above the h1.
+        wrap(`<main><div class="product-info"><span class="price">$84.00</span><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div>${cards('card')}</main>`),
+        // Only the related products are declared, in JSON-LD; the page's own price follows its h1.
+        wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, listed(names.slice(0, 3))),
+      ]) {
+        const doc = parse(html)
+        expect(routePage(doc.document).type).toBe('product')
+        doc.close()
+      }
+    })
+
     it('keeps a product page whose JSON-LD also lists related products a product page', () => {
       const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'Cobalt teapot', offers: { '@type': 'Offer', price: '84.00', priceCurrency: 'USD' } })}</script>`
       const html = wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 4 }, (_, i) => tile(i)).join('')}</div></main>`, own + listed(names.slice(0, 4)))
