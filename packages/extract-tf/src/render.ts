@@ -90,12 +90,22 @@ export function countEmptyTables(doc: Document): number {
   return empty
 }
 
+/** What the extraction knew of the page, weighed beside its signals. */
+export interface RenderContext {
+  /**
+   * The extracted region shows the product the page declares in its own
+   * markup (see extract.ts): a page of little text beside its scripts is then
+   * a small page, not a shell.
+   */
+  contentShown?: boolean
+}
+
 /**
  * Decide whether the page's data is most likely rendered client-side.
  * Every rule pairs a structural gap with script presence, so a static page
  * with an empty table or a "loading" word never trips it.
  */
-export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document): RenderSignals {
+export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, context: RenderContext = {}): RenderSignals {
   const textChars = cleaned.body ? collapsed(textOf(cleaned.body)).length : 0
   const emptyTables = countEmptyTables(cleaned)
   const markers = raw.markers
@@ -104,7 +114,7 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document): R
   let reason: RenderReason | null = null
   if (emptyTables > 0 && raw.scriptChars >= 1_000) reason = 'empty_table_with_scripts'
   else if (has('app_root_empty') && raw.scriptChars >= 500) reason = 'empty_app_root'
-  else if (textChars < 300 && raw.scriptChars >= 2_000) reason = 'script_shell'
+  else if (textChars < 300 && raw.scriptChars >= 2_000 && context.contentShown !== true) reason = 'script_shell'
   else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
   else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
   else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2) reason = 'hydration_shell'
