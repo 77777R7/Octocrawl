@@ -371,15 +371,21 @@ function isRootish(doc: Document, el: Element | null): boolean {
  * back to the article cascade rather than emit a guess.
  */
 /**
- * The shortest block that is a description rather than a label: the block
- * cascade's own minimum for prose. Table cells and list items count from five
- * characters, so a variation picker's "Size" and "Color" would otherwise pass
- * for the product's description.
+ * Whether a block says something of its own, not only the labels of form
+ * controls: a variation picker's table cells ("Size", "Color") label the
+ * selects that cleaning removed, and describe nothing.
  */
-const DESCRIPTION_MIN_CHARS = 25
+function describes(block: TextBlock): boolean {
+  const unlabelled = (node: Node): string => {
+    if (node.nodeType === 3) return node.textContent ?? ''
+    if (node.nodeType !== 1 || tagOf(node as Element) === 'label') return ''
+    return Array.from(node.childNodes).map(unlabelled).join('')
+  }
+  return /[\p{L}\p{N}]/u.test(unlabelled(block.el))
+}
 
 export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Element | null {
-  const described = blocks.filter((b) => b.length >= DESCRIPTION_MIN_CHARS)
+  const described = blocks.filter(describes)
   // A declared microdata scope is the publisher telling us the boundary
   // outright — but only when it is not simply the whole page.
   const scope = microdataProductScope(doc)

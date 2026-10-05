@@ -234,6 +234,23 @@ describe('PDP region selection', () => {
     expect(out.mainHtml).not.toContain('0 items')
   })
 
+  it('keeps a buy box whose own description is short: bullets, a spec table, CJK prose', () => {
+    const page = (lang: string, buyBox: string, beside: string) => `<!doctype html><html lang="${lang}"><head><title>Product</title>${PRODUCT_LD}</head><body>
+<main><div class="product">${buyBox}</div>${beside}</main></body></html>`
+    for (const [lang, buyBox, beside, outside] of [
+      ['en', '<h1>Linen shirt</h1><span class="price">$84.00</span><ul><li>Organic linen</li><li>Machine washable</li><li>Made in Portugal</li></ul>',
+        '<div class="rich-text"><p>Since 1998 we have made every garment in small batches in our own workshop by the sea.</p></div>', 'Since 1998'],
+      ['en', '<h1>Cordless drill</h1><span class="price">$129.00</span><table><tr><th>Voltage</th><td>18 V</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>',
+        '<div class="blog-teaser"><p>Five things every homeowner should know before buying a power tool this winter.</p></div>', 'Five things'],
+      ['zh', '<h1>防风保暖连帽衫</h1><span class="price">¥199.00</span><p>采用防风面料，轻便保暖，适合秋冬户外穿着</p>',
+        '<div class="notice"><p>本店所有商品均为正品，支持七天无理由退换，请放心选购。</p></div>', '本店所有商品'],
+    ] as const) {
+      const out = extractTf.extract(page(lang, buyBox, beside))
+      expect(out.strategy).toBe('product')
+      expect(out.mainHtml).not.toContain(outside)
+    }
+  })
+
   it('widens a bare buy box to the product that holds its description', () => {
     // books.toscrape.com: title, price and stock sit in one column, the
     // description and the Product Information table two levels further up.
