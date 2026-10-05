@@ -48,6 +48,7 @@ interface RouterCounts {
 function hasVisibleBuyBox(doc: Document): boolean {
   const h1s = qsa(doc, 'h1')
   const prices = visiblePrices(doc)
+  if (h1s.length === 0) return hasBuyBoxUnderH2(doc, prices)
   if (h1s.length !== 1 || prices.length !== 1 || prices[0]!.closest('li') !== null) return false
   let heading: Element | null = null
   for (const el of qsa(doc, '*')) {
@@ -55,6 +56,34 @@ function hasVisibleBuyBox(doc: Document): boolean {
     if (/^h[1-6]$/.test(tagOf(el))) heading = el
   }
   return heading === h1s[0]
+}
+
+/**
+ * A product page with no h1 (sandbox.oxylabs.io), titled by its one h2, not
+ * a link, then the first visible price after it with no other heading
+ * between. Other prices may follow (related products), so that price must not
+ * be a card's: not in a list item, and not inside an element with two or
+ * more siblings of its tag that show a price too.
+ */
+function hasBuyBoxUnderH2(doc: Document, prices: readonly Element[]): boolean {
+  const h2s = qsa(doc, 'h2')
+  if (h2s.length !== 1 || h2s[0]!.closest('a') !== null) return false
+  const all = qsa(doc, '*')
+  const priceSet = new Set(prices)
+  let price: Element | null = null
+  for (const el of all.slice(all.indexOf(h2s[0]!) + 1)) {
+    if (/^h[1-6]$/.test(tagOf(el))) return false
+    if (priceSet.has(el)) {
+      price = el
+      break
+    }
+  }
+  if (price === null || price.closest('li') !== null) return false
+  for (let up = price.parentElement; up !== null && up !== doc.body; up = up.parentElement) {
+    const siblings = Array.from(up.parentElement?.children ?? []).filter((sibling) => sibling !== up && tagOf(sibling) === tagOf(up) && prices.some((p) => sibling.contains(p)))
+    if (siblings.length >= 2) return false
+  }
+  return true
 }
 
 function countAll(doc: Document): RouterCounts {

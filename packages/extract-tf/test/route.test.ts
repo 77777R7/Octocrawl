@@ -132,6 +132,44 @@ describe('routePage', () => {
     doc.close()
   })
 
+  describe('a product page titled by its one h2, beside related products', () => {
+    // sandbox.oxylabs.io: no h1 and nothing declared; the game's title is the
+    // page's one h2, its price follows in the same block, and two related
+    // games show their own prices under linked h4 titles.
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>Action Adventure Fantasy, a land in grave danger and a moon crashing toward it.</p><div class="price-wrapper">8${n},99 €</div></div>`
+    const sidebar = `<div class="categories"><p>Game platforms:</p><ul>${['All', 'Nintendo', 'Xbox', 'Dreamcast', 'Playstation', 'Pc', 'Stadia', 'Wii', 'Switch', 'Gamecube'].map((c) => `<li><a href="/c/${c}">${c}</a></li>`).join('')}</ul></div>`
+    const pdp = wrap(`<main>${sidebar}<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2>
+<p><b>Developer:</b> Nintendo</p><p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves, and travels through time gathering the powers of the Seven Sages.</p>
+<div class="price">91,99 €</div><p>In stock</p></div></div><div class="related">${related(1)}${related(2)}</div></main>`)
+
+    it('routes it to product and keeps the related games out', () => {
+      const doc = parse(pdp)
+      expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+      doc.close()
+      const out = extractTf.extract(pdp)
+      expect(out.pageType).toBe('product')
+      expect(out.mainHtml).toContain('Seven Sages')
+      expect(out.mainHtml).toContain('91,99 €')
+      expect(out.mainHtml).not.toContain('Related game 1')
+    })
+
+    it('does not take a listing titled by one h2 for a product page', () => {
+      const card = (n: number) => `<div class="card"><a href="/products/${n}">Game ${n}</a><span class="price">${n}9,99 €</span></div>`
+      for (const body of [
+        // Priced cards under the listing's one h2.
+        `<main><h2>Nintendo games</h2><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+        // A featured game with its own title before the grid.
+        `<main><h2>Nintendo games</h2><div class="featured"><a href="/products/9"><h3>Featured game</h3></a><span class="price">59,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+        // The page's one h2 is a promotion's linked title, with a price of its own.
+        `<main><div class="promo"><a href="/sale"><h2>Summer sale</h2></a><span class="price">From 9,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+      ]) {
+        const doc = parse(wrap(body))
+        expect(routePage(doc.document).type).not.toBe('product')
+        doc.close()
+      }
+    })
+  })
+
   it('does not route a price that belongs to a listed item to product', () => {
     // One card under its own heading, or in a list item, is a listing of one.
     for (const body of [
