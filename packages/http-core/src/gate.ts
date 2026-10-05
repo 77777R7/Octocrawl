@@ -19,7 +19,8 @@
  *
  * Honesty rules, mirroring the page-type router's signal discipline:
  *  - a status code alone is only decisive where the code *means* the gate
- *    (429 rate limit, 451 legal, 401 auth). A bare 403 is NOT enough — it is
+ *    (429 rate limit, 451 legal, 401 auth), and a 429 yields only to a
+ *    decisive challenge page served with it. A bare 403 is NOT enough — it is
  *    indistinguishable from an ordinary permission error, so it classifies as
  *    nothing on its own and the caller keeps reporting `http_error`.
  *  - otherwise a strong vendor/interstitial signal is required, or two weak
@@ -208,6 +209,14 @@ const CF_JSD_PATH = '/cdn-cgi/challenge-platform/scripts/jsd/'
 const PX_CAPTCHA_SCRIPT = /\/captcha\/captcha\.js|captcha\.px-(?:cdn|cloud)\.net\/[^"'\s<>]*captcha\.js/
 const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/i
 
+/** The PerimeterX challenge's signals, or null when the page is not the challenge. */
+function perimeterXChallenge(head: string, lower: string): string[] | null {
+  if (!lower.includes('_pxappid') || !PX_CAPTCHA_SCRIPT.test(lower)) return null
+  const signals = ['px_captcha_script', 'px_app_id']
+  if (PX_CAPTCHA_CONTAINER.test(head)) signals.push('px_captcha_container')
+  return signals
+}
+
 function challengePlatformBeyondJsd(lower: string): boolean {
   const marker = '/cdn-cgi/challenge-platform'
   for (let at = lower.indexOf(marker); at !== -1; at = lower.indexOf(marker, at + marker.length)) {
@@ -254,6 +263,14 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
 
   // --- statuses whose meaning *is* the gate -------------------------------
   if (res.status === 429) {
+    // PerimeterX serves its press-and-hold challenge with 429 on some sites
+    // (Wayfair and its sibling stores, 2026-10-05). A person gets through
+    // that page; waiting does not, so rate_limit (terminal, no handoff) would
+    // be the wrong claim. Only the decisive challenge evidence overrides the
+    // status: copy or the sensor alone leave a 429 a rate limit. The host
+    // cooldown and Retry-After follow the status, not this verdict.
+    const px = perimeterXChallenge(head, lower)
+    if (px !== null) return { reason: 'captcha', signals: [...px, 'status_429'] }
     return { reason: 'rate_limit', signals: ['status_429'] }
   }
   if (res.status === 451) {
@@ -297,11 +314,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // PerimeterX's press-and-hold, served with HTTP 200 (Walmart, after a 307
   // to /blocked) or 403. Its button needs a person to press and hold it: a
   // widget, not an interstitial a browser clears by running its JS.
-  if (lower.includes('_pxappid') && PX_CAPTCHA_SCRIPT.test(lower)) {
-    const signals = ['px_captcha_script', 'px_app_id']
-    if (PX_CAPTCHA_CONTAINER.test(head)) signals.push('px_captcha_container')
-    return { reason: 'captcha', signals }
-  }
+  const px = perimeterXChallenge(head, lower)
+  if (px !== null) return { reason: 'captcha', signals: px }
 
   if (contentful) return null
 
