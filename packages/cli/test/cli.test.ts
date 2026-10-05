@@ -48,7 +48,7 @@ describe('flags', () => {
   })
 
   it('refuses an unknown flag, a flag of another command and a malformed value by name', () => {
-    expect(() => parseCommandLine('scrape', ['u', '--bogus'])).toThrow('unknown flag --bogus for w2l scrape')
+    expect(() => parseCommandLine('scrape', ['u', '--bogus'])).toThrow('unknown flag --bogus for octocrawl scrape')
     expect(() => parseCommandLine('scrape', ['u', '--max-pages', '3'])).toThrow('unknown flag --max-pages')
     expect(() => parseCommandLine('scrape', ['u', '--max-age', 'soon'])).toThrow('--max-age takes an integer')
     expect(() => parseCommandLine('scrape', ['u', '--headers', '{bad'])).toThrow('--headers takes JSON')
@@ -56,9 +56,9 @@ describe('flags', () => {
     expect(() => parseCommandLine('scrape', ['u', '--mobile=yes'])).toThrow('--mobile is true or false')
     expect(() => parseCommandLine('scrape', ['u', '--no-mobile=false'])).toThrow('--no-mobile takes no value')
     expect(() => parseCommandLine('scrape', ['u', '--task-root='])).toThrow('--task-root takes a directory')
-    expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('unknown flag --out for w2l map')
+    expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('unknown flag --out for octocrawl map')
     // A command runs no delivery worker, so it offers no webhook.
-    expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*w2l serve/)
+    expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*octocrawl serve/)
     expect(() => parseCommandLine('batch', ['u', '--webhook={"url":"https://hooks.example/w"}'])).toThrow(/--webhook is not offered/)
   })
 })
@@ -94,7 +94,7 @@ async function cli(argv: string[], signal?: AbortSignal): Promise<{ code: number
   return { code, out: out.join('\n'), err: err.join('\n') }
 }
 
-describe('w2l against a local site', () => {
+describe('octocrawl against a local site', () => {
   it('scrapes a page as JSON with its Evidence Record, as Markdown alone, and to files with each table as CSV', async () => {
     const json = await cli(['scrape', `${origin}/tides/a`, '--formats', 'markdown,tables'])
     expect(json.code).toBe(0)
@@ -118,7 +118,7 @@ describe('w2l against a local site', () => {
     const unreachable = 'http://127.0.0.1:1/gone'
     const written = await cli(['batch', `${origin}/tides/a`, unreachable, '--out', dir])
     expect(written.code).toBe(0)
-    expect(written.err).toMatch(/wrote 2 results \(results.jsonl, results.csv\), 1 Markdown files/)
+    expect(written.err).toMatch(/^octocrawl: wrote 2 results \(results.jsonl, results.csv\), 1 Markdown files/m)
     const lines = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
     expect(lines.at(-1)).toBe('')
     expect(lines[0]).toBe(EVIDENCE_COLUMNS.join(','))
@@ -155,6 +155,13 @@ describe('w2l against a local site', () => {
     expect(refused.err).toMatch(/maxAge must be an integer number of milliseconds/)
     expect((await cli(['fetch', 'x'])).code).toBe(2)
     expect((await cli(['scrape'])).err).toMatch(/takes one URL/)
+    // Every message names the command the person types.
+    expect((await cli(['bogus'])).err).toMatch(/^octocrawl: unknown command bogus/)
+    // A one-off command listens nowhere: a listen address for the API server in the environment is not its concern.
+    const out: string[] = []
+    const err: string[] = []
+    const code = await runCli(['scrape', `${origin}/tides/a`, '--markdown'], { env: { W2L_TASK_ROOT: join(root, 'tasks'), W2L_API_HOST: '0.0.0.0' }, stdout: (text) => out.push(text), stderr: (text) => err.push(text) })
+    expect({ code, err: err.join('\n') }).toMatchObject({ code: 0 })
   })
 
   it('runs a batch and a crawl to the end and answers with the report and every page; maps a site', async () => {
@@ -162,7 +169,7 @@ describe('w2l against a local site', () => {
     await writeFile(urlsFile, `# tide pages\n${origin}/tides/a\n\n${origin}/tides/c\n`)
     const batch = await cli(['batch', `${origin}/tides/b`, '--urls-file', urlsFile, '--max-concurrency', '2'])
     expect(batch.code).toBe(0)
-    expect(batch.err).toMatch(/w2l batch: task [0-9a-f-]{36}/)
+    expect(batch.err).toMatch(/octocrawl batch: task [0-9a-f-]{36}/)
     const answer = JSON.parse(batch.out)
     expect(answer.report).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
     expect(answer.items.map((item: { url: string }) => item.url).sort()).toEqual([`${origin}/tides/a`, `${origin}/tides/b`, `${origin}/tides/c`])

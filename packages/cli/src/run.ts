@@ -1,5 +1,5 @@
 /**
- * `w2l`: the API's engine on the command line, in this process. scrape and
+ * `octocrawl`: the API's engine on the command line, in this process. scrape and
  * map answer at once; crawl and batch run to the end and answer with their
  * report and every page; serve runs the API itself. A one-off command does
  * not resume the task root's unfinished jobs (`resumeOnStart: false`).
@@ -44,7 +44,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   if (name === 'serve') return serve(rest, io)
   if (name === 'login') return login(rest, io)
   if (!(COMMANDS as readonly string[]).includes(name)) {
-    io.stderr(`w2l: unknown command ${name}\n\n${usage(null)}`)
+    io.stderr(`octocrawl: unknown command ${name}\n\n${usage(null)}`)
     return 2
   }
   const command = name as Command
@@ -54,8 +54,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command === 'batch' && line.cli.urlsFile !== undefined) line.urls.push(...await urlsFrom(line.cli.urlsFile))
     // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
-    const listen = parseListen([], io.env)
-    for (const notice of listen.notices) io.stderr(`w2l: ${notice}`)
+    // A one-off command listens nowhere: the API server's listen address is not its concern, only the network policy is.
+    const listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
+    for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
       taskRoot,
       networkPolicy: listen.networkPolicy,
@@ -72,7 +73,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     } catch (error) {
       // Ctrl-C during a scrape or a map: the engine gave up the call; nothing is left to resume.
       if (io.signal?.aborted && !(error instanceof UsageError) && !(error instanceof RequestError)) {
-        io.stderr(`w2l ${command}: interrupted`)
+        io.stderr(`octocrawl ${command}: interrupted`)
         return 130
       }
       throw error
@@ -81,7 +82,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
   } catch (error) {
     if (error instanceof UsageError || error instanceof RequestError) {
-      io.stderr(`w2l ${command}: ${error.message}`)
+      io.stderr(`octocrawl ${command}: ${error.message}`)
       return 2
     }
     throw error
@@ -92,7 +93,7 @@ const ORIGIN = `cli@${CLI_VERSION}`
 
 async function runCommand(engine: ApiEngine, command: Command, urls: string[], body: Record<string, unknown>, cli: CliOptions, io: CliIo): Promise<number> {
   const one = (): string => {
-    if (urls.length !== 1) throw new UsageError(`w2l ${command} takes one URL, got ${urls.length}`)
+    if (urls.length !== 1) throw new UsageError(`octocrawl ${command} takes one URL, got ${urls.length}`)
     return urls[0]!
   }
   switch (command) {
@@ -101,7 +102,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       const response = await engine.scrape(req, io.signal === undefined ? {} : { signal: io.signal }, handoffPrompts('scrape', io))
       if (req.handoff !== undefined && response.handoff !== undefined) {
         const missed = response.warnings?.find((warning) => warning.code === 'handoff_not_through')
-        io.stderr(`w2l scrape: ${missed?.message ?? 'not handed over'}`)
+        io.stderr(`octocrawl scrape: ${missed?.message ?? 'not handed over'}`)
       }
       if (cli.out !== undefined) await writeOut(cli.out, [response], null, io)
       if (cli.markdown) io.stdout(response.markdown ?? '')
@@ -116,11 +117,11 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
     case 'crawl': {
       let taskId: string
       if (cli.resume !== undefined) {
-        if (urls.length > 0) throw new UsageError('w2l crawl --resume takes the task id, not a URL')
+        if (urls.length > 0) throw new UsageError('octocrawl crawl --resume takes the task id, not a URL')
         // A crawl recorded as pending or running may be another process's (an API server on this task root): resuming it here would run it twice.
         const current = await engine.getCrawl(cli.resume)
         if (current !== null && (current.status === 'pending' || current.status === 'running')) {
-          throw new UsageError(`crawl ${cli.resume} is ${current.status}: another process may be running it. If none is, w2l serve on this task root resumes it`)
+          throw new UsageError(`crawl ${cli.resume} is ${current.status}: another process may be running it. If none is, octocrawl serve on this task root resumes it`)
         }
         const accepted = await engine.resumeCrawl(cli.resume)
         if (accepted === null) throw new UsageError(`no crawl ${cli.resume} under this task root`)
@@ -128,13 +129,13 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       } else {
         taskId = (await engine.startCrawl(parseCrawlStartRequest({ ...body, url: one(), origin: ORIGIN }))).taskId
       }
-      io.stderr(`w2l crawl: task ${taskId}`)
+      io.stderr(`octocrawl crawl: task ${taskId}`)
       return finish(engine, 'crawl', taskId, cli, io)
     }
     case 'batch': {
-      if (urls.length === 0) throw new UsageError('w2l batch takes URLs as arguments or --urls-file')
+      if (urls.length === 0) throw new UsageError('octocrawl batch takes URLs as arguments or --urls-file')
       const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, urls, origin: ORIGIN }))
-      io.stderr(`w2l batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
+      io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
       return finish(engine, 'batch', accepted.taskId, cli, io)
     }
   }
@@ -153,7 +154,7 @@ type Page = {
 async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo): Promise<number> {
   let report = await settled(engine, kind, taskId, io.signal)
   if (report === null) {
-    io.stderr(`w2l ${kind}: interrupted; the task is paused${kind === 'crawl' ? `, and w2l crawl --resume ${taskId} continues it` : ' and resumes when the API starts on this task root'}`)
+    io.stderr(`octocrawl ${kind}: interrupted; the task is paused${kind === 'crawl' ? `, and octocrawl crawl --resume ${taskId} continues it` : ' and resumes when the API starts on this task root'}`)
     return 130
   }
   if (kind === 'batch' && cli.handoff === true) report = await handOff(engine, taskId, io) ?? report
@@ -177,9 +178,9 @@ async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string
 /** What a handoff tells the person on the terminal while it waits for them. */
 function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
   return {
-    onWaiting: (url, check) => io.stderr(`w2l ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
-    onConfirm: (url) => io.stderr(`w2l ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (W2L reads it only once you act in its tab)`),
-    onHidden: (url) => io.stderr(`w2l ${command}: the Chrome tab W2L opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
+    onWaiting: (url, check) => io.stderr(`octocrawl ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
+    onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (W2L reads it only once you act in its tab)`),
+    onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab W2L opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
     ...(io.signal === undefined ? {} : { signal: io.signal }),
   }
 }
@@ -189,16 +190,16 @@ async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<Cr
   const before = await engine.getBatch(taskId)
   const waiting = before?.waitingForPerson ?? 0
   if (waiting === 0) return null
-  io.stderr(`w2l batch: ${waiting} page${waiting === 1 ? '' : 's'} stopped at a check; opening ${waiting === 1 ? 'it' : 'them'} in your Chrome, one at a time (click Allow if Chrome asks)`)
+  io.stderr(`octocrawl batch: ${waiting} page${waiting === 1 ? '' : 's'} stopped at a check; opening ${waiting === 1 ? 'it' : 'them'} in your Chrome, one at a time (click Allow if Chrome asks)`)
   try {
     const done = await engine.handOffBatch(taskId, {}, handoffPrompts('batch', io))
     if (done !== null) {
-      io.stderr(`w2l batch: ${done.through} of ${done.handedOff} read in your Chrome`)
-      for (const item of done.items) if (!item.through) io.stderr(`w2l batch: ${item.url} not read: ${item.reason ?? 'not through'}`)
+      io.stderr(`octocrawl batch: ${done.through} of ${done.handedOff} read in your Chrome`)
+      for (const item of done.items) if (!item.through) io.stderr(`octocrawl batch: ${item.url} not read: ${item.reason ?? 'not through'}`)
     }
   } catch (error) {
     // The batch's results are written whatever became of the handoff.
-    io.stderr(`w2l batch: no handoff: ${error instanceof Error ? error.message : String(error)}`)
+    io.stderr(`octocrawl batch: no handoff: ${error instanceof Error ? error.message : String(error)}`)
   }
   return engine.getBatch(taskId)
 }
@@ -238,7 +239,7 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
     }
   }
   await writeFile(join(dir, 'results.csv'), rows.map((row) => `${row}\r\n`).join(''))
-  io.stderr(`w2l: wrote ${pages.length} results (results.jsonl, results.csv), ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
+  io.stderr(`octocrawl: wrote ${pages.length} results (results.jsonl, results.csv), ${markdowns} Markdown files and ${tables} CSV tables to ${dir}`)
 }
 
 /**
@@ -293,7 +294,7 @@ async function urlsFrom(file: string): Promise<string[]> {
 
 async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv.includes('--help')) {
-    io.stdout('usage: w2l serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT.')
+    io.stdout('usage: octocrawl serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT.')
     return 0
   }
   // --task-root, as on the other commands; the server reads W2L_TASK_ROOT.
@@ -303,7 +304,7 @@ async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (at !== -1) {
     const inline = rest[at]!.includes('=') ? rest[at]!.slice(rest[at]!.indexOf('=') + 1) : undefined
     const value = inline ?? rest[at + 1]
-    if (value === undefined || value === '' || value.startsWith('--')) { io.stderr('w2l serve: --task-root takes a directory'); return 2 }
+    if (value === undefined || value === '' || value.startsWith('--')) { io.stderr('octocrawl serve: --task-root takes a directory'); return 2 }
     rest.splice(at, inline === undefined ? 2 : 1)
     env = { ...io.env, W2L_TASK_ROOT: value }
   }

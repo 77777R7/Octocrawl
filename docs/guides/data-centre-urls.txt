@@ -1,5 +1,5 @@
 # Ten public data-centre sources from the seed user's list (research/coos-pilot/coos-links.csv).
-# Lines starting with # are ignored by `w2l batch --urls-file`.
+# Lines starting with # are ignored by `octocrawl batch --urls-file`.
 https://docs.equinix.com/colocation/availability/
 https://datacenters.google/efficiency/
 https://datacenters.atmeta.com/all-locations/

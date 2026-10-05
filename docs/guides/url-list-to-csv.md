@@ -1,6 +1,6 @@
 # From a URL list to a CSV with evidence
 
-You have a list of web pages and PDFs, and you want a table: one row per URL, saying what W2L read, when, from where, and what it could not read and why. This guide builds that table for ten public data-centre sources, first with the `w2l` command line and then with the Python client. The two give the same columns.
+You have a list of web pages and PDFs, and you want a table: one row per URL, saying what W2L read, when, from where, and what it could not read and why. This guide builds that table for ten public data-centre sources, first with the `octocrawl` command line and then with the Python client. The two give the same columns.
 
 The example list is [data-centre-urls.txt](data-centre-urls.txt). It holds ten URLs taken from the seed user's public source list ([research/coos-pilot/coos-links.csv](../../research/coos-pilot/coos-links.csv)): operator pages, two PDFs, a sustainability page that needs a browser, and four sources W2L could not read on 2026-10-03. Every output shown below is from that day's run, through an HTTP proxy, on commit `8356314` ([run record](../../research/parity/runs/2026-10-03-p2-guides.md)).
 
@@ -18,7 +18,7 @@ npx tsc -b
 
 `npx playwright install chromium` is for pages that only render in a browser; W2L escalates to it on its own when the plain HTTP read is not enough.
 
-Once the packages are published, `npx @w2l/cli` replaces `npm run w2l --` below, and `pip install 'w2l[pandas]'` replaces the local install.
+Once the packages are published, `npx octocrawl` replaces `npm run w2l --` below, and `pip install 'octocrawl-client[pandas]'` replaces the local install.
 
 If your shell sets `HTTPS_PROXY`, W2L sends its requests through that proxy and says so on its first line of output. Results can differ with and without a proxy, so note which one you used.
 
@@ -69,10 +69,10 @@ python3 -m venv .venv
 ```
 
 ```python
-import w2l
+import octocrawl_client
 
 urls = [line.strip() for line in open("docs/guides/data-centre-urls.txt") if line.strip() and not line.startswith("#")]
-result = w2l.batch(urls, formats=["markdown", "tables"])
+result = octocrawl_client.batch(urls, formats=["markdown", "tables"])
 print(result.report["status"], result.report["succeeded"], result.report["failed"])
 
 frame = result.to_pandas(include_markdown=False)

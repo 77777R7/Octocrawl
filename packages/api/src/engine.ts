@@ -3,7 +3,7 @@
  * One crawl is CrawlOrchestrator. No second fetcher.
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
@@ -253,7 +253,7 @@ export interface ApiEngine {
   endHandoffs(): Promise<void>
   /**
    * The person's login to a site, saved from their running Chrome into the
-   * sessions file (`w2l login import`), on an engine that serves them alone;
+   * sessions file (`octocrawl login import`), on an engine that serves them alone;
    * a LoginsUnavailableError elsewhere, a RequestError for a site that is not
    * one, a ChromeLoginError when Chrome cannot give it.
    */
@@ -319,7 +319,7 @@ export interface ApiEngineOptions {
    */
   hosted?: boolean
   /**
-   * The file of the user's saved logins (`w2l login import`), read by mode
+   * The file of the user's saved logins (`octocrawl login import`), read by mode
    * `authed` to fetch a page with the session saved for its domain. The
    * engine only reads it; a run never writes a session there. Absent or
    * null: no saved logins, and mode `authed` has no session to use. A
@@ -365,7 +365,7 @@ export interface ApiEngineOptions {
   /**
    * Whether the engine, as it opens, resumes the batches and crawls of its
    * task root that no process finished, and re-offers finished jobs'
-   * webhooks. Default true: the API server. A one-off command (`w2l scrape`)
+   * webhooks. Default true: the API server. A one-off command (`octocrawl scrape`)
    * passes false, so it neither runs nor waits for earlier jobs.
    */
   resumeOnStart?: boolean
@@ -402,6 +402,7 @@ type CacheAnswer =
 
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
+  prepareTaskRoot(taskRoot)
   const monitorStore = MonitorStore.open(join(taskRoot, 'section-b-control.sqlite'), {leaseMs: options.monitorLeaseMs, attemptTimeoutMs: options.monitorAttemptTimeoutMs})
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
   const shutdownController = new AbortController()
@@ -694,6 +695,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   async function loadCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -711,6 +714,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
   /** A batch's status: the latest attempt's report with the batch's totals, the cap in force, the skipped entries and its webhook's standing. */
   async function loadBatch(taskId: string): Promise<BatchStatusResponse | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -725,7 +730,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
-      const waitingForPerson = userChrome === null || handoffUnread(task) !== null ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
+      const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -785,6 +790,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   async function loadCrawlPageList(taskId: string, query: CrawlPageQuery | undefined, kind: StepPageQuery['kind'], allAttempts = false): Promise<CrawlPageList<CrawlPage> | null> {
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
     if (!existsSync(join(taskRoot, taskId))) return null
     const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
     try {
@@ -801,7 +808,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       })
       const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && handoffUnread(task) === null)),
+        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && offersHandoff(task))),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -833,7 +840,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A scrape's `handoff` is offered here, and asks for what a page read in the person's Chrome can give. */
   function checkHandoff(req: ScrapeRequest): void {
     if (req.handoff === undefined) return
-    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
+    if (userChrome === null) throw new RequestError('handoff: this server does not hand pages to a person; run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['handoff'] })
     const unread = unreadByPerson(fetchOptions(req, req.formats))
     if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
   }
@@ -863,13 +870,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stopped = `${result.requestedUrl} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass`
     const rationale = tried
       ? `${stopped}, and handed to you in your own Chrome it was not read there (the handoff_not_through warning says why): send the request again with handoff to try once more, with a longer handoff.waitMs if you needed more time`
-      : `${stopped}: send the request again with handoff: true (w2l scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
+      : `${stopped}: send the request again with handoff: true (octocrawl scrape --handoff) to get through it yourself in your own Chrome, and W2L reads the page there`
     return { ...result, handoff: { reason: HANDOFF_REASONS[blockReason]!, liveViewUrl: null, rationale } }
   }
 
   /** handOffBatch's work: see ApiEngine.handOffBatch. */
   async function handOff(taskId: string, req: BatchHandoffRequest, hooks: HandoffHooks): Promise<BatchHandoffResponse | null> {
-    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (w2l serve, the local MCP host, or the w2l CLI) to open them in your Chrome')
+    // A job id names a directory under the task root: anything but an id this server issues names none.
+    if (!UUID.test(taskId)) return null
+    if (userChrome === null) throw new HandoffUnavailableError('this server does not hand pages to a person: run W2L on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI) to open them in your Chrome')
     if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('W2L is shutting down')
     if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
     const store = SqliteTaskStore.open(join(taskRoot, taskId))
@@ -880,6 +889,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
       const unread = handoffUnread(task)
       if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
+      if (webhookOf(task) !== undefined) throw new CrawlStateError(`batch ${taskId} has a webhook: a page read in your own Chrome is read signed in as you, and is not sent to another address; its stopped items are not handed over`)
       handoffs.add(taskId)
       try {
         const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
@@ -1440,6 +1450,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async getBatchErrors(taskId, query = {}) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       const store = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
       try {
@@ -1473,6 +1485,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     getCrawlWithSteps: loadCrawlWithSteps,
 
     async getCrawlStatusPage(taskId, query) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       if (query.cursor !== undefined) {
         try { decodeStepCursor(query.cursor) } catch { throw new RequestError('cursor is not one this API issued') }
@@ -1513,6 +1527,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async cancelCrawl(taskId) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId))) return null
       const store = SqliteTaskStore.open(join(taskRoot, taskId))
       try {
@@ -1535,6 +1551,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async resumeCrawl(taskId) {
+      // A job id names a directory under the task root: anything but an id this server issues names none.
+      if (!UUID.test(taskId)) return null
       if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
       const store = SqliteTaskStore.open(join(taskRoot, taskId))
       let launched = false
@@ -1556,7 +1574,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     },
 
     async importLogin(req) {
-      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (w2l serve, the local MCP host, or w2l login import)')
+      if (options.hosted === true || (options.sessionsFile ?? null) === null || userChrome === null) throw new LoginsUnavailableError('this server does not save logins: run W2L on your own machine (octocrawl serve, the local MCP host, or octocrawl login import)')
       try { loginDomain(req.site) }
       catch (error) { throw new RequestError(error instanceof Error ? error.message : String(error)) }
       const imported = await importChromeLogin({
@@ -1719,7 +1737,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function appendToBatch(req: ParsedBatchStartRequest, canonical: readonly string[], submission: Submission<BatchAccepted>): Promise<BatchAccepted> {
     const id = req.appendToId!
-    if (!existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw new TaskNotFoundError(`batch not found: ${id}`)
+    if (!UUID.test(id) || !existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw new TaskNotFoundError(`batch not found: ${id}`)
     const store = SqliteTaskStore.open(join(taskRoot, id))
     let launched = false
     try {
@@ -1847,6 +1865,18 @@ function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(res
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * A task root holds pages read with the person's session, saved files and
+ * job databases: one this engine creates is readable by them alone, with a
+ * .gitignore so a repository it sits in does not take it in. A root that
+ * exists is theirs, and is left as it is.
+ */
+function prepareTaskRoot(taskRoot: string): void {
+  if (existsSync(taskRoot)) return
+  mkdirSync(taskRoot, { recursive: true, mode: 0o700 })
+  writeFileSync(join(taskRoot, '.gitignore'), '*\n')
+}
 
 /** `origin` and `integration` as the request said them, for the task's `attribution`; nothing when it named neither. */
 function attributionOf(req: RequestAttribution): Pick<Task, 'attribution'> {
@@ -2019,6 +2049,11 @@ function handoffUnread(task: Task): string | null {
   return task.batch === undefined ? null : unreadByPerson(fetchOptions(task.batch, task.batch.formats))
 }
 
+/** Whether a batch's stopped items can be handed to the person: not when it asked for what their Chrome cannot give, nor when it has a webhook, which would send pages read signed in as them to another address. */
+function offersHandoff(task: Task): boolean {
+  return handoffUnread(task) === null && webhookOf(task) === undefined
+}
+
 /** What a request asks for that a page read in the person's Chrome cannot give: page actions or a screenshot, W2L's browser's to take; null when nothing. */
 function unreadByPerson(options: FetchOptions): string | null {
   if (options.actions !== undefined && options.actions.length > 0) return 'page actions'
@@ -2042,7 +2077,7 @@ function handoffRequestOf(step: StepRecord): { reason: string; liveViewUrl: null
   return {
     reason: HANDOFF_REASONS[blockReason]!,
     liveViewUrl: null,
-    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or w2l batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
+    rationale: `${step.url} stopped at a ${blockReason.replace(/_/g, ' ')} W2L does not pass: POST /v1/batches/${step.taskId}/handoff (MCP hand_off_batch, or octocrawl batch --handoff) opens it in your own Chrome, where you get through it, and W2L reads the page there`,
   }
 }
 
@@ -2202,7 +2237,7 @@ export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): strin
   return env.W2L_SESSIONS_FILE ?? join(homedir(), '.w2l', 'sessions.json')
 }
 
-/** A session store the engine reads but never writes: saved logins come from `w2l login import` alone. */
+/** A session store the engine reads but never writes: saved logins come from `octocrawl login import` alone. */
 function readOnlySessions(store: SessionStore): SessionStore {
   return { load: (domain) => store.load(domain), save: async () => {} }
 }

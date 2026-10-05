@@ -625,7 +625,7 @@ export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_
 
 /**
  * `POST /v1/logins/import`: save the person's login to `site` (a domain or a
- * page URL) from the Chrome they use, as `w2l login import` does, on a server
+ * page URL) from the Chrome they use, as `octocrawl login import` does, on a server
  * on their machine. `approveTimeoutMs`: how long to wait for them to click
  * Allow in Chrome, 10 s to 10 min; default 2 min.
  */
@@ -878,7 +878,7 @@ export class RequestError extends Error {
 
 /** The hints a refusal carries for the options W2L does not offer: the next honest step, never a way around the refusal. */
 export const REFUSAL_HINTS = {
-  stealth: "W2L does not offer a stealth mode or stealth proxies: every fetch declares W2L's identity; a proxy or session you own (mode authed) is the supported route",
+  stealth: "W2L does not offer a stealth mode or stealth proxies; a proxy or session you own (mode authed) is the supported route",
   ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
   useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
@@ -1728,6 +1728,8 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
   const cache = readCacheOptions(rec, mode)
   // A page after actions is that run's page: it is never stored, and never answered from a page stored without them.
   if (actions !== undefined && (cacheLookupRequested(cache) || cache.storeInCache === true)) throw new RequestError('the cache is not available with actions: a page after actions is never stored or reused')
+  // A script in a page read with the person's session could read that session's cookies and storage; clicks, typing and scrolling stay available.
+  if (mode === 'authed' && actions?.some((action) => action.type === 'executeJavascript')) throw new RequestError("executeJavascript is not available in mode 'authed': a script could read your session's cookies and storage; click, write, press, scroll and the list steps are")
   return {
     onlyMainContent: rec.onlyMainContent as boolean | undefined,
     waitFor: readMilliseconds(rec.waitFor, 'waitFor', 0, MAX_WAIT_FOR_MS),
@@ -2025,6 +2027,8 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const includeSubdomains = readBatchScopeNoOp(rec.includeSubdomains, 'includeSubdomains')
   const webhook = readWebhook(rec.webhook)
   const mode = readMode(rec.mode)
+  // Pages read with the person's session stay with the caller: a webhook would send them to another address.
+  if (mode === 'authed' && webhook !== undefined) throw new RequestError("webhook is not available in mode 'authed': pages read with your session are not sent to another address; read them from the batch")
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const req: ParsedBatchStartRequest = {

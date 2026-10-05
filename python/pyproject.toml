@@ -3,9 +3,9 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "w2l"
+name = "octocrawl-client"
 version = "0.3.0"
-description = "Python client for the W2L API: web pages as Markdown, tables and JSON, each with its Evidence Record, into pandas."
+description = "Python client for the Octocrawl API: web pages as Markdown, tables and JSON, each with its Evidence Record, into pandas."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -23,8 +23,8 @@ pandas = ["pandas>=1.5"]
 test = ["pytest>=7", "pandas>=1.5"]
 
 [project.urls]
-Homepage = "https://github.com/77777R7/w2l"
-Source = "https://github.com/77777R7/w2l/tree/main/python"
+Homepage = "https://github.com/77777R7/Octocrawl"
+Source = "https://github.com/77777R7/Octocrawl/tree/main/python"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/w2l"]
+packages = ["src/octocrawl_client"]

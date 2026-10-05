@@ -1,5 +1,5 @@
 /**
- * `w2l login import`: the user's own login, taken from the Chrome they
+ * `octocrawl login import`: the user's own login, taken from the Chrome they
  * already use, so mode `authed` can read a page as them without a second
  * browser or a second sign-in.
  *
@@ -258,7 +258,7 @@ export async function importChromeLogin(options: ImportChromeLoginOptions): Prom
   const kept = (storage?.origins ?? []).filter((origin) => origin.localStorage.length > 0)
   if (cookies.length === 0 && kept.length === 0) {
     const below = hostsBelow(all, domain)
-    if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. w2l login import ${below[0]}`)
+    if (below.length > 0) throw new ChromeLoginError(`Chrome sets no cookie on ${domain} itself, only on hosts under it (${below.slice(0, 3).join(', ')}${below.length > 3 ? ', ...' : ''}): import the host you sign in on, e.g. octocrawl login import ${below[0]}`)
     const tabs = storage === null ? `, and no tab of ${domain} is open to read its localStorage from`
       : storage.unread.length > 0 ? `, and Chrome did not give the localStorage of its open tabs (${storage.unread.map((read) => `${read.origin}: ${read.error}`).join(', ')}; reload them)`
         : `, and its open tabs hold no localStorage`
@@ -375,7 +375,7 @@ function recordedSha256(snapshot: SessionSnapshot): string {
   return sessionSha256({ ...(snapshot.cookies === undefined ? {} : { cookies: snapshot.cookies }), ...(snapshot.storageState === undefined ? {} : { storageState: snapshot.storageState }) })
 }
 
-/** The saved logins, by domain, without their cookies or storage values: what `w2l login list` shows. */
+/** The saved logins, by domain, without their cookies or storage values: what `octocrawl login list` shows. */
 export async function listSavedLogins(sessionsFile: string): Promise<{ domain: string; savedAt: string; cookieCount: number; localStorage: LoginStorage | null; sessionSha256: string }[]> {
   return (await new FileSessionStore(sessionsFile).list())
     .filter((s) => s.vendor === 'browser_local_authed')

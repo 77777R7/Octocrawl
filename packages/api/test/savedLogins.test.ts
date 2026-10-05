@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { connect, type AddressInfo } from 'node:net'
+import { serve } from '@hono/node-server'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -83,7 +85,7 @@ describe('saved logins in the API engine', () => {
     for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine!.getBatch(accepted.taskId) }
     const item = (await engine!.getBatchItems(accepted.taskId))!.items[0]!
     expect(item.status).toBe('blocked')
-    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*w2l login import example\.com/)])
+    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*octocrawl login import example\.com/)])
   })
 
   it('other modes never load a saved login', async () => {
@@ -114,6 +116,32 @@ describe('saved logins in the API engine', () => {
     expect((await post({ host: '127.0.0.1:8787', origin: 'https://evil.example' })).status).toBe(401)
     const ok = await post({ host: '127.0.0.1:8787', origin: 'http://localhost:3000' })
     expect(ok.status).toBe(200)
+    // A page on another local port can send a form or a text body without asking the server first; a body that is not JSON is refused before it is read.
+    for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x']) {
+      const res = await app.request('http://127.0.0.1:8787/v1/scrape', { method: 'POST', headers: { host: '127.0.0.1:8787', origin: 'http://localhost:3000', 'content-type': type }, body: JSON.stringify({ url: URL_, mode: 'authed' }) })
+      expect(res.status, type).toBe(400)
+    }
+    const bare = await app.request('http://127.0.0.1:8787/v1/scrape', { method: 'POST', headers: { host: '127.0.0.1:8787' }, body: JSON.stringify({ url: URL_ }) })
+    expect(bare.status).toBe(400)
+    // A POST without a body (cancel, resume) needs no type.
+    expect((await app.request('http://127.0.0.1:8787/v1/crawl/00000000-0000-4000-8000-000000000000/cancel', { method: 'POST', headers: { host: '127.0.0.1:8787' } })).status).toBe(404)
+    // Over a real socket too: curl -X POST sends neither a length nor a type, and the server still sees a body stream.
+    const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })
+    try {
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+      const { port } = server.address() as AddressInfo
+      // The bytes curl -X POST sends: no Content-Length, no Transfer-Encoding, no body.
+      const status = await new Promise<number>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () => socket.write(`POST /v1/crawl/00000000-0000-4000-8000-000000000000/cancel HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nAccept: */*\r\nConnection: close\r\n\r\n`))
+        let reply = ''
+        socket.on('data', (chunk) => { reply += String(chunk) })
+        socket.on('end', () => resolve(Number(/^HTTP\/1\.1 (\d+)/.exec(reply)?.[1] ?? 0)))
+        socket.on('error', reject)
+      })
+      expect(status).toBe(404)
+    } finally {
+      server.close()
+    }
     expect(isLoopbackAuthority('[::1]:8787', false)).toBe(true)
     expect(isLoopbackAuthority('localhost.evil.example', false)).toBe(false)
   })

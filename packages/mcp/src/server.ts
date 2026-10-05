@@ -32,7 +32,7 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 }
 
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
-  const server = new Server({ name: 'w2l', version: MCP_VERSION }, { capabilities: { tools: {} } })
+  const server = new Server({ name: 'octocrawl', version: MCP_VERSION }, { capabilities: { tools: {} } })
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name)) }))
   const calls = options.calls

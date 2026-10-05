@@ -247,26 +247,23 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
     }
   }, 120_000)
 
-  it('an item the person got through replaces its stopped result as a page event of its own on the batch\'s webhook, after the terminal one', async () => {
+  it('a batch with a webhook is not handed over: a page read in the person\'s Chrome is read signed in as them, and the webhook gets nothing more', async () => {
     const engine = engineFor(join(root, 'tasks-13'))
     const stop = person(chrome, { '/hooked': async (page) => { await page.click('#pass') } })
     try {
       const { taskId } = await engine.startBatch({ urls: [`${base}/hooked`, `${base}/open`], formats: ['markdown'], webhook: 'http://127.0.0.1:8829/hook' } as never)
       for (let i = 0; i < 300 && !['completed', 'failed', 'cancelled'].includes((await engine.getBatch(taskId))?.status ?? ''); i++) await new Promise((resolve) => setTimeout(resolve, 50))
       const stopped = (await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/hooked'))!
+      expect(stopped).toMatchObject({ status: 'blocked' })
+      expect(stopped.handoff).toBeUndefined()
+      expect((await engine.getBatch(taskId))?.waitingForPerson).toBeUndefined()
       for (let i = 0; i < 100 && engine.listDeliveries({ jobId: taskId }).length < 4; i++) await new Promise((resolve) => setTimeout(resolve, 25))
       const before = engine.listDeliveries({ jobId: taskId }).map((delivery) => [delivery.eventId, delivery.eventVersion])
       expect(before).toHaveLength(4)
-      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ through: 1 })
-      const deliveries = engine.listDeliveries({ jobId: taskId })
-      const replaced = deliveries.find((delivery) => delivery.eventId === `${taskId}:handoff:${stopped.id}`)
-      expect(replaced).toMatchObject({ eventVersion: 4, payload: { event: 'page', sequence: 4, page: { id: stopped.id, status: 'success', lane: 'browser_local_authed' } } })
-      expect((replaced!.payload as { page: CrawlPage }).page.markdown).toContain('The hooked page')
-      // The events before it are as they were: started, the two items, completed.
-      expect(deliveries.filter((delivery) => delivery !== replaced).map((delivery) => [delivery.eventId, delivery.eventVersion])).toEqual(before)
-      // Handed over again, nothing is left to hand over, and nothing more is sent.
-      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0 })
-      expect(engine.listDeliveries({ jobId: taskId })).toHaveLength(5)
+      await expect(engine.handOffBatch(taskId, {})).rejects.toThrow('has a webhook')
+      // The events are as they were: started, the two items, completed; no page read in the person's Chrome among them.
+      expect(engine.listDeliveries({ jobId: taskId }).map((delivery) => [delivery.eventId, delivery.eventVersion])).toEqual(before)
+      expect((await itemsOf(engine, taskId)).find((item) => item.url.endsWith('/hooked'))).toMatchObject({ status: 'blocked' })
     } finally {
       stop()
       await engine.close()
@@ -323,7 +320,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       const notRead = await engine.scrape({ url: `${base}/never`, handoff: { waitMs: 1_000 } } as never, {}, {}) as Record<string, any>
       expect(notRead.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
       expect(notRead.handoff.rationale).toContain('it was not read there')
-      expect(notRead.handoff.rationale).not.toContain('handoff: true (w2l scrape --handoff)')
+      expect(notRead.handoff.rationale).not.toContain('handoff: true (octocrawl scrape --handoff)')
     } finally {
       stop()
       await engine.close()

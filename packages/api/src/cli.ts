@@ -14,7 +14,7 @@ export { parseListen, parsePort }
  * The local or hosted API server: the engine on `W2L_TASK_ROOT` (default
  * `.w2l/api`), the routes, the job webhooks' delivery worker and the
  * listener, stopped on SIGINT or SIGTERM. `argv` takes the listen flags
- * (`--port`, `--host`, `--hosted`, `--token`, ...); `w2l-api` and `w2l serve`
+ * (`--port`, `--host`, `--hosted`, `--token`, ...); `w2l-api` and `octocrawl serve`
  * both run it. Resolves once it listens, with the URL it listens on and a
  * `close` that stops it as SIGINT does; `signals: false` leaves the process
  * signals to the caller (tests).

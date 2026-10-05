@@ -36,7 +36,7 @@ const NOT_FLAGS: ReadonlySet<string> = new Set(['url', 'urls', 'origin', 'webhoo
 
 /** Options the CLI refuses with the supported route, instead of as unknown. */
 const REFUSED_FLAGS: Readonly<Record<string, string>> = {
-  webhook: '--webhook is not offered by the command line, which runs no delivery worker: start the API (w2l serve) and send the crawl or batch to it',
+  webhook: '--webhook is not offered by the command line, which runs no delivery worker: start the API (octocrawl serve) and send the crawl or batch to it',
 }
 
 const KEYS: Readonly<Record<Command, readonly string[]>> = { scrape: SCRAPE_KEYS, crawl: CRAWL_KEYS, batch: BATCH_KEYS, map: MAP_KEYS }
@@ -132,7 +132,7 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
       name = name.slice(3)
     }
     const key = byFlag.get(name)
-    if (key === undefined) throw new UsageError(`unknown flag --${name} for w2l ${command} (w2l ${command} --help lists them)`)
+    if (key === undefined) throw new UsageError(`unknown flag --${name} for octocrawl ${command} (octocrawl ${command} --help lists them)`)
     const kind = KINDS[key] ?? 'json'
     switch (kind) {
       case 'boolean': {
@@ -202,25 +202,25 @@ function json(name: string, text: string): unknown {
 export function usage(command: Command | null): string {
   if (command === null) {
     return [
-      'usage: w2l <command> [options]',
+      'usage: octocrawl <command> [options]',
       '',
       '  scrape <url>          one page; JSON on stdout (--markdown for the Markdown alone)',
       '  crawl <url>           follow a site\'s links (--resume <taskId> continues one)',
       '  batch <url>...        many pages (--urls-file <file>)',
       '  map <url>             list a site\'s URLs without fetching each page',
       '  serve                 run the local API (--port, --host, --hosted, --token)',
-      '  login import <site>   save your login to a site from the Chrome you use, for --mode authed (w2l login --help)',
+      '  login import <site>   save your login to a site from the Chrome you use, for --mode authed (octocrawl login --help)',
       '',
       'Every option of the REST API is a flag under its kebab-case name: maxAge is --max-age.',
-      'w2l <command> --help lists them. A command\'s task root is --task-root, else W2L_TASK_ROOT,',
+      'octocrawl <command> --help lists them. A command\'s task root is --task-root, else W2L_TASK_ROOT,',
       'else .w2l/cli, apart from the API\'s .w2l/api: never point a command at the task root of a running server.',
     ].join('\n')
   }
   const synopsis: Record<Command, string> = {
-    crawl: 'usage: w2l crawl <url> [options] [--out <dir>] | w2l crawl --resume <taskId>',
-    scrape: 'usage: w2l scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand W2L answers with it. W2L passes no check itself.',
-    batch: 'usage: w2l batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and W2L reads the page. W2L passes no check itself.',
-    map: 'usage: w2l map <url> [options]',
+    crawl: 'usage: octocrawl crawl <url> [options] [--out <dir>] | octocrawl crawl --resume <taskId>',
+    scrape: 'usage: octocrawl scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand W2L answers with it. W2L passes no check itself.',
+    batch: 'usage: octocrawl batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and W2L reads the page. W2L passes no check itself.',
+    map: 'usage: octocrawl map <url> [options]',
   }
   const lines = optionKeys(command).map((key) => {
     const kind = KINDS[key] ?? 'json'
