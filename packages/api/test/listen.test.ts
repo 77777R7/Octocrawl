@@ -39,6 +39,16 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(() => parseListen([], { W2L_ACCESS_GRANT: grant })).toThrow(/scope\.hosts is not enforced yet/)
   })
 
+  it('runs the public browser on Patchright only when W2L_BROWSER_ENGINE asks and the grant names enhanced_browser, never hosted', () => {
+    expect(parseListen([], {}).browserEngine).toBe('playwright')
+    const grant = JSON.stringify({ tier: 'enhanced', capabilities: ['enhanced_browser'], attestation: ATTESTATION })
+    const local = parseListen([], { W2L_ACCESS_GRANT: grant, W2L_BROWSER_ENGINE: 'patchright' })
+    expect(local.browserEngine).toBe('patchright')
+    expect(local.notices).toContain('browser engine: patchright on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright')
+    expect(() => parseListen([], { W2L_BROWSER_ENGINE: 'patchright' })).toThrow(/needs an access grant that names enhanced_browser/)
+    expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_BROWSER_ENGINE: 'patchright' })).toThrow(/refused on a hosted server/)
+  })
+
   it("refuses tier my_browser on a hosted server, which has no person's browser", () => {
     const grant = JSON.stringify({ tier: 'my_browser' })
     expect(parseListen([], { W2L_ACCESS_GRANT: grant }).accessGrant).toMatchObject({ tier: 'my_browser' })

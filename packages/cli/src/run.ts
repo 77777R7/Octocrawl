@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, loadPatchrightEngine, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -56,8 +56,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
     // A one-off command listens nowhere: the API server's listen address is not its concern, only the network policy is.
     let listen: ReturnType<typeof parseListen>
-    try { listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' }) }
-    catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)) }
+    try {
+      listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
+      if (listen.browserEngine === 'patchright') await loadPatchrightEngine()
+    } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)) }
     for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
       taskRoot,
@@ -70,6 +72,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       workerCount: listen.workerCount,
       resumeOnStart: false,
       accessGrant: listen.accessGrant,
+      browserEngine: listen.browserEngine,
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)

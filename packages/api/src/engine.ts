@@ -107,7 +107,7 @@ import {
 import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { ChannelsFiltered } from '@w2l/bench'
+import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
@@ -353,6 +353,8 @@ export interface ApiEngineOptions {
    * reused under another. Null or absent: no grant, so every grant-gated capability stays off.
    */
   accessGrant?: AccessGrant | null
+  /** The engine the public browser rung launches, as the server chose it (browserEngineChoice). Default stock Playwright. */
+  browserEngine?: BrowserEngineName
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -671,7 +673,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] } })
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright' })
       return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
