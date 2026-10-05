@@ -89,6 +89,22 @@ describe('the handoff route', () => {
     await expect(engine.handOffBatch(taskId, {})).rejects.toThrow('asked for page actions, which a page read in your own Chrome cannot give')
   })
 
+  it('a batch with a webhook offers no handoff: a page read in the person\'s Chrome is read signed in as them, and is not sent to another address', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      channelsFor: (mode) => [buildChannels(mode, { localSubjects: { http: { fetch: async (url: string) => laneResult(url) }, browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!],
+      userChrome: { userDataDir: join(root, 'no-chrome') },
+      webhookPolicy: { allowHttpLoopback: true },
+    })
+    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`], webhook: { url: 'https://hooks.example/w' } } as never)
+    for (let i = 0; i < 200 && (await engine.getBatch(taskId))?.status !== 'completed'; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect((await engine.getBatch(taskId))?.waitingForPerson).toBeUndefined()
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]!.handoff).toBeUndefined()
+    await expect(engine.handOffBatch(taskId, {})).rejects.toThrow('has a webhook: a page read in your own Chrome is read signed in as you')
+  })
+
   it('W2L closing while Chrome asks the person to Allow drops the connection at once', async () => {
     root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
     const chromeDir = join(root, 'chrome')

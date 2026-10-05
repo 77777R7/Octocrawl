@@ -54,7 +54,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command === 'batch' && line.cli.urlsFile !== undefined) line.urls.push(...await urlsFrom(line.cli.urlsFile))
     // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
-    const listen = parseListen([], io.env)
+    // A one-off command listens nowhere: the API server's listen address is not its concern, only the network policy is.
+    const listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
     for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
       taskRoot,

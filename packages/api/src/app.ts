@@ -184,6 +184,14 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
       if (host === undefined || !isLoopbackAuthority(host, false) || (origin !== undefined && !isLoopbackAuthority(origin, true))) {
         return fail(c, 'unauthorized', 'this local server answers requests addressed to 127.0.0.1, localhost or [::1] from this machine only')
       }
+      // A page on another local port may send a form or text body without asking first: a body that is not JSON is refused.
+      // A declared length says it at once; without one (curl -X POST sends none, a chunked body has none) the body is read to tell
+      // a bodiless POST from one with content, and the route reads it again from Hono's cache.
+      if (!/^application\/json\s*(;|$)/i.test(c.req.header('content-type') ?? '')) {
+        const length = c.req.header('content-length')
+        const hasBody = length !== undefined ? Number(length) > 0 : c.req.raw.body !== null && (await c.req.text()).length > 0
+        if (hasBody) return fail(c, 'invalid_request', 'a request body must be JSON, sent with content-type: application/json')
+      }
       await next()
     })
   }

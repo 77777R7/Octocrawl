@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -48,6 +48,20 @@ describe('FileSessionStore', () => {
       const loaded = await reloaded.load('example.com')
       expect(loaded?.cookies?.[0]?.value).toBe('sekrit')
       expect(await reloaded.load('nope.example')).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('creates the folder of the saved logins readable by the person alone, like the file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-session-'))
+    try {
+      const file = join(dir, '.w2l', 'sessions.json')
+      await new FileSessionStore(file).save(SNAPSHOT)
+      if (process.platform !== 'win32') {
+        expect((await stat(join(dir, '.w2l'))).mode & 0o777).toBe(0o700)
+        expect((await stat(file)).mode & 0o777).toBe(0o600)
+      }
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
