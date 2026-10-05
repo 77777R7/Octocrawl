@@ -168,8 +168,12 @@
           "minimum": 0
         },
         "userOverride": {
-          "description": "Whether the fetch went ahead under a recorded robots override (robotsOverride on a scrape, a robotsOverrides entry on a batch) although decision is disallowed; the result's trace (robots_overridden) and warnings, and in the browser lane its compliance record, carry the rule set aside, the reason and who recorded it. False otherwise, and always on results stored before W2L had the override.",
+          "description": "Whether the fetch went ahead although decision is disallowed (a rule the publisher wrote, or an unreachable robots.txt); overrideBasis says on whose word. The result's trace (robots_overridden) and warnings, and in the browser lane its compliance record, carry the rule set aside, the reason and who recorded it. False otherwise, and always on results stored before W2L had the override.",
           "type": "boolean"
+        },
+        "overrideBasis": {
+          "description": "On whose word the disallow was set aside: robots_override, the caller's recorded robotsOverride or robotsOverrides entry; user_named_url, a local server fetching a URL the request named (a scrape, a batch entry), as robots.txt binds the links a crawl or map discovers; ignore_robots_txt, a crawl or map started with ignoreRobotsTxt on a local server. Null when nothing was set aside. Added after userOverride, so optional here; absent on results stored before it, where a true userOverride was a robots_override.",
+          "enum": ["robots_override", "user_named_url", "ignore_robots_txt", null]
         }
       }
     },

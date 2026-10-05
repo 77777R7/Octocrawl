@@ -1,4 +1,4 @@
-import type { RobotsOverride } from './compliance.js'
+import type { AppliedRobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
 import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
 import type { PageAction } from './actions.js'
@@ -55,15 +55,18 @@ export interface FetchOptions {
    */
   parsers?: readonly PdfParser[]
   /**
-   * A recorded decision to fetch this one URL although its host's robots.txt
-   * disallows it. robots.txt is still read and its verdict recorded; the
-   * override goes into the trace, the warnings and, in the browser lane, the
-   * compliance record. An unreachable robots.txt is not set aside. The HTTP
-   * and local browser lanes apply it; the provider lane takes none.
-   * Set per URL by the caller (a scrape's `robotsOverride`, a batch's
-   * `robotsOverrides` entry), never by a batch or crawl for every page.
+   * A decision to fetch this one URL although its host's robots.txt
+   * disallows it or could not be read. robots.txt is still read and its
+   * verdict recorded, Crawl-delay included; the override goes into the
+   * trace, the warnings and, in the browser lane, the compliance record. The
+   * HTTP and local browser lanes apply it; the provider lane takes none.
+   * Set by the engine: a scrape's `robotsOverride` or a batch's
+   * `robotsOverrides` entry, else, on a local server, `user_named_url` for
+   * every URL a scrape or batch names and `ignore_robots_txt` for a crawl's
+   * pages when the crawl asked. A navigation a page's steps make to another
+   * URL is checked against robots.txt whatever this says.
    */
-  robotsOverride?: RobotsOverride
+  robotsOverride?: AppliedRobotsOverride
   /**
    * CSS selectors naming the only elements to keep. The content is those
    * elements, in document order, copied from the page before anything is

@@ -323,17 +323,18 @@ describe('persistent URL-array batch', () => {
 
   it('lists the items that did not succeed on /errors, every attempt included, with the URLs robots.txt refused', async () => {
     const f = await fixture()
-    const engine = f.engine()
+    // A server that obeys robots.txt for every URL, as a hosted one does; a local one fetches the URLs a batch names.
+    const engine = f.engine({ allowRobotsOverride: false })
     cleanup.push(() => engine.close())
     const { app, client: w2l } = client(engine)
-    const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/private/item/3`, `${f.origin}/missing/4`]
-    const accepted = await w2l.batchScrape(urls, { robotsOverrides: [{ url: urls[1]!, reason: 'The publisher links this item publicly.' }] })
+    const urls = [`${f.origin}/item/1`, `${f.origin}/item/2`, `${f.origin}/private/item/3`, `${f.origin}/missing/4`]
+    const accepted = await w2l.batchScrape(urls)
     expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', completed: 4 })
     const errors = await w2l.getBatchErrors(accepted.taskId)
     expect(errors).toMatchObject({ nextCursor: null, hasMore: false, robotsBlocked: [urls[2]] })
     const byUrl = new Map(errors.errors.map(item => [item.url, item]))
     expect([...byUrl.keys()].sort()).toEqual([urls[2], urls[3]].sort())
-    // The 404 page is the http lane's own failure with its status; the robots refusal names the rule; the overridden URL is in neither list.
+    // The 404 page is the http lane's own failure with its status; the robots refusal names the rule.
     expect(byUrl.get(urls[3])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[3], status: 'failed', code: 'http_error', error: 'failed: http_error (HTTP 404)', httpStatus: 404 })
     expect(byUrl.get(urls[2])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[2], status: 'failed', code: 'policy_denied', error: 'failed: policy_denied — robots.txt rule /private', httpStatus: null })
     const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
@@ -377,13 +378,14 @@ describe('persistent URL-array batch', () => {
     let started!: () => void
     const slowStarted = new Promise<void>(resolve => { started = resolve })
     f.setStarted(started)
-    const engine1 = f.engine()
+    // Servers that obey robots.txt for every URL, so the first attempt records a refusal.
+    const engine1 = f.engine({ allowRobotsOverride: false })
     const urls = [`${f.origin}/private/item/3`, `${f.origin}/item/2`]
     const { taskId } = await engine1.startBatch({ urls })
     await slowStarted
     await engine1.close({ cancelActive: true })
     f.setSlow(false); f.release()
-    const engine2 = f.engine()
+    const engine2 = f.engine({ allowRobotsOverride: false })
     cleanup.push(() => engine2.close())
     const { app, client: w2l } = client(engine2)
     expect(await w2l.waitBatch(taskId)).toMatchObject({ status: 'completed', requested: 2, completed: 2 })
@@ -398,7 +400,7 @@ describe('persistent URL-array batch', () => {
     expect((await (await app.request(`/v1/crawl/${taskId}/errors`)).json()).items).toEqual([])
   })
 
-  it('fetches only the URL a recorded robots override names, keeps the override on the item and with the task', async () => {
+  it('fetches every URL a batch names past robots.txt, a recorded override with its reason, keeps the override on the item and with the task', async () => {
     const f = await fixture()
     const engine = f.engine()
     cleanup.push(() => engine.close())
@@ -414,12 +416,14 @@ describe('persistent URL-array batch', () => {
     expect(byUrl.get(urls[0]!)).not.toHaveProperty('warnings')
     expect(byUrl.get(urls[1]!)).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden', message: expect.stringContaining('recorded by analyst') }] })
     expect(byUrl.get(urls[1]!)?.trace.find(event => event.event === 'robots_overridden')?.detail).toMatchObject({ reason: robotsOverrides[0]!.reason, recordedBy: 'analyst' })
-    expect(byUrl.get(urls[1]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: true })
-    // Its neighbour under the same rule is still refused, and never fetched.
-    expect(byUrl.get(urls[2]!)).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
-    expect(byUrl.get(urls[2]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: false })
+    expect(byUrl.get(urls[1]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: true, overrideBasis: 'robots_override' })
+    // Its neighbour under the same rule is fetched too, because the batch named it, and its record says so.
+    expect(byUrl.get(urls[2]!)).toMatchObject({ status: 'success', warnings: [{ code: 'robots_overridden', message: expect.stringContaining('because the request named it') }] })
+    expect(byUrl.get(urls[2]!)?.trace.find(event => event.event === 'robots_overridden')?.detail).toMatchObject({ basis: 'user_named_url' })
+    expect(byUrl.get(urls[2]!)?.evidenceRecord?.robotsDecision).toMatchObject({ decision: 'disallowed', userOverride: true, overrideBasis: 'user_named_url' })
     expect(f.seen).toContain('/private/item/2')
-    expect(f.seen).not.toContain('/private/item/3')
+    expect(f.seen).toContain('/private/item/3')
+    expect((await client.getBatchErrors(accepted.taskId)).robotsBlocked).toEqual([])
     // Compact items keep the warning without the trace.
     expect((await client.getBatchItems(accepted.taskId)).items.find(item => item.url === urls[1])).toMatchObject({ trace: [], warnings: [{ code: 'robots_overridden' }] })
     // The override is stored with the task, so a resumed batch runs with it.
@@ -466,7 +470,8 @@ describe('persistent URL-array batch', () => {
 
   it('counts succeeded and failed across a mixed batch, each URL once in its items with its json or its reason', async () => {
     const f = await fixture()
-    const engine = f.engine()
+    // A server that obeys robots.txt for every URL, so one item is refused by it.
+    const engine = f.engine({ allowRobotsOverride: false })
     cleanup.push(() => engine.close())
     const { client: w2l } = client(engine)
     const urls = [`${f.origin}/item/1`, `${f.origin}/private/item/2`, `${f.origin}/missing/4`]
@@ -512,7 +517,8 @@ describe('persistent URL-array batch', () => {
     await new Promise<void>(resolve => silent.listen(0, '127.0.0.1', resolve))
     cleanup.push(async () => { silent.closeAllConnections(); await new Promise<void>(resolve => silent.close(() => resolve())) })
     const silentUrl = `http://127.0.0.1:${(silent.address() as AddressInfo).port}/page`
-    const engine = createApiEngine({ taskRoot: f.root, networkPolicy: { ...localNetworkPolicy(), perHostMinDelayMs: 0, robotsTimeoutMs: 100 }, workerCount: 2 })
+    // A server that obeys robots.txt for every URL; a local one fetches a URL a batch names past an unreachable robots.txt (resilientHttp.robots.test.ts).
+    const engine = createApiEngine({ taskRoot: f.root, networkPolicy: { ...localNetworkPolicy(), perHostMinDelayMs: 0, robotsTimeoutMs: 100 }, workerCount: 2, allowRobotsOverride: false })
     cleanup.push(() => engine.close())
     const urls = [silentUrl, `${f.origin}/item/1`, `${f.origin}/item/2`]
     const { taskId } = await engine.startBatch({ urls })

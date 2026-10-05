@@ -122,6 +122,8 @@ export interface Task {
     maxConcurrency?: number | null
     /** The crawl's webhook, when the request set one. */
     webhook?: StoredJobWebhook
+    /** The crawl fetches what robots.txt disallows, on the record (CrawlStartRequest.ignoreRobotsTxt); absent: it obeys. A server that takes no override resumes it obeying. */
+    ignoreRobotsTxt?: boolean
   } & PageOptions
   /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
   attribution?: RequestAttribution

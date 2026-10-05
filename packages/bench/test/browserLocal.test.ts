@@ -272,12 +272,12 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
-  it('refuses a page whose robots.txt answers 5xx and signs the reason into its record', async () => {
+  it('refuses a page whose robots.txt answers 5xx and signs the reason into its record; an override fetches it, signed too', async () => {
     let pageHits = 0
     const failing = createServer((req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(503).end('temporarily unavailable'); return }
       pageHits++
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><article><h1>Must not fetch</h1></article></body></html>')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><main><article><h1>Named page</h1><p>This page is fetched only when the request named it: its host cannot serve robots.txt, which counts as a complete disallow for the links a crawler discovers.</p></article></main></body></html>')
     })
     await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve))
     const address = failing.address()
@@ -290,13 +290,12 @@ describe('BrowserLocalSubject transport', () => {
       // A complete disallow W2L assumed (RFC 9309 §2.3.1.4), not one the publisher wrote.
       expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', unreachable: 'server_error', skippedFetch: true, robotsSha256: null, appliedRules: [] })
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'robots_disallowed', detail: expect.objectContaining({ unreachable: 'server_error' }) }))
-      // No rule was read, so a recorded override has nothing to set aside.
-      const overridden = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, undefined, { robotsOverride: { reason: 'a rule I know of' } })
-      expect(overridden).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
-      expect(overridden.compliance!.robots).toMatchObject({ unreachable: 'server_error', skippedFetch: true })
-      expect(overridden.compliance!.robots).not.toHaveProperty('override')
-      expect(overridden.warnings).toBeUndefined()
-      expect(pageHits).toBe(0)
+      // A URL the request named sets the complete disallow aside, and the record says on whose word.
+      const overridden = await subject.fetch(`http://127.0.0.1:${address.port}/page`, undefined, undefined, undefined, { robotsOverride: { reason: 'the request named this URL', basis: 'user_named_url' } })
+      expect(overridden.status).toBe('success')
+      expect(overridden.compliance!.robots).toMatchObject({ unreachable: 'server_error', skippedFetch: false, override: { reason: 'the request named this URL', basis: 'user_named_url' } })
+      expect(overridden.warnings).toEqual([expect.objectContaining({ code: 'robots_overridden', message: expect.stringContaining('could not be read (server_error)') })])
+      expect(pageHits).toBe(1)
       expect(verifyLedger(subject.ledger()).valid).toBe(true)
     } finally {
       await subject.teardown()

@@ -10,7 +10,7 @@
  * caller's own cancellation or deadline aborts a lookup.
  */
 
-import { robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type RobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
+import { isOctocrawlRobotsGroup, robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type AppliedRobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
 import {
   createExecutionScope,
@@ -18,6 +18,7 @@ import {
   raceWithSignal,
   throwIfExecutionStopped,
   evaluateRobots,
+  matchRobotsGroup,
   parseRobotsTxt,
   sha256Hex,
   type ComplianceRobotsDecision,
@@ -62,12 +63,41 @@ function errorCode(error: unknown): string | null {
  * never opens the trace still sees that a rule was set aside, which one, and
  * on whose word.
  */
-export function robotsOverrideWarning(decision: ComplianceRobotsDecision, override: RobotsOverride): FetchWarning {
-  const rules = decision.appliedRules.map((rule) => rule.pattern).join(', ')
+export function robotsOverrideWarning(decision: ComplianceRobotsDecision, override: AppliedRobotsOverride): FetchWarning {
+  const robotsUrl = decision.robotsUrl ?? 'robots.txt'
+  const verdict = decision.unreachable === undefined
+    ? `${robotsUrl} disallows this URL (rule ${decision.appliedRules.map((rule) => rule.pattern).join(', ')})`
+    : `${robotsUrl} could not be read (${decision.unreachable}), which counts as a complete disallow`
   const who = override.recordedBy === undefined ? '' : ` by ${override.recordedBy}`
+  const why = override.basis === 'user_named_url'
+    ? 'it was fetched because the request named it: robots.txt binds the links a crawl or map discovers, not the URLs a person names'
+    : override.basis === 'ignore_robots_txt'
+      ? 'it was fetched because the crawl or map was started with ignoreRobotsTxt'
+      : `it was fetched under an override recorded${who}: ${override.reason}`
+  return { code: 'robots_overridden', message: `${verdict}; ${why}` }
+}
+
+/**
+ * The override a lane applies to this verdict. A rule a robots.txt wrote for
+ * Octocrawl itself (`User-agent: Octocrawl`) is the site owner's targeted
+ * opt-out: a URL the request names and ignoreRobotsTxt do not set it aside,
+ * only the caller's recorded robotsOverride for this URL does. A rule for
+ * every crawler gives way to any override.
+ */
+export function applicableOverride(override: AppliedRobotsOverride | undefined, decision: ComplianceRobotsDecision): AppliedRobotsOverride | undefined {
+  if (override?.basis !== undefined && isOctocrawlRobotsGroup(decision.matchedUserAgentGroup)) return undefined
+  return override
+}
+
+/** The `robots_overridden` trace event's detail: the URL, the rules or unreachable reason set aside, and on whose word. */
+export function overriddenDetail(url: string, decision: ComplianceRobotsDecision, override: AppliedRobotsOverride): Record<string, unknown> {
   return {
-    code: 'robots_overridden',
-    message: `${decision.robotsUrl ?? 'robots.txt'} disallows this URL (rule ${rules}); it was fetched under an override recorded${who}: ${override.reason}`,
+    url,
+    appliedRules: decision.appliedRules,
+    ...(decision.unreachable === undefined ? {} : { unreachable: decision.unreachable }),
+    reason: override.reason,
+    ...(override.recordedBy === undefined ? {} : { recordedBy: override.recordedBy }),
+    basis: override.basis ?? 'robots_override',
   }
 }
 
@@ -244,11 +274,15 @@ export class RobotsOriginCache {
     }
 
     // The research product token governs SEC's format too (robotsAgent).
-    const match = evaluateRobots(cached.robots, robotsAgent(userAgent), path)
+    const agent = robotsAgent(userAgent)
+    const match = evaluateRobots(cached.robots, agent, path)
+    // A deciding group that names Octocrawl is Octocrawl's, whichever of its tokens is longest: that is what makes a rule
+    // written for Octocrawl hold for a named URL and ignoreRobotsTxt (applicableOverride).
+    const own = matchRobotsGroup(cached.robots, agent)?.agents.find((token) => isOctocrawlRobotsGroup(token))
     return {
       robotsUrl: cached.robotsUrl,
       robotsSha256: cached.sha256,
-      matchedUserAgentGroup: match.matchedAgent,
+      matchedUserAgentGroup: own ?? match.matchedAgent,
       appliedRules: match.appliedRules.map((r) => ({ pattern: r.pattern, allow: r.allow })),
       decision: match.allowed ? 'allowed' : 'disallowed',
       skippedFetch: false,

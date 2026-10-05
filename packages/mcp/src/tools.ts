@@ -160,7 +160,7 @@ const ACTIONS_SCHEMA = {
 
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
-  description: 'Fetch this URL although its host robots.txt disallows it, on a recorded decision with a reason. robots.txt is still read; the rule set aside, the reason and recordedBy go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. An unreachable robots.txt is not set aside. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API refuses this field.',
+  description: 'Your own reason for fetching this URL although its host robots.txt disallows it or could not be read. A local server fetches a URL you name anyway, recorded as user_named_url; with this field the record carries your reason and recordedBy instead (robots_override). robots.txt is still read; the rule set aside and the reason go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API, which obeys robots.txt for every URL, refuses this field.',
   properties: ROBOTS_OVERRIDE_PROPERTIES,
   required: ['reason'],
   additionalProperties: false,
@@ -197,7 +197,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden, or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait). metadata.scrapeId names the call\'s record for get_scrape.',
+    description: 'Fetch one URL through the W2L coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden (robots.txt disallows the URL; a local server fetched it because you named it), or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait). metadata.scrapeId names the call\'s record for get_scrape.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -229,7 +229,7 @@ export const TOOLS = [
   },
   {
     name: 'map',
-    description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts }); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
+    description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt unless ignoreRobotsTxt is set; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description?, robots? }], warning?, agentHints?, counts }; robots only on a link robots.txt keeps out, under ignoreRobotsTxt); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
     annotations: { title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -246,6 +246,7 @@ export const TOOLS = [
         regexOnFullURL: { type: 'boolean', description: 'Match includePaths and excludePaths against the canonical URL instead of its pathname. Default false.' },
         crawlEntireDomain: { type: 'boolean', description: 'Admit URLs anywhere on the start host, not only in the start URL\'s path subtree. Default false.' },
         deduplicateSimilarURLs: { type: 'boolean', description: 'Fold /a and /a/, / and /index.html, www and apex, http and https into one URL. Default true.' },
+        ignoreRobotsTxt: { type: 'boolean', description: 'Also return the URLs robots.txt disallows or whose robots.txt could not be read, each with that verdict (robots disallowed or unreachable), and read the start page and sitemaps past it. robots.txt is still read and recorded. Default false. A local server only; a hosted one refuses it.' },
         mode: { type: 'string', enum: ['standard', 'research'], description: 'The declared identity robots.txt, the page and the sitemaps are read under. authed is not offered: a map reads public sitemaps and one public page.' },
         debug: { type: 'boolean', description: 'Return the full map response instead of the compact one.' },
         ...INTEGRATION_PROPERTY,
@@ -261,7 +262,7 @@ export const TOOLS = [
         stoppedBy: { enum: ['limit', 'timeout', null] },
         links: {
           type: 'array',
-          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['url'] },
+          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, robots: { enum: ['allowed', 'no_robots', 'disallowed', 'unreachable'], description: 'The link\'s robots.txt verdict: every link with debug=true; in the compact answer only on a link robots.txt keeps out, returned under ignoreRobotsTxt.' } }, required: ['url'] },
         },
         warning: { type: 'string', description: 'The warnings\' messages, joined.' },
         agentHints: { type: 'array', items: { type: 'string' } },
@@ -293,6 +294,7 @@ export const TOOLS = [
         allowSubdomains: { type: 'boolean', description: 'Follow links to every host under the start URL\'s apex (the host with one leading www. removed; no public-suffix list, so a seed on www.gov.uk admits every *.gov.uk host). Default false. Each new host gets its own robots.txt read.' },
         allowExternalLinks: { type: 'boolean', description: 'Follow links to any host, each with its own robots.txt read; maxDepth and maxPages bound the walk. Default false. Cannot be combined with allowlistedDomains.' },
         sitemap: { type: 'string', enum: ['include', 'skip', 'only'], description: 'How the crawl uses the site\'s sitemap. include (default): the sitemaps the start URL\'s robots.txt names, or /sitemap.xml, are read with the crawl\'s identity and robots.txt verdict and their URLs queued ahead of the start page\'s links, under the same host, subtree, path and depth rules. skip: no sitemap is read. only: no page link is followed; the pages are the start URL and the sitemap\'s entries. get_crawl reports the files read, refused or unreadable in discovery.sitemap.' },
+        ignoreRobotsTxt: { type: 'boolean', description: 'Fetch the pages and sitemap files robots.txt disallows, or whose robots.txt could not be read. robots.txt is still read for every host and its verdict recorded, Crawl-delay applied; each page fetched past a rule carries a robots_overridden warning. Default false: the links a crawl discovers obey robots.txt. A local server only; a hosted one refuses it.' },
         maxConcurrency: { type: 'integer', minimum: 1, description: 'Pages this crawl fetches at once, at most; refused above the service\'s worker count (4 locally, 2 on the hosted host). It only lowers the crawl\'s parallelism: the per-host ceiling and minimum interval still apply.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
         webhook: WEBHOOK_PROPERTY,
@@ -517,6 +519,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
       ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }),
       ...(req.webhook === undefined ? {} : { webhook: req.webhook }),
+      ...(req.ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt: req.ignoreRobotsTxt }),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -669,7 +672,8 @@ function compactMap(response: MapResponse) {
     id: response.id,
     status: response.status,
     stoppedBy: response.stoppedBy,
-    links: response.links.map(({ url, title, description }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }) })),
+    // A link robots.txt keeps out (returned under ignoreRobotsTxt) says so; an allowed one carries nothing.
+    links: response.links.map(({ url, title, description, robots }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(robots === 'disallowed' || robots === 'unreachable' ? { robots } : {}) })),
     ...(response.warnings.length === 0 ? {} : { warning: response.warnings.map((warning) => warning.message).join(' ') }),
     ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
     counts: { returned: response.links.length, refused: Object.values(counters).reduce((sum, n) => sum + n, 0) },

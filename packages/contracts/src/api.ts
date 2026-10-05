@@ -429,6 +429,16 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   idempotencyKey?: string
   /** A receiver for the crawl's events (`started`, one `page` per page recorded, then `completed`, `failed` or `cancelled`); see WebhookConfig. */
   webhook?: WebhookOption
+  /**
+   * Fetch the pages and sitemap files robots.txt disallows, or whose
+   * robots.txt could not be read (Firecrawl v2's name). robots.txt is still
+   * read for every host and its verdict recorded on each page, Crawl-delay
+   * applied, with a `robots_overridden` warning and `overrideBasis:
+   * "ignore_robots_txt"` where a rule was set aside. A local server only: a
+   * hosted one refuses it by name. Default false: a crawl's links obey
+   * robots.txt.
+   */
+  ignoreRobotsTxt?: boolean
 }
 
 /** What the parser hands the engine: the request plus, from the `/fc` shim, the payload shape its receiver expects. */
@@ -473,6 +483,14 @@ export interface MapRequest extends RequestAttribution {
   crawlEntireDomain?: boolean
   /** Default true, as on a crawl; a returned http link gives way to its https variant when that comes too, on an origin whose robots.txt the map read anyway and which allows it. */
   deduplicateSimilarURLs?: boolean
+  /**
+   * Return the URLs robots.txt disallows, or whose robots.txt could not be
+   * read, with that verdict on each link (`robots: "disallowed"` or
+   * `"unreachable"`), and read the start page and sitemap files past it.
+   * robots.txt is still read, within MAP_MAX_ROBOTS_HOSTS. A local server
+   * only: a hosted one refuses it by name. Default false.
+   */
+  ignoreRobotsTxt?: boolean
 }
 
 /** A map's `search`: at most this many characters after trimming, and this many whitespace-separated words. */
@@ -505,6 +523,7 @@ export interface ActiveCrawlOptions {
   allowExternalLinks: boolean
   regexOnFullURL: boolean
   maxConcurrency: number | null
+  ignoreRobotsTxt: boolean
   /** The per-page options every page of the crawl gets: its formats, `includeLinks` and the page options. */
   scrapeOptions: PageOptions & { formats: readonly ScrapeFormat[]; includeLinks: boolean }
 }
@@ -879,7 +898,7 @@ export class RequestError extends Error {
 /** The hints a refusal carries for the options W2L does not offer: the next honest step, never a way around the refusal. */
 export const REFUSAL_HINTS = {
   stealth: "W2L does not offer a stealth mode or stealth proxies; a proxy or session you own (mode authed) is the supported route",
-  ignoreRobotsTxt: 'robots.txt is always read; a robotsOverride with a recorded reason fetches one URL past its rule, on the record',
+  ignoreRobotsTxt: 'robots.txt is always read and recorded; on a local server a URL a scrape or batch names is fetched whatever it says, and ignoreRobotsTxt on a crawl or map fetches the links it disallows, on the record',
   hostedSkipTlsVerification: 'a hosted server verifies every certificate; run W2L locally to use skipTlsVerification, which is recorded in the trace and a tls_unverified warning',
   useIndex: 'W2L keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages',
   actions: 'actions run on scrape and batch, where each page named gets the same steps; a crawl or a map does not take them',
@@ -906,7 +925,7 @@ export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
 export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
@@ -916,12 +935,12 @@ const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
 /** The scope options a map takes under their crawl names; allowSubdomains is includeSubdomains on a map, and allowExternalLinks is not offered. */
 export const MAP_SCOPE_KEYS = ['includeSubdomains', 'ignoreQueryParameters', 'regexOnFullURL', 'crawlEntireDomain', 'deduplicateSimilarURLs'] as const
 /** What a map takes. No page option (headers, mobile, skipTlsVerification, formats, ...): a map has nothing to loosen. */
-export const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', 'search', 'sitemap', ...MAP_SCOPE_KEYS, 'includePaths', 'excludePaths', ...ATTRIBUTION_KEYS] as const
+export const MAP_KEYS = ['url', 'mode', 'limit', 'timeout', 'search', 'sitemap', ...MAP_SCOPE_KEYS, 'includePaths', 'excludePaths', 'ignoreRobotsTxt', ...ATTRIBUTION_KEYS] as const
 
 /**
  * An option W2L does not know is an error, never silently dropped; `at`
  * names a nested object's place in the request. A refused option W2L does
- * not offer (`stealth`, a stealth `proxy`, `ignoreRobotsTxt`) names the
+ * not offer (`stealth`, a stealth `proxy`, `ignoreRobotsTxt` beside a scrape or batch) names the
  * supported route in `agentHints`.
  */
 function rejectUnknownKeys(rec: Record<string, unknown>, known: readonly string[], at = ''): void {
@@ -1909,6 +1928,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
   const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
   const webhook = readWebhook(rec.webhook)
+  const ignoreRobotsTxt = readBoolean(rec.ignoreRobotsTxt, 'ignoreRobotsTxt')
   const req: CrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
@@ -1925,6 +1945,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(webhook === undefined ? {} : { webhook }),
+    ...(ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt }),
     ...page,
     ...readAttribution(rec),
   }
@@ -1946,8 +1967,8 @@ function readMapSearch(value: unknown): string | undefined {
  * A map request: url, mode (standard or research), limit, timeout, search,
  * sitemap, includeSubdomains, the crawl's scope options under their crawl
  * names (ignoreQueryParameters, includePaths, excludePaths, regexOnFullURL,
- * crawlEntireDomain, deduplicateSimilarURLs), origin and integration.
- * Anything else is refused by name, `useIndex` with the supported route;
+ * crawlEntireDomain, deduplicateSimilarURLs), ignoreRobotsTxt, origin and
+ * integration. Anything else is refused by name, `useIndex` with the supported route;
  * nothing is silently ignored.
  */
 export function parseMapRequest(body: unknown): MapRequest {
@@ -1969,6 +1990,7 @@ export function parseMapRequest(body: unknown): MapRequest {
   }
   const includePaths = readPathPatterns(rec.includePaths, 'includePaths')
   const excludePaths = readPathPatterns(rec.excludePaths, 'excludePaths')
+  const ignoreRobotsTxt = readBoolean(rec.ignoreRobotsTxt, 'ignoreRobotsTxt')
   return {
     url: readUrl(rec.url),
     ...(rec.mode === undefined ? {} : { mode: rec.mode }),
@@ -1979,6 +2001,7 @@ export function parseMapRequest(body: unknown): MapRequest {
     ...scope,
     ...(includePaths === undefined ? {} : { includePaths }),
     ...(excludePaths === undefined ? {} : { excludePaths }),
+    ...(ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt }),
     ...readAttribution(rec),
   }
 }

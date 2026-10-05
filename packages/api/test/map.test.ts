@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { gzipSync } from 'node:zlib'
-import type { MapRecord, MapResponse } from '@w2l/contracts'
+import type { MapLink, MapRecord, MapResponse } from '@w2l/contracts'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngineOptions } from '../src/engine.js'
 
@@ -66,6 +66,24 @@ describe('POST /v1/map', () => {
     }
     return { origin, app, engine, post, requests }
   }
+
+  it('with ignoreRobotsTxt returns the URLs robots.txt disallows, each with its verdict; a server that obeys robots.txt refuses the option by name', async () => {
+    const { origin, post, requests } = await setup()
+    const { status, body: map } = await post({ url: `${origin}/docs/`, ignoreRobotsTxt: true })
+    expect(status).toBe(200)
+    const robots = new Map((map.links as MapLink[]).map((link) => [link.url, link.robots]))
+    expect(robots.get(`${origin}/docs/private/y`)).toBe('disallowed')
+    expect(robots.get(`${origin}/docs/private/x`)).toBe('disallowed')
+    expect(robots.get(`${origin}/docs/guide`)).toBe('allowed')
+    expect(map.refused.robots).toBe(0)
+    // Still one page body, and robots.txt still read once: the verdicts are on the record, not skipped.
+    expect(requests.filter((path) => !path.endsWith('.xml') && !path.endsWith('.xml.gz') && path !== '/robots.txt')).toEqual(['/docs/'])
+    expect(requests.filter((path) => path === '/robots.txt')).toHaveLength(1)
+    const obeying = await setup({ engine: { allowRobotsOverride: false } })
+    const refused = await obeying.post({ url: `${obeying.origin}/docs/`, ignoreRobotsTxt: true })
+    expect(refused).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['ignoreRobotsTxt'] } } })
+    expect(obeying.requests).toEqual([])
+  })
 
   it('returns the start URL, its page links and the sitemap entries with their evidence, reads one page body and keeps the record', async () => {
     const { origin, app, post, requests } = await setup()

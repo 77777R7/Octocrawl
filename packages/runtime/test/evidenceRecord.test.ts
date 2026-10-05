@@ -53,7 +53,7 @@ describe('toEvidenceRecord', () => {
       status: 'success',
       reason: null,
       lane: 'http',
-      robotsDecision: { decision: 'allowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, unreachable: null, crawlDelayMs: 2000, userOverride: false },
+      robotsDecision: { decision: 'allowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, unreachable: null, crawlDelayMs: 2000, userOverride: false, overrideBasis: null },
       rawSha256: RAW,
       contentEncoding: 'gzip',
       outputSha256: { markdown: sha256Utf8('# Page'), json: null },
@@ -120,18 +120,28 @@ describe('toEvidenceRecord', () => {
       identity: { userAgent: null, mode: 'research', contact: null, device: null, requestHeaders: null },
     })
     // Recorded before W2L kept the robots.txt hash in the trace: unknown, not invented.
-    expect(record.robotsDecision).toEqual({ decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, unreachable: null, crawlDelayMs: null, userOverride: false })
+    expect(record.robotsDecision).toEqual({ decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, unreachable: null, crawlDelayMs: null, userOverride: false, overrideBasis: null })
   })
 
-  it('reports a recorded robots override from the signed record or the trace', () => {
-    const overridden = compliance({ robots: { robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, matchedUserAgentGroup: '*', appliedRules: [{ pattern: '/', allow: false }], decision: 'disallowed', skippedFetch: false, crawlDelayMs: null, override: { reason: 'publisher link', recordedBy: 'analyst' } } })
-    expect(toEvidenceRecord(result({ lane: 'browser_local', compliance: overridden }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', unreachable: null, userOverride: true })
+  it('reports a robots override and its basis from the signed record or the trace', () => {
+    const robots = { robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, matchedUserAgentGroup: '*', appliedRules: [{ pattern: '/', allow: false }], decision: 'disallowed' as const, skippedFetch: false, crawlDelayMs: null }
+    const overridden = compliance({ robots: { ...robots, override: { reason: 'publisher link', recordedBy: 'analyst' } } })
+    expect(toEvidenceRecord(result({ lane: 'browser_local', compliance: overridden }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', unreachable: null, userOverride: true, overrideBasis: 'robots_override' })
+    const named = compliance({ robots: { ...robots, override: { reason: 'the request named this URL', basis: 'user_named_url' } } })
+    expect(toEvidenceRecord(result({ lane: 'browser_local', compliance: named }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ userOverride: true, overrideBasis: 'user_named_url' })
     const trace = [
       { at: 1, lane: 'http' as const, event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: ROBOTS, matchedGroup: '*', ruleCount: 1, crawlDelayMs: null } },
       { at: 2, lane: 'http' as const, event: 'robots_disallowed', detail: { url, appliedRules: [{ pattern: '/', allow: false }] } },
       { at: 3, lane: 'http' as const, event: 'robots_overridden', detail: { url, appliedRules: [{ pattern: '/', allow: false }], reason: 'publisher link' } },
     ]
-    expect(toEvidenceRecord(result({ trace }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', robotsSha256: ROBOTS, userOverride: true })
+    // An event written before bases existed was the caller's recorded override.
+    expect(toEvidenceRecord(result({ trace }), { mode: 'standard' }, {}).robotsDecision).toMatchObject({ decision: 'disallowed', robotsSha256: ROBOTS, userOverride: true, overrideBasis: 'robots_override' })
+    const unreachable = [
+      { at: 1, lane: 'http' as const, event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, matchedGroup: null, ruleCount: 0, crawlDelayMs: null, unreachable: 'timeout' } },
+      { at: 2, lane: 'http' as const, event: 'robots_disallowed', detail: { url, appliedRules: [], unreachable: 'timeout' } },
+      { at: 3, lane: 'http' as const, event: 'robots_overridden', detail: { url, appliedRules: [], unreachable: 'timeout', reason: 'the request named this URL', basis: 'user_named_url' } },
+    ]
+    expect(toEvidenceRecord(result({ trace: unreachable }), { mode: 'standard' }, {}).robotsDecision).toEqual({ decision: 'disallowed', robotsUrl: 'https://source.example/robots.txt', robotsSha256: null, unreachable: 'timeout', crawlDelayMs: null, userOverride: true, overrideBasis: 'user_named_url' })
   })
 
   it('keeps an unreachable robots.txt and treats an unconsulted one as no decision', () => {

@@ -149,9 +149,11 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlCrawlRequest({ url, useCached: true, proxy: 'stealth', scrapeOptions: { formats: ['summary'], location: {}, waitFor: 1 } }))
       .toThrow('unsupported parameters: useCached, proxy, scrapeOptions.location; unsupported format: summary')
     expect(() => parseFirecrawlCrawlRequest({ url, ignoreSitemap: 'yes' })).toThrow('ignoreSitemap must be a boolean')
-    // W2L's own recorded robots override is not mapped, and the blanket switch is refused by name.
+    // W2L's own recorded robots override is not mapped; Firecrawl v2's ignoreRobotsTxt is a crawl's alone, refused by name on a scrape or map.
     expect(() => parseFirecrawlScrapeRequest({ url, robotsOverride: { reason: 'publisher link' } })).toThrow('unsupported parameter: robotsOverride')
-    expect(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
+    expect(parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true })).toMatchObject({ url, ignoreRobotsTxt: true })
+    expect(() => parseFirecrawlScrapeRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
+    expect(() => parseFirecrawlMapRequest({ url, ignoreRobotsTxt: true })).toThrow('unsupported parameter: ignoreRobotsTxt')
     // removeBase64Images is mapped with its value: true is W2L's default, false keeps the data: images.
     expect(parseFirecrawlScrapeRequest({ url, removeBase64Images: true })).toEqual({ url, ...FC_PDF, removeBase64Images: true })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { removeBase64Images: false } })).toMatchObject({ url, removeBase64Images: false })
@@ -384,7 +386,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlScrapeRequest({ url, integration: 'with space' })).toThrow('integration must be a string of 1 to 100 printable characters without spaces')
     const thrown = (fn: () => unknown): unknown => { try { fn() } catch (error) { return error } return undefined }
     expect(thrown(() => parseFirecrawlScrapeRequest({ url, proxy: 'stealth' }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy'] }, agentHints: [REFUSAL_HINTS.stealth] })
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, ignoreRobotsTxt: true, scrapeOptions: { proxy: 'enhanced' } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt, REFUSAL_HINTS.stealth] })
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'enhanced', ignoreRobotsTxt: true } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
     expect((thrown(() => parseFirecrawlScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /scrapeId/.test(d) && /creditsUsed/.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /agent_hints/.test(d) && /rate_limited/.test(d))).toBe(true)
