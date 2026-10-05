@@ -354,7 +354,7 @@ export function buildChannels(
         // pendingResume was established by preparePersistence BEFORE this
         // point, so the very first session the transport creates already
         // carries the context — the UA probe and the fetch share it.
-        pending = connectVendor(ops, opts.vendorConnector, pendingResume ?? null, execution?.deadlineAt, execution?.signal).then((c) => {
+        pending = connectVendor(ops, opts.vendorConnector, pendingResume ?? null, execution?.deadlineAt, execution?.signal, opts.vendorPolicy?.authorized ?? []).then((c) => {
           connected = c
           return c
         }).catch(error => { pending = null; throw error })

@@ -56,6 +56,10 @@ export async function connectVendor(
   resume?: VendorResumeContext | null,
   deadlineMs?: number,
   signal?: AbortSignal,
+  /** The run's own grant (ADR 0005), from the caller's VendorPolicy, never
+   *  from `ops.decision`: the gate checks the declared capabilities against
+   *  it independently of the decision that produced them. */
+  grants: readonly string[] = [],
 ): Promise<ConnectedVendor> {
   const transport = new CdpVendorTransport(ops, connector)
   if (resume !== undefined && resume !== null) {
@@ -69,6 +73,7 @@ export async function connectVendor(
     // here: the three-layer split means the vendor adapter declares what it
     // CAN do, policy decides what we WILL use, and this list is the result.
     capabilities: ops.decision.enabled.map((c) => c.capability),
+    grants,
     honoursCallerUserAgent: false,
   }
   return { declaration, transport }
@@ -84,9 +89,11 @@ export async function vendorProviderSubject(
     robotsFetcher?: RobotsFetcher
     /** Absolute deadline (epoch ms) for session create + CDP connect. */
     deadlineMs?: number
+    /** The run's grant; see connectVendor. */
+    grants?: readonly string[]
   } = {},
 ): Promise<ProviderSubject> {
-  const { declaration, transport } = await connectVendor(ops, opts.connector, undefined, opts.deadlineMs)
+  const { declaration, transport } = await connectVendor(ops, opts.connector, undefined, opts.deadlineMs, undefined, opts.grants)
   return new ProviderSubject(
     declaration,
     transport,
