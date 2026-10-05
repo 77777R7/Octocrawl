@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
+import { cleanTree, detectRenderSignals, extractTf, htmlToMarkdown, pruneTree, rawSignals, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
+import { parse } from '../src/dom.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -427,9 +428,22 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
       expect(out.render).toMatchObject({ clientRendered: true, reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 4 } })
     })
 
-    it('does not flag it when the markup shows the records the data lists', () => {
-      const out = extractTf.extract(listing(16, products(TOOLS)))
-      expect(out.render).toMatchObject({ clientRendered: false, reason: null })
+    it('does not flag it when the markup shows more than half the records the data lists', () => {
+      // A page that shows 9 or more of these tiles routes as an article, so the
+      // detector is called as a listing directly, at the half-way boundary.
+      const signals = (shown: number) => {
+        const doc = parse(listing(shown, products(TOOLS)))
+        const raw = rawSignals(doc.document)
+        cleanTree(doc.document)
+        pruneTree(doc.document)
+        const render = detectRenderSignals(raw, doc.document, true)
+        doc.close()
+        return render
+      }
+      expect(signals(8)).toMatchObject({ clientRendered: true, reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 8 } })
+      expect(signals(9)).toMatchObject({ clientRendered: false, reason: null })
+      expect(signals(9).listRecords).toBeUndefined()
+      expect(signals(16)).toMatchObject({ clientRendered: false, reason: null })
     })
 
     it('does not flag data the page never shows, or shows only a record or two of', () => {
