@@ -229,7 +229,7 @@ export const TOOLS = [
   },
   {
     name: 'map',
-    description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt unless ignoreRobotsTxt is set; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts }); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
+    description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt unless ignoreRobotsTxt is set; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description?, robots? }], warning?, agentHints?, counts }; robots only on a link robots.txt keeps out, under ignoreRobotsTxt); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
     annotations: { title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -262,7 +262,7 @@ export const TOOLS = [
         stoppedBy: { enum: ['limit', 'timeout', null] },
         links: {
           type: 'array',
-          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['url'] },
+          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, robots: { enum: ['allowed', 'no_robots', 'disallowed', 'unreachable'], description: 'The link\'s robots.txt verdict: every link with debug=true; in the compact answer only on a link robots.txt keeps out, returned under ignoreRobotsTxt.' } }, required: ['url'] },
         },
         warning: { type: 'string', description: 'The warnings\' messages, joined.' },
         agentHints: { type: 'array', items: { type: 'string' } },
@@ -672,7 +672,8 @@ function compactMap(response: MapResponse) {
     id: response.id,
     status: response.status,
     stoppedBy: response.stoppedBy,
-    links: response.links.map(({ url, title, description }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }) })),
+    // A link robots.txt keeps out (returned under ignoreRobotsTxt) says so; an allowed one carries nothing.
+    links: response.links.map(({ url, title, description, robots }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(robots === 'disallowed' || robots === 'unreachable' ? { robots } : {}) })),
     ...(response.warnings.length === 0 ? {} : { warning: response.warnings.map((warning) => warning.message).join(' ') }),
     ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
     counts: { returned: response.links.length, refused: Object.values(counters).reduce((sum, n) => sum + n, 0) },

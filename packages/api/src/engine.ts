@@ -396,6 +396,13 @@ interface CachePlan {
   bounds: PageCacheBounds | null
   lockdown: boolean
   store: boolean
+  /** Whether this request sets robots.txt aside for the URL (a named URL on a local server, ignoreRobotsTxt, a robotsOverride): only then may it reuse a page that was fetched past robots.txt. */
+  robotsSetAside: boolean
+}
+
+/** Whether a stored result was fetched past robots.txt: a disallow, or an unreachable robots.txt, set aside on someone's word. */
+function fetchedPastRobots(result: FetchResult): boolean {
+  return result.compliance?.robots.override !== undefined || result.trace.some((event) => event.event === 'robots_overridden')
 }
 
 /** What the cache says before a page is fetched: a stored result to answer with, a lockdown miss that ends the page, or fetch it (after a lookup that missed, or none). */
@@ -447,7 +454,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * build that extracts (extractor versions and the declared source commit),
    * so a reused result's Evidence Record names the build that produced it.
    */
-  const cachePlanFor = (url: string, mode: 'standard' | 'research' | 'authed', page: PageOptions, formats: readonly ScrapeFormat[] | undefined, channels: readonly Channel[], robotsOverride?: RobotsOverride): CachePlan | null => {
+  const cachePlanFor = (url: string, mode: 'standard' | 'research' | 'authed', page: PageOptions, formats: readonly ScrapeFormat[] | undefined, channels: readonly Channel[], robotsOverride: RobotsOverride | undefined, robotsSetAside: boolean): CachePlan | null => {
     if (mode === 'authed') return null
     // A page after actions is that run's page alone (the parser refuses the cache options with them).
     if (page.actions !== undefined) return null
@@ -459,7 +466,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const rungs = channels.map((channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`)
     const build = { extractor: EXTRACTOR_VERSION, pdf: PDF_TEXT_VERSION, file: FILE_TEXT_VERSION, commit: sourceCommitFromEnv() }
     const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build })
-    return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store }
+    return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store, robotsSetAside }
   }
   /**
    * The cache's answer before a fetch. A URL governance refuses is never
@@ -468,8 +475,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const consultCache = (plan: CachePlan | null, url: string, policy: CrawlPolicy): CacheAnswer => {
     if (plan === null || plan.bounds === null || !evaluateGovernance(url, policy).allowed) return { kind: 'fetch', missed: false }
+    // The key holds a recorded override, not the one a named URL or ignoreRobotsTxt applies, so a page robots.txt
+    // refuses can sit under the key an obeying request looks up (a crawl's link, a hosted engine on the same task root):
+    // such a request never gets it.
     const hit = pageCache.lookup(plan.key, plan.bounds)
-    if (hit !== null) return { kind: 'hit', result: cacheHitResult(hit) }
+    if (hit !== null && (plan.robotsSetAside || !fetchedPastRobots(hit.result))) return { kind: 'hit', result: cacheHitResult(hit) }
     if (plan.lockdown) return { kind: 'lockdown_miss', result: cacheMissResult(url, plan.bounds) }
     return { kind: 'fetch', missed: true }
   }
@@ -1001,7 +1011,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
-        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url))
+        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
@@ -1155,9 +1165,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
-    const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride) : null
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
+    const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride, robotsOverride !== undefined) : null
     const operation = (async () => {
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'

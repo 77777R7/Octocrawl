@@ -231,6 +231,27 @@ describe('Evidence Record: HTTP lane', () => {
   })
 })
 
+describe('Evidence Record: a page fetched past robots.txt in the cache', () => {
+  it('is reused only by a request that sets robots.txt aside too: never by an obeying crawl or a hosted engine on the same task root', async () => {
+    const root = join(taskRoot, 'cache-robots')
+    const httpOnly = (mode: Parameters<typeof buildChannels>[0]) => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http')
+    const local = engineWith({ taskRoot: root, channelsFor: httpOnly })
+    const named = await scrape(local, { url: `${origin}/private`, maxAge: 3_600_000 })
+    expect(named).toMatchObject({ status: 'success', evidenceRecord: { robotsDecision: { overrideBasis: 'user_named_url' } } })
+    // A second named scrape may reuse it: it sets robots.txt aside as the first did.
+    expect(await scrape(local, { url: `${origin}/private`, maxAge: 3_600_000 })).toMatchObject({ status: 'success', metadata: { cacheState: 'hit' } })
+    const app = createApp(local)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const crawl = await client.crawl(`${origin}/hub`, { maxPages: 4, crawlEntireDomain: true, maxAge: 3_600_000 })
+    await client.waitCrawl(crawl.taskId, { pollIntervalMs: 50, timeoutMs: 20_000 })
+    const pages = [...(await client.getCrawlPages(crawl.taskId, { includeDuplicates: true })).items, ...(await client.getCrawlErrors(crawl.taskId)).items]
+    expect(pages.find(page => page.url === `${origin}/private`)).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+    await local.close()
+    const hosted = engineWith({ taskRoot: root, hosted: true, allowRobotsOverride: false, channelsFor: httpOnly })
+    expect(await scrape(hosted, { url: `${origin}/private`, maxAge: 3_600_000 })).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+  })
+})
+
 describe('Evidence Record: browser lane', () => {
   let browser: ApiEngine
   beforeAll(() => { browser = engineWith({ channelPolicy: () => 'browser_only' }) })

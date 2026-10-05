@@ -673,7 +673,7 @@ describe('MCP tools', () => {
     expect('outputSchema' in tool && tool.outputSchema.required).toEqual(['id', 'status', 'stoppedBy', 'links'])
     const native: MapResponse = {
       id: 'map-1', url: 'https://example.com/docs/', status: 'partial', stoppedBy: 'timeout',
-      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs', titleSource: 'page', via: ['start'], robots: 'allowed' }, { url: 'https://example.com/docs/a', via: ['sitemap'], sitemapFile: 'https://example.com/sitemap.xml', lastmod: '2026-10-01', robots: 'no_robots' }],
+      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs', titleSource: 'page', via: ['start'], robots: 'allowed' }, { url: 'https://example.com/docs/a', via: ['sitemap'], sitemapFile: 'https://example.com/sitemap.xml', lastmod: '2026-10-01', robots: 'no_robots' }, { url: 'https://example.com/docs/private', via: ['link'], robots: 'disallowed' }],
       sources: { startPage: null, sitemap: null },
       refused: { duplicate: 1, collapsed: 2, hostDenied: 3, subtreeDenied: 0, pathDenied: 0, assetDenied: 0, robots: 1, robotsUnchecked: 0, searchFiltered: 4, overLimit: 0, samples: { collapsed: [], hostDenied: [], robots: [] } },
       identity: { mode: 'standard', userAgent: 'W2L/1' },
@@ -687,8 +687,9 @@ describe('MCP tools', () => {
     }) as typeof fetch })
     expect(await callTool(client, 'map', { url: 'https://example.com/docs/', search: 'docs', sitemap: 'include', limit: 10, integration: 'nightly' }, { origin: 'mcp-test@1' })).toEqual({
       id: 'map-1', status: 'partial', stoppedBy: 'timeout',
-      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs' }, { url: 'https://example.com/docs/a' }],
-      warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agentHints: ['raise timeout'], counts: { returned: 2, refused: 11 },
+      // A link robots.txt keeps out (returned under ignoreRobotsTxt) keeps its verdict; the others carry none.
+      links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs' }, { url: 'https://example.com/docs/a' }, { url: 'https://example.com/docs/private', robots: 'disallowed' }],
+      warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agentHints: ['raise timeout'], counts: { returned: 3, refused: 11 },
     })
     expect(bodies[0]).toEqual({ url: 'https://example.com/docs/', search: 'docs', sitemap: 'include', limit: 10, integration: 'nightly', origin: 'mcp-test@1' })
     expect(await callTool(client, 'map', { url: 'https://example.com/docs/', debug: true })).toEqual(native)
