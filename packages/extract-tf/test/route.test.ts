@@ -168,6 +168,87 @@ describe('routePage', () => {
     doc.close()
   })
 
+  describe('a shop listing whose cards declare products', () => {
+    const name = (i: number) => `Cedar Ridge Garden Trowel Model ${i + 1}`
+    // WooCommerce: every card is a microdata Product scope whose classes
+    // differ card to card (post id, first/last in the row, stock, category).
+    const woo = (i: number) => {
+      const place = i % 4 === 0 ? ' first' : i % 4 === 3 ? ' last' : ''
+      const stock = i % 3 === 0 ? 'outofstock' : 'instock'
+      return `<li data-products="item" itemscope itemtype="http://schema.org/Product" class="product type-product post-${240 + i} status-publish${place} ${stock} product_cat-tools-${i % 2} has-post-thumbnail purchasable product-type-simple">` +
+        `<a href="/shop/trowel-${i + 1}/" class="woocommerce-LoopProduct-link"><img src="/img/${i + 1}.jpg" alt=""><h2 class="woocommerce-loop-product__title">${name(i)}</h2><span class="price">$${12 + i}.00</span></a>` +
+        `<a href="/shop/?add-to-cart=${700 + i}" class="button">Add to basket</a></li>`
+    }
+    // The header's cart total is a price outside the cards, before the page's h1.
+    const shop = wrap(`<header class="site-header"><a class="cart-contents" href="/cart/"><span class="woocommerce-Price-amount amount">$0.00</span> 0 items</a></header><main><h1 class="page-title">Shop</h1><p class="woocommerce-result-count">Showing 1–8 of 188 results</p><ul class="products columns-4">${Array.from({ length: 8 }, (_, i) => woo(i)).join('')}</ul></main>`)
+
+    it('routes WooCommerce product cards to collection and keeps every one', () => {
+      const doc = parse(shop)
+      expect(routePage(doc.document)).toEqual({ type: 'collection', strategy: 'article' })
+      doc.close()
+      const out = extractTf.extract(shop)
+      expect(out.pageType).toBe('collection')
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+    })
+
+    // IKEA: the products are declared in JSON-LD only, as a CollectionPage's ItemList. A product page that declares its
+    // related products does so as an ItemList of its own.
+    const itemList = (names: readonly string[]) => ({ '@type': 'ItemList', itemListElement: names.map((n, i) => ({ '@type': 'ListItem', position: i + 1, item: { '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${12 + i}.00`, priceCurrency: 'USD' } } })) })
+    const listed = (names: readonly string[]) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'CollectionPage', mainEntity: itemList(names) })}</script>`
+    const related = (names: readonly string[]) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', name: 'You may also like', ...itemList(names) })}</script>`
+    const tile = (i: number) => `<div class="plp-product"><a href="/p/trowel-${i + 1}/">${name(i)}</a><span class="price">$${12 + i}.00</span><span>Forged steel blade, ash handle.</span></div>`
+    const names = Array.from({ length: 8 }, (_, i) => name(i))
+
+    it('routes a page whose JSON-LD lists its products in an ItemList to collection and keeps every card', () => {
+      const html = wrap(`<main><h1>Garden tools</h1><p>Showing 8 of 46 results</p><div class="plp-grid">${Array.from({ length: 8 }, (_, i) => tile(i)).join('')}</div></main>`, listed(names))
+      const doc = parse(html)
+      expect(routePage(doc.document)).toEqual({ type: 'collection', strategy: 'article' })
+      doc.close()
+      const out = extractTf.extract(html)
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+    })
+
+    it('keeps product pages beside cards that share a class with them, or that show their price first, product pages', () => {
+      const card = (i: number, cls: string) => `<div class="${cls}" itemscope itemtype="https://schema.org/Product"><a href="/p/${i}">Teapot ${i}</a><span class="price">$1${i}.00</span></div>`
+      const cards = (cls: string) => `<div class="grid">${Array.from({ length: 4 }, (_, i) => card(i + 1, cls)).join('')}</div>`
+      for (const html of [
+        // The page's own scope shares the class "product" with the cards around it.
+        wrap(`<main><h1>Cobalt teapot</h1><div class="product product-main" itemscope itemtype="https://schema.org/Product"><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><h2>You may also like</h2>${cards('product product-card')}</main>`),
+        // The buy box shows its price above the h1.
+        wrap(`<main><div class="product-info"><span class="price">$84.00</span><h1>Cobalt teapot</h1><p>Hand-thrown stoneware.</p></div>${cards('card')}</main>`),
+        // Only the related products are declared, in JSON-LD; the page's own price follows its h1, alone, beside the
+        // price it was before (Shopify's Dawn theme puts them in sibling boxes), or in a list of facts.
+        ...[
+          '<span class="price">$84.00</span>',
+          '<div class="buy-box"><span class="price price--sale">$84.00</span> <span class="price price--compare">$100.00</span></div>',
+          // A size picker: each size its own price, none of them a link.
+          '<fieldset class="variants"><label class="variant"><input type="radio" name="size"> 600 ml <span class="price">$84.00</span></label><label class="variant"><input type="radio" name="size"> 900 ml <span class="price">$96.00</span></label><label class="variant"><input type="radio" name="size"> 1.2 l <span class="price">$112.00</span></label></fieldset>',
+          '<div class="price__regular"><span class="price-item">$84.00</span></div><div class="price__sale"><s class="price-item">$100.00</s><span class="price-item">$84.00</span></div>',
+          '<ul class="facts"><li><span class="price">$84.00</span></li><li>Stoneware, 600 ml</li></ul>',
+          // A size picker whose sizes are links.
+          '<div class="variants"><a href="?v=1"><span class="price">$84.00</span> 600 ml</a><a href="?v=2"><span class="price">$96.00</span> 900 ml</a><a href="?v=3"><span class="price">$112.00</span> 1.2 l</a></div>',
+        ].map((price) => wrap(`<main><h1>Cobalt teapot</h1>${price}<p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`, related(names.slice(0, 3)))),
+        // The page's graph names the collection it is part of: that is not the page declaring itself one.
+        wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div></main>`,
+          `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': [{ '@type': 'WebPage', isPartOf: { '@type': 'CollectionPage', name: 'Teapots' } }, { '@type': 'BreadcrumbList', itemListElement: [] }, itemList(names.slice(0, 4))] })}</script>`),
+        // A page of sections (Shopify): the product's own, then two of linked, priced tiles.
+        wrap(`<main><div class="shopify-section"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p></div><div class="shopify-section"><h2>You may also like</h2>${Array.from({ length: 3 }, (_, i) => tile(i)).join('')}</div><div class="shopify-section"><h2>Recently viewed</h2>${Array.from({ length: 3 }, (_, i) => tile(i + 3)).join('')}</div></main>`, related(names.slice(0, 6))),
+      ]) {
+        const doc = parse(html)
+        expect(routePage(doc.document).type).toBe('product')
+        doc.close()
+      }
+    })
+
+    it('keeps a product page whose JSON-LD also lists related products a product page', () => {
+      const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'Cobalt teapot', offers: { '@type': 'Offer', price: '84.00', priceCurrency: 'USD' } })}</script>`
+      const html = wrap(`<main><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware.</p><div class="plp-grid">${Array.from({ length: 4 }, (_, i) => tile(i)).join('')}</div></main>`, own + related(names.slice(0, 4)))
+      const doc = parse(html)
+      expect(routePage(doc.document).type).toBe('product')
+      doc.close()
+    })
+  })
+
   it('routes JSON-LD OfferCatalog to collection, not product', () => {
     const doc = parse(
       wrap('<main><h1>Catalog</h1><ul><li><a href="/c/1">Cobalt teapot</a></li><li><a href="/c/2">Ash jug</a></li></ul></main>',
