@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // What a cold Chromium screenshot costs on a public-preview instance, measured as a Cloud Run job running the
-// service's own image under its limits (screenshotProbe.ts). Each page is captured over HTTP first, as the preview
-// captures it, for its robots.txt decision and its own time; only where robots.txt allowed the page is it then loaded
-// in a cold Chromium for the top three viewports. One JSON line per page goes to stdout, and a summary line last.
-// Nothing is saved. ROUNDS sets how many passes (1 by default); W2L_PROBE_URLS, comma-separated, replaces the list.
+// service's own image under its limits (screenshotProbe.ts). Each page is captured over HTTP as the preview captures
+// it, and, as the service does, its screenshot starts the moment the robots stage allows the page and runs beside the
+// capture, so the two share the instance's CPU; `lagMs` is how long after the result the picture was ready (negative
+// when it came first), which is what the service's grace has to cover. One JSON line per page goes to stdout, and a
+// summary line last. Nothing is saved. ROUNDS sets how many passes (1 by default); W2L_PROBE_URLS, comma-separated,
+// replaces the list.
 import { capturePreview, mapPreviewResult, normalizePreviewUrl } from './preview.js'
 import { probeScreenshot, type ScreenshotProbe } from './screenshotProbe.js'
 
@@ -26,6 +28,7 @@ const CAPTURE_DEADLINE_MS = 40_000
 const rounds = Math.max(1, Number(process.env.ROUNDS ?? 1) || 1)
 const urls = process.env.W2L_PROBE_URLS ? process.env.W2L_PROBE_URLS.split(',').map(url => url.trim()).filter(Boolean) : DEFAULT_URLS
 const probes: ScreenshotProbe[] = []
+const lines: Record<string, unknown>[] = []
 let refused = 0
 
 console.log(JSON.stringify({ event: 'probe_start', sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null, rounds, urls: urls.length, cpus: (await import('node:os')).cpus().length, platform: process.platform }))
@@ -36,28 +39,36 @@ for (let round = 1; round <= rounds; round++) {
       const target = normalizePreviewUrl(url)
       const stages: Record<string, number> = {}
       const started = performance.now()
-      const outcome = await capturePreview(target, new AbortController().signal, Date.now() + CAPTURE_DEADLINE_MS, null, false, undefined, undefined, false, {}, stage => { stages[stage.stage] = Math.round(performance.now() - started) })
-      const mapped = mapPreviewResult(target.url, target, outcome, performance.now() - started)
+      let pending: Promise<ScreenshotProbe> | null = null
+      let browserDoneAt = 0
+      const outcome = await capturePreview(target, new AbortController().signal, Date.now() + CAPTURE_DEADLINE_MS, null, false, undefined, undefined, false, {}, stage => {
+        stages[stage.stage] = Math.round(performance.now() - started)
+        if (stage.stage === 'robots' && stage.allowed && pending === null) pending = probeScreenshot(target.url, new AbortController().signal).then(probe => { browserDoneAt = performance.now(); return probe })
+      })
+      const resultAt = performance.now()
+      const mapped = mapPreviewResult(target.url, target, outcome, resultAt - started)
       const code = mapped.diagnostic?.code ?? null
-      const robotsRefused = code === 'robots_disallowed' || code === 'robots_unreachable'
-      const browser = robotsRefused ? null : await probeScreenshot(target.url, new AbortController().signal)
+      const browser = pending === null ? null : await pending
       if (browser === null) refused++
       else probes.push(browser)
-      line = { event: 'probe', round, url: target.url, preview: { status: mapped.status, code, stages, totalMs: Math.round(mapped.totalMs) }, browser }
+      const lagMs = browser === null ? null : Math.round(browserDoneAt - resultAt)
+      line = { event: 'probe', round, url: target.url, preview: { status: mapped.status, code, stages, totalMs: Math.round(mapped.totalMs) }, lagMs, browser }
     } catch (error) {
       line = { event: 'probe', round, url, error: error instanceof Error ? error.message : String(error) }
     }
     console.log(JSON.stringify(line))
+    lines.push(line)
   }
 }
 const ok = probes.filter(probe => probe.ok)
+const lags = lines.flatMap(line => typeof line.lagMs === 'number' ? [line.lagMs] : [])
 const stat = (values: number[]): { min: number; median: number; max: number } | null => {
   if (values.length === 0) return null
   const sorted = [...values].sort((a, b) => a - b)
   return { min: sorted[0]!, median: sorted[Math.floor(sorted.length / 2)]!, max: sorted[sorted.length - 1]! }
 }
 console.log(JSON.stringify({
-  event: 'probe_summary', captures: ok.length, failed: probes.length - ok.length, robotsRefused: refused,
+  event: 'probe_summary', captures: ok.length, failed: probes.length - ok.length, robotsRefused: refused, lagMs: stat(lags),
   totalMs: stat(ok.map(probe => probe.timings.totalMs)),
   launchMs: stat(ok.flatMap(probe => probe.timings.launchMs === undefined ? [] : [probe.timings.launchMs])),
   loadMs: stat(ok.flatMap(probe => probe.timings.loadMs === undefined ? [] : [probe.timings.loadMs])),
