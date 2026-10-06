@@ -5,7 +5,7 @@ import { isIP } from 'node:net'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
-import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse } from './preview.js'
+import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
@@ -53,6 +53,12 @@ function sendJson(res: ServerResponse, status: number, body: PreviewResponse | R
     'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', ...headers,
   }).end(JSON.stringify(body))
 }
+
+/** A client that sends `Accept: application/x-ndjson` hears the preview's stages as they happen, one JSON object per
+ * line, then the result: `{"type":"stage","stage":"started"|"robots"|"page",...,"ms"}` and finally
+ * `{"type":"result","http":<status>,"body":<PreviewResponse>}`. The stream starts only once the capture does, so an
+ * answer decided before it (a refused request, no quota) is the plain JSON reply with its own status. */
+const STREAM_TYPE = 'application/x-ndjson'
 
 function empty(status: PreviewResponse['status'], url: string, reason: string, totalMs = 0, override?: PreviewResponse['diagnostic']): PreviewResponse {
   const code = status === 'invalid_url' ? 'invalid_url' : status === 'quota_exceeded' ? 'quota_exceeded'
@@ -356,6 +362,16 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     // Every anonymous outcome is logged once: its state, the target's host and the time, never the page or its path.
     // Owner evaluation runs keep their own log line and stay out of these counts, as do visitors who opted out.
     const owner = authorizedEvaluation(req, options.evalToken)
+    const wantsStages = (req.headers.accept ?? '').split(',').some(type => type.trim().split(';')[0] === STREAM_TYPE)
+    let streaming = false
+    const stage = (step: PreviewStage | { stage: 'started' }): void => {
+      if (!wantsStages || res.destroyed || res.writableEnded) return
+      if (!streaming) {
+        res.writeHead(200, { 'content-type': `${STREAM_TYPE}; charset=utf-8`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' })
+        streaming = true
+      }
+      res.write(`${JSON.stringify({ type: 'stage', ...step, ms: Math.round(performance.now() - started) })}\n`)
+    }
     const send: typeof sendJson = (target, status, body, headers) => {
       const outcome = body as PreviewResponse
       if (!owner && !optedOut(req)) log({
@@ -363,7 +379,8 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         host: targetHost(submitted), options: submittedOptions, totalMs: Math.round(outcome.totalMs),
         vid: visitorId(req), automated: looksAutomated(req),
       })
-      sendJson(target, status, body, headers)
+      if (streaming) target.end(`${JSON.stringify({ type: 'result', http: status, body })}\n`)
+      else sendJson(target, status, body, headers)
     }
     if (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site') {
       send(res, 403, empty('failed', '', 'Submit links from this site only.', Math.max(0, performance.now() - started), { code: 'policy_denied', stage: 'policy', evidence: 'observed' }))
@@ -459,13 +476,14 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
             headers: { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) } }
         } else if (quota === 'ok') {
           try {
+            stage({ stage: 'started' })
             const outcome = await capture(target, abort.signal, deadlineAt, options.amazonState ?? null, evaluation, (_url, retryAt) => {
               if (!permit || !Number.isSafeInteger(retryAt) || retryAt < 0) return
               observedRetryAt = Math.max(observedRetryAt, retryAt)
               // The lease stays owned while we persist the observed cooldown.
               // Release repeats the maximum after all notes settle.
               retryNotes.push(permit.noteRetryAfter(retryAt).catch(() => {}))
-            }, options.localPlatformProxyUrl, options.localPlatformRobotsException, request.options)
+            }, options.localPlatformProxyUrl, options.localPlatformRobotsException, request.options, stage)
             if (outcome.result.retryAt !== undefined) observedRetryAt = Math.max(observedRetryAt, outcome.result.retryAt)
             const mapped = mapPreviewResult(submitted, target, outcome, Math.max(0, performance.now() - started), request.options)
             if (evaluation) {
@@ -513,7 +531,10 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     } catch (error) {
       if (!res.destroyed) send(res, 400, empty('invalid_url', submitted, error instanceof Error ? error.message : 'Invalid request.', Math.max(0, performance.now() - started)))
     }
-  })().catch(() => { if (!res.headersSent) sendJson(res, 500, empty('failed', '', 'The preview service is temporarily unavailable.')) }) }
+  })().catch(() => {
+    if (!res.headersSent) sendJson(res, 500, empty('failed', '', 'The preview service is temporarily unavailable.'))
+    else if (!res.writableEnded) res.end()
+  }) }
 }
 
 export function createPreviewServer(options: PreviewServerOptions): Server {
