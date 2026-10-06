@@ -232,12 +232,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
 
   type GateEnv = { Bindings: { socketAddress: string }; Variables: { caller: HostedCaller } }
   const gate = new Hono<GateEnv>()
-  gate.get('/healthz', (c) => c.json({ ok: true, service: 'octocrawl-hosted-api', tools: [...HOSTED_API_TOOLS] }))
+  // /health, not /healthz: Google's front end answers /healthz on a Cloud Run URL itself (a 404 page) and the request never reaches the container.
+  gate.get('/health', (c) => c.json({ ok: true, service: 'octocrawl-hosted-api', tools: [...HOSTED_API_TOOLS] }))
   gate.use('*', async (c, next) => {
     const method = c.req.method
     const path = c.req.path
     const starts = method === 'POST' && (path === '/v1/scrape' || path === '/v1/map')
     const reads = method === 'GET' && (path.startsWith('/v1/scrapes/') || path.startsWith('/v1/maps/'))
+    if (method === 'GET' && path === '/health') return next()
     if (!starts && !reads) {
       return refuse(c, 403, 'hosted_unavailable', `${method} ${path} is not served by hosted Octocrawl: scrape and map only (POST /v1/scrape, POST /v1/map)`, [LOCAL_HINT, 'batch, crawl and Monitor are hosted in a later phase of the roadmap'])
     }

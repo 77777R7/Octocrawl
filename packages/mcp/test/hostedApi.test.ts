@@ -58,7 +58,7 @@ const post = (url: string, path: string, body: unknown, headers: Record<string, 
 
 it('serves scrape and map only, and refuses the rest by name with a hint to run locally', async () => {
   const { url } = await start()
-  expect(await (await fetch(`${url}/healthz`)).json()).toMatchObject({ ok: true, tools: ['scrape', 'map', 'scrape_product'] })
+  expect(await (await fetch(`${url}/health`)).json()).toMatchObject({ ok: true, tools: ['scrape', 'map', 'scrape_product'] })
   for (const [method, path] of [['GET', '/v1/crawl/active'], ['POST', '/v1/crawl'], ['POST', '/v1/batches'], ['GET', '/v1/monitors'], ['POST', '/fc/v1/scrape'], ['GET', '/v1/logins']] as const) {
     const response = await fetch(`${url}${path}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'POST' ? '{}' : undefined })
     expect(response.status, `${method} ${path}`).toBe(403)
