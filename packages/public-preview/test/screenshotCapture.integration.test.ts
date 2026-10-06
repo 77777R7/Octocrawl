@@ -13,7 +13,7 @@ for (const name of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']) d
 
 let server: Server
 let origin = ''
-let requests: { path: string; userAgent: string | undefined; upgrade: boolean }[] = []
+let requests: { path: string; userAgent: string | undefined; upgrade: boolean; method: string; bodyLength: number }[] = []
 /** A second server on the other loopback address, which the policy denies: nothing may ever reach it. */
 let denied: Server
 let deniedOrigin = ''
@@ -23,7 +23,13 @@ let deniedConnections = 0
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    requests.push({ path: req.url ?? '', userAgent: req.headers['user-agent'], upgrade: req.headers.upgrade !== undefined })
+    const entry = { path: req.url ?? '', userAgent: req.headers['user-agent'], upgrade: req.headers.upgrade !== undefined, method: req.method ?? '', bodyLength: 0 }
+    requests.push(entry)
+    req.on('data', (chunk: Buffer) => { entry.bodyLength += chunk.length })
+    // A POST the page's script sends, redirected the way a browser turns into a GET, or kept as it was.
+    if (req.url === '/post-302') { res.writeHead(302, { location: '/echo' }).end(); return }
+    if (req.url === '/post-307') { res.writeHead(307, { location: '/echo' }).end(); return }
+    if (req.url === '/echo') { req.on('end', () => res.writeHead(200, { 'content-type': 'text/plain' }).end('ok')); return }
     if (req.url === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>Tide report</title></head><body>
         <main><h1>Tide report</h1><p>The harbour office records tide height, wind and visibility for every hour of the day.</p>
@@ -32,6 +38,7 @@ beforeAll(async () => {
         <img src="http://169.254.169.254/computeMetadata/v1/" alt="metadata" width="40" height="40">
         <img src="/img-redirect" alt="redirected" width="40" height="40">
         <script>try { new WebSocket('ws://' + location.host + '/ws') } catch {}</script>
+        <script>fetch('/post-302', { method: 'POST', body: 'hello', headers: { 'content-type': 'text/plain' } }); fetch('/post-307', { method: 'POST', body: 'hello', headers: { 'content-type': 'text/plain' } })</script>
         <script>try { const pc = new RTCPeerConnection({ iceServers: [{ urls: 'turn:[::1]:${deniedPort()}?transport=tcp', username: 'u', credential: 'c' }] }); pc.createDataChannel('x'); pc.createOffer().then(o => pc.setLocalDescription(o)) } catch (e) { document.body.dataset.webrtc = String(e) }</script></main></body></html>`)
       return
     }
@@ -50,7 +57,7 @@ beforeAll(async () => {
     }
     res.writeHead(404).end()
   })
-  server.on('upgrade', (req, socket) => { requests.push({ path: req.url ?? '', userAgent: req.headers['user-agent'], upgrade: true }); socket.destroy() })
+  server.on('upgrade', (req, socket) => { requests.push({ path: req.url ?? '', userAgent: req.headers['user-agent'], upgrade: true, method: req.method ?? '', bodyLength: 0 }); socket.destroy() })
   denied = createServer((req, res) => { deniedHits.push(req.url ?? ''); res.writeHead(200, { 'content-type': 'text/html' }).end('<h1>SECRET</h1>') })
   denied.on('connection', () => { deniedConnections++ })
   await new Promise<void>(resolve => denied.listen(0, '::1', resolve))
@@ -81,7 +88,10 @@ describe('the screenshot capture', () => {
     for (const element of capture.elements) expect(element.y).toBeLessThan(capture.height)
     // The private image, the metadata address, the image that redirects to the denied address, and the WebSocket.
     expect(capture.blocked).toBeGreaterThanOrEqual(4)
-    expect(requests.map(request => request.path).sort()).toEqual(['/', '/img-redirect', '/ok.png'])
+    expect(requests.map(request => request.path).sort()).toEqual(['/', '/echo', '/echo', '/img-redirect', '/ok.png', '/post-302', '/post-307'])
+    // The 302 made the POST a GET without its body; the 307 kept both.
+    const echoes = requests.filter(request => request.path === '/echo').map(request => [request.method, request.bodyLength]).sort()
+    expect(echoes).toEqual([['GET', 0], ['POST', 5]])
     expect(deniedHits).toEqual([])
     expect(requests.some(request => request.upgrade)).toBe(false)
     // Not even a TCP connection from WebRTC, which no routing sees.

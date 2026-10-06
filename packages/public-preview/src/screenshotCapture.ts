@@ -62,6 +62,9 @@ const ELEMENT_SMALLEST_PX = 8
 const REDIRECTS_AT_MOST = 3
 
 const isRedirect = (status: number): boolean => status >= 300 && status < 400
+/** A request's headers without those that describe a body it no longer has. */
+const withoutBody = (headers: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers).filter(([name]) => !['content-type', 'content-length', 'content-encoding', 'transfer-encoding'].includes(name.toLowerCase())))
 
 /** A browser call that takes no timeout of its own, held to the budget. */
 async function within<T>(step: string, deadline: number, work: Promise<T>): Promise<T> {
@@ -140,16 +143,19 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
         if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
         const isPage = request.isNavigationRequest() && request.frame().parentFrame() === null
         let method = request.method()
-        let body = request.postDataBuffer() ?? undefined
-        let response = await route.fetch({ url, method, postData: body, maxRedirects: 0, timeout: remaining('loading the page') })
+        // The request as the page made it, body and all; once a redirect turns it into a GET, the context's own
+        // request, which carries no body (route.fetch would fall back to the page's).
+        let response = await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
         for (let hop = isPage ? hopsTaken : 0; isRedirect(response.status()) && response.headers().location !== undefined; hop++) {
           if (hop >= REDIRECTS_AT_MOST) { blocked++; await route.abort('blockedbyclient'); return }
           url = new URL(response.headers().location!, url).href
           if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
           if (isPage) { hopsTaken = hop + 1; navigateTo = url; await route.abort('aborted'); return }
           // As a browser does: a 301, 302 or 303 turns a POST into a GET without its body; a 307 or 308 keeps both.
-          if (response.status() !== 307 && response.status() !== 308 && method !== 'GET' && method !== 'HEAD') { method = 'GET'; body = undefined }
-          response = await route.fetch({ url, method, postData: body, maxRedirects: 0, timeout: remaining('loading the page') })
+          if (response.status() !== 307 && response.status() !== 308 && method !== 'GET' && method !== 'HEAD') method = 'GET'
+          response = method === request.method()
+            ? await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
+            : await context.request.fetch(url, { method, headers: withoutBody(request.headers()), maxRedirects: 0, timeout: remaining('loading the page') })
         }
         await route.fulfill({ response })
       } catch {
