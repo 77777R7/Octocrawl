@@ -242,10 +242,13 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
     log('ready', { buttons: wired })
     const started = Date.now()
     let last: { answer: string; active: boolean } = { answer: '', active: false }
-    const lastSeen = () => last.answer === 'allowed' ? 'the page answered allowed, but no click of yours on it was seen (Chrome did not count one)' : last.active ? 'you clicked on the page, but not on Allow reading these sites' : 'the page was not clicked'
+    const lastSeen = () => !wired ? "the page's buttons did not answer (its own script did not run), so no click could allow the sites"
+      : last.answer === 'allowed' ? 'the page answered allowed, but no click of yours on it was seen (Chrome did not count one)'
+        : last.active ? 'you clicked on the page, but not on Allow reading these sites' : 'the page was not clicked'
+    const waited = waitMs % 60_000 === 0 ? `${waitMs / 60_000} minute${waitMs === 60_000 ? '' : 's'}` : `${Math.round(waitMs / 1000)} s`
     for (;;) {
       if (options.signal?.aborted === true) { log('refused', { reason: 'cancelled', ...last }); throw refused('the request was cancelled before you allowed the sites', 'cancelled') }
-      if (Date.now() - started >= waitMs) { log('refused', { reason: 'timeout', ...last, buttons: wired }); throw refused(`you did not allow the sites in Chrome within ${Math.round(waitMs / 1000)} s: ${lastSeen()}`, 'timeout') }
+      if (Date.now() - started >= waitMs) { log('refused', { reason: 'timeout', ...last, buttons: wired }); throw refused(`you did not allow the sites in Chrome within ${waited}: ${lastSeen()}`, 'timeout') }
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       const seen = await answerOf(sessionId, world)
       if (seen === null) { log('refused', { reason: 'closed', ...last }); throw refused('you closed Octocrawl\'s page in Chrome before allowing the sites', 'cancelled') }

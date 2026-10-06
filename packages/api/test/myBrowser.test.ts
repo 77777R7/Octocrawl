@@ -58,8 +58,8 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
         const expression = String(p.expression)
         if (kind === 'scope') {
           if (expression.includes('document.write')) { written.push(expression); return {} }
-          // The page's own script wired its buttons.
-          if (expression.includes("getElementById('allow')")) return { result: { value: true } }
+          // The page's own script wired its buttons, in the page's own world: W2L's isolated world sees no handler, as in Chrome.
+          if (expression.includes("getElementById('allow')")) return { result: { value: p.contextId === undefined } }
           const now = answerNow()
           if (now === 'closed') throw new ChromeLoginError('Chrome refused the request: Session with given id not found.')
           if (p.contextId === 7) { polled++; return { result: { value: now.active } } }
