@@ -1,0 +1,15 @@
+# Deploy with `npx wrangler deploy` from this directory, after `npx wrangler secret put PROXY_SECRET` with the same value
+# as the service's W2L_PROXY_SECRET (the public preview's w2l-proxy-secret). The Worker answers on both hosts itself
+# (Workers custom domains), so no DNS record for Cloud Run is needed. See docs/hosted-api.md.
+name = "octocrawl-hosted-api-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-30"
+workers_dev = false
+routes = [
+  { pattern = "api.octocrawl.dev", custom_domain = true },
+  { pattern = "mcp.octocrawl.dev", custom_domain = true },
+]
+
+[vars]
+# The run.app address of the `octocrawl-api` service: `gcloud run services describe octocrawl-api --format='value(status.url)'`.
+ORIGIN_URL = "https://octocrawl-api-307354954747.asia-southeast1.run.app"
