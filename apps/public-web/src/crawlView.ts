@@ -355,10 +355,11 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     card.style.transition = 'none'
     if (switched) card.style.height = `${shrinkFrom}px`
     windowEl.classList.remove('is-arriving')
-    closing = new Promise<void>(resolve => { closeDone = resolve })
-    // Before the card turned into the window there is nothing to fold: it is simply put back.
+    const folded = closing = new Promise<void>(resolve => { closeDone = resolve })
+    // Before the card turned into the window there is nothing to fold: it is simply put back (finalize clears
+    // `closing`, so the promise is kept here).
     if (!switched) finalize()
-    return closing
+    return folded
   }
 
   function finalize(): void {
