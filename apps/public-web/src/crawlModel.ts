@@ -239,8 +239,9 @@ function captureKind(tag: string): Cell {
  * at `pitchY`, plus the floor. A cell is the kind of the element that covers it, a heading winning over a picture
  * over text, and each element is a block for the octopus to reach. The cells' own glyphs come from the picture's
  * brightness (glyphForLuminance), not from here. */
-export function captureLayout(page: Pick<PageCapture, 'width' | 'height' | 'elements'>, cols: number, pitchX: number, pitchY: number, scale: number): PageLayout {
-  const rows = Math.max(12, Math.ceil(page.height * scale / pitchY) + 2)
+export function captureLayout(page: Pick<PageCapture, 'width' | 'height' | 'elements'>, cols: number, pitchX: number, pitchY: number, scale: number, minRows = 12): PageLayout {
+  // At least the window's own rows, so a short picture still fills it and the view never scrolls above the top.
+  const rows = Math.max(12, minRows, Math.ceil(page.height * scale / pitchY) + 2)
   const kind = new Uint8Array(cols * rows)
   const glyph = new Uint16Array(cols * rows).fill(32)
   const blocks: Block[] = []
@@ -269,4 +270,22 @@ const LUMINANCE_RAMP = ['·', ':', '+', 'x', 'X', '#']
 export function glyphForLuminance(luminance: number): string {
   const dark = 1 - Math.max(0, Math.min(255, luminance)) / 255
   return LUMINANCE_RAMP[Math.min(LUMINANCE_RAMP.length - 1, Math.floor(dark * LUMINANCE_RAMP.length))]!
+}
+
+/** The elements of the picture whose text the result holds: what was extracted, and so what the window may mark as
+ * read. Navigation, sidebars and whatever else the extraction left out stay pixels. A heading counts when the title
+ * or the Markdown has it, a picture when the Markdown keeps its alt text, anything else when the Markdown's words
+ * contain its first line. Only text the result itself holds can match: nothing is inferred. */
+export function extractedElements(elements: CaptureElement[], title: string | null, markdown: string | null): CaptureElement[] {
+  const norm = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const words = norm(markdown ? plainText(markdown) : '')
+  const heading = norm(title ?? '')
+  const raw = norm(markdown ?? '')
+  return elements.filter(element => {
+    const text = norm(element.text)
+    if (element.tag === 'img') return text.length >= 2 && raw.includes(`![${text}`)
+    const isHeading = /^h[1-4]$/.test(element.tag)
+    if (text.length < (isHeading ? 2 : 6)) return false
+    return words.includes(text) || (isHeading && heading === text)
+  })
 }

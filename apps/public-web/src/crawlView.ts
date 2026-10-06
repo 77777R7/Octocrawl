@@ -1,4 +1,4 @@
-import { captureLayout, crawlCap, fillWords, glyphForLuminance, hashText, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, Cell, type CrawlStage, type PageCapture, type PageLayout, type StageEvent } from './crawlModel'
+import { captureLayout, crawlCap, extractedElements, fillWords, glyphForLuminance, hashText, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, Cell, type CrawlStage, type PageCapture, type PageLayout, type StageEvent } from './crawlModel'
 
 /** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs crawls a page
  * drawn as a grid, the page scrolling under it. It never goes further down than the server's reported stages allow
@@ -177,6 +177,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   let words: Uint16Array | null = null
   let wordsAt = 0
   let shot: Shot | null = null
+  /** The decoded picture waiting for a result that read the page. */
+  let pendingShot: { page: PageCapture; bitmap: ImageBitmap } | null = null
   let run = 0
   let seen = new Set<CrawlStage>()
   let robotsAllowed: boolean | null = null
@@ -289,6 +291,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     words = null
     shot?.bitmap.close()
     shot = null
+    pendingShot?.bitmap.close()
+    pendingShot = null
     run++
     depth = 0
     reach = null
@@ -364,46 +368,59 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
     } catch { return }
     void createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then(bitmap => {
-      if (version !== run || (phase !== 'crawling' && phase !== 'finishing' && phase !== 'settled') || !layout) { bitmap.close(); return }
-      const scale = width / page.width
-      const scaledHeight = Math.round(page.height * scale)
-      const next = captureLayout(page, layout.cols, pitchX, pitchY, scale)
-      // The brightness of each cell, from the picture drawn once at the window's width.
-      const off = document.createElement('canvas')
-      off.width = width
-      off.height = scaledHeight
-      const octx = off.getContext('2d', { willReadFrequently: true })
-      if (!octx) { bitmap.close(); return }
-      octx.drawImage(bitmap, 0, 0, width, scaledHeight)
-      const pixels = octx.getImageData(0, 0, width, scaledHeight).data
-      const luminance = new Uint8Array(next.cols * next.rows).fill(255)
-      for (let row = 0; row < next.rows; row++) {
-        for (let col = 0; col < next.cols; col++) {
-          let sum = 0
-          let count = 0
-          for (let sy = 0; sy < 3; sy++) {
-            const y = Math.floor(row * pitchY + (sy + 0.5) * pitchY / 3)
-            if (y >= scaledHeight) break
-            for (let sx = 0; sx < 3; sx++) {
-              const x = Math.min(width - 1, Math.floor(col * pitchX + (sx + 0.5) * pitchX / 3))
-              const at = (y * width + x) * 4
-              sum += 0.299 * pixels[at]! + 0.587 * pixels[at + 1]! + 0.114 * pixels[at + 2]!
-              count++
-            }
-          }
-          if (count > 0) luminance[row * next.cols + col] = Math.round(sum / count)
-        }
-      }
-      const now = performance.now()
-      // The picture replaces the drawn page: the octopus keeps its depth, and what it had reached is reached again
-      // as it goes on; the page's words are not laid over its own picture.
-      layout = next
-      readAt = new Float64Array(next.cols * next.rows).fill(Infinity)
-      reached = next.blocks.map(() => false)
-      words = null
-      shot = { bitmap, height: scaledHeight, luminance, at: now }
-      if (phase === 'settled') markAll(now)
+      if (version !== run || (phase !== 'crawling' && phase !== 'finishing' && phase !== 'settled')) { bitmap.close(); return }
+      pendingShot?.bitmap.close()
+      pendingShot = { page, bitmap }
+      applyShot()
     }).catch(() => {})
+  }
+
+  /** Lays the picture under the octopus once both it and a result that read the page are in: the grid is laid over
+   * the elements whose text the result holds (crawlModel.extractedElements), so only what was extracted is marked
+   * and dissolves; the rest of the page stays pixels. */
+  function applyShot(): void {
+    if (pendingShot === null || result === null || !result.read || !layout) return
+    const { page, bitmap } = pendingShot
+    pendingShot = null
+    const scale = width / page.width
+    const scaledHeight = Math.round(page.height * scale)
+    const next = captureLayout({ ...page, elements: extractedElements(page.elements, result.title, result.markdown) }, layout.cols, pitchX, pitchY, scale, visibleRows + 2)
+    // The brightness of each cell, from the picture drawn once at the window's width.
+    const off = document.createElement('canvas')
+    off.width = width
+    off.height = scaledHeight
+    const octx = off.getContext('2d', { willReadFrequently: true })
+    if (!octx) { bitmap.close(); return }
+    octx.drawImage(bitmap, 0, 0, width, scaledHeight)
+    const pixels = octx.getImageData(0, 0, width, scaledHeight).data
+    const luminance = new Uint8Array(next.cols * next.rows).fill(255)
+    for (let row = 0; row < next.rows; row++) {
+      for (let col = 0; col < next.cols; col++) {
+        let sum = 0
+        let count = 0
+        for (let sy = 0; sy < 3; sy++) {
+          const y = Math.floor(row * pitchY + (sy + 0.5) * pitchY / 3)
+          if (y >= scaledHeight) break
+          for (let sx = 0; sx < 3; sx++) {
+            const x = Math.min(width - 1, Math.floor(col * pitchX + (sx + 0.5) * pitchX / 3))
+            const at = (y * width + x) * 4
+            sum += 0.299 * pixels[at]! + 0.587 * pixels[at + 1]! + 0.114 * pixels[at + 2]!
+            count++
+          }
+        }
+        if (count > 0) luminance[row * next.cols + col] = Math.round(sum / count)
+      }
+    }
+    const now = performance.now()
+    // The picture replaces the drawn page: the octopus keeps its depth, and what it had reached is reached again
+    // as it goes on; the page's words are not laid over its own picture.
+    layout = next
+    readAt = new Float64Array(next.cols * next.rows).fill(Infinity)
+    reached = next.blocks.map(() => false)
+    words = null
+    shot?.bitmap.close()
+    shot = { bitmap, height: scaledHeight, luminance, at: now }
+    if (phase === 'settled') markAll(now)
   }
 
   function finish(outcome: CrawlResult): Promise<boolean> {
@@ -421,7 +438,13 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       finishFrom = depth
       finishMs = 400 + (FINISH_MS - 400) * (1 - depth)
       phase = 'finishing'
+      applyShot()
     } else {
+      // A page that was not read shows no picture of itself, whatever came.
+      pendingShot?.bitmap.close()
+      pendingShot = null
+      shot?.bitmap.close()
+      shot = null
       phase = 'failed'
       note.replaceChildren(text('strong', outcome.label), ...(outcome.reason ? [text('span', outcome.reason)] : []))
       note.hidden = false
@@ -456,6 +479,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   function finalize(): void {
     shot?.bitmap.close()
     shot = null
+    pendingShot?.bitmap.close()
+    pendingShot = null
     card.classList.remove('is-crawling')
     windowEl.hidden = true
     card.style.height = ''
@@ -636,7 +661,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     // After the landing the page jumps a row up and down a few times: the cells stay put, what they show shifts.
     const shakeStep = Math.floor((now - slamAt) / SHAKE_STEP_MS)
     const shake = now >= slamAt && shakeStep < SHAKE.length ? SHAKE[shakeStep]! : 0
-    const top = Math.max(0, Math.min(rows - visibleRows, head - Math.floor(visibleRows * 0.35))) - shake
+    const top = Math.max(0, Math.min(Math.max(0, rows - visibleRows), head - Math.floor(visibleRows * 0.35)) - shake)
     const ending = phase === 'settled' ? Math.min(1, (now - phaseAt) / 300) : 0
     const failing = phase === 'failed' ? Math.min(1, (now - phaseAt) / 300) : 0
     const chromeAlpha = 0.32 - 0.2 * ending - 0.14 * failing
@@ -654,7 +679,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     if (shot !== null) {
       const shown = clamp01((now - shot.at) / SHOT_IN_MS)
       ctx.globalAlpha = shown
-      ctx.drawImage(shot.bitmap, 0, GRID_TOP - pitchY / 2 - top * pitchY, width, shot.height)
+      // Picture row r lands on grid row r: the first shown row's top edge is GRID_TOP.
+      ctx.drawImage(shot.bitmap, 0, GRID_TOP - top * pitchY, width, shot.height)
       ctx.globalAlpha = 1
       ctx.fillStyle = `rgba(8, 27, 66, ${shown * (SHOT_VEIL + (SHOT_VEIL_ENDING - SHOT_VEIL) * ending)})`
       ctx.fillRect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)

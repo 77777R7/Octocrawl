@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { captureLayout, Cell, crawlCap, fillWords, glyphForLuminance, layoutPage, mayRead, plainText, stageLabel, stepsDone, type CrawlStage, type PageCapture } from '../src/crawlModel'
+import { captureLayout, Cell, crawlCap, extractedElements, fillWords, glyphForLuminance, layoutPage, mayRead, plainText, stageLabel, stepsDone, type CrawlStage, type PageCapture } from '../src/crawlModel'
 import { readPreview } from '../src/previewStream'
 
 const stages = (...names: CrawlStage[]) => new Set<CrawlStage>(names)
@@ -116,6 +116,12 @@ describe('the grid over the server\'s picture', () => {
     expect(at(1000, 100)).toBe(Cell.Empty)
   })
 
+  it('has at least the rows asked for, so a short picture still fills the window', () => {
+    const short = captureLayout({ width: 1280, height: 800, elements: [] }, 36, 9, 16, 0.26)
+    expect(short.rows).toBeLessThan(20)
+    expect(captureLayout({ width: 1280, height: 800, elements: [] }, 36, 9, 16, 0.26, 20).rows).toBe(20)
+  })
+
   it('makes a block of each element inside the picture, top to bottom, and none of one below it', () => {
     expect(layout.blocks.map(block => block.kind)).toEqual(['title', 'text', 'text', 'image'])
     for (const block of layout.blocks) expect(block.bottom).toBeLessThan(layout.floor)
@@ -134,5 +140,29 @@ describe('the grid over the server\'s picture', () => {
     const response = new Response(`${line}\n{"type":"result","http":200,"body":{"status":"success"}}\n`, { headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } })
     expect(await readPreview(response, () => {}, capture => captures.push(capture))).toEqual({ status: 'success' })
     expect(captures).toEqual([{ width: 1280, height: 800, jpeg: 'AAAA', elements: [{ tag: 'h1', x: 1, y: 2, width: 3, height: 4, text: 'Tide' }] }])
+  })
+})
+
+describe('which of the picture\'s elements the result read', () => {
+  const elements = [
+    { tag: 'h1', x: 0, y: 0, width: 10, height: 10, text: 'Tide report' },
+    { tag: 'p', x: 0, y: 0, width: 10, height: 10, text: 'The harbour office records tide height, wind and visibility for every hour of the day.' },
+    { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'Docs' },
+    { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'Pricing and plans' },
+    { tag: 'li', x: 0, y: 0, width: 10, height: 10, text: 'Sign in to your account' },
+    { tag: 'img', x: 0, y: 0, width: 10, height: 10, text: 'Harbour at dawn' },
+    { tag: 'img', x: 0, y: 0, width: 10, height: 10, text: 'Logo' },
+    { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Related' },
+  ]
+  const markdown = '# Tide report\n\nThe harbour office records **tide height**, wind and visibility for every hour of the day. See [pricing and plans](https://x.y).\n\n![Harbour at dawn](h.jpg)'
+
+  it('keeps the elements whose text the title or Markdown holds, and none of the navigation', () => {
+    expect(extractedElements(elements, 'Tide report', markdown).map(element => element.text))
+      .toEqual(['Tide report', 'The harbour office records tide height, wind and visibility for every hour of the day.', 'Pricing and plans', 'Harbour at dawn'])
+  })
+
+  it('keeps nothing for a result without words', () => {
+    expect(extractedElements(elements, null, null)).toEqual([])
+    expect(extractedElements(elements, 'Tide report', null).map(element => element.text)).toEqual(['Tide report'])
   })
 })
