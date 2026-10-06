@@ -45,6 +45,8 @@ function pickTitle(doc: Document, main: Element | null): string | null {
 
 /** The confidence floor of a product region that shows its title heading and its price (confidenceOf). */
 const BUY_BOX_CONFIDENCE = 0.45
+/** The shortest text block that is a product's description rather than a store's one-line notice. */
+const DESCRIPTION_MIN_CHARS = 150
 
 /** Whether the region holds a title heading and shows the price. */
 function showsBuyBox(main: Element, price: string): boolean {
@@ -93,10 +95,11 @@ function confidenceOf(
   // read from what the page shows rather than what it declares: a lower
   // floor, still above the low-yield escalation's ceiling, so an answer the
   // browser cannot improve is not rendered again for its brevity. The
-  // region must describe the product too (a text block besides its
-  // headings): a buy box whose description its scripts draw is what the
-  // browser can still fill in. A page routed by its declarations
-  // (microdata cards) earns no such floor.
+  // region must describe the product too, in a text block of description
+  // length besides its headings (a delivery or returns line is not one): a
+  // buy box whose description its scripts draw is what the browser can still
+  // fill in. A page routed by its declarations (microdata cards) earns no
+  // such floor.
   else if (buyBox && described && main !== null && product !== null && product.price !== null && showsBuyBox(main, product.price.value)) {
     conf = Math.max(conf, BUY_BOX_CONFIDENCE)
   }
@@ -259,7 +262,7 @@ export class ExtractTf implements Extractor {
         mainLength,
         decision.type,
         decision.buyBox === true,
-        blocks.some((b) => main?.contains(b.el) === true && !/^h[1-6]$/.test(b.el.tagName.toLowerCase())),
+        blocks.some((b) => main?.contains(b.el) === true && !/^h[1-6]$/.test(b.el.tagName.toLowerCase()) && b.length >= DESCRIPTION_MIN_CHARS),
         favorPrecision,
         favorRecall,
         product,

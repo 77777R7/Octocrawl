@@ -143,7 +143,7 @@ describe('routePage', () => {
     const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
     const page = wrap(`<main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li><a href="/c/xbox">Xbox platform</a></li><li>Dreamcast</li><li>Stadia</li></ul></div>
 <div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>
-<p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves, and travels through time gathering the powers of the Seven Sages.</p>
+<p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves. The evil human uses Link to gain access to the Sacred Realm, where he places his tainted hands on Triforce and transforms the beautiful Hyrulean landscape into a barren wasteland. Link is determined to fix the problems he helped to create, so with the help of Rauru he travels through time gathering the powers of the Seven Sages.</p>
 <div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>
 <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { product: { id: 1, title: 'The Legend of Zelda: Ocarina of Time', blurb: blurb.repeat(16) } } } })}</script>`)
 
@@ -163,9 +163,13 @@ describe('routePage', () => {
       // The description is in __NEXT_DATA__ only (a component rendered on the client): the browser can still add it.
       const drawn = page.replace(/<p class="description">[^<]*<\/p>/, '<p class="description"></p>')
       expect(drawn).not.toContain('Seven Sages</p>')
-      const out = extractTf.extract(drawn)
-      expect(out.pageType).toBe('product')
-      expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+      // A store's delivery or returns line beside it is no description either.
+      const lines = ['<p>Free delivery on orders over 50 € within 3 working days.</p>', '<p>Returns are accepted within thirty days of purchase.</p>']
+      for (const html of [drawn, ...lines.map((line) => drawn.replace('<p class="description"></p>', `${line}<p class="description"></p>`))]) {
+        const out = extractTf.extract(html)
+        expect(out.pageType).toBe('product')
+        expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+      }
     })
 
     it('keeps the floor to a buy box the router found, not a page routed by its declarations', () => {
