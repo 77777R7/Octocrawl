@@ -842,7 +842,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
           else { ctx.fillStyle = '#011758'; ctx.fillRect(x - pitchX * 0.4, y - pitchY * 0.3, pitchX * 0.8, pitchY * 0.6) }
           continue
         }
-        ctx.fillStyle = squashed || dy < MANTLE.length ? '#d6e6ff' : '#a8c9fa'
+        ctx.fillStyle = squashed || dy < MANTLE.length + (stretched ? 1 : 0) ? '#d6e6ff' : '#a8c9fa'
         ctx.fillText(char, x, y)
       }
     })
