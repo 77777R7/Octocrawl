@@ -62,6 +62,17 @@ export interface UserChromeReadOptions {
   hiddenNoticeMs?: number
   /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
   signal?: AbortSignal
+  /**
+   * Read the page without the person acting in its tab: only for a site they allowed (`UserChrome.allow`). A check
+   * the page shows still waits for them. Default false: a handoff reads a page only once they acted in it.
+   */
+  unattended?: boolean
+  /**
+   * The hosts the person allowed (AllowedSites.hosts), each with a port that is not the scheme's default: read without
+   * them only on these exactly, never a parent, a subdomain or another port of one, wherever the page leads. Default the
+   * URL's own.
+   */
+  allowedHosts?: readonly string[]
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
   includeTags?: readonly string[]
   excludeTags?: readonly string[]
@@ -79,16 +90,40 @@ const READ_TIMEOUT_MS = 10_000
 /** W2L's own world in the page, where the page's script cannot change what it reads. */
 const WORLD = 'w2l-handoff'
 
+/** Why a page was not read: the wait ended (`timeout`), its tab or Chrome is gone (`gone`), the caller or the person stopped it (`cancelled`), it stayed off the page asked for (`elsewhere`), or Chrome refused a command (`chrome`). */
+export type NotThroughCause = 'timeout' | 'gone' | 'cancelled' | 'elsewhere' | 'chrome'
+
 /** A page the person did not get through in time, left (closed its tab, quit Chrome), or that ended off the page asked for: it is not read. */
 export class HandoffNotThrough extends Error {
-  constructor(message: string, readonly check: string | null) {
+  constructor(message: string, readonly check: string | null, readonly kind: NotThroughCause = 'timeout') {
     super(message)
   }
+}
+
+/** The sites the person allowed for one connection, in the page W2L opened in their Chrome; `signal` aborts when they revoke them (the Revoke button, or closing that page). */
+export interface AllowedSites {
+  readonly hosts: readonly string[]
+  readonly signal: AbortSignal
+  /** Stops watching and closes the page. */
+  close(): Promise<void>
+}
+
+/** The sites and the task the person is asked to allow. */
+export interface SiteScope {
+  hosts: readonly string[]
+  /** What the reads are for, in a few words (the request, as W2L names it). */
+  task: string
 }
 
 export interface UserChrome {
   /** Open `url` in a new tab, wait for the person to get through, read the page, close the tab. */
   read(url: string, options?: UserChromeReadOptions): Promise<UserBrowserRead>
+  /**
+   * Show the person, in a page W2L opens in their Chrome, the sites and task it asks to read, and wait for them to
+   * click Allow there (a click Chrome counts as theirs). Refused (HandoffNotThrough) when they close the page, click
+   * Revoke, or do not answer within `waitMs` (default 120 s).
+   */
+  allow(scope: SiteScope, options?: { waitMs?: number; pollMs?: number; signal?: AbortSignal }): Promise<AllowedSites>
   close(): void
 }
 
@@ -138,7 +173,85 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
   }
   return {
     read: (url, readOptions = {}) => readPage(connection, browser, url, readOptions),
+    allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
     close: () => connection.close(),
+  }
+}
+
+/** The page's answer: `allowed` or `revoked` once the person clicked, else empty. */
+const ANSWER = `document.documentElement.dataset.octocrawl || ''`
+
+/** The page that asks the person to allow the sites, written into a blank tab of their Chrome. */
+function scopePage(scope: SiteScope): string {
+  const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+  const sites = scope.hosts.map((host) => `<li><code>${escape(host)}</code></li>`).join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Octocrawl asks to read pages</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;color:#111}button{font:inherit;padding:.5rem 1rem;margin-right:.5rem}#state{margin-top:1rem;font-weight:600}</style></head>
+<body><h1>Octocrawl asks to read pages in this Chrome</h1>
+<p>Task: ${escape(scope.task)}</p><p>Sites it may read, signed in as you where you are:</p><ul>${sites}</ul>
+<p>It reads only pages on these sites, only while this page stays open. A page that shows a check waits for you.</p>
+<button id="allow">Allow reading these sites</button><button id="revoke">Revoke</button><p id="state"></p>
+<script>
+const root = document.documentElement, state = document.getElementById('state')
+document.getElementById('allow').onclick = () => { if (root.dataset.octocrawl !== 'revoked') { root.dataset.octocrawl = 'allowed'; state.textContent = 'Allowed. Close this page or click Revoke to stop.' } }
+document.getElementById('revoke').onclick = () => { root.dataset.octocrawl = 'revoked'; state.textContent = 'Revoked. Octocrawl reads nothing more here.' }
+</script></body></html>`
+}
+
+async function allowSites(connection: CdpConnection, scope: SiteScope, options: { waitMs?: number; pollMs?: number; signal?: AbortSignal }): Promise<AllowedSites> {
+  const waitMs = options.waitMs ?? 120_000
+  const pollMs = options.pollMs ?? 500
+  const refused = (message: string, kind: NotThroughCause) => new HandoffNotThrough(message, null, kind)
+  let targetId: string
+  try {
+    targetId = (await connection.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }).targetId
+  } catch (error) {
+    throw refused(`Octocrawl could not open its page in Chrome: ${error instanceof Error ? error.message : String(error)}`, 'chrome')
+  }
+  const closeTab = () => connection.send('Target.closeTarget', { targetId }).then(() => undefined, () => undefined)
+  // The page's answer, with whether the person clicked on it (their activation, read in W2L's own world); null when the page is gone.
+  const answerOf = async (sessionId: string, world: number): Promise<{ answer: string; active: boolean } | null> => {
+    try {
+      await connection.send('Target.getTargetInfo', { targetId }, undefined, READ_TIMEOUT_MS)
+      const answer = await connection.send('Runtime.evaluate', { expression: ANSWER, returnByValue: true }, sessionId) as { result?: { value?: unknown } }
+      const active = await connection.send('Runtime.evaluate', { expression: 'navigator.userActivation.hasBeenActive', contextId: world, returnByValue: true }, sessionId) as { result?: { value?: unknown } }
+      return { answer: String(answer.result?.value ?? ''), active: active.result?.value === true }
+    } catch {
+      return null
+    }
+  }
+  try {
+    const { sessionId } = await connection.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
+    await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
+    await connection.send('Runtime.evaluate', { expression: `document.open(); document.write(${JSON.stringify(scopePage(scope))}); document.close()` }, sessionId)
+    const world = (await connection.send('Page.createIsolatedWorld', { frameId: targetId, worldName: WORLD }, sessionId) as { executionContextId: number }).executionContextId
+    const started = Date.now()
+    for (;;) {
+      if (options.signal?.aborted === true) throw refused('the request was cancelled before you allowed the sites', 'cancelled')
+      if (Date.now() - started >= waitMs) throw refused(`you did not allow the sites in Chrome within ${Math.round(waitMs / 1000)} s`, 'timeout')
+      await new Promise((resolve) => setTimeout(resolve, pollMs))
+      const seen = await answerOf(sessionId, world)
+      if (seen === null) throw refused('you closed Octocrawl\'s page in Chrome before allowing the sites', 'cancelled')
+      if (seen.answer === 'revoked') throw refused('you did not allow the sites: you clicked Revoke', 'cancelled')
+      // Allowed only by a click Chrome counts as the person's: a script cannot set it for them.
+      if (seen.answer === 'allowed' && seen.active) break
+    }
+    // Allowed: the page is watched until it is closed or revoked.
+    const revoked = new AbortController()
+    let watching = true
+    void (async () => {
+      while (watching && !revoked.signal.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, Math.max(pollMs, 500)))
+        if (!watching) return
+        const seen = await answerOf(sessionId, world)
+        if (seen === null || seen.answer === 'revoked') revoked.abort(new Error('you revoked the sites in Chrome'))
+      }
+    })()
+    return { hosts: [...scope.hosts], signal: revoked.signal, close: async () => { watching = false; await closeTab() } }
+  } catch (error) {
+    await closeTab()
+    if (error instanceof HandoffNotThrough) throw error
+    throw refused(`Octocrawl could not ask you in Chrome: ${error instanceof Error ? error.message : String(error)}`, 'chrome')
   }
 }
 
@@ -146,15 +259,16 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   const waitMs = options.waitMs ?? 600_000
   const pollMs = options.pollMs ?? 500
   const host = new URL(url).hostname
+  const allowed = options.unattended === true ? new Set(options.allowedHosts ?? [new URL(url).host]) : null
   const started = Date.now()
   let sawGate: string | null = null
   // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
   const gone = (error: unknown): HandoffNotThrough | null =>
     error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer Target\.getTargetInfo/i.test(error.message)
-      ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before Octocrawl read it`, sawGate)
+      ? new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, before Octocrawl read it`, sawGate, 'gone')
       : null
   // Any other refusal from Chrome ends this page alone, not the handoff of the others.
-  const ended = (error: unknown): unknown => gone(error) ?? (error instanceof ChromeLoginError ? new HandoffNotThrough(`${url} was not read: ${error.message}`, sawGate) : error)
+  const ended = (error: unknown): unknown => gone(error) ?? (error instanceof ChromeLoginError ? new HandoffNotThrough(`${url} was not read: ${error.message}`, sawGate, 'chrome') : error)
   let targetId: string
   try {
     // A blank tab first, so the page's own requests and responses are heard from its first one.
@@ -209,7 +323,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
-      if (options.signal?.aborted === true) throw new HandoffNotThrough(`the handoff of ${url} was cancelled before Octocrawl read it`, sawGate)
+      if (options.signal?.aborted === true) throw new HandoffNotThrough(`the read of ${url} was cancelled before Octocrawl read it`, sawGate, 'cancelled')
       if (navigation !== null && gone(navigation) !== null) throw gone(navigation)
       let state: PageState
       try {
@@ -258,18 +372,20 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       // The page asked for: the URL, or where it leads when W2L opens it; after a return, once its document has come.
       const asked = pageOf(state.href) === pageOf(url) || heard.landings.has(pageOf(state.href))
       const arrived = returns === 0 || connection.on === undefined || heard.documents > documentsAtReturn
-      const through = state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
+      // Read without the person: only on a host they allowed, exactly.
+      const inScope = allowed === null || allowed.has(hostAndPort(state.href))
+      const through = inScope && state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
         && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !typing && arrived
       clear = through ? clear + 1 : 0
       if (clear < CLEAR_READS) continue
-      // The person has not acted in the tab: a page clear without them is not read until they click on it.
-      if (heard.act === null) {
+      // The person has not acted in the tab: a page clear without them is not read until they click on it, unless its site is one they allowed.
+      if (heard.act === null && options.unattended !== true) {
         if (!confirming) { confirming = true; options.onConfirm?.(url) }
         continue
       }
       // Through, but elsewhere on the site (a sign-in that ends on the home page): the tab goes back to the page asked for.
       if (!asked) {
-        if (returns >= RETURNS) throw new HandoffNotThrough(`${url} was not read: after you got through, the tab stayed on ${pageOf(state.href)}, not the page asked for`, sawGate)
+        if (returns >= RETURNS) throw new HandoffNotThrough(`${url} was not read: after you got through, the tab stayed on ${pageOf(state.href)}, not the page asked for`, sawGate, 'elsewhere')
         returns++
         documentsAtReturn = heard.documents
         clear = 0
@@ -290,6 +406,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       }
     }
     const where = last === null ? 'it never loaded'
+      : allowed !== null && !allowed.has(hostAndPort(last.state.href)) ? `it was on ${hostAndPort(last.state.href)}, which you did not allow (only ${[...allowed].join(', ')})`
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
         : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
           : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (Octocrawl reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
@@ -360,6 +477,15 @@ function pageOf(href: string): string {
 /** Two addresses of one document: the same but for the fragment. */
 function sameDocument(a: string, b: string): boolean {
   return a.split('#')[0] === b.split('#')[0]
+}
+
+/** The host and a port that is not the scheme's default (`site.test`, `site.test:8443`), as an allowed site is named. */
+function hostAndPort(href: string): string {
+  try {
+    return new URL(href).host
+  } catch {
+    return 'another page'
+  }
 }
 
 function safeHost(href: string): string {

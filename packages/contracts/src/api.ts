@@ -195,6 +195,17 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    * screenshot (`unsupported_parameter`).
    */
   handoff?: { waitMs?: number }
+  /**
+   * `my-browser`: read the page in the person's own Chrome, over remote
+   * debugging, without W2L fetching it first. The person allows the
+   * connection in Chrome, then the site in a page W2L opens there; the page
+   * is read without a click of theirs only on a site they allowed, and a
+   * check it shows waits for them (`handoff.waitMs`, default 10 min). Lane
+   * `my_browser`; never cached. Offered only by a server on the person's
+   * own machine; refused elsewhere, with `actions` or a screenshot, and with
+   * a mode other than standard (`unsupported_parameter`).
+   */
+  lane?: 'my-browser'
 }
 
 /** A recorded robots override for one URL of a batch. */
@@ -923,7 +934,9 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', 'lane', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+/** The lanes a request may ask for by name. */
+export const REQUEST_LANES = ['my-browser'] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
@@ -1878,6 +1891,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   const robotsOverride = rec.robotsOverride === undefined ? undefined : readRobotsOverride(rec.robotsOverride, 'robotsOverride')
   if (rec.handoff !== undefined && typeof rec.handoff !== 'boolean' && (rec.handoff === null || typeof rec.handoff !== 'object' || Array.isArray(rec.handoff))) throw new RequestError('handoff must be true or { waitMs }')
   const handoff = rec.handoff === undefined || rec.handoff === false ? undefined : rec.handoff === true ? {} : parseBatchHandoffRequest(rec.handoff)
+  if (rec.lane !== undefined && !(REQUEST_LANES as readonly unknown[]).includes(rec.lane)) throw new RequestError(`lane must be one of: ${REQUEST_LANES.join(', ')}`)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
@@ -1891,6 +1905,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...page,
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
     ...(handoff === undefined ? {} : { handoff }),
+    ...(rec.lane === undefined ? {} : { lane: rec.lane as 'my-browser' }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)

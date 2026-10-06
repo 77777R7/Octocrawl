@@ -456,6 +456,15 @@ describe('MCP tools', () => {
     expect(bodies.map((body) => (body as { handoff?: unknown }).handoff)).toEqual([{}, { waitMs: 60_000 }])
   })
 
+  it('a scrape asks for the my-browser lane when the call does, and the tool names it', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); return json({ status: 'success' }) }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/', lane: 'my-browser' })
+    expect(bodies).toEqual([expect.objectContaining({ lane: 'my-browser' })])
+    expect(TOOLS.find((tool) => tool.name === 'scrape')?.inputSchema.properties).toMatchObject({ lane: { type: 'string', enum: ['my-browser'] } })
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', lane: 'browser' })).rejects.toThrow('lane must be one of: my-browser')
+  })
+
   it('imports, lists and forgets the person\'s saved logins through the API, never a cookie', async () => {
     const calls: string[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

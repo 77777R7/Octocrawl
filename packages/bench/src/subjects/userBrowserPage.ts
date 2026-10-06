@@ -7,14 +7,19 @@
  * (`identity_unobserved`), and the robots.txt decision the lane that was
  * stopped took for the same URL. Read the way the browser lane reads a
  * rendered page: the same gate, extractor and formats.
+ *
+ * On the `my_browser` lane the page is read there first, on a site the
+ * person allowed, with no stopped fetch before it: no `handoff_from`, and no
+ * robots.txt decision (W2L fetched nothing; the person's browser did).
  */
 
-import { estimateTokens, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, type BlockReason, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
 
-const LANE = 'browser_local_authed' as const
+/** The lanes a page read in the person's browser is recorded on: after a handoff, or on the my-browser lane. */
+export type UserBrowserLane = 'browser_local_authed' | 'my_browser'
 
 /** What was read in the person's browser. */
 export interface UserBrowserRead {
@@ -33,19 +38,22 @@ export interface UserBrowserRead {
   wallMs: number
   /** The check the page showed before the person was through, as W2L's gate read it (decisive markers, or the document's status and headers); null when it showed none. */
   sawGate: string | null
-  /** How the person acted in the tab, as Chrome counts a user's act: `user_activation` (a click or key press on the page) or `gesture_navigation` (a navigation they made). */
-  act: string
+  /** How the person acted in the tab, as Chrome counts a user's act: `user_activation` (a click or key press on the page) or `gesture_navigation` (a navigation they made); null when the page was read without one (the my-browser lane, on a site they allowed). */
+  act: string | null
   /** Which browser: `chrome` and its version, as it reported them. */
   browser: string
 }
 
-/** The result of a page read in the person's browser, in place of `prior`, the result the check stopped. */
-export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, options: FetchOptions): FetchResult {
+/** The result of a page read in the person's browser: in place of `prior`, the result the check stopped, or, with none, on the my-browser lane. */
+export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | null, options: FetchOptions): FetchResult {
+  const LANE: UserBrowserLane = prior === null ? 'my_browser' : 'browser_local_authed'
   const { html: body, finalUrl, wallMs } = read
   const status = read.status ?? 200
   const trace: TraceEvent[] = [
-    { at: 0, lane: LANE, event: 'handoff_from', detail: { status: prior.status, blockReason: prior.blockReason, failureReason: prior.failureReason, lane: prior.lane, rawBodySha256: prior.evidence.rawBodySha256 } },
-    ...robotsOf(prior),
+    ...(prior === null ? [] : [
+      { at: 0, lane: LANE, event: 'handoff_from', detail: { status: prior.status, blockReason: prior.blockReason, failureReason: prior.failureReason, lane: prior.lane, rawBodySha256: prior.evidence.rawBodySha256 } },
+      ...robotsOf(prior, LANE),
+    ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
     { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs } },
@@ -143,8 +151,32 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult, o
   })
 }
 
+/**
+ * A page the my-browser lane did not read: the person's Chrome did not get to it in time (`timeout`, or `blocked`
+ * by the check it still showed), they closed its tab or revoked the sites (`cancelled`). W2L fetched nothing.
+ */
+export function unreadInUserBrowser(url: string, outcome: { status: 'failed'; failureReason: 'timeout' } | { status: 'blocked'; blockReason: BlockReason } | { status: 'cancelled' }, message: string, wallMs: number): FetchResult {
+  return {
+    requestedUrl: url,
+    status: outcome.status,
+    failureReason: outcome.status === 'failed' ? outcome.failureReason : null,
+    blockReason: outcome.status === 'blocked' ? outcome.blockReason : null,
+    budgetExceeded: null,
+    lane: 'my_browser',
+    escalations: [],
+    markdown: null,
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], redirectChainComplete: false, contentType: null, rawBodySha256: null, artifacts: [], fetchedAt: new Date().toISOString() },
+    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: wallMs, externalCostUsd: 0 },
+    trace: [{ at: wallMs, lane: 'my_browser', event: 'user_browser_unread', detail: { reason: message } }],
+    warnings: [{ code: 'my_browser_not_read', message }],
+  }
+}
+
 /** The robots.txt decision the stopped fetch took for this URL, carried over: the person's browser read the same URL. */
-function robotsOf(prior: FetchResult): TraceEvent[] {
+function robotsOf(prior: FetchResult, LANE: UserBrowserLane): TraceEvent[] {
   const signed = prior.compliance?.robots
   if (signed !== undefined) {
     return [

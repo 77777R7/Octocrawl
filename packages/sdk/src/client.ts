@@ -354,8 +354,8 @@ export class W2L {
     // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
     // wait that long plus a margin, and no longer.
     const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
-    // A scrape handed to the person waits for them as well: as long as they take (undici reads 0 as no limit); request.signal ends it.
-    const handedOver = opts.handoff !== undefined && opts.handoff !== false
+    // A scrape handed to the person, or read in their Chrome, waits for them as well: as long as they take (undici reads 0 as no limit); request.signal ends it.
+    const handedOver = (opts.handoff !== undefined && opts.handoff !== false) || opts.lane === 'my-browser'
     return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, handedOver ? 0 : deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
   }
 

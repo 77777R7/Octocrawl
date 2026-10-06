@@ -190,6 +190,7 @@ function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
     onWaiting: (url, check) => io.stderr(`octocrawl ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
     onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (Octocrawl reads it only once you act in its tab)`),
     onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab Octocrawl opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
+    onAllow: (hosts) => io.stderr(`octocrawl ${command}: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (${hosts.join(', ')}); close that page or click Revoke to stop`),
     ...(io.signal === undefined ? {} : { signal: io.signal }),
   }
 }

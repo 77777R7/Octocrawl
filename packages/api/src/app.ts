@@ -610,6 +610,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.onError((err, c) => {
     if (err instanceof RequestError) return fail(c, err.code, err.message, err.details, err.agentHints)
     if (err instanceof CrawlStateError) return fail(c, 'conflict', err.message)
+    // A scrape on the my-browser lane whose Chrome was not reached, or whose site the person did not allow.
+    if (err instanceof HandoffUnavailableError) return fail(c, 'conflict', err.message)
     if (err instanceof TaskNotFoundError) return fail(c, 'not_found', 'not found')
     // A cursor a client made up or truncated, on any route that pages through a task's steps.
     if (err instanceof InvalidCursorError) return fail(c, 'invalid_request', 'cursor is not one this API issued')

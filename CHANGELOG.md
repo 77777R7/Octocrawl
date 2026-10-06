@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The `my-browser` lane (ROADMAP PA item 8), for one page: `"lane": "my-browser"` on `POST /v1/scrape`, the SDK, the MCP `scrape` tool and `octocrawl scrape --lane my-browser` reads the page in the person's own Chrome on a server on their machine. After Chrome's Allow, Octocrawl opens a page of its own there listing the site and the task; only the person's click on **Allow reading these sites** lets it read that site without a further click, and closing that page or clicking Revoke stops it. Recorded as lane `my_browser` (a new value of `lane`), never cached. Refused by name on other servers and with actions, a screenshot, lockdown or a mode other than standard. Every Evidence Record's `access` gains `completion` (`unattended`, `authorized_session`, `user_browser`, `handed_to_person`, or null when no page was read). Batches and MCP `batch_scrape` follow.
 - Managed sessions (`/v1/sessions/*`) no longer answer with the profile's path on the server (`profileDir`) or a CDP endpoint (`cdpEndpoint`); every route returns the public fields only. A hosted engine refuses them all (409), in the engine itself as well as at the hosted gate, and makes no browser profile (ROADMAP PA, G4).
 ## 0.3.1 — 2026-10-06
 
