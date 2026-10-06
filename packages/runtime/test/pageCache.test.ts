@@ -77,7 +77,7 @@ describe('PageCache', () => {
 
   it('answers a hit with the stored result unchanged and a cache_hit event at the end of its trace', () => {
     const answered = cacheHitResult({ result: result(), fetchedAt: FETCHED, ageMs: 42 })
-    expect(answered).toEqual({ ...result(), trace: [...result().trace, { at: 0, lane: 'http', event: 'cache_hit', detail: { cachedAt: FETCHED, ageMs: 42 } }] })
+    expect(answered).toEqual({ ...result(), trace: [...result().trace, { at: 0, lane: 'http', event: 'cache_hit', detail: { cachedAt: FETCHED, ageMs: 42, externalCostUsd: result().usage.externalCostUsd ?? null } }] })
   })
 
   it('answers a lockdown miss with a failed result that requested nothing', () => {

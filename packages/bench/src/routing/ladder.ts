@@ -33,7 +33,6 @@ import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
-/** One channel: a lane implementation the ladder can try. */
 /** One attempt of the run: the rung that answered, its place in the run, when it was asked and answered. */
 function attemptOf(channel: Channel, id: string, result: FetchResult, ordinal: number, startedAt: string): LadderAttempt {
   return { channel: id, result, ordinal, startedAt, endedAt: new Date().toISOString(), ...(channel.vendorId === undefined ? {} : { vendorId: channel.vendorId }) }
@@ -42,6 +41,7 @@ function attemptOf(channel: Channel, id: string, result: FetchResult, ordinal: n
 /** The rungs of the http lane: undici's, and the browser-compatible transport's (ADR 0005 `compatible_transport`). */
 export const HTTP_CHANNELS: ReadonlySet<string> = new Set(['http', 'http_compat'])
 
+/** One channel: a lane implementation the ladder can try. */
 export interface Channel {
   /** Lane id, e.g. 'http', 'browser_local', 'provider'. */
   id: string

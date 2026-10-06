@@ -276,6 +276,8 @@ describe('the http lane over the compatible transport', () => {
       requests.length = 0
       const out = await http.fetch(`${origin}/private`)
       expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      // undici read robots.txt; impit sent nothing, so the trace does not name it.
+      expect(out.trace.map((event) => event.event)).not.toContain('transport')
       expect(requests.map((r) => r.url)).not.toContain('/private')
     } finally { await http.teardown() }
   })

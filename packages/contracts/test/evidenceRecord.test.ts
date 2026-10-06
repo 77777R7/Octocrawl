@@ -68,7 +68,7 @@ describe('Evidence Record v1 schema file', () => {
     expect(d.artifact!.properties.kind!.enum).toEqual([...EVIDENCE_ARTIFACT_KINDS, null])
     expect(d.robotsDecision!.properties.decision!.enum).toEqual(['allowed', 'disallowed', 'no_robots'])
     expect(d.robotsDecision!.properties.unreachable!.enum).toEqual(['server_error', 'network_error', 'timeout', null])
-    expect(d.access!.properties.route!.enum).toEqual([...ACCESS_ROUTES])
+    expect(d.access!.properties.route!.enum).toEqual([...ACCESS_ROUTES, null])
   })
 })
 

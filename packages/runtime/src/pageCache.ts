@@ -115,7 +115,8 @@ export function pageCacheKey(url: string, parts: Record<string, unknown>): strin
 
 /** A stored result as the answer to this request: unchanged, with a `cache_hit` event that names its fetch time and age at the end of its trace. */
 export function cacheHitResult(hit: PageCacheHit): FetchResult {
-  const event: TraceEvent = { at: 0, lane: hit.result.lane, event: 'cache_hit', detail: { cachedAt: hit.fetchedAt, ageMs: hit.ageMs } }
+  // The stored fetch's third-party cost: this call's own is 0, the record's is that fetch's.
+  const event: TraceEvent = { at: 0, lane: hit.result.lane, event: 'cache_hit', detail: { cachedAt: hit.fetchedAt, ageMs: hit.ageMs, externalCostUsd: hit.result.usage.externalCostUsd ?? null } }
   return { ...hit.result, trace: [...hit.result.trace, event] }
 }
 

@@ -52,7 +52,8 @@ export type AccessRoute = (typeof ACCESS_ROUTES)[number]
  * (EVIDENCE_RECORD_ADDED_KEYS).
  */
 export interface EvidenceAccess {
-  route: AccessRoute
+  /** Null when no lane produced the result (a run cut before a rung answered, a rung that threw, a lockdown miss). */
+  route: AccessRoute | null
   /** The client that sent the requests: undici, impit, playwright, patchright, the person's browser, or the vendor's id; null when the result does not say. */
   executor: string | null
   /** The executor's version as the lane reported it; null when it reported none. */
