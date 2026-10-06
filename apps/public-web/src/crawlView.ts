@@ -1,10 +1,12 @@
-import { crawlCap, fillWords, hashText, layoutPage, mayRead, progressBar, stageLabel, stepsDone, Cell, type CrawlStage, type PageLayout, type StageEvent } from './crawlModel'
+import { crawlCap, fillWords, hashText, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, Cell, type CrawlStage, type PageLayout, type StageEvent } from './crawlModel'
 
-/** While a preview runs, the URL card grows down into a window: an octopus of glyphs crawls a page drawn as a grid,
- * the page scrolling under it, and the cells of the main content it reaches dissolve into glyphs. It never goes
- * further down than the server's reported stages allow (crawlModel.ts); once the result is back it finishes within
- * 1.5 s, the read page's own words settle into the lines, the page's chrome dims, and the window folds back into the
- * card. A page that was not read keeps the octopus at the door with the reason. Every cell keeps its place on the
+/** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs crawls a page
+ * drawn as a grid, the page scrolling under it. It never goes further down than the server's reported stages allow
+ * (crawlModel.ts), and nothing dissolves until the result says the page was read; then it finishes within 1.5 s, the
+ * cells of the main content it passes dissolve into glyphs, the read page's own words settle into the lines, the
+ * page's chrome dims, and the window folds back into the card. A page that was not read keeps the octopus at the door
+ * with the reason. Along the foot runs a bar of glyphs: each stage the server reports sweeps its segment alight,
+ * while the awaited segment only shows a spark running to and fro, never filling. Every cell keeps its place on the
  * grid: only its glyph, brightness and colour change. Escape or Skip closes it at once; the run goes on. Nothing
  * plays with reduced motion or once the visitor chose to always skip. */
 
@@ -12,7 +14,7 @@ export interface CrawlResult {
   read: boolean
   title: string | null
   markdown: string | null
-  /** The status as the page names it ("Done", "Site policy blocks preview", ...). */
+  /** The status as the page names it ("Extraction complete", "Site policy blocks preview", ...). */
   label: string
   reason: string | null
   /** No capture ran (no previews left, a refused address): the window closes without a scene. */
@@ -28,7 +30,7 @@ export interface CrawlView {
 }
 
 const SKIP_KEY = 'octocrawl.crawl.skip'
-const MORPH_MS = 380
+const MORPH_MS = 420
 /** Once the result is back the octopus finishes the page within this, however far it had to go. */
 const FINISH_MS = 1500
 const SETTLE_MS = 600
@@ -39,7 +41,14 @@ const RAMP = ['X', 'x', '+', ':']
 /** A read cell settles into one of these, picked by its place, so the read content reads as a glyph texture. */
 const TEXTURE = ['x', '+', ':', '*', '/', '\\', '=', 'x', '+', '#']
 const HOT = ['#fff1e0', '#ffc59a', '#ff9a66', '#fb7b4c']
+const NAVY = '#081b42'
 const FRAME_MS = 33
+// The page's grid sits between the window's top line (the address, Skip) and its foot (the bar, what the server said).
+const GRID_TOP = 44
+const GRID_FOOT = 78
+// The bar: a reported segment sweeps alight in this long, and the cells around its end spark for this long.
+const SWEEP_MS = 420
+const BURST_MS = 520
 
 // The octopus: its mantle, eyes (O, drawn as navy cells as on the hero's static octopus) and two strides of arms.
 const MANTLE = [
@@ -74,8 +83,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   const windowEl = card.querySelector<HTMLElement>('#crawl-window')!
   const canvas = windowEl.querySelector<HTMLCanvasElement>('.crawl-canvas')!
   const stageEl = windowEl.querySelector<HTMLElement>('.crawl-stage')!
+  const address = windowEl.querySelector<HTMLElement>('#crawl-url')!
   const note = windowEl.querySelector<HTMLElement>('#crawl-note')!
-  const bar = windowEl.querySelector<HTMLElement>('#crawl-bar')!
   const label = windowEl.querySelector<HTMLElement>('#crawl-label')!
   const time = windowEl.querySelector<HTMLElement>('#crawl-time')!
   const skipButton = windowEl.querySelector<HTMLButtonElement>('#crawl-skip')!
@@ -103,6 +112,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   let readAt = new Float64Array(0)
   let reached: boolean[] = []
   let reach: { x: number; y: number; at: number } | null = null
+  /** When each of the bar's steps was reported (performance.now), Infinity until then. */
+  let stepAt: number[] = []
   let octoX = 0
   let raf = 0
   let lastFrame = 0
@@ -161,8 +172,10 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     words = null
     depth = 0
     reach = null
+    stepAt = PROGRESS_STEPS.map(() => Infinity)
     note.hidden = true
     note.textContent = ''
+    address.textContent = url
     startedAt = phaseAt = performance.now()
     phase = 'crawling'
     hero.classList.add('is-crawling')
@@ -175,7 +188,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     width = height = 0
     fit()
     const cols = Math.max(24, Math.floor(width / pitchX))
-    visibleRows = Math.max(12, Math.floor(height / pitchY))
+    visibleRows = Math.max(10, Math.floor((height - GRID_TOP - GRID_FOOT) / pitchY))
     layout = layoutPage(cols, visibleRows * 3, hashText(url))
     pitchX = width / cols
     readAt = new Float64Array(cols * layout.rows).fill(Infinity)
@@ -194,6 +207,13 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     return true
   }
 
+  function markSteps(now: number): void {
+    PROGRESS_STEPS.forEach((step, i) => {
+      const reported = step === 'result' ? done : seen.has(step)
+      if (reported && stepAt[i] === Infinity) stepAt[i] = now
+    })
+  }
+
   function stage(event: StageEvent): void {
     if (phase !== 'crawling') return
     seen.add(event.stage)
@@ -201,6 +221,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       robotsAllowed = event.allowed
       robotsUnreachable = event.unreachable === true
     }
+    markSteps(performance.now())
   }
 
   function finish(outcome: CrawlResult): Promise<boolean> {
@@ -210,6 +231,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     result = outcome
     const now = performance.now()
     endedAt = now
+    markSteps(now)
     if (outcome.skipScene) return close().then(() => focusInside)
     if (outcome.read) {
       words = fillWords(layout!, outcome.title, outcome.markdown)
@@ -261,18 +283,11 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   let footText = ''
   function updateFoot(now: number): void {
-    const steps = stepsDone(seen, done)
-    const pending = !done && Math.floor((now - startedAt) / 260) % 2 === 0
-    const filled = progressBar(steps, 16)
-    // The next step blinks while it is awaited; it is never filled before the server reports it.
-    const shown = pending ? filled.replace('·', ':') : filled
     const said = done && result ? result.label : stageLabel(seen, robotsAllowed, robotsUnreachable)
     // The time runs until the result is back, then stays at the time it took.
     const seconds = `${(((done ? endedAt : now) - startedAt) / 1000).toFixed(1)} s`
-    const next = `${shown}|${said}|${seconds}`
-    if (next === footText) return
-    footText = next
-    bar.textContent = `[${shown}]`
+    if (`${said}|${seconds}` === footText) return
+    footText = `${said}|${seconds}`
     label.textContent = said
     time.textContent = seconds
   }
@@ -297,10 +312,10 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       depth += (0 - depth) * (1 - Math.exp(-dt / 160))
       if (now - phaseAt > FAILURE_MS) void close()
     } else if (phase === 'settled' && now - phaseAt > SETTLE_MS) void close()
-    // Blocks the mantle has reached are read, from where an arm touched them outward, once the server has read the
-    // page: the ones it passed before then dissolve together when it has.
+    // Once the result says the page was read, the blocks the mantle has reached dissolve, from where an arm touched
+    // them outward; the ones it passed before then dissolve together.
     const head = headRow()
-    const reading = phase !== 'failed' && mayRead(seen, result?.read === true)
+    const reading = phase !== 'failed' && mayRead(result?.read === true)
     layout!.blocks.forEach((block, index) => {
       if (reached[index] || !reading || head + SPRITE_H < block.top) return
       reached[index] = true
@@ -310,7 +325,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       spread(block, x, y, now)
     })
     // The octopus leans toward the next block it will reach.
-    const next = layout!.blocks.find((_, index) => !reached[index])
+    const next = layout!.blocks.find((block) => block.top > head + SPRITE_H)
     if (next) {
       const goal = Math.round(next.left + (next.right - next.left) * 0.3 - SPRITE_W / 2)
       if (Math.abs(goal - octoX) > 1) octoX += Math.sign(goal - octoX)
@@ -349,6 +364,9 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     draw(now)
   }
 
+  /** The vertical centre of a grid row on the canvas, given the first row shown. */
+  const rowY = (row: number, top: number): number => GRID_TOP + (row - top) * pitchY + pitchY / 2
+
   function draw(now: number): void {
     const ctx = context!
     const { cols, rows, kind, glyph } = layout!
@@ -362,8 +380,12 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     const ending = phase === 'settled' ? Math.min(1, (now - phaseAt) / 300) : 0
     const failing = phase === 'failed' ? Math.min(1, (now - phaseAt) / 300) : 0
     const chromeAlpha = 0.32 - 0.2 * ending - 0.14 * failing
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)
+    ctx.clip()
     for (let row = top; row < Math.min(rows, top + visibleRows + 1); row++) {
-      const y = (row - top) * pitchY + pitchY / 2
+      const y = rowY(row, top)
       for (let col = 0; col < cols; col++) {
         const i = row * cols + col
         const k = kind[i]!
@@ -394,7 +416,95 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       }
     }
     drawReach(now, top)
-    drawOctopus(now, head - top)
+    drawOctopus(now, head, top)
+    ctx.restore()
+    // The page fades into the window's navy at its top and foot.
+    const fade = (y: number, h: number, down: boolean): void => {
+      const gradient = ctx.createLinearGradient(0, y, 0, y + h)
+      gradient.addColorStop(down ? 0 : 1, NAVY)
+      gradient.addColorStop(down ? 1 : 0, 'rgba(8, 27, 66, 0)')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, y, width, h)
+    }
+    fade(GRID_TOP - pitchY / 2, pitchY * 1.5, true)
+    fade(height - GRID_FOOT - pitchY, pitchY * 1.5, false)
+    drawBar(now)
+  }
+
+  /** The bar along the window's foot: a segment per step, lit only once the server reported it. */
+  function drawBar(now: number): void {
+    const ctx = context!
+    const steps = PROGRESS_STEPS.length
+    const left = 16
+    const span = width - 32
+    const cells = Math.max(steps * 4, Math.floor(span / pitchX))
+    const pitch = span / cells
+    const per = cells / steps
+    const y = height - GRID_FOOT + 22
+    // A page that was not read: the step where it stopped turns red (robots.txt when it refused, otherwise the first
+    // step the server never reported), and nothing after it lights.
+    ctx.save()
+    ctx.font = `700 ${pitchY - 1}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    const failedAt = !done || !result || result.read ? -1 : robotsAllowed === false ? PROGRESS_STEPS.indexOf('robots') : Math.min(stepsDone(seen, false), steps - 1)
+    // The awaited step: the first not yet reported, while the run goes on.
+    const awaited = done ? -1 : stepAt.findIndex(at => at === Infinity)
+    const all = stepAt.every(at => at !== Infinity) && result?.read === true
+    for (let c = 0; c < cells; c++) {
+      const s = Math.min(steps - 1, Math.floor(c / per))
+      const local = c - s * per
+      const x = left + c * pitch + pitch / 2
+      const lit = stepAt[s]! !== Infinity ? (now - stepAt[s]!) / SWEEP_MS * per : -1
+      let char = '·'
+      let colour = 'rgba(168, 201, 250, .22)'
+      if (failedAt >= 0 && s > failedAt) { /* stays dim */ }
+      else if (s === failedAt) {
+        char = c % 2 ? 'x' : '+'
+        colour = `rgba(255, 112, 88, ${0.55 + 0.35 * Math.sin(now / 180 + c * 0.4)})`
+      } else if (lit >= local) {
+        const behind = lit - local
+        if (behind < 1.2 && lit < per + 1) { char = 'X'; colour = '#fff1e0' }
+        else {
+          // Lit cells shimmer: a wave of brightness runs right along them, the glyph stepping with it.
+          const wave = 0.5 + 0.5 * Math.sin(c * 0.55 - now / 110)
+          char = wave > 0.75 ? 'X' : wave > 0.45 ? 'x' : wave > 0.2 ? '+' : ':'
+          colour = all ? (wave > 0.6 ? '#fff1e0' : '#ffc59a') : wave > 0.6 ? '#ffc59a' : '#fb7b4c'
+        }
+      } else if (s === awaited) {
+        // A spark runs to and fro inside the awaited segment; it never fills it.
+        const spark = (0.5 + 0.5 * Math.sin(now / 340)) * (per - 1)
+        const d = Math.abs(local - spark)
+        if (d < 3.5) {
+          char = RAMP[Math.min(RAMP.length - 1, Math.floor(d))]!
+          colour = `rgba(251, 123, 76, ${1 - d / 4})`
+        } else {
+          char = ':'
+          colour = 'rgba(168, 201, 250, .3)'
+        }
+      }
+      // Lit and red cells glow; the rest stay flat.
+      const glows = colour.startsWith('#') || s === failedAt
+      ctx.shadowColor = s === failedAt ? 'rgba(255, 112, 88, .9)' : 'rgba(251, 123, 76, .85)'
+      ctx.shadowBlur = glows ? 9 : 0
+      ctx.fillStyle = colour
+      ctx.fillText(char, x, y)
+    }
+    ctx.shadowBlur = 0
+    // Where a step was just reported, the cells around its end spark and cool.
+    for (let s = 0; s < steps; s++) {
+      const age = now - stepAt[s]! - SWEEP_MS
+      if (age < 0 || age > BURST_MS || stepAt[s] === Infinity) continue
+      const t = age / BURST_MS
+      const x = left + Math.min(cells - 1, Math.round((s + 1) * per) - 1) * pitch + pitch / 2
+      const glyphs: Array<[number, number, string]> = [[0, -1, '+'], [0, 1, '+'], [-1, -1, '\\'], [1, -1, '/'], [-1, 1, '/'], [1, 1, '\\'], [0, -2, ':'], [0, 2, ':'], [2, 0, 'x']]
+      ctx.globalAlpha = 1 - t
+      glyphs.forEach(([dx, dy, char], i) => {
+        if (i >= 6 && t < 0.25) return
+        ctx.fillStyle = HOT[Math.min(HOT.length - 1, Math.floor(t * HOT.length))]!
+        ctx.fillText(char, x + dx * pitch * (1 + t), y + dy * pitchY * 0.8 * (1 + t * 0.6))
+      })
+      ctx.globalAlpha = 1
+    }
+    ctx.restore()
   }
 
   function drawReach(now: number, top: number): void {
@@ -407,24 +517,24 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     for (let s = 1; s < steps; s++) {
       const col = Math.round(fromX + (reach.x - fromX) * s / steps)
       const row = Math.round(fromY + (reach.y - fromY) * s / steps)
-      if (row < top || row >= top + visibleRows) continue
+      if (row < top || row > top + visibleRows) continue
       ctx.fillStyle = `rgba(251, 123, 76, ${0.35 + 0.65 * life})`
-      ctx.fillText(s % 3 === 0 ? '+' : ':', col * pitchX + pitchX / 2, (row - top) * pitchY + pitchY / 2)
+      ctx.fillText(s % 3 === 0 ? '+' : ':', col * pitchX + pitchX / 2, rowY(row, top))
     }
   }
 
-  function drawOctopus(now: number, row0: number): void {
+  function drawOctopus(now: number, head: number, top: number): void {
     const ctx = context!
     const stride = Math.floor(now / (phase === 'failed' ? 520 : 240)) % 2
     const blink = phase === 'failed' ? Math.floor(now / 700) % 3 === 0 : (now % 2600) < 140
     const lines = [...MANTLE, ...ARMS[stride]!]
     lines.forEach((line, dy) => {
-      const y = (row0 + dy) * pitchY + pitchY / 2
-      if (y < -pitchY || y > height + pitchY) return
+      const y = rowY(head + dy, top)
+      if (y < GRID_TOP - pitchY || y > height - GRID_FOOT + pitchY) return
       // The cells under the octopus are covered, so the page never shows through its mantle or between its arms.
       const first = line.search(/\S/)
       const last = line.length - 1 - line.split('').reverse().join('').search(/\S/)
-      ctx.fillStyle = '#081b42'
+      ctx.fillStyle = NAVY
       ctx.fillRect((octoX + first) * pitchX, y - pitchY / 2, (last - first + 1) * pitchX, pitchY)
       for (let dx = 0; dx < line.length; dx++) {
         const char = line[dx]!

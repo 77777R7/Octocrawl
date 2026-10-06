@@ -182,6 +182,7 @@ describe('ResilientHttpSubject robots', () => {
       // robots.txt is decided before the page is requested, and the page is extracted once its body is read.
       expect(heard.indexOf('robots_checked')).toBeGreaterThanOrEqual(0)
       expect(heard.indexOf('extract')).toBeGreaterThan(heard.indexOf('robots_checked'))
+      expect(structuredClone(out.trace)).toEqual(out.trace)
     } finally {
       await subject.teardown()
     }

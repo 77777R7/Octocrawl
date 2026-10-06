@@ -922,13 +922,17 @@ function bodyReadFailure(error: unknown): 'timeout' | 'connection_error' | null 
 function observedTrace(onTrace: ExecutionContext['onTrace']): TraceEvent[] {
   const trace: TraceEvent[] = []
   if (onTrace === undefined) return trace
-  trace.push = (...events: TraceEvent[]): number => {
-    const length = Array.prototype.push.apply(trace, events)
-    for (const event of events) {
-      try { onTrace(event) } catch { /* Progress is advisory; the record is the trace. */ }
-    }
-    return length
-  }
+  // Not enumerable, so the trace still clones and serializes as a plain array.
+  Object.defineProperty(trace, 'push', {
+    configurable: true, writable: true, enumerable: false,
+    value: (...events: TraceEvent[]): number => {
+      const length = Array.prototype.push.apply(trace, events)
+      for (const event of events) {
+        try { onTrace(event) } catch { /* Progress is advisory; the record is the trace. */ }
+      }
+      return length
+    },
+  })
   return trace
 }
 

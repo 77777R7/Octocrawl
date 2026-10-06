@@ -142,8 +142,9 @@ export function previewNetworkPolicy(): NetworkPolicy {
 }
 
 /** A step of a running preview that the page shows as it happens: robots.txt was read (whether it allows the page,
- * and `unreachable` when it could not be read, which counts as a refusal), then the page was fetched and read. Only
- * the HTTP lane reports them; any step may never come. */
+ * and `unreachable` when it could not be read, which counts as a refusal), then the page's body was received and
+ * parsed. `page` does not mean the page was read: a challenge page or an empty shell is still refused after it, and
+ * only the result says. Only the HTTP lane reports them; any step may never come. */
 export type PreviewStage = { stage: 'robots'; allowed: boolean; unreachable?: true } | { stage: 'page' }
 
 export type PreviewCapture = (url: NormalizedPreviewUrl, signal: AbortSignal, deadlineAt: number, amazonState: string | null, ownerEvaluation?: boolean, onRetryAfter?: (url: string, retryAt: number) => void, localPlatformProxyUrl?: string, localPlatformRobotsException?: boolean, options?: PreviewOptions, onStage?: (stage: PreviewStage) => void) => Promise<CaptureOutcome>

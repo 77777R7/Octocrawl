@@ -16,10 +16,10 @@ export function crawlCap(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean |
   return 0
 }
 
-/** Whether the content the octopus passes may dissolve: only once the server has read the page. Before that it walks
- * the silhouette and nothing is shown as read. */
-export function mayRead(seen: ReadonlySet<CrawlStage>, pageRead: boolean): boolean {
-  return seen.has('page') || pageRead
+/** Whether the content the octopus passes may dissolve: only once the result says the page was read. The `page`
+ * stage is not enough: the server receives a challenge page or an empty shell too, and refuses it after. */
+export function mayRead(pageRead: boolean): boolean {
+  return pageRead
 }
 
 /** The progress bar's steps, in order: the request was taken, robots.txt read, the page read, the result back. */
@@ -30,16 +30,10 @@ export function stepsDone(seen: ReadonlySet<CrawlStage>, done: boolean): number 
   return PROGRESS_STEPS.filter(step => step === 'result' ? done : seen.has(step)).length
 }
 
-/** The ASCII bar: `width` cells, a filled run for the steps reported so far. */
-export function progressBar(done: number, width: number): string {
-  const filled = Math.round(width * Math.min(done, PROGRESS_STEPS.length) / PROGRESS_STEPS.length)
-  return '#'.repeat(filled) + '·'.repeat(Math.max(0, width - filled))
-}
-
 /** What the server is doing, said plainly from the last thing it reported. */
 export function stageLabel(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean | null, robotsUnreachable = false): string {
   if (robotsAllowed === false) return robotsUnreachable ? 'robots.txt could not be read · not fetching' : 'robots.txt disallows this page'
-  if (seen.has('page')) return 'Page read · finishing'
+  if (seen.has('page')) return 'Page received · checking it'
   if (seen.has('robots')) return 'robots.txt allows it · fetching the page'
   if (seen.has('started')) return 'Checking robots.txt'
   return 'Sending the link'

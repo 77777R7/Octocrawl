@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Cell, crawlCap, fillWords, layoutPage, mayRead, plainText, progressBar, stageLabel, stepsDone, type CrawlStage } from '../src/crawlModel'
+import { Cell, crawlCap, fillWords, layoutPage, mayRead, plainText, stageLabel, stepsDone, type CrawlStage } from '../src/crawlModel'
 import { readPreview } from '../src/previewStream'
 
 const stages = (...names: CrawlStage[]) => new Set<CrawlStage>(names)
@@ -14,11 +14,10 @@ describe('crawl window progress', () => {
     expect(crawlCap(stages(), null, true)).toBe(1)
   })
 
-  it('dissolves nothing as read before the server has read the page', () => {
-    expect(mayRead(stages('started', 'robots'), false)).toBe(false)
-    expect(mayRead(stages('started', 'robots', 'page'), false)).toBe(true)
-    // A server that reports no stages: the result says whether the page was read.
-    expect(mayRead(stages(), true)).toBe(true)
+  it('dissolves nothing as read until the result says the page was read', () => {
+    // The page stage comes for a challenge page or an empty shell too.
+    expect(mayRead(false)).toBe(false)
+    expect(mayRead(true)).toBe(true)
   })
 
   it('fills a step of the bar only once the server reported it', () => {
@@ -26,14 +25,12 @@ describe('crawl window progress', () => {
     expect(stepsDone(stages('started', 'robots'), false)).toBe(2)
     // A server that did not stream reports no stages: only the result fills its step.
     expect(stepsDone(stages(), true)).toBe(1)
-    expect(progressBar(2, 16)).toBe('########········')
-    expect(progressBar(4, 16)).toBe('################')
   })
 
   it('says what the server last reported', () => {
     expect(stageLabel(stages('started'), null)).toBe('Checking robots.txt')
     expect(stageLabel(stages('started', 'robots'), false)).toBe('robots.txt disallows this page')
-    expect(stageLabel(stages('started', 'robots', 'page'), true)).toBe('Page read · finishing')
+    expect(stageLabel(stages('started', 'robots', 'page'), true)).toBe('Page received · checking it')
   })
 })
 
