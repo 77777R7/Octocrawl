@@ -1036,7 +1036,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try { chrome = await openUserChrome(userChrome!, signal) }
     catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
     try {
-      const hosts = [new URL(req.url).hostname]
+      // The host, with a port that is not the scheme's default: another port of it is another site to allow.
+      const hosts = [new URL(req.url).host]
       hooks.onAllow?.(hosts)
       let allowed: AllowedSites
       try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal }) }

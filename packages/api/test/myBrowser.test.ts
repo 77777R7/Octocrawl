@@ -188,5 +188,7 @@ describe('the person\'s Chrome, asked to allow sites', () => {
     // A subdomain the allowed host leads to (an apex to its mail host), and the parent a subdomain leads to.
     expect(await readOn('site.test', 'https://site.test/mail', 'https://mail.site.test/mail')).toMatchObject({ message: expect.stringContaining('mail.site.test, which you did not allow') })
     expect(await readOn('docs.site.test', 'https://docs.site.test/x', 'https://site.test/settings')).toMatchObject({ message: expect.stringContaining('site.test, which you did not allow') })
+    // Another port of the host allowed is another site.
+    expect(await readOn('site.test', 'https://site.test/a', 'https://site.test:8443/a')).toMatchObject({ message: expect.stringContaining('site.test:8443, which you did not allow') })
   }, 20_000)
 })

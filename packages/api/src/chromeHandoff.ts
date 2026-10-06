@@ -68,8 +68,9 @@ export interface UserChromeReadOptions {
    */
   unattended?: boolean
   /**
-   * The hosts the person allowed (AllowedSites.hosts): read without them only on these hosts exactly, never a parent
-   * or a subdomain of one, wherever the page leads. Default the URL's own host.
+   * The hosts the person allowed (AllowedSites.hosts), each with a port that is not the scheme's default: read without
+   * them only on these exactly, never a parent, a subdomain or another port of one, wherever the page leads. Default the
+   * URL's own.
    */
   allowedHosts?: readonly string[]
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
@@ -258,7 +259,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   const waitMs = options.waitMs ?? 600_000
   const pollMs = options.pollMs ?? 500
   const host = new URL(url).hostname
-  const allowed = options.unattended === true ? new Set(options.allowedHosts ?? [host]) : null
+  const allowed = options.unattended === true ? new Set(options.allowedHosts ?? [new URL(url).host]) : null
   const started = Date.now()
   let sawGate: string | null = null
   // A tab or a Chrome that is gone; a page between two documents ("navigated or closed") is not gone, only moving.
@@ -372,7 +373,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       const asked = pageOf(state.href) === pageOf(url) || heard.landings.has(pageOf(state.href))
       const arrived = returns === 0 || connection.on === undefined || heard.documents > documentsAtReturn
       // Read without the person: only on a host they allowed, exactly.
-      const inScope = allowed === null || allowed.has(safeHost(state.href))
+      const inScope = allowed === null || allowed.has(hostAndPort(state.href))
       const through = inScope && state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
         && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !typing && arrived
       clear = through ? clear + 1 : 0
@@ -405,7 +406,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       }
     }
     const where = last === null ? 'it never loaded'
-      : allowed !== null && !allowed.has(safeHost(last.state.href)) ? `it was on ${safeHost(last.state.href)}, which you did not allow (only ${[...allowed].join(', ')})`
+      : allowed !== null && !allowed.has(hostAndPort(last.state.href)) ? `it was on ${hostAndPort(last.state.href)}, which you did not allow (only ${[...allowed].join(', ')})`
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
         : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
           : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (Octocrawl reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
@@ -476,6 +477,15 @@ function pageOf(href: string): string {
 /** Two addresses of one document: the same but for the fragment. */
 function sameDocument(a: string, b: string): boolean {
   return a.split('#')[0] === b.split('#')[0]
+}
+
+/** The host and a port that is not the scheme's default (`site.test`, `site.test:8443`), as an allowed site is named. */
+function hostAndPort(href: string): string {
+  try {
+    return new URL(href).host
+  } catch {
+    return 'another page'
+  }
 }
 
 function safeHost(href: string): string {
