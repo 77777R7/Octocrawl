@@ -55,10 +55,10 @@ export interface CaptureOptions {
 export type ScreenshotCapturer = (url: string, options: CaptureOptions) => Promise<ScreenshotCapture>
 
 const VIEWPORT = { width: 1280, height: 800 }
-const VIEWPORTS = 3
-const QUALITY = 70
+const VIEWPORTS = 2
+const QUALITY = 60
 /** After the document loaded, the window waits this long at most for its images and fonts. */
-const LOAD_WAIT_MS = 800
+const LOAD_WAIT_MS = 400
 const ELEMENTS_SELECTOR = 'h1,h2,h3,h4,p,li,a,img,table,pre,blockquote'
 const ELEMENTS_AT_MOST = 400
 const TEXT_AT_MOST = 120

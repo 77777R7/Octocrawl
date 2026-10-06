@@ -11,7 +11,7 @@ import { captureScreenshot } from './screenshotCapture.js'
 export interface ScreenshotProbe {
   ok: boolean
   error?: string
-  /** Pixels captured: the viewport's width and the lesser of three viewports and the page. */
+  /** Pixels captured: the viewport's width and the lesser of two viewports and the page. */
   clip?: { width: number; height: number }
   jpegBytes?: number
   /** Headings, paragraphs, list items, links, images, tables and code blocks inside the clip. */
