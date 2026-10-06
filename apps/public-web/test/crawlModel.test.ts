@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Cell, crawlCap, fillWords, layoutPage, mayRead, plainText, stageLabel, stepsDone, type CrawlStage } from '../src/crawlModel'
+import { captureLayout, Cell, crawlCap, extractedElements, fillWords, glyphForLuminance, layoutPage, mayRead, plainText, stageLabel, stepsDone, type CrawlStage, type PageCapture } from '../src/crawlModel'
 import { readPreview } from '../src/previewStream'
 
 const stages = (...names: CrawlStage[]) => new Set<CrawlStage>(names)
@@ -92,5 +92,87 @@ describe('reading a preview', () => {
     const plain = new Response('{"status":"quota_exceeded"}', { headers: { 'content-type': 'application/json; charset=utf-8' } })
     expect(await readPreview(plain, () => {})).toEqual({ status: 'quota_exceeded' })
     await expect(readPreview(stream(['{"type":"stage","stage":"started","ms":1}\n']), () => {})).rejects.toThrow('incomplete result')
+  })
+})
+
+describe('the grid over the server\'s picture', () => {
+  const page = { width: 1280, height: 2400, elements: [
+    { tag: 'h1', x: 100, y: 200, width: 600, height: 60, text: 'Tide report' },
+    { tag: 'p', x: 100, y: 300, width: 800, height: 120, text: 'The harbour office…' },
+    { tag: 'a', x: 100, y: 300, width: 120, height: 20, text: 'harbour' },
+    { tag: 'img', x: 100, y: 500, width: 400, height: 300, text: 'Harbour' },
+    { tag: 'p', x: 100, y: 5000, width: 800, height: 40, text: 'below the picture' },
+  ] }
+  // The window is 640 px wide for a 1280 px picture: half scale, 8 px columns, 14 px rows.
+  const layout = captureLayout(page, 80, 8, 14, 0.5)
+
+  it('is as tall as the picture plus the floor, and marks each element\'s cells by its kind', () => {
+    expect(layout.rows).toBe(Math.ceil(1200 / 14) + 2)
+    expect(layout.floor).toBe(layout.rows - 2)
+    const at = (px: number, py: number) => layout.kind[Math.floor(py * 0.5 / 14) * 80 + Math.floor(px * 0.5 / 8)]
+    expect(at(150, 220)).toBe(Cell.Title)
+    expect(at(500, 360)).toBe(Cell.Text)
+    expect(at(200, 600)).toBe(Cell.Image)
+    expect(at(1000, 100)).toBe(Cell.Empty)
+  })
+
+  it('has at least the rows asked for, so a short picture still fills the window', () => {
+    const short = captureLayout({ width: 1280, height: 800, elements: [] }, 36, 9, 16, 0.26)
+    expect(short.rows).toBeLessThan(20)
+    expect(captureLayout({ width: 1280, height: 800, elements: [] }, 36, 9, 16, 0.26, 20).rows).toBe(20)
+  })
+
+  it('makes a block of each element inside the picture, top to bottom, and none of one below it', () => {
+    expect(layout.blocks.map(block => block.kind)).toEqual(['title', 'text', 'text', 'image'])
+    for (const block of layout.blocks) expect(block.bottom).toBeLessThan(layout.floor)
+  })
+
+  it('dissolves dark pixels into dense glyphs and light ones into faint ones', () => {
+    expect(glyphForLuminance(255)).toBe('·')
+    expect(glyphForLuminance(0)).toBe('#')
+    expect(['x', 'X']).toContain(glyphForLuminance(90))
+  })
+
+  it('reads a capture line from the stream and leaves out an element that is not one', async () => {
+    const { readPreview } = await import('../src/previewStream')
+    const captures: PageCapture[] = []
+    const line = JSON.stringify({ type: 'capture', width: 1280, height: 800, jpeg: 'AAAA', blocked: 1, ms: 900, elements: [{ tag: 'h1', x: 1, y: 2, width: 3, height: 4, text: 'Tide' }, { tag: 'p' }] })
+    const response = new Response(`${line}\n{"type":"result","http":200,"body":{"status":"success"}}\n`, { headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } })
+    expect(await readPreview(response, () => {}, capture => captures.push(capture))).toEqual({ status: 'success' })
+    expect(captures).toEqual([{ width: 1280, height: 800, jpeg: 'AAAA', elements: [{ tag: 'h1', x: 1, y: 2, width: 3, height: 4, text: 'Tide' }] }])
+  })
+})
+
+describe('which of the picture\'s elements the result read', () => {
+  const elements = [
+    { tag: 'h1', x: 0, y: 0, width: 10, height: 10, text: 'Tide report' },
+    { tag: 'p', x: 0, y: 0, width: 10, height: 10, text: 'The harbour office records tide height, wind and visibility for every hour of the day.' },
+    { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'Docs' },
+    { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'Pricing and plans' },
+    { tag: 'li', x: 0, y: 0, width: 10, height: 10, text: 'Sign in to your account' },
+    { tag: 'img', x: 0, y: 0, width: 10, height: 10, text: 'Harbour at dawn' },
+    { tag: 'img', x: 0, y: 0, width: 10, height: 10, text: 'Logo' },
+    { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Related' },
+  ]
+  const markdown = '# Tide report\n\nThe harbour office records **tide height**, wind and visibility for every hour of the day. See [pricing and plans](https://x.y).\n\n![Harbour at dawn](h.jpg)'
+
+  it('keeps the elements whose text the title or Markdown holds, and none of the navigation', () => {
+    expect(extractedElements(elements, 'Tide report', markdown).map(element => element.text))
+      .toEqual(['Tide report', 'The harbour office records tide height, wind and visibility for every hour of the day.', 'Pricing and plans', 'Harbour at dawn'])
+  })
+
+  it('never marks a short heading or link from the inside of a word or an address', () => {
+    const sidebar = [
+      { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'AI' }, { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Go' },
+      { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Tide' }, { tag: 'h3', x: 0, y: 0, width: 10, height: 10, text: 'FAQ' },
+      { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'About us' }, { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Harbour' },
+    ]
+    const words = 'He said the tide was going out; see https://example.com/faq and learn more about us today. The harbour sleeps.'
+    expect(extractedElements(sidebar, 'Harbour notes', words).map(element => element.text)).toEqual(['Tide', 'About us', 'Harbour'])
+  })
+
+  it('keeps nothing for a result without words', () => {
+    expect(extractedElements(elements, null, null)).toEqual([])
+    expect(extractedElements(elements, 'Tide report', null).map(element => element.text)).toEqual(['Tide report'])
   })
 })

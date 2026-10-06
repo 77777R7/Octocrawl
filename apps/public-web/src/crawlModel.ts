@@ -221,3 +221,74 @@ export function fillWords(layout: PageLayout, title: string | null, markdown: st
   if (body) pour(split(body), runsOf([Cell.Text]), out)
   return out
 }
+
+/** The server's picture of the page (packages/public-preview, the stream's `capture` line): its top as a cold browser
+ * rendered it, and where the elements the window may mark sit in it, in the picture's own pixels. */
+export interface CaptureElement { tag: string; x: number; y: number; width: number; height: number; text: string }
+export interface PageCapture { width: number; height: number; jpeg: string; elements: CaptureElement[] }
+
+const RANK: Record<number, number> = { [Cell.Title]: 3, [Cell.Image]: 2, [Cell.Text]: 1 }
+
+function captureKind(tag: string): Cell {
+  if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4') return Cell.Title
+  if (tag === 'img' || tag === 'table') return Cell.Image
+  return Cell.Text
+}
+
+/** The grid over the picture: `cols` cells wide at `pitchX` px, as many rows as the picture scaled by `scale` fills
+ * at `pitchY`, plus the floor. A cell is the kind of the element that covers it, a heading winning over a picture
+ * over text, and each element is a block for the octopus to reach. The cells' own glyphs come from the picture's
+ * brightness (glyphForLuminance), not from here. */
+export function captureLayout(page: Pick<PageCapture, 'width' | 'height' | 'elements'>, cols: number, pitchX: number, pitchY: number, scale: number, minRows = 12): PageLayout {
+  // At least the window's own rows, so a short picture still fills it and the view never scrolls above the top.
+  const rows = Math.max(12, minRows, Math.ceil(page.height * scale / pitchY) + 2)
+  const kind = new Uint8Array(cols * rows)
+  const glyph = new Uint16Array(cols * rows).fill(32)
+  const blocks: Block[] = []
+  for (const element of page.elements) {
+    const left = Math.max(0, Math.floor(element.x * scale / pitchX))
+    const right = Math.min(cols - 1, Math.ceil((element.x + element.width) * scale / pitchX) - 1)
+    const top = Math.max(0, Math.floor(element.y * scale / pitchY))
+    const bottom = Math.min(rows - 3, Math.ceil((element.y + element.height) * scale / pitchY) - 1)
+    if (right < left || bottom < top) continue
+    const k = captureKind(element.tag)
+    for (let row = top; row <= bottom; row++) {
+      for (let col = left; col <= right; col++) {
+        const i = row * cols + col
+        if ((RANK[kind[i]!] ?? 0) < RANK[k]!) kind[i] = k
+      }
+    }
+    blocks.push({ kind: k === Cell.Title ? 'title' : k === Cell.Image ? 'image' : 'text', top, bottom, left, right })
+    if (blocks.length >= 400) break
+  }
+  blocks.sort((a, b) => a.top - b.top || a.left - b.left)
+  return { cols, rows, kind, glyph, blocks, floor: rows - 2 }
+}
+
+/** The glyph a cell of the picture dissolves into: the darker the pixels (ink on a page), the denser the glyph. */
+const LUMINANCE_RAMP = ['·', ':', '+', 'x', 'X', '#']
+export function glyphForLuminance(luminance: number): string {
+  const dark = 1 - Math.max(0, Math.min(255, luminance)) / 255
+  return LUMINANCE_RAMP[Math.min(LUMINANCE_RAMP.length - 1, Math.floor(dark * LUMINANCE_RAMP.length))]!
+}
+
+/** The elements of the picture whose text the result holds: what was extracted, and so what the window may mark as
+ * read. Navigation, sidebars and whatever else the extraction left out stay pixels. A heading counts when the title
+ * or the Markdown has it, a picture when the Markdown keeps its alt text, anything else when the Markdown's words
+ * contain its first line. Only text the result itself holds can match: nothing is inferred. */
+export function extractedElements(elements: CaptureElement[], title: string | null, markdown: string | null): CaptureElement[] {
+  const norm = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim()
+  // Bare addresses are not words the page said: "faq" in a link's path does not make a "FAQ" heading read.
+  const words = norm((markdown ? plainText(markdown) : '').replace(/https?:\/\/\S+/g, ' '))
+  const heading = norm(title ?? '')
+  const raw = norm(markdown ?? '')
+  // The phrase as whole words: "AI" is not in "said", nor "go" in "going".
+  const holds = (haystack: string, phrase: string): boolean => new RegExp(`(^|[^\\p{L}\\p{N}])${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'u').test(haystack)
+  return elements.filter(element => {
+    const text = norm(element.text)
+    if (element.tag === 'img') return text.length >= 2 && raw.includes(`![${text}`)
+    const isHeading = /^h[1-4]$/.test(element.tag)
+    if (text.length < (isHeading ? 3 : 6)) return false
+    return holds(words, text) || (isHeading && heading === text)
+  })
+}
