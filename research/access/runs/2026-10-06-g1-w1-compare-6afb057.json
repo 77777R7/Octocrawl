@@ -1,0 +1,1371 @@
+{
+  "runs": {
+    "A": [
+      {
+        "dir": ".w2l/access/runs/2026-10-06T03-38-00-053Z",
+        "startedAt": "2026-10-06T03:38:00.053Z",
+        "api": "http://127.0.0.1:8797",
+        "commit": "6afb057"
+      },
+      {
+        "dir": ".w2l/access/runs/2026-10-06T03-54-14-618Z",
+        "startedAt": "2026-10-06T03:54:14.618Z",
+        "api": "http://127.0.0.1:8797",
+        "commit": "6afb057"
+      }
+    ],
+    "B": [
+      {
+        "dir": ".w2l/access/runs/2026-10-06T03-44-08-009Z",
+        "startedAt": "2026-10-06T03:44:08.009Z",
+        "api": "http://127.0.0.1:8798",
+        "commit": "6afb057"
+      },
+      {
+        "dir": ".w2l/access/runs/2026-10-06T03-50-03-687Z",
+        "startedAt": "2026-10-06T03:50:03.687Z",
+        "api": "http://127.0.0.1:8798",
+        "commit": "6afb057"
+      }
+    ]
+  },
+  "byPart": {
+    "frozen": {
+      "tasks": 50,
+      "gain": 6,
+      "regression": 0,
+      "same": 43,
+      "unstable": 1
+    },
+    "unstable": {
+      "tasks": 3,
+      "gain": 1,
+      "regression": 0,
+      "same": 1,
+      "unstable": 1
+    },
+    "healthy": {
+      "tasks": 25,
+      "gain": 0,
+      "regression": 1,
+      "same": 24,
+      "unstable": 0
+    },
+    "blind": {
+      "tasks": 14,
+      "gain": 1,
+      "regression": 0,
+      "same": 13,
+      "unstable": 0
+    },
+    "all": {
+      "tasks": 92,
+      "gain": 8,
+      "regression": 1,
+      "same": 81,
+      "unstable": 2
+    }
+  },
+  "engines": {
+    "A": {
+      "attempts": 184,
+      "verified": 69,
+      "falseSuccess": 16,
+      "p50": 2941,
+      "p95": 10296,
+      "browserAttempts": 110,
+      "browserP50": 3908,
+      "browserP95": 7395
+    },
+    "B": {
+      "attempts": 184,
+      "verified": 84,
+      "falseSuccess": 22,
+      "p50": 2710,
+      "p95": 7333,
+      "browserAttempts": 109,
+      "browserP50": 3695,
+      "browserP95": 7872
+    }
+  },
+  "paired": {
+    "channel": "http_compat",
+    "tasks": 33,
+    "medianRatio": 0.901,
+    "limit": 1.2,
+    "met": true,
+    "perTask": [
+      {
+        "id": "T008",
+        "part": "unstable",
+        "ratio": 0.786
+      },
+      {
+        "id": "T015",
+        "part": "healthy",
+        "ratio": 1.014
+      },
+      {
+        "id": "T016",
+        "part": "healthy",
+        "ratio": 1.07
+      },
+      {
+        "id": "T020",
+        "part": "healthy",
+        "ratio": 1.172
+      },
+      {
+        "id": "T024",
+        "part": "healthy",
+        "ratio": 0.825
+      },
+      {
+        "id": "T027",
+        "part": "healthy",
+        "ratio": 0.896
+      },
+      {
+        "id": "T033",
+        "part": "healthy",
+        "ratio": 0.901
+      },
+      {
+        "id": "T035",
+        "part": "healthy",
+        "ratio": 0.85
+      },
+      {
+        "id": "T036",
+        "part": "healthy",
+        "ratio": 1.159
+      },
+      {
+        "id": "T039",
+        "part": "healthy",
+        "ratio": 0.36
+      },
+      {
+        "id": "T040",
+        "part": "healthy",
+        "ratio": 0.829
+      },
+      {
+        "id": "T041",
+        "part": "healthy",
+        "ratio": 0.802
+      },
+      {
+        "id": "T044",
+        "part": "healthy",
+        "ratio": 0.865
+      },
+      {
+        "id": "T051",
+        "part": "healthy",
+        "ratio": 0.99
+      },
+      {
+        "id": "T058",
+        "part": "healthy",
+        "ratio": 1.04
+      },
+      {
+        "id": "T059",
+        "part": "healthy",
+        "ratio": 0.989
+      },
+      {
+        "id": "T061",
+        "part": "healthy",
+        "ratio": 0.786
+      },
+      {
+        "id": "T062",
+        "part": "healthy",
+        "ratio": 0.266
+      },
+      {
+        "id": "T063",
+        "part": "healthy",
+        "ratio": 0.816
+      },
+      {
+        "id": "T067",
+        "part": "healthy",
+        "ratio": 1.261
+      },
+      {
+        "id": "T072",
+        "part": "healthy",
+        "ratio": 0.699
+      },
+      {
+        "id": "T077",
+        "part": "healthy",
+        "ratio": 2.912
+      },
+      {
+        "id": "T079",
+        "part": "healthy",
+        "ratio": 1.12
+      },
+      {
+        "id": "T080",
+        "part": "healthy",
+        "ratio": 0.776
+      },
+      {
+        "id": "B002",
+        "part": "blind",
+        "ratio": 1.428
+      },
+      {
+        "id": "B005",
+        "part": "blind",
+        "ratio": 0.861
+      },
+      {
+        "id": "B006",
+        "part": "blind",
+        "ratio": 0.99
+      },
+      {
+        "id": "B007",
+        "part": "blind",
+        "ratio": 0.91
+      },
+      {
+        "id": "B010",
+        "part": "blind",
+        "ratio": 0.293
+      },
+      {
+        "id": "B011",
+        "part": "blind",
+        "ratio": 0.172
+      },
+      {
+        "id": "B012",
+        "part": "blind",
+        "ratio": 1.027
+      },
+      {
+        "id": "B013",
+        "part": "blind",
+        "ratio": 0.962
+      },
+      {
+        "id": "B014",
+        "part": "blind",
+        "ratio": 0.978
+      }
+    ]
+  },
+  "rows": [
+    {
+      "id": "T001",
+      "part": "frozen",
+      "url": "https://studylib.net/doc/28545749/google-2025-environmental-report",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T002",
+      "part": "frozen",
+      "url": "https://ember-energy.org/data/electricity-data-explorer/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T003",
+      "part": "frozen",
+      "url": "https://demoshop.oxid-esales.com/Merchandise/Uhren/Gold-Spirit.html",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T004",
+      "part": "frozen",
+      "url": "https://www.jpc.de/jpcng/books/detail/-/art/die-augenheilkunde/hnum/11617379",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "connection_error · connection_error",
+      "reasonsB": "timeout · timeout"
+    },
+    {
+      "id": "T005",
+      "part": "frozen",
+      "url": "https://www.etsy.com/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T006",
+      "part": "frozen",
+      "url": "https://www.amazon.com/",
+      "a": "failed",
+      "b": "unstable",
+      "outcome": "unstable",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · bot_detected_generic",
+      "reasonsB": "success · bot_detected_generic"
+    },
+    {
+      "id": "T007",
+      "part": "frozen",
+      "url": "https://www.ironmountain.com/data-centers/colocation",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "rate_limit · rate_limit",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T008",
+      "part": "unstable",
+      "url": "https://github.com/scrapinghub/spidyquotes/blob/master/README.md",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T009",
+      "part": "frozen",
+      "url": "https://fred.stlouisfed.org/series/UNRATE",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "timeout · timeout",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T010",
+      "part": "frozen",
+      "url": "https://data-explorer.oecd.org/s/1xl",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "empty_unverified · empty_unverified"
+    },
+    {
+      "id": "T011",
+      "part": "frozen",
+      "url": "https://www.tiktok.com/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http/browser_local",
+      "laneB": "browser_local/http",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "empty_unverified · empty_unverified"
+    },
+    {
+      "id": "T012",
+      "part": "frozen",
+      "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "empty_unverified · empty_unverified"
+    },
+    {
+      "id": "T013",
+      "part": "frozen",
+      "url": "https://www.bestbuy.com/site/searchpage.jsp?st=laptop",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "timeout · timeout",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T014",
+      "part": "frozen",
+      "url": "https://www.homedepot.com/b/Tools-Power-Tools-Drills/N-5yc1vZc27f",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T015",
+      "part": "healthy",
+      "url": "https://www.nike.com/w/mens-running-shoes-37v7jznik1zy7ok",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T016",
+      "part": "healthy",
+      "url": "https://www.zara.com/us/en/man-shirts-l737.html",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T017",
+      "part": "frozen",
+      "url": "https://www2.hm.com/en_us/men/products/shirts.html",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local/http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T018",
+      "part": "frozen",
+      "url": "https://www.wayfair.com/furniture/sb0/sofas-c413892.html",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "captcha · captcha",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T019",
+      "part": "frozen",
+      "url": "https://www.costco.com/laptops.html",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T020",
+      "part": "healthy",
+      "url": "https://www.newegg.com/p/pl?d=laptop",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T021",
+      "part": "frozen",
+      "url": "https://www.ebay.com/b/Laptops-Netbooks/175672/bn_1648276",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "http_error · http_error"
+    },
+    {
+      "id": "T022",
+      "part": "frozen",
+      "url": "https://www.ikea.com/us/en/cat/sofas-fu003/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T023",
+      "part": "frozen",
+      "url": "https://www.sephora.com/shop/moisturizing-cream-oils-mists",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T024",
+      "part": "healthy",
+      "url": "https://www.ulta.com/shop/skin-care/moisturizers",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T025",
+      "part": "frozen",
+      "url": "https://www.nordstrom.com/browse/women/clothing/dresses",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · success",
+      "reasonsB": "empty_unverified · success"
+    },
+    {
+      "id": "T026",
+      "part": "frozen",
+      "url": "https://www.zalando.de/herrenschuhe/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · timeout",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T027",
+      "part": "healthy",
+      "url": "https://www.otto.de/technik/laptop/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T029",
+      "part": "frozen",
+      "url": "https://www.idealo.de/preisvergleich/ProductCategory/3751.html",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T030",
+      "part": "frozen",
+      "url": "https://www.aliexpress.com/category/702/laptops.html",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "empty_unverified · empty_unverified"
+    },
+    {
+      "id": "T031",
+      "part": "unstable",
+      "url": "https://www.temu.com/",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T033",
+      "part": "healthy",
+      "url": "https://www.amazon.com/s?k=laptop",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local/http",
+      "laneB": "browser_local/http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T034",
+      "part": "frozen",
+      "url": "https://www.etsy.com/c/jewelry/necklaces",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T035",
+      "part": "healthy",
+      "url": "https://www.booking.com/city/fr/paris.html",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T036",
+      "part": "healthy",
+      "url": "https://www.airbnb.com/paris-france/stays",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T037",
+      "part": "frozen",
+      "url": "https://www.expedia.com/Paris-Hotels.d179898.Travel-Guide-Hotels",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "rate_limit · rate_limit",
+      "reasonsB": "rate_limit · rate_limit"
+    },
+    {
+      "id": "T038",
+      "part": "frozen",
+      "url": "https://www.tripadvisor.com/Hotels-g187147-Paris_Ile_de_France-Hotels.html",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T039",
+      "part": "healthy",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T040",
+      "part": "healthy",
+      "url": "https://www.kayak.com/flight-routes/London-LON/Paris-PAR",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T041",
+      "part": "healthy",
+      "url": "https://www.zillow.com/homes/for_sale/Seattle,-WA_rb/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T042",
+      "part": "frozen",
+      "url": "https://www.realtor.com/realestateandhomes-search/Seattle_WA",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "rate_limit · rate_limit",
+      "reasonsB": "rate_limit · rate_limit"
+    },
+    {
+      "id": "T043",
+      "part": "frozen",
+      "url": "https://www.redfin.com/city/16163/WA/Seattle",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "http_error · http_error"
+    },
+    {
+      "id": "T044",
+      "part": "healthy",
+      "url": "https://www.rightmove.co.uk/property-for-sale/London.html",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T045",
+      "part": "frozen",
+      "url": "https://www.idealista.com/venta-viviendas/madrid-madrid/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T046",
+      "part": "frozen",
+      "url": "https://www.g2.com/categories/crm",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T047",
+      "part": "frozen",
+      "url": "https://www.capterra.com/customer-relationship-management-software/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T048",
+      "part": "frozen",
+      "url": "https://www.crunchbase.com/organization/openai",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T049",
+      "part": "frozen",
+      "url": "https://www.yelp.com/search?find_desc=coffee&find_loc=San+Francisco%2C+CA",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T050",
+      "part": "frozen",
+      "url": "https://www.similarweb.com/website/wikipedia.org/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "http_error · http_error"
+    },
+    {
+      "id": "T051",
+      "part": "healthy",
+      "url": "https://www.indeed.com/jobs?q=data+analyst&l=Remote",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T052",
+      "part": "healthy",
+      "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T053",
+      "part": "frozen",
+      "url": "https://www.imf.org/en/Publications/WEO",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "T055",
+      "part": "frozen",
+      "url": "https://ec.europa.eu/eurostat/databrowser/view/tps00001/default/table",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "empty_unverified · empty_unverified",
+      "reasonsB": "empty_unverified · empty_unverified"
+    },
+    {
+      "id": "T056",
+      "part": "frozen",
+      "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T057",
+      "part": "frozen",
+      "url": "https://www.investing.com/indices/us-spx-500-historical-data",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T058",
+      "part": "healthy",
+      "url": "https://finance.yahoo.com/quote/AAPL/history/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T059",
+      "part": "healthy",
+      "url": "https://www.marketwatch.com/investing/stock/aapl",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T060",
+      "part": "frozen",
+      "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T061",
+      "part": "healthy",
+      "url": "https://www.morningstar.com/stocks/xnas/aapl/quote",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T062",
+      "part": "healthy",
+      "url": "https://www.coingecko.com/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T063",
+      "part": "healthy",
+      "url": "https://coinmarketcap.com/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T064",
+      "part": "frozen",
+      "url": "https://www.reuters.com/markets/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "login_wall · login_wall",
+      "reasonsB": "login_wall · login_wall"
+    },
+    {
+      "id": "T065",
+      "part": "frozen",
+      "url": "https://www.bloomberg.com/markets/stocks",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "captcha · captcha",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T066",
+      "part": "frozen",
+      "url": "https://www.wsj.com/market-data/stocks",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T067",
+      "part": "healthy",
+      "url": "https://www.ft.com/technology",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T068",
+      "part": "frozen",
+      "url": "https://www.economist.com/finance-and-economics",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "cloudflare_challenge · bot_detected_generic"
+    },
+    {
+      "id": "T069",
+      "part": "frozen",
+      "url": "https://www.carvana.com/cars",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T070",
+      "part": "frozen",
+      "url": "https://www.autotrader.com/cars-for-sale/all-cars/seattle-wa",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T071",
+      "part": "frozen",
+      "url": "https://www.cars.com/shopping/results/?stock_type=used&zip=98101",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T072",
+      "part": "healthy",
+      "url": "https://www.ticketmaster.com/discover/concerts",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T073",
+      "part": "unstable",
+      "url": "https://www.stubhub.com/",
+      "a": "unstable",
+      "b": "unstable",
+      "outcome": "unstable",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · success"
+    },
+    {
+      "id": "T074",
+      "part": "healthy",
+      "url": "https://medium.com/tag/programming",
+      "a": "verified",
+      "b": "failed",
+      "outcome": "regression",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T075",
+      "part": "frozen",
+      "url": "https://www.reddit.com/r/datascience/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T076",
+      "part": "frozen",
+      "url": "https://stackoverflow.com/questions/tagged/web-scraping",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "T077",
+      "part": "healthy",
+      "url": "https://openai.com/research/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T078",
+      "part": "frozen",
+      "url": "https://www.instagram.com/nasa/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local/http",
+      "laneB": "http",
+      "reasonsA": "rate_limit · rate_limit",
+      "reasonsB": "rate_limit · rate_limit"
+    },
+    {
+      "id": "T079",
+      "part": "healthy",
+      "url": "https://x.com/NASA",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T080",
+      "part": "healthy",
+      "url": "https://www.linkedin.com/company/microsoft/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "T081",
+      "part": "frozen",
+      "url": "https://www.facebook.com/NASA/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "success · empty_unverified"
+    },
+    {
+      "id": "B001",
+      "part": "blind",
+      "url": "https://www.bhphotovideo.com/c/buy/laptops/ci/18818",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "cloudflare_challenge · cloudflare_challenge",
+      "reasonsB": "cloudflare_challenge · cloudflare_challenge"
+    },
+    {
+      "id": "B002",
+      "part": "blind",
+      "url": "https://www.macys.com/shop/womens-clothing/womens-dresses?id=5449",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B003",
+      "part": "blind",
+      "url": "https://www.tesla.com/inventory/new/m3",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "B004",
+      "part": "blind",
+      "url": "https://www.apartments.com/seattle-wa/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "B005",
+      "part": "blind",
+      "url": "https://www.trulia.com/WA/Seattle/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B006",
+      "part": "blind",
+      "url": "https://www.producthunt.com/topics/developer-tools",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B007",
+      "part": "blind",
+      "url": "https://www.goodreads.com/genres/science-fiction",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B008",
+      "part": "blind",
+      "url": "https://www.imdb.com/chart/top/",
+      "a": "failed",
+      "b": "failed",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "browser_local",
+      "reasonsA": "bot_detected_generic · bot_detected_generic",
+      "reasonsB": "bot_detected_generic · bot_detected_generic"
+    },
+    {
+      "id": "B009",
+      "part": "blind",
+      "url": "https://www.allrecipes.com/recipes/17562/dinner/",
+      "a": "failed",
+      "b": "verified",
+      "outcome": "gain",
+      "laneA": "http",
+      "laneB": "browser_local",
+      "reasonsA": "http_error · http_error",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B010",
+      "part": "blind",
+      "url": "https://www.espn.com/nba/standings",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B011",
+      "part": "blind",
+      "url": "https://www.bls.gov/cpi/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "browser_local",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B012",
+      "part": "blind",
+      "url": "https://www.federalreserve.gov/releases/h15/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B013",
+      "part": "blind",
+      "url": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    },
+    {
+      "id": "B014",
+      "part": "blind",
+      "url": "https://www.marketbeat.com/stocks/NASDAQ/AAPL/",
+      "a": "verified",
+      "b": "verified",
+      "outcome": "same",
+      "laneA": "http",
+      "laneB": "http",
+      "reasonsA": "success · success",
+      "reasonsB": "success · success"
+    }
+  ]
+}
