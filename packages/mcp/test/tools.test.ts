@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -384,7 +385,8 @@ describe('MCP tools', () => {
     } finally {
       await mcp.close()
     }
-    expect(mcpOrigin(undefined)).toBe('mcp@0.3.0')
+    // The server's own version, as scripts/release-version.mjs sets it: a release must not have to edit this test.
+    expect(mcpOrigin(undefined)).toBe(`mcp@${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`)
     expect(mcpOrigin({ name: 'Claude Desktop', version: '1.0 beta' })).toBe('mcp-Claude_Desktop@1.0_beta')
     expect(mcpOrigin({ name: 'x'.repeat(200), version: '1' })).toHaveLength(100)
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
