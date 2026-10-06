@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -15,6 +15,13 @@ import { createApiEngine, type ApiEngine } from '../src/engine.js'
  * pages set and sends them to their site on its later pages; without the grant nothing changes. The
  * cookie values reach no stored step, and no page read with them is cached.
  */
+
+/** The task's cookie session file: one per route, named by the route's hash. */
+const sessionFile = (taskDir: string): string => {
+  const names = existsSync(taskDir) ? readdirSync(taskDir).filter((name) => /^cookie-session\.[0-9a-f]+\.json$/.test(name)) : []
+  return join(taskDir, names[0] ?? 'cookie-session.none.json')
+}
+const hasSessionFile = (taskDir: string): boolean => existsSync(taskDir) && readdirSync(taskDir).some((name) => name.startsWith('cookie-session'))
 
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year. '.repeat(3)
 const PAGE = `<!doctype html><html><head><title>Tides</title></head><body><article><h1>Tide ledger</h1><p>${PROSE}</p></article></body></html>`
@@ -128,7 +135,8 @@ describe('egress_sessions: a resumed task goes on with its session', () => {
     const first = make()
     const { taskId } = await first.startBatch({ urls: [`${origin}/start`, `${origin}/needs-slow`], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
     await started
-    const file = join(root, 'tasks', taskId, 'cookie-session.json')
+    const taskDir = join(root, 'tasks', taskId)
+    const file = sessionFile(taskDir)
     expect(existsSync(file)).toBe(true)
     if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600)
     await first.close({ cancelActive: true })
@@ -149,7 +157,7 @@ describe('egress_sessions: a resumed task goes on with its session', () => {
     const sessionOf = (path: string) => page(path).trace?.find((event) => event.event === 'session_cookies')?.detail?.session
     expect(sessionOf('/needs-slow')).toBe(sessionOf('/start'))
     // The task has ended: its cookies are gone from the disk.
-    expect(existsSync(file)).toBe(false)
+    expect(hasSessionFile(taskDir)).toBe(false)
   })
 })
 
@@ -188,12 +196,13 @@ describe('egress_sessions: the session file leaves with its task', () => {
     })
     const { taskId } = await engine.startBatch({ urls: [`${origin}/start`, `${origin}/late`], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
     await late
-    const file = join(root, 'tasks', taskId, 'cookie-session.json')
+    const taskDir = join(root, 'tasks', taskId)
+    const file = sessionFile(taskDir)
     expect(existsSync(file)).toBe(true)
     await engine.cancelBatch(taskId)
     await settle(taskId, ['cancelled'])
     await new Promise((resolve) => setTimeout(resolve, 800))
-    expect(existsSync(file)).toBe(false)
+    expect(hasSessionFile(taskDir)).toBe(false)
   })
 
   it('is removed when the task ends on a server restarted without the grant', async () => {
@@ -210,13 +219,14 @@ describe('egress_sessions: the session file leaves with its task', () => {
     const first = make(['egress_sessions'])
     const { taskId } = await first.startBatch({ urls: [`${origin}/start`, `${origin}/needs-slow`], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
     await started
-    const file = join(root, 'tasks', taskId, 'cookie-session.json')
+    const taskDir = join(root, 'tasks', taskId)
+    const file = sessionFile(taskDir)
     await first.close({ cancelActive: true })
     holdSlow = false
     for (const answer of held.splice(0)) answer()
     expect(existsSync(file)).toBe(true)
     engine = make([])
     expect(await settle(taskId, ['completed', 'failed'])).toMatchObject({ status: 'completed' })
-    expect(existsSync(file)).toBe(false)
+    expect(hasSessionFile(taskDir)).toBe(false)
   })
 })

@@ -66,7 +66,8 @@ export interface NetworkPolicy {
  * because the browser lane can route through only one proxy.
  */
 export interface EgressProxy {
-  source: 'environment'
+  /** `environment`: HTTPS_PROXY / HTTP_PROXY. `pool`: one of the operator's W2L_EGRESS_PROXIES (ADR 0005 egress_sessions). */
+  source: 'environment' | 'pool'
   /** From HTTPS_PROXY / https_proxy. Null sends https: URLs direct. */
   https: ProxyServer | null
   /** From HTTP_PROXY / http_proxy. Null sends http: URLs direct. */
