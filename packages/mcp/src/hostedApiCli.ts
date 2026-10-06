@@ -26,7 +26,8 @@ function positive(name: string, fallback: number): number {
 }
 
 const port = positive('PORT', 8080)
-const hashKey = process.env.W2L_QUOTA_HASH_KEY ?? ''
+// Trimmed as scripts/hosted/issue-key.mjs trims it, so a secret file with a trailing newline gives both sides the same digests.
+const hashKey = (process.env.W2L_QUOTA_HASH_KEY ?? '').trim()
 if (hashKey.length < 32) throw new Error('W2L_QUOTA_HASH_KEY must contain at least 32 characters')
 const store = process.env.W2L_HOSTED_STORE ?? 'firestore'
 let keys: HostedKeys
