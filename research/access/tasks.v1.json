@@ -2,8 +2,8 @@
   "schema": "octocrawl.access-tasks/1",
   "note": "Candidates until frozen. At freeze, each task becomes `frozen` (not verified in both baseline windows), `healthy` (verified in both) or `unstable` (the windows disagree; kept in the denominator), and the blind set is added with part `blind`.",
   "createdAt": "2026-10-05",
-  "frozenAt": null,
-  "baselineCommit": null,
+  "frozenAt": "2026-10-06",
+  "baselineCommit": "29e77ed / fbe76b9",
   "healthyBatches": [
     "1",
     "L",
@@ -57,7 +57,7 @@
   "tasks": [
     {
       "id": "T001",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "document",
       "url": "https://studylib.net/doc/28545749/google-2025-environmental-report",
@@ -78,11 +78,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: coos-pilot URL"
+      "provenance": "harvest: coos-pilot URL",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T002",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "dynamic",
       "url": "https://ember-energy.org/data/electricity-data-explorer/",
@@ -103,11 +113,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: real-site-test-set"
+      "provenance": "harvest: real-site-test-set",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T003",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "product",
       "url": "https://demoshop.oxid-esales.com/Merchandise/Uhren/Gold-Spirit.html",
@@ -128,11 +148,21 @@
           "min": 1
         }
       ],
-      "provenance": "harvest: parity J05"
+      "provenance": "harvest: parity J05",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T004",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "product",
       "url": "https://www.jpc.de/jpcng/books/detail/-/art/die-augenheilkunde/hnum/11617379",
@@ -153,11 +183,21 @@
           "min": 1
         }
       ],
-      "provenance": "harvest: parity J04"
+      "provenance": "harvest: parity J04",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "connection_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "connection_error"
+        }
+      }
     },
     {
       "id": "T005",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.etsy.com/",
@@ -178,11 +218,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: canary tier 2"
+      "provenance": "harvest: canary tier 2",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T006",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.amazon.com/",
@@ -203,11 +253,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: canary tier 2"
+      "provenance": "harvest: canary tier 2",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T007",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.ironmountain.com/data-centers/colocation",
@@ -228,11 +288,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: coos-pilot URL"
+      "provenance": "harvest: coos-pilot URL",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "rate_limit"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T008",
-      "part": "candidate",
+      "part": "unstable",
       "audience": "developer",
       "kind": "page",
       "url": "https://github.com/scrapinghub/spidyquotes/blob/master/README.md",
@@ -253,11 +323,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: real-site-test-set"
+      "provenance": "harvest: real-site-test-set",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T009",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "dynamic",
       "url": "https://fred.stlouisfed.org/series/UNRATE",
@@ -278,11 +358,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: real-site-test-set"
+      "provenance": "harvest: real-site-test-set",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "timeout"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "timeout"
+        }
+      }
     },
     {
       "id": "T010",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "dynamic",
       "url": "https://data-explorer.oecd.org/s/1xl",
@@ -302,11 +392,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "harvest: real-site-test-set"
+      "provenance": "harvest: real-site-test-set",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T011",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "dynamic",
       "url": "https://www.tiktok.com/",
@@ -327,11 +427,21 @@
           "min": 10
         }
       ],
-      "provenance": "harvest: canary tier 2"
+      "provenance": "harvest: canary tier 2",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T012",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
@@ -352,11 +462,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T013",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.bestbuy.com/site/searchpage.jsp?st=laptop",
@@ -377,11 +497,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "timeout"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "timeout"
+        }
+      }
     },
     {
       "id": "T014",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.homedepot.com/b/Tools-Power-Tools-Drills/N-5yc1vZc27f",
@@ -402,11 +532,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T015",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.nike.com/w/mens-running-shoes-37v7jznik1zy7ok",
@@ -427,11 +567,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T016",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.zara.com/us/en/man-shirts-l737.html",
@@ -452,11 +602,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T017",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www2.hm.com/en_us/men/products/shirts.html",
@@ -477,11 +637,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T018",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.wayfair.com/furniture/sb0/sofas-c413892.html",
@@ -502,11 +672,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "rate_limit"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T019",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.costco.com/laptops.html",
@@ -527,11 +707,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T020",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.newegg.com/p/pl?d=laptop",
@@ -552,11 +742,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T021",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.ebay.com/b/Laptops-Netbooks/175672/bn_1648276",
@@ -577,11 +777,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T022",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.ikea.com/us/en/cat/sofas-fu003/",
@@ -602,11 +812,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T023",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.sephora.com/shop/moisturizing-cream-oils-mists",
@@ -627,11 +847,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T024",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.ulta.com/shop/skin-care/moisturizers",
@@ -652,11 +882,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T025",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.nordstrom.com/browse/women/clothing/dresses",
@@ -677,11 +917,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T026",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.zalando.de/herrenschuhe/",
@@ -702,11 +952,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "timeout"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "timeout"
+        }
+      }
     },
     {
       "id": "T027",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.otto.de/technik/laptop/",
@@ -727,11 +987,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T029",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.idealo.de/preisvergleich/ProductCategory/3751.html",
@@ -752,11 +1022,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T030",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.aliexpress.com/category/702/laptops.html",
@@ -777,11 +1057,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T031",
-      "part": "candidate",
+      "part": "unstable",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.temu.com/",
@@ -802,11 +1092,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T033",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.amazon.com/s?k=laptop",
@@ -827,11 +1127,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T034",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.etsy.com/c/jewelry/necklaces",
@@ -852,11 +1162,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T035",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.booking.com/city/fr/paris.html",
@@ -877,11 +1197,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T036",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.airbnb.com/paris-france/stays",
@@ -902,11 +1232,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T037",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.expedia.com/Paris-Hotels.d179898.Travel-Guide-Hotels",
@@ -927,11 +1267,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "rate_limit"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T038",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.tripadvisor.com/Hotels-g187147-Paris_Ile_de_France-Hotels.html",
@@ -952,11 +1302,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T039",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
@@ -977,11 +1337,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T040",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.kayak.com/flight-routes/London-LON/Paris-PAR",
@@ -1002,11 +1372,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T041",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.zillow.com/homes/for_sale/Seattle,-WA_rb/",
@@ -1027,11 +1407,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T042",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.realtor.com/realestateandhomes-search/Seattle_WA",
@@ -1052,11 +1442,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "rate_limit"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T043",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.redfin.com/city/16163/WA/Seattle",
@@ -1077,11 +1477,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T044",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.rightmove.co.uk/property-for-sale/London.html",
@@ -1102,11 +1512,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T045",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.idealista.com/venta-viviendas/madrid-madrid/",
@@ -1127,11 +1547,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T046",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "listing",
       "url": "https://www.g2.com/categories/crm",
@@ -1153,11 +1583,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T047",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "listing",
       "url": "https://www.capterra.com/customer-relationship-management-software/",
@@ -1179,11 +1619,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T048",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.crunchbase.com/organization/openai",
@@ -1204,11 +1654,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T049",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.yelp.com/search?find_desc=coffee&find_loc=San+Francisco%2C+CA",
@@ -1230,11 +1690,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T050",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.similarweb.com/website/wikipedia.org/",
@@ -1255,11 +1725,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T051",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.indeed.com/jobs?q=data+analyst&l=Remote",
@@ -1276,11 +1756,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion; Howard to confirm against ROADMAP.md:48"
+      "provenance": "expansion; Howard to confirm against ROADMAP.md:48",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T052",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "table",
       "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
@@ -1300,11 +1790,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion; sites.md line 206 candidate"
+      "provenance": "expansion; sites.md line 206 candidate",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T053",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.imf.org/en/Publications/WEO",
@@ -1320,11 +1820,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T055",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "dynamic",
       "url": "https://ec.europa.eu/eurostat/databrowser/view/tps00001/default/table",
@@ -1344,11 +1854,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "empty_unverified"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "empty_unverified"
+        }
+      }
     },
     {
       "id": "T056",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "dynamic",
       "url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD",
@@ -1369,11 +1889,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion; window 1 rejudged: the heading alone had passed, the values were not rendered"
+      "provenance": "expansion; window 1 rejudged: the heading alone had passed, the values were not rendered",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T057",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "table",
       "url": "https://www.investing.com/indices/us-spx-500-historical-data",
@@ -1394,11 +1924,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T058",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "table",
       "url": "https://finance.yahoo.com/quote/AAPL/history/",
@@ -1419,11 +1959,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T059",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.marketwatch.com/investing/stock/aapl",
@@ -1444,11 +1994,21 @@
           "min": 3
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T060",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "table",
       "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
@@ -1469,11 +2029,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T061",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "page",
       "url": "https://www.morningstar.com/stocks/xnas/aapl/quote",
@@ -1494,11 +2064,21 @@
           "min": 3
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T062",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "developer",
       "kind": "table",
       "url": "https://www.coingecko.com/",
@@ -1519,11 +2099,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T063",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "developer",
       "kind": "table",
       "url": "https://coinmarketcap.com/",
@@ -1544,11 +2134,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T064",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "listing",
       "url": "https://www.reuters.com/markets/",
@@ -1569,11 +2169,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "login_wall"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "login_wall"
+        }
+      }
     },
     {
       "id": "T065",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "listing",
       "url": "https://www.bloomberg.com/markets/stocks",
@@ -1594,11 +2204,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T066",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "table",
       "url": "https://www.wsj.com/market-data/stocks",
@@ -1619,11 +2239,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T067",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "listing",
       "url": "https://www.ft.com/technology",
@@ -1644,11 +2274,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T068",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "researcher",
       "kind": "listing",
       "url": "https://www.economist.com/finance-and-economics",
@@ -1669,11 +2309,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "T069",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.carvana.com/cars",
@@ -1694,11 +2344,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T070",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.autotrader.com/cars-for-sale/all-cars/seattle-wa",
@@ -1719,11 +2379,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": null
+        },
+        "windowB": {
+          "verified": false,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T071",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.cars.com/shopping/results/?stock_type=used&zip=98101",
@@ -1744,11 +2414,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T072",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.ticketmaster.com/discover/concerts",
@@ -1769,11 +2449,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T073",
-      "part": "candidate",
+      "part": "unstable",
       "audience": "non_programmer",
       "kind": "listing",
       "url": "https://www.stubhub.com/",
@@ -1794,11 +2484,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T074",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "developer",
       "kind": "listing",
       "url": "https://medium.com/tag/programming",
@@ -1819,11 +2519,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T075",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "listing",
       "url": "https://www.reddit.com/r/datascience/",
@@ -1844,11 +2554,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "T076",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "developer",
       "kind": "listing",
       "url": "https://stackoverflow.com/questions/tagged/web-scraping",
@@ -1865,11 +2585,21 @@
           "min": 5
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "T077",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "listing",
       "url": "https://openai.com/research/",
@@ -1890,11 +2620,21 @@
           "min": 10
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T078",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "login",
       "url": "https://www.instagram.com/nasa/",
@@ -1915,11 +2655,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "rate_limit"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "rate_limit"
+        }
+      }
     },
     {
       "id": "T079",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "non_programmer",
       "kind": "login",
       "url": "https://x.com/NASA",
@@ -1940,11 +2690,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T080",
-      "part": "candidate",
+      "part": "healthy",
       "audience": "researcher",
       "kind": "login",
       "url": "https://www.linkedin.com/company/microsoft/",
@@ -1965,11 +2725,21 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "T081",
-      "part": "candidate",
+      "part": "frozen",
       "audience": "non_programmer",
       "kind": "login",
       "url": "https://www.facebook.com/NASA/",
@@ -1990,7 +2760,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "expansion"
+      "provenance": "expansion",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "B001",
@@ -2015,7 +2795,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "cloudflare_challenge"
+        }
+      }
     },
     {
       "id": "B002",
@@ -2040,7 +2830,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B003",
@@ -2065,7 +2865,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "B004",
@@ -2090,7 +2900,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "B005",
@@ -2115,7 +2935,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B006",
@@ -2136,7 +2966,17 @@
           "min": 5
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching; predicate corrected after window 1 (the page lists the products but never says \"developer tools\")"
+      "provenance": "blind set, chosen 2026-10-05 before fetching; predicate corrected after window 1 (the page lists the products but never says \"developer tools\")",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B007",
@@ -2161,7 +3001,17 @@
           "min": 10
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B008",
@@ -2186,7 +3036,17 @@
           "min": 25
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "bot_detected_generic"
+        }
+      }
     },
     {
       "id": "B009",
@@ -2211,7 +3071,17 @@
           "min": 10
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": false,
+          "reason": "http_error"
+        },
+        "windowB": {
+          "verified": false,
+          "reason": "http_error"
+        }
+      }
     },
     {
       "id": "B010",
@@ -2235,7 +3105,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B011",
@@ -2260,7 +3140,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B012",
@@ -2284,7 +3174,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B013",
@@ -2308,7 +3208,17 @@
           "flags": "i"
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     },
     {
       "id": "B014",
@@ -2333,7 +3243,17 @@
           "min": 3
         }
       ],
-      "provenance": "blind set, chosen 2026-10-05 before fetching"
+      "provenance": "blind set, chosen 2026-10-05 before fetching",
+      "baseline": {
+        "windowA": {
+          "verified": true,
+          "reason": null
+        },
+        "windowB": {
+          "verified": true,
+          "reason": null
+        }
+      }
     }
   ]
 }
