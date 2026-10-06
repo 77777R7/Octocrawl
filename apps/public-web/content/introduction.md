@@ -2,18 +2,17 @@
 
 Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 
-> **Availability:** Try the page preview at the URL where you are reading this. The MCP walkthrough below is verified on the same computer as the client. A hosted MCP address and browser login are paused on the roadmap. A hosted page preview does not include hosted MCP or persistent Monitor tasks.
+> **Availability:** Try the page preview at the URL where you are reading this. Octocrawl also runs on your own computer from the published packages (`npx octocrawl`) and connects to Claude Code, Cursor, OpenCode and Codex over MCP; see [Connect MCP](/docs/connect-mcp/). A hosted API and a remote MCP URL run by Octocrawl are being built and will be announced on this site; the preview does not include them or persistent Monitor tasks yet.
 
 ## Try Octocrawl
 
 Paste `https://docs.firecrawl.dev/introduction` into [the Octocrawl page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
 
-This is a recorded result from the Octocrawl capture path, not a guaranteed response for every future visit:
+This is a recorded result from the preview, not a guaranteed response for every future visit:
 
 ```json
 {
   "observedAt": "2026-09-24T08:52:01.350Z",
-  "sourceCommit": "936fdf0",
   "requestedUrl": "https://docs.firecrawl.dev/introduction",
   "status": "success",
   "finalUrl": "https://docs.firecrawl.dev/introduction",
@@ -27,12 +26,11 @@ This is a recorded result from the Octocrawl capture path, not a guaranteed resp
 
 ## When Octocrawl cannot read a page
 
-Octocrawl reports a reason instead of inventing content. In another real local capture on the same source commit, a LinkedIn feed URL was stopped by the site's automated-access policy:
+Octocrawl reports a reason instead of inventing content. In another recorded preview, a LinkedIn feed URL was stopped by the site's automated-access policy:
 
 ```json
 {
   "observedAt": "2026-09-24T08:52:48.374Z",
-  "sourceCommit": "936fdf0",
   "requestedUrl": "https://www.linkedin.com/feed/",
   "status": "blocked",
   "reason": "This site does not allow automated preview of this page.",
@@ -41,10 +39,10 @@ Octocrawl reports a reason instead of inventing content. In another real local c
 }
 ```
 
-The preview did not return readable feed content in this result. A separate X request from this local machine **timed out**, so it is not used as an example of a site block. See [result states and limits](/docs/limits/) for the difference.
+The preview did not return readable feed content in this result. A separate X request in the same session **timed out**, so it is not used as an example of a site block. See [result states and limits](/docs/limits/) for the difference.
 
 ## Choose your next step
 
 - [Extract a public page](/docs/guides/extract-page/) for the browser workflow.
-- [Connect MCP](/docs/connect-mcp/) to ask Codex to preview, monitor, or batch pages with the local service.
+- [Connect MCP](/docs/connect-mcp/) to scrape, map, crawl and batch pages from Claude Code, Cursor, OpenCode or Codex.
 - [Check Amazon.sg product JSON](/docs/guides/amazon-product/) when subject identity, region, and currency matter.
