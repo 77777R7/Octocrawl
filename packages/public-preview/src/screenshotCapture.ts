@@ -1,0 +1,150 @@
+import { assertSafeUrl, browserEngineFor } from '@w2l/bench'
+import { evaluateUrl, hostedNetworkPolicy, modeIdentity, PREVIEW_PRODUCT_TOKEN, type NetworkPolicy } from '@w2l/contracts'
+
+/**
+ * The picture the crawl window plays over: the top of the page as a cold Chromium renders it, and where the elements
+ * the window may mark sit in it. It is decoration for a page the preview read, never evidence, and it stays out of the
+ * preview's result: the server sends it only on the stream, only once the HTTP capture's robots.txt decision allowed
+ * the page, and only with a result that read the page.
+ *
+ * What the browser may do is narrow. It loads the page and nothing else: no clicks, no typing, no downloads, no
+ * service workers. Every request it makes, the page's own and each subresource's, passes the hosted network policy
+ * first, the same policy the HTTP lane applies: only http(s), and only to public addresses, decided after resolving
+ * the name; a WebSocket is never connected. It answers to a budget and to the caller's signal, and it closes the
+ * browser whatever happens.
+ */
+export interface CaptureElement {
+  tag: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** The element's own text, trimmed to a line; an image's alt text. */
+  text: string
+}
+
+export interface ScreenshotCapture {
+  jpeg: Buffer
+  width: number
+  height: number
+  elements: CaptureElement[]
+  /** Requests the policy refused (subresources to private or unresolvable addresses, WebSockets). */
+  blocked: number
+  timings: { launchMs: number; navigateMs: number; loadMs: number; loadCapped: boolean; screenshotMs: number; totalMs: number }
+}
+
+export interface CaptureOptions {
+  signal: AbortSignal
+  /** The whole capture, launch to close, ends within this. */
+  budgetMs: number
+  policy?: NetworkPolicy
+  viewport?: { width: number; height: number }
+  /** How many viewports tall the picture is at most. */
+  viewports?: number
+  quality?: number
+}
+
+export type ScreenshotCapturer = (url: string, options: CaptureOptions) => Promise<ScreenshotCapture>
+
+const VIEWPORT = { width: 1280, height: 800 }
+const VIEWPORTS = 3
+const QUALITY = 70
+/** After the document loaded, the window waits this long at most for its images and fonts. */
+const LOAD_WAIT_MS = 1_500
+const ELEMENTS_SELECTOR = 'h1,h2,h3,h4,p,li,a,img,table,pre,blockquote'
+const ELEMENTS_AT_MOST = 400
+const TEXT_AT_MOST = 120
+/** An element narrower or shorter than this is not something a reader sees. */
+const ELEMENT_SMALLEST_PX = 8
+
+export class ScreenshotBudgetError extends Error {
+  constructor(step: string) { super(`The screenshot's budget ran out while ${step}.`); this.name = 'ScreenshotBudgetError' }
+}
+
+/** The browser identifies itself as the preview does over HTTP, so a site's robots.txt rule for it holds here too. */
+export function previewBrowserUserAgent(): string {
+  return `${modeIdentity('standard').userAgent} ${PREVIEW_PRODUCT_TOKEN}`
+}
+
+export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
+  const policy = options.policy ?? hostedNetworkPolicy()
+  const viewport = options.viewport ?? VIEWPORT
+  const started = performance.now()
+  const deadline = started + options.budgetMs
+  const remaining = (step: string): number => {
+    const left = Math.floor(deadline - performance.now())
+    if (left <= 0) throw new ScreenshotBudgetError(step)
+    return left
+  }
+  options.signal.throwIfAborted()
+  // The page's own address, before any browser exists.
+  await assertSafeUrl(url, policy)
+  // Each host's verdict is decided once per capture, after resolving its name, so a page with many subresources on
+  // one host costs one lookup.
+  const verdicts = new Map<string, Promise<boolean>>()
+  let blocked = 0
+  const allowed = (target: string): Promise<boolean> => {
+    const first = evaluateUrl(target, policy)
+    if ('allowed' in first) return Promise.resolve(first.allowed)
+    let verdict = verdicts.get(first.hostname)
+    if (verdict === undefined) {
+      verdict = assertSafeUrl(target, policy).then(() => true, () => false)
+      verdicts.set(first.hostname, verdict)
+    }
+    return verdict
+  }
+  const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
+  const engine = await browserEngineFor('playwright')
+  const launchStarted = performance.now()
+  const browser = await engine.launch({ headless: true, timeout: remaining('launching the browser'), ...(proxy ? { proxy: { server: proxy } } : {}) })
+  const launchMs = Math.round(performance.now() - launchStarted)
+  const close = (): void => { void browser.close().catch(() => {}) }
+  options.signal.addEventListener('abort', close, { once: true })
+  try {
+    // Aborted while the browser started: nothing is loaded.
+    options.signal.throwIfAborted()
+    const context = await browser.newContext({
+      viewport, deviceScaleFactor: 1, userAgent: previewBrowserUserAgent(),
+      acceptDownloads: false, serviceWorkers: 'block',
+    })
+    await context.route('**/*', async route => {
+      if (await allowed(route.request().url())) await route.continue().catch(() => {})
+      else { blocked++; await route.abort('blockedbyclient').catch(() => {}) }
+    })
+    // A routed WebSocket that is never connected to its server stays silent.
+    await context.routeWebSocket('**/*', ws => { blocked++; ws.close() })
+    const page = await context.newPage()
+    const navigateStarted = performance.now()
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: remaining('loading the page') })
+    const navigateMs = Math.round(performance.now() - navigateStarted)
+    let loadCapped = false
+    await page.waitForLoadState('load', { timeout: Math.min(LOAD_WAIT_MS, remaining('loading the page')) }).catch(() => { loadCapped = true })
+    const loadMs = Math.round(performance.now() - navigateStarted)
+    const screenshotStarted = performance.now()
+    const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight)
+    const height = Math.min(viewport.height * (options.viewports ?? VIEWPORTS), Math.max(viewport.height, pageHeight))
+    const jpeg = await page.screenshot({
+      type: 'jpeg', quality: options.quality ?? QUALITY, fullPage: true, animations: 'disabled',
+      clip: { x: 0, y: 0, width: viewport.width, height }, timeout: remaining('taking the picture'),
+    })
+    const screenshotMs = Math.round(performance.now() - screenshotStarted)
+    const elements = await page.evaluate(({ selector, limit, atMost, textAtMost, smallest }) => {
+      const found: CaptureElement[] = []
+      for (const element of Array.from(document.querySelectorAll(selector))) {
+        const box = element.getBoundingClientRect()
+        const y = box.top + window.scrollY
+        // Too small to see (a page's hidden index for machines sits in a pixel off the edge) or below the picture.
+        if (box.width < smallest || box.height < smallest || y + box.height <= 0 || y >= limit) continue
+        const raw = element instanceof HTMLImageElement ? element.alt : (element as HTMLElement).innerText ?? element.textContent ?? ''
+        found.push({ tag: element.tagName.toLowerCase(), x: Math.round(box.left + window.scrollX), y: Math.round(y), width: Math.round(box.width), height: Math.round(box.height), text: raw.replace(/\s+/g, ' ').trim().slice(0, textAtMost) })
+        if (found.length >= atMost) break
+      }
+      return found.sort((a, b) => a.y - b.y || a.x - b.x)
+    }, { selector: ELEMENTS_SELECTOR, limit: height, atMost: ELEMENTS_AT_MOST, textAtMost: TEXT_AT_MOST, smallest: ELEMENT_SMALLEST_PX })
+    await context.close()
+    return { jpeg, width: viewport.width, height, elements, blocked, timings: { launchMs, navigateMs, loadMs, loadCapped, screenshotMs, totalMs: Math.round(performance.now() - started) } }
+  } finally {
+    options.signal.removeEventListener('abort', close)
+    await browser.close().catch(() => {})
+  }
+}
