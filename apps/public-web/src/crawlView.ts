@@ -109,7 +109,17 @@ const DUST: ReadonlyArray<readonly [number, number, string]> = [
 ]
 /** How long the landing's shock, dome and dust run, and how fast the dome spreads (px a ms). */
 const THUD_MS = 900
-const WAVE_SPEED = 0.85
+/** The burst's rays: angle (degrees, 0 along the ground to the right, 90 straight up), length as a share of the
+ * window (of its width for the ground-hugging ones, which are two rows thick, else its height), and thickness. */
+const BURST: ReadonlyArray<readonly [number, number, boolean]> = [
+  [4, 0.95, true], [16, 0.55, false], [28, 0.8, false], [42, 0.5, false], [57, 0.72, false], [72, 0.45, false],
+  [84, 0.85, false], [96, 0.6, false], [110, 0.78, false], [124, 0.48, false], [139, 0.7, false], [152, 0.52, false],
+  [164, 0.62, false], [176, 0.95, true],
+]
+/** The burst shoots out in BURST_GROW_MS, holds until BURST_HOLD_MS, and is eaten from the root in BURST_FADE_MS. */
+const BURST_GROW_MS = 110
+const BURST_HOLD_MS = 360
+const BURST_FADE_MS = 300
 /** The window's content jumps by whole rows after the landing: one step every SHAKE_STEP_MS. */
 const SHAKE = [1, -1, 1, 0, -1, 0]
 const SHAKE_STEP_MS = 45
@@ -660,19 +670,42 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
         cellAt(col, ground, RAMP[step]!, HOT[step]!, 1, step < 2 ? 12 : 0)
         cellAt(col, ground + 1, RAMP[Math.min(RAMP.length - 1, step + 1)]!, HOT[step]!, 0.45)
       }
-      // The dome: a ring, two cells thick, spreading from the point of impact, heavy at its crest and fading as it
-      // grows. Distance is measured in pixels, so the ring is round on the page's tall cells.
-      const radius = since * WAVE_SPEED
-      const reach = Math.max(width, height)
-      const strength = 1 - radius / reach
-      if (strength > 0) {
-        const span = Math.ceil((radius + pitchX * 2) / pitchY)
-        for (let row = ground - span; row < ground; row++) {
-          for (let col = 0; col < layout!.cols; col++) {
-            const d = Math.hypot((col + 0.5 - centre) * pitchX, (row - ground) * pitchY) - radius
-            if (d > pitchX * 1.2 || d < -pitchX * 2.6) continue
-            const crest = d > -pitchX * 0.8
-            cellAt(col, row, crest ? 'X' : (col + row) % 2 ? 'x' : '+', crest ? HOT[0]! : HOT[2]!, strength * (crest ? 1 : 0.6), crest ? 10 : 0)
+      // The burst: rays of glyphs shoot out from where it hit, up and to both sides, the ones along the ground longest
+      // and two rows thick. Each runs white-hot at its root through orange to a dark red tip, flickers, then is eaten
+      // from the root out. Lengths are in pixels, so the fan keeps its shape on the page's tall cells.
+      const grow = easeOut(clamp01(since / BURST_GROW_MS))
+      const eaten = clamp01((since - BURST_HOLD_MS) / BURST_FADE_MS)
+      if (eaten < 1) {
+        // The page dims behind the burst, so the rays stand out from the read text.
+        ctx.shadowBlur = 0
+        ctx.globalAlpha = 1
+        ctx.fillStyle = `rgba(8, 27, 66, ${0.62 * grow * (1 - eaten)})`
+        ctx.fillRect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)
+        ctx.font = `700 ${pitchY - 2}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+        const ox = centre * pitchX
+        const oy = rowY(ground, top)
+        for (const [angle, share, thick] of BURST) {
+          const length = share * (thick ? width : height * 0.75) * grow * (0.92 + 0.08 * Math.sin(since / 30 + angle))
+          const rad = angle * Math.PI / 180
+          const dx = Math.cos(rad)
+          const dy = -Math.sin(rad)
+          const char = angle < 20 || angle > 160 ? '=' : angle < 70 ? '/' : angle <= 110 ? '|' : '\\'
+          let last = ''
+          for (let d = pitchX * 1.5; d <= length; d += Math.min(pitchX, pitchY) * 0.7) {
+            const f = d / Math.max(1, length)
+            if (f < eaten) continue
+            const col = Math.floor((ox + dx * d) / pitchX)
+            const row = top + Math.round((oy + dy * d - rowY(top, top)) / pitchY)
+            if (`${col},${row}` === last || col < 0 || col >= layout!.cols) continue
+            last = `${col},${row}`
+            const tip = length - d < Math.min(pitchX, pitchY) * 1.2
+            const colour = f < 0.18 ? '#ffffff' : f < 0.4 ? HOT[0]! : f < 0.62 ? HOT[1]! : f < 0.84 ? HOT[3]! : '#d9542f'
+            const glyph = tip ? (Math.floor(since / 60) % 2 ? '*' : '+') : f < 0.2 ? 'X' : char
+            cellAt(col, row, glyph, colour, 1 - 0.5 * eaten, f < 0.6 ? 12 : 4)
+            // Every ray is two cells wide (the ground-hugging ones a row above, the others a column beside), its
+            // second strand lighter.
+            if (thick) cellAt(col, row - 1, f < 0.3 ? 'x' : '-', colour, 0.6 * (1 - eaten), 6)
+            else if (!tip) cellAt(col + (dx < 0 ? -1 : 1), row, f < 0.3 ? 'x' : char, colour, 0.5 * (1 - eaten), 4)
           }
         }
       }
