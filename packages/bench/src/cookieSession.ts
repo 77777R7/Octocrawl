@@ -29,6 +29,8 @@ export class TaskCookieSession implements CookieSession {
   /** Done once the file, if any, has been read; every method waits for it. */
   private readonly ready: Promise<void>
   private writing: Promise<void> = Promise.resolve()
+  /** Set when the task ended: a page still finishing afterwards changes the session in memory alone. */
+  private closed = false
 
   /** `file`: where the session lives between runs of its task; without one it lives in memory alone. */
   constructor(private readonly file?: string) {
@@ -43,6 +45,18 @@ export class TaskCookieSession implements CookieSession {
   /** Deletes a task's session file: the task has ended, and its cookies go with it. */
   static async remove(file: string): Promise<void> {
     await rm(file, { force: true })
+  }
+
+  /**
+   * The task has ended: deletes the file after the writes already queued, and writes nothing again,
+   * so a page that finishes after the task (one a cancel or a deadline stopped waiting for) cannot put it back.
+   */
+  async close(): Promise<void> {
+    this.closed = true
+    const file = this.file
+    if (file === undefined) return
+    this.writing = this.writing.then(() => rm(file, { force: true })).catch(() => {})
+    await this.writing
   }
 
   private async load(file: string): Promise<void> {
@@ -63,9 +77,15 @@ export class TaskCookieSession implements CookieSession {
     const file = this.file
     if (file === undefined) return Promise.resolve()
     this.writing = this.writing.then(async () => {
+      if (this.closed) return
       const temporary = `${file}.${randomUUID()}.tmp`
-      await writeFile(temporary, JSON.stringify({ version: 1, id: this.sessionId, jar: await this.jar.serialize() }), { mode: 0o600 })
-      await rename(temporary, file)
+      try {
+        await writeFile(temporary, JSON.stringify({ version: 1, id: this.sessionId, jar: await this.jar.serialize() }), { mode: 0o600 })
+        await rename(temporary, file)
+      } catch {
+        // A write that failed (a full disk) leaves no copy of the cookies behind.
+        await rm(temporary, { force: true }).catch(() => {})
+      }
     }).catch(() => {})
     return this.writing
   }

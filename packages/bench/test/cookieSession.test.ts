@@ -105,6 +105,20 @@ describe('TaskCookieSession on disk', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  it('writes nothing once closed: a page finishing after its task ended does not put the file back', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w2l-session-'))
+    const file = join(dir, 'cookie-session.json')
+    try {
+      const session = new TaskCookieSession(file)
+      await session.store('https://shop.example/', ['sid=1; Path=/'])
+      expect(existsSync(file)).toBe(true)
+      await session.close()
+      expect(existsSync(file)).toBe(false)
+      await session.store('https://shop.example/', ['late=1; Path=/'])
+      expect(existsSync(file)).toBe(false)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('starts afresh from a file that does not read, and keeps every change of writes made at once', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'w2l-session-'))
     const file = join(dir, 'cookie-session.json')

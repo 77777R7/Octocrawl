@@ -1065,9 +1065,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // removed when the task ends. A saved login is mode authed's own session; pages read with a session are never cached.
     const cookieSessionFile = join(task.taskDir, COOKIE_SESSION_FILE)
     const cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession(cookieSessionFile) : undefined
-    /** The session file goes once the task has ended; a run paused by shutdown keeps it for its resume. */
+    /**
+     * The session file goes once the task has ended, also when this run has no session (a server restarted
+     * without the grant resumed a task that had one); a run paused by shutdown keeps it for its resume.
+     */
     const endCookieSession = async (ended: boolean): Promise<void> => {
-      if (cookieSession !== undefined && ended) await TaskCookieSession.remove(cookieSessionFile).catch(() => {})
+      if (!ended) return
+      await cookieSession?.close()
+      await TaskCookieSession.remove(cookieSessionFile).catch(() => {})
     }
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
@@ -1182,9 +1187,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
       // The terminal event follows the terminal task row the run wrote; a run paused by shutdown has none.
       await finishJob(task, store)
+      inflight.delete(task.id)
+      // After the run is out of the in-flight set, as before: removing the session file does not hold the task as running.
       const after = await store.getTask(task.id)
       await endCookieSession(after !== null && isTerminalStatus(after.status))
-      inflight.delete(task.id)
       await store.close()
     }).catch(async (error: unknown) => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
@@ -1215,6 +1221,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       } else {
         // A finished job with a receiver: anything a crash cut off between a write and its enqueue is offered again, nothing twice.
         if (task !== null && webhookOf(task) !== undefined && isTerminalStatus(task.status)) await reconcileFinished(task, store)
+        // A cookie session a crash left behind a finished task goes now.
+        if (task !== null && isTerminalStatus(task.status)) await TaskCookieSession.remove(join(taskDir, COOKIE_SESSION_FILE)).catch(() => {})
         void store.close()
       }
     }).catch(() => { void store.close() })
@@ -1673,7 +1681,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           if (latest?.status === 'running') await store.putAttempt({ ...latest, status: 'cancelled', endedAt: now })
           crawlControllers.get(taskId)?.abort()
           // A run in this process ends with the cancellation and sends the terminal event itself; a task no run is working on gets it here.
-          if (!inflight.has(taskId)) await finishJob(task, store)
+          if (!inflight.has(taskId)) {
+            await finishJob(task, store)
+            // Its cookie session too, which only a run would otherwise remove.
+            await TaskCookieSession.remove(join(taskRoot, taskId, COOKIE_SESSION_FILE)).catch(() => {})
+          }
         }
       } finally {
         await store.close()
