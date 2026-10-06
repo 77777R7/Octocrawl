@@ -24,6 +24,8 @@ export interface CaptureElement {
 }
 
 export interface ScreenshotCapture {
+  /** The page's address once its own redirects, each checked, were followed. */
+  finalUrl: string
   jpeg: Buffer
   width: number
   height: number
@@ -120,19 +122,34 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
       viewport, deviceScaleFactor: 1, userAgent: previewBrowserUserAgent(),
       acceptDownloads: false, serviceWorkers: 'block',
     }))
+    // WebRTC opens TCP and UDP connections of its own (a TURN server, say), which no request routing sees: a page gets
+    // no RTCPeerConnection here.
+    await context.addInitScript(() => {
+      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false })
+    })
     // Every request is made here, not by Chromium, with redirects followed one hop at a time: Chromium would follow a
     // redirect to any address on its own, after the only check it had passed. Each hop's address is judged before it
-    // is fetched, and the final response is handed to the page.
+    // is fetched. A subresource gets the final response; the page itself is navigated again to where its redirects
+    // led, so its address, and what its relative links mean, are the final page's.
+    let navigateTo: string | null = null
+    let hopsTaken = 0
     await context.route('**/*', async route => {
       try {
-        let url = route.request().url()
+        const request = route.request()
+        let url = request.url()
         if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
-        let response = await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
-        for (let hop = 0; isRedirect(response.status()) && response.headers().location !== undefined; hop++) {
+        const isPage = request.isNavigationRequest() && request.frame().parentFrame() === null
+        let method = request.method()
+        let body = request.postDataBuffer() ?? undefined
+        let response = await route.fetch({ url, method, postData: body, maxRedirects: 0, timeout: remaining('loading the page') })
+        for (let hop = isPage ? hopsTaken : 0; isRedirect(response.status()) && response.headers().location !== undefined; hop++) {
           if (hop >= REDIRECTS_AT_MOST) { blocked++; await route.abort('blockedbyclient'); return }
           url = new URL(response.headers().location!, url).href
           if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
-          response = await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
+          if (isPage) { hopsTaken = hop + 1; navigateTo = url; await route.abort('aborted'); return }
+          // As a browser does: a 301, 302 or 303 turns a POST into a GET without its body; a 307 or 308 keeps both.
+          if (response.status() !== 307 && response.status() !== 308 && method !== 'GET' && method !== 'HEAD') { method = 'GET'; body = undefined }
+          response = await route.fetch({ url, method, postData: body, maxRedirects: 0, timeout: remaining('loading the page') })
         }
         await route.fulfill({ response })
       } catch {
@@ -143,7 +160,17 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
     await context.routeWebSocket('**/*', ws => { blocked++; ws.close() })
     const page = await within('opening the page', deadline, context.newPage())
     const navigateStarted = performance.now()
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: remaining('loading the page') })
+    let finalUrl = url
+    for (;;) {
+      try {
+        await page.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: remaining('loading the page') })
+        break
+      } catch (error) {
+        if (navigateTo === null) throw error
+        finalUrl = navigateTo
+        navigateTo = null
+      }
+    }
     const navigateMs = Math.round(performance.now() - navigateStarted)
     let loadCapped = false
     await page.waitForLoadState('load', { timeout: Math.min(LOAD_WAIT_MS, remaining('loading the page')) }).catch(() => { loadCapped = true })
@@ -170,7 +197,7 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
       return found.sort((a, b) => a.y - b.y || a.x - b.x)
     }, { selector: ELEMENTS_SELECTOR, limit: height, atMost: ELEMENTS_AT_MOST, textAtMost: TEXT_AT_MOST, smallest: ELEMENT_SMALLEST_PX }))
     await within('closing the page', deadline, context.close())
-    return { jpeg, width: viewport.width, height, elements, blocked, timings: { launchMs, navigateMs, loadMs, loadCapped, screenshotMs, totalMs: Math.round(performance.now() - started) } }
+    return { finalUrl, jpeg, width: viewport.width, height, elements, blocked, timings: { launchMs, navigateMs, loadMs, loadCapped, screenshotMs, totalMs: Math.round(performance.now() - started) } }
   } finally {
     options.signal.removeEventListener('abort', close)
     await browser.close().catch(() => {})

@@ -18,6 +18,8 @@ let requests: { path: string; userAgent: string | undefined; upgrade: boolean }[
 let denied: Server
 let deniedOrigin = ''
 let deniedHits: string[] = []
+/** Every TCP connection the denied server accepted, HTTP or not: WebRTC would open one without any HTTP request. */
+let deniedConnections = 0
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -29,13 +31,18 @@ beforeAll(async () => {
         <img src="http://10.0.0.1/private.png" alt="private" width="40" height="40">
         <img src="http://169.254.169.254/computeMetadata/v1/" alt="metadata" width="40" height="40">
         <img src="/img-redirect" alt="redirected" width="40" height="40">
-        <script>try { new WebSocket('ws://' + location.host + '/ws') } catch {}</script></main></body></html>`)
+        <script>try { new WebSocket('ws://' + location.host + '/ws') } catch {}</script>
+        <script>try { const pc = new RTCPeerConnection({ iceServers: [{ urls: 'turn:[::1]:${deniedPort()}?transport=tcp', username: 'u', credential: 'c' }] }); pc.createDataChannel('x'); pc.createOffer().then(o => pc.setLocalDescription(o)) } catch (e) { document.body.dataset.webrtc = String(e) }</script></main></body></html>`)
       return
     }
     // Redirects: a subresource and a page that hop to the denied address, and a page that hops within the fixture.
     if (req.url === '/img-redirect') { res.writeHead(302, { location: `${deniedOrigin}/pixel.png` }).end(); return }
     if (req.url === '/top-redirect') { res.writeHead(302, { location: `${deniedOrigin}/secret` }).end(); return }
     if (req.url === '/go') { res.writeHead(302, { location: '/' }).end(); return }
+    // A page under a folder whose image is relative: only a page at the folder's address finds it.
+    if (req.url === '/go-sub') { res.writeHead(302, { location: '/sub/' }).end(); return }
+    if (req.url === '/sub/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><h1>Sub page</h1><img src="pic.png" alt="Sub picture" width="40" height="40"></body></html>'); return }
+    if (req.url === '/sub/pic.png') { res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')); return }
     if (req.url === '/ok.png') {
       // A 1x1 PNG.
       res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'))
@@ -45,6 +52,7 @@ beforeAll(async () => {
   })
   server.on('upgrade', (req, socket) => { requests.push({ path: req.url ?? '', userAgent: req.headers['user-agent'], upgrade: true }); socket.destroy() })
   denied = createServer((req, res) => { deniedHits.push(req.url ?? ''); res.writeHead(200, { 'content-type': 'text/html' }).end('<h1>SECRET</h1>') })
+  denied.on('connection', () => { deniedConnections++ })
   await new Promise<void>(resolve => denied.listen(0, '::1', resolve))
   deniedOrigin = `http://[::1]:${(denied.address() as AddressInfo).port}`
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -57,12 +65,15 @@ afterAll(async () => {
 })
 
 const policy = { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }
+const deniedPort = (): number => (denied.address() as AddressInfo).port
 
 describe('the screenshot capture', () => {
   it('takes the page and its allowed image, refuses private and metadata subresources, never connects a WebSocket, and names the preview', async () => {
     requests = []
     deniedHits = []
+    deniedConnections = 0
     const capture = await captureScreenshot(`${origin}/`, { signal: new AbortController().signal, budgetMs: 20_000, policy })
+    expect(capture.finalUrl).toBe(`${origin}/`)
     expect(capture.width).toBe(1280)
     expect(capture.height).toBe(800)
     expect(capture.jpeg.length).toBeGreaterThan(1_000)
@@ -73,6 +84,8 @@ describe('the screenshot capture', () => {
     expect(requests.map(request => request.path).sort()).toEqual(['/', '/img-redirect', '/ok.png'])
     expect(deniedHits).toEqual([])
     expect(requests.some(request => request.upgrade)).toBe(false)
+    // Not even a TCP connection from WebRTC, which no routing sees.
+    expect(deniedConnections).toBe(0)
     for (const request of requests) expect(request.userAgent).toBe(previewBrowserUserAgent())
     expect(capture.timings.totalMs).toBeGreaterThan(0)
   })
@@ -81,6 +94,12 @@ describe('the screenshot capture', () => {
     deniedHits = []
     const capture = await captureScreenshot(`${origin}/go`, { signal: new AbortController().signal, budgetMs: 20_000, policy })
     expect(capture.elements.map(element => element.text)).toContain('Tide report')
+    expect(capture.finalUrl).toBe(`${origin}/`)
+    // The page is navigated to where its redirect led, so its relative image is found.
+    requests = []
+    const sub = await captureScreenshot(`${origin}/go-sub`, { signal: new AbortController().signal, budgetMs: 20_000, policy })
+    expect(sub.finalUrl).toBe(`${origin}/sub/`)
+    expect(requests.map(request => request.path)).toContain('/sub/pic.png')
     await expect(captureScreenshot(`${origin}/top-redirect`, { signal: new AbortController().signal, budgetMs: 20_000, policy })).rejects.toThrow()
     expect(deniedHits).toEqual([])
   })
