@@ -145,6 +145,21 @@ export function countEmptyTables(doc: Document): number {
   return empty
 }
 
+/** What the extraction knew of the page, weighed beside its signals. */
+export interface RenderContext {
+  /**
+   * The extracted region shows the product the page declares in its own
+   * markup (see extract.ts): a page of little text beside its scripts is then
+   * a small page, not a shell.
+   */
+  contentShown?: boolean
+  /**
+   * The page was routed as a listing or collection: only there is a
+   * hydration list that outnumbers the shown records the page's content.
+   */
+  listing?: boolean
+}
+
 /**
  * The hydration list that most outnumbers the records the visible text
  * shows, when the text shows at least LIST_MIN_SHOWN of them and at most
@@ -163,12 +178,13 @@ function partialRecordList(lists: RawRenderSignals['recordLists'], visible: stri
 /**
  * Decide whether the page's data is most likely rendered client-side.
  * Every rule pairs a structural gap with script presence, so a static page
- * with an empty table or a "loading" word never trips it. `listing` says the
- * page was routed as a listing or collection: only there is a hydration list
- * that outnumbers the shown records the page's content (an article's data
- * often lists more related posts than it shows).
+ * with an empty table or a "loading" word never trips it. `context.listing`
+ * says the page was routed as a listing or collection: only there is a
+ * hydration list that outnumbers the shown records the page's content (an
+ * article's data often lists more related posts than it shows).
  */
-export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, listing = false): RenderSignals {
+export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, context: RenderContext = {}): RenderSignals {
+  const listing = context.listing === true
   const visible = cleaned.body ? collapsed(textOf(cleaned.body)) : ''
   const textChars = visible.length
   const emptyTables = countEmptyTables(cleaned)
@@ -178,7 +194,7 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, li
   let reason: RenderReason | null = null
   if (emptyTables > 0 && raw.scriptChars >= 1_000) reason = 'empty_table_with_scripts'
   else if (has('app_root_empty') && raw.scriptChars >= 500) reason = 'empty_app_root'
-  else if (textChars < 300 && raw.scriptChars >= 2_000) reason = 'script_shell'
+  else if (textChars < 300 && raw.scriptChars >= 2_000 && context.contentShown !== true) reason = 'script_shell'
   else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
   else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
   else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2) reason = 'hydration_shell'

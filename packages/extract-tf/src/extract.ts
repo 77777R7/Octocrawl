@@ -18,7 +18,7 @@ import { detectRenderSignals, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
@@ -83,6 +83,19 @@ function confidenceOf(
   return Math.round(conf * 100) / 100
 }
 
+/**
+ * Whether the region shows the product the page declares in its own markup
+ * (JSON-LD or microdata): its name and its price are in the region's text.
+ * Such a page carries its content in its HTML, however much script it has.
+ */
+function showsDeclaredProduct(main: Element | null, product: ProductFacts | null): boolean {
+  if (main === null || product === null || product.name === null || product.price === null) return false
+  if (product.name.source === 'text' || product.price.source === 'text') return false
+  const text = textOf(main).replace(/\s+/g, ' ')
+  const price = product.price.value.replace(/[^\d.,]/g, '')
+  return text.includes(product.name.value.replace(/\s+/g, ' ').trim()) && price !== '' && text.includes(price)
+}
+
 export class ExtractTf implements Extractor {
   extract(html: string, options: ExtractorOptions = {}): ExtractorOutput {
     const { favorPrecision = false, favorRecall = false, pruneSelectors, includeSelectors, blockAds = true } = options
@@ -129,11 +142,15 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    // A product's options shown as controls are kept aside before cleaning
+    // removes the controls, and shown once the page is known to be a product's.
+    const optionGroups = markOptionGroups(doc.document, excluded)
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
+    settleOptionGroups(optionGroups, decision.type === 'product')
 
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
@@ -247,7 +264,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document, decision.type === 'listing' || decision.type === 'collection'),
+      render: detectRenderSignals(raw, doc.document, { contentShown: showsDeclaredProduct(main, product), listing: decision.type === 'listing' || decision.type === 'collection' }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

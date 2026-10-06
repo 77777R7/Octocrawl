@@ -343,6 +343,39 @@ describe('HTTP lane on a client-rendered shell', () => {
   })
 })
 
+describe('HTTP lane on a small server-rendered product page', () => {
+  it('answers with the product and its options, with no shell warning', async () => {
+    const { createServer } = await import('node:http')
+    // webscraper.io's test shop: everything the page shows is in its HTML, beside 2 KB of widget script.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Asus VivoBook</title></head><body><main>' +
+          '<div class="card thumbnail" itemscope itemtype="https://schema.org/Product">' +
+          '<h4 class="price" itemprop="offers" itemscope itemtype="https://schema.org/Offer"><span itemprop="price">$295.99</span><meta itemprop="priceCurrency" content="USD"></h4>' +
+          '<h4 class="title" itemprop="name">Asus VivoBook X441NA-GA190</h4>' +
+          '<p class="description" itemprop="description">Asus VivoBook X441NA-GA190 Chocolate Black, 14", Celeron N3450, 4GB, 128GB SSD</p>' +
+          '<label class="memory">HDD:</label><div class="swatches"><button type="button" value="128">128</button><button type="button" value="256">256</button><button type="button" value="512">512</button></div>' +
+          `</div></main><script>${'window.dataLayer = window.dataLayer || []; '.repeat(55)}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/product/60`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('128, 256, 512')
+      expect(out.warnings ?? []).toEqual([])
+      expect(out.trace.some((event) => event.event === 'quality_client_rendered')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
 describe('hosted network policy on the HTTP arm', () => {
   it('denies cloud metadata before a wire request', async () => {
     const hosted = new ResilientHttpSubject('standard', hostedNetworkPolicy())

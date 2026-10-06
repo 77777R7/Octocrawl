@@ -234,6 +234,19 @@ describe('PDP region selection', () => {
     expect(out.mainHtml).not.toContain('0 items')
   })
 
+  it('keeps the tabs when the picker shows its values and a reset link beside them', () => {
+    // The Adrienne Trek Jacket: longer colour names leave the "Clear" link under the block filter's link density, so the
+    // cell is a block; its values and its link describe the product no more than its label does.
+    const html = `<!doctype html><html><head><title>Jacket</title>${PRODUCT_LD}</head><body><main><div class="product">
+<div class="summary"><h1>Adrienne Trek Jacket</h1><p class="price"><span class="amount">$57.00</span></p><p>This is a variable product called a Adrienne Trek Jacket</p>
+<form class="variations_form cart" action="/cart/"><table class="variations"><tr><th class="label"><label for="color">Color</label></th><td class="value"><select id="color" name="attribute_color"><option value="">Choose an option</option><option value="gray">Charcoal Gray</option><option value="orange">Sunset Orange</option></select><a class="reset_variations" href="#">Clear</a></td></tr></table><button type="submit">Add to cart</button></form></div>
+<div class="woocommerce-tabs"><div id="tab-description"><h2>Description</h2><p>You're ready for a cross-country jog or a coffee on the patio in the Adrienne Trek Jacket.</p></div></div>
+</div></main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.mainHtml).toContain('Charcoal Gray, Sunset Orange')
+    expect(out.mainHtml).toContain('coffee on the patio')
+  })
+
   it('keeps a buy box whose own description is short: bullets, a spec table, CJK prose', () => {
     const page = (lang: string, buyBox: string, beside: string) => `<!doctype html><html lang="${lang}"><head><title>Product</title>${PRODUCT_LD}</head><body>
 <main><div class="product">${buyBox}</div>${beside}</main></body></html>`
