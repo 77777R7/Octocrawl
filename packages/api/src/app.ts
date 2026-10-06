@@ -4,7 +4,7 @@ import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
 import { InvalidCursorError } from '@w2l/runtime'
-import { CrawlStateError, HandoffUnavailableError, LoginsUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
+import { CrawlStateError, HandoffUnavailableError, LoginsUnavailableError, SessionsUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
@@ -524,7 +524,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.post('/v1/sessions/managed', async (c) => {
     const body = await c.req.json() as Record<string, unknown>
     if (typeof body.workspaceId !== 'string' || typeof body.accountRef !== 'string' || typeof body.originScope !== 'string') return fail(c, 'invalid_request', 'workspaceId, accountRef, and originScope are required')
-    return c.json(await engine.createManagedSession({ workspaceId: body.workspaceId, accountRef: body.accountRef, originScope: body.originScope, expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null }), 201)
+    try { return c.json(await engine.createManagedSession({ workspaceId: body.workspaceId, accountRef: body.accountRef, originScope: body.originScope, expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null }), 201) }
+    catch (error) { if (error instanceof SessionsUnavailableError) return fail(c, 'conflict', error.message); throw error }
   })
 
   app.post('/v1/sessions/:id/authorize', async (c) => {
@@ -543,7 +544,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.get('/v1/sessions/:id', async (c) => {
     try { return c.json(await engine.getManagedSession(c.req.param('id')), 200) }
-    catch { return fail(c, 'not_found', 'session not found') }
+    catch (error) { return error instanceof SessionsUnavailableError ? fail(c, 'conflict', error.message) : fail(c, 'not_found', 'session not found') }
   })
 
   app.post('/v1/sessions/:id/renew', async (c) => {
@@ -562,7 +563,8 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.post('/v1/sessions/:id/capture', async (c) => {
     const body = await c.req.json() as Record<string, unknown>
     if (typeof body.workspaceId !== 'string' || typeof body.accountRef !== 'string' || typeof body.url !== 'string') return fail(c, 'invalid_request', 'workspaceId, accountRef, and url are required')
-    return c.json(await engine.captureManagedSession({ sessionRef: c.req.param('id'), workspaceId: body.workspaceId, accountRef: body.accountRef, url: body.url }), 200)
+    try { return c.json(await engine.captureManagedSession({ sessionRef: c.req.param('id'), workspaceId: body.workspaceId, accountRef: body.accountRef, url: body.url }), 200) }
+    catch (error) { if (error instanceof SessionsUnavailableError) return fail(c, 'conflict', error.message); throw error }
   })
 
   app.post('/fc/v1/scrape', async (c) => {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Managed sessions (`/v1/sessions/*`) no longer answer with the profile's path on the server (`profileDir`) or a CDP endpoint (`cdpEndpoint`); every route returns the public fields only. A hosted engine refuses them all (409), in the engine itself as well as at the hosted gate, and makes no browser profile (ROADMAP PA, G4).
 ## 0.3.1 — 2026-10-06
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.3.1: everything below since 0.3.0 on 2026-10-05, and `@octocrawl/mcp` now carries `mcpName` for the official MCP Registry.
