@@ -790,7 +790,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         const navigationTimeoutMs = remainingTimeout(execution, options.timeout !== undefined && execution.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : 20_000)
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'navigate', detail: { url: navigationUrl, attempt: attemptCount, timeoutMs: navigationTimeoutMs } })
         const envProxy = proxyFor(navigationUrl, this.networkPolicy)
-        if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: 'environment' } })
+        if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: this.networkPolicy.egressProxy?.source ?? 'environment' } })
         try {
           documents.restart()
           response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })

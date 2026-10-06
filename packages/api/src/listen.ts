@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
 import { browserEngineChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
-import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { describeEgressProxy, egressProxies, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
 
@@ -76,6 +76,20 @@ export interface ListenConfig {
    * only with a grant that names `compatible_transport`, never on a hosted server. Empty: none.
    */
   compatHosts: string[]
+  /**
+   * The operator's egress proxies (`W2L_EGRESS_PROXIES`): only with a grant that names `egress_sessions`,
+   * never on a hosted server. Empty: none.
+   */
+  egressProxies: ProxyServer[]
+}
+
+/** W2L_EGRESS_PROXIES, checked at startup: the grant must name egress_sessions; a hosted server refuses them. */
+function readEgressProxies(env: NodeJS.ProcessEnv, grant: AccessGrant | null, hosted: boolean): ProxyServer[] {
+  const proxies = egressProxies(env.W2L_EGRESS_PROXIES)
+  if (proxies.length === 0) return []
+  if (hosted) throw new Error('W2L_EGRESS_PROXIES is refused on a hosted server (ADR 0005: a hosted server connects direct, to addresses it checked)')
+  if (!(grant?.capabilities ?? []).includes('egress_sessions')) throw new Error('W2L_EGRESS_PROXIES needs an access grant that names egress_sessions (ADR 0005; --access-grant or W2L_ACCESS_GRANT)')
+  return proxies
 }
 
 /**
@@ -123,6 +137,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const browserEngine = browserEngineChoice(env, accessGrant, hosted)
   const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
   const compatHosts = compatHostsChoice(env, accessGrant, hosted)
+  const egressList = readEgressProxies(env, accessGrant, hosted)
+  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when it fails at the connection (at most 2 times), never after a block, a challenge or a 429; a scrape takes the next healthy one`]
   const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains; a request with custom headers or mobile keeps the http rung`]
   if (hosted) {
     if (tokens.length === 0) {
@@ -147,6 +163,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       accessGrant,
       browserEngine,
       compatHosts,
+      egressProxies: egressList,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -167,13 +184,14 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...compatNotice],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...compatNotice, ...egressNotice],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
     accessGrant,
     browserEngine,
     compatHosts,
+    egressProxies: egressList,
   }
 }
 

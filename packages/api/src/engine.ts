@@ -3,7 +3,7 @@
  * One crawl is CrawlOrchestrator. No second fetcher.
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
@@ -36,6 +36,8 @@ import {
   maxFileBytesFromEnv,
   type FetchOptions,
   type PageOptions,
+  type ProxyServer,
+  type TraceEvent,
   type ActiveCrawl,
   type ActiveCrawlList,
   type ActiveCrawlOptions,
@@ -111,6 +113,7 @@ import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlP
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
+import { EgressPool, egressFailed, MAX_EGRESS_SWITCHES, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
@@ -359,13 +362,19 @@ export interface ApiEngineOptions {
   /** The engine the public browser rung launches, as the server chose it (browserEngineChoice). Default stock Playwright. */
   browserEngine?: BrowserEngineName
   /**
+   * The operator's egress proxies (`W2L_EGRESS_PROXIES`, ADR 0005 `egress_sessions`): a batch or crawl
+   * takes one for its run and switches only when it fails at the connection (EgressPool); a scrape takes
+   * the next healthy one. Absent or empty: the network policy's own route. Needs the grant; refused hosted.
+   */
+  egressProxies?: readonly ProxyServer[]
+  /**
    * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
    * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
    * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
    */
   compatHosts?: readonly string[]
   /** Test seam: override local ladder channels without changing fetch. */
-  channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
+  channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress) => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
   httpOnly?: boolean
   /** Server-owned acquisition rule; callers cannot disable it per request. */
@@ -404,6 +413,31 @@ const NO_SITEMAP: MapSources['sitemap'] = {
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
 /** A task's cookie session file, in its own directory (egress_sessions). */
 const COOKIE_SESSION_FILE = 'cookie-session.json'
+/** A task's egress (`{ egress: "host:port" }`), in its own directory: no credentials. */
+const EGRESS_FILE = 'egress.json'
+
+/**
+ * The egress a task's run goes through: the one it used before (its file) while that is in the pool and
+ * not cooling down, else the next healthy one. A task that changes egress drops its cookie session, whose
+ * cookies came through the other one.
+ */
+function bindTaskEgress(pool: EgressPool, file: string, cookieSessionFile: string): Egress {
+  let saved: string | undefined
+  try {
+    const parsed = (JSON.parse(readFileSync(file, 'utf8')) as { egress?: unknown }).egress
+    if (typeof parsed === 'string') saved = parsed
+  } catch { /* no egress yet */ }
+  const kept = saved === undefined ? undefined : pool.byId(saved)
+  if (kept !== undefined && !pool.cooling(kept.id)) return kept
+  const egress = pool.pick(saved)
+  if (saved !== undefined) rmSync(cookieSessionFile, { force: true })
+  writeTaskEgress(file, egress.id)
+  return egress
+}
+
+function writeTaskEgress(file: string, id: string): void {
+  writeFileSync(file, `${JSON.stringify({ egress: id })}\n`, { mode: 0o600 })
+}
 const DEFAULT_WORKER_COUNT = 4
 
 /**
@@ -454,6 +488,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const compatHosts = options.compatHosts ?? []
   /** ADR 0005 `egress_sessions`: each batch or crawl keeps the cookies its pages set and sends them again to their site. */
   const egressSessions = (accessGrant?.capabilities ?? []).includes('egress_sessions')
+  const egressProxyList = options.egressProxies ?? []
+  if (egressProxyList.length > 0 && options.hosted === true) throw new Error('egress proxies are refused on a hosted engine (ADR 0005)')
+  if (egressProxyList.length > 0 && !egressSessions) throw new Error('egress proxies need an access grant that names egress_sessions (ADR 0005)')
   if (compatHosts.length > 0 && options.hosted === true) throw new Error('the compatible transport is refused on a hosted engine (ADR 0005)')
   if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
@@ -480,6 +517,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // The operator's file cap: the policy's own, else W2L_MAX_FILE_BYTES, else the default.
     maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
   }
+  /** The operator's egress proxies, when any: every fetch leaves through one of them. */
+  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy)
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
   const fileStore = new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
@@ -663,11 +702,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const workerCount = Math.max(1, options.workerCount ?? DEFAULT_WORKER_COUNT)
   // One robots.txt cache per mode, shared by the http rung and a crawl's sitemap reader, so a host's robots.txt is read once for both.
   const robotsCaches = new Map<string, RobotsOriginCache>()
-  const robotsCacheFor = (mode: 'standard' | 'research' | 'authed'): RobotsOriginCache => {
-    const existing = robotsCaches.get(mode)
+  const robotsCacheFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress): RobotsOriginCache => {
+    // An egress reads robots.txt through its own proxy, as its pages are read.
+    const key = egress === undefined ? mode : `${mode}|${egress.id}`
+    const existing = robotsCaches.get(key)
     if (existing !== undefined) return existing
-    const cache = new RobotsOriginCache(networkPolicy)
-    robotsCaches.set(mode, cache)
+    const cache = new RobotsOriginCache(egress?.policy ?? networkPolicy)
+    robotsCaches.set(key, cache)
     return cache
   }
   const inflight = new Map<string, Promise<void>>()
@@ -695,17 +736,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const runningCrawls = new Map<string, CrawlOrchestrator>()
   const createChannels =
     options.channelsFor ??
-    ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0 })
+    ((mode: 'standard' | 'research' | 'authed', egress?: Egress) => {
+      // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0 })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
   const historiesByMode = new Map<string, MemoryRoutingHistory>()
-  const channelsFor = (mode: 'standard' | 'research' | 'authed'): Channel[] => {
-    const existing = channelsByMode.get(mode)
+  const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress): Channel[] => {
+    const key = egress === undefined ? mode : `${mode}|${egress.id}`
+    const existing = channelsByMode.get(key)
     if (existing !== undefined) return existing
-    const channels = createChannels(mode)
-    channelsByMode.set(mode, channels)
+    const channels = createChannels(mode, egress)
+    channelsByMode.set(key, channels)
     return channels
   }
   /**
@@ -727,8 +770,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * `compat` false leaves it out altogether: a map reads its start page with
    * the identity its response names, the one it reads robots.txt with.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
-    const channels = channelsFor(mode)
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+    const channels = channelsFor(mode, egress)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
     // A host the server did not list never sees the compatible rung, in the audit either.
@@ -1059,12 +1102,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // relaxation it refuses at submission.
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
+    // The task's egress (W2L_EGRESS_PROXIES), kept in its directory: a resumed task goes on through the one its cookies
+    // came through while it is in the pool and not cooling down, else the next healthy one with a new session.
+    const cookieSessionFile = join(task.taskDir, COOKIE_SESSION_FILE)
+    const egressFile = join(task.taskDir, EGRESS_FILE)
+    let egress = egressPool === null ? undefined : bindTaskEgress(egressPool, egressFile, cookieSessionFile)
+    let switches = 0
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
-    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false)
+    let rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
     // The task's cookie session (egress_sessions), kept in its directory so a resumed task goes on with it, and
     // removed when the task ends. A saved login is mode authed's own session; pages read with a session are never cached.
-    const cookieSessionFile = join(task.taskDir, COOKIE_SESSION_FILE)
-    const cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession(cookieSessionFile) : undefined
+    let cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession(cookieSessionFile) : undefined
     /**
      * The session file goes once the task has ended, also when this run has no session (a server restarted
      * without the grant resumed a task that had one); a run paused by shutdown keeps it for its resume.
@@ -1073,11 +1121,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (!ended) return
       await cookieSession?.close()
       await TaskCookieSession.remove(cookieSessionFile).catch(() => {})
+      rmSync(egressFile, { force: true })
     }
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runner = new LadderRunner(rungs.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: rungs.filtered })
+    const runnerFor = (lane: typeof rungs) => new LadderRunner(lane.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -1085,11 +1134,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered, and obey robots.txt unless it was started with ignoreRobotsTxt.
     const namedOverride = task.batch === undefined ? ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) : namedUrlOverride
     const robotsOverrideFor = recordedOverrideFor === null && namedOverride === undefined ? null : (url: string) => recordedOverrideFor?.(url) ?? namedOverride
-    const ladder = new LadderScrapeAtom(runner, robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
+    const ladderFor = (lane: typeof rungs) => new LadderScrapeAtom(runnerFor(lane), robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
     })
-    const atom: ScrapeAtom = selection === undefined ? (cookieSession === undefined ? ladder : { scrape: (url, context) => ladder.scrape(url, { ...context, cookieSession }), close: () => ladder.close() }) : {
+    // The rungs of the task's current egress; a switch replaces them, and the task closes every set it used.
+    let ladder = ladderFor(rungs)
+    const ladders = [ladder]
+    const closeLadders = async (): Promise<void> => { await Promise.all(ladders.map((one) => one.close())) }
+    const pageAtom: ScrapeAtom = selection === undefined ? { scrape: (url, context) => ladder.scrape(url, cookieSession === undefined ? context : { ...context, cookieSession }), close: closeLadders } : {
       async scrape(url, context) {
         // `timeout` is each page's own deadline, inside the task's.
         const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(cookieSession === undefined ? {} : { cookieSession }) })
@@ -1127,14 +1180,48 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...(json === undefined ? {} : { json }),
         } }
       },
-      close: () => ladder.close(),
+      close: closeLadders,
+    }
+    /**
+     * With egress proxies, a page whose egress failed at the connection moves the task to the next healthy egress, at
+     * most MAX_EGRESS_SWITCHES times a run, with a new cookie session, and is read again there. A page another page's
+     * failure already moved is read again on the new egress, without a switch of its own.
+     */
+    const atom: ScrapeAtom = egressPool === null ? pageAtom : {
+      async scrape(url, context) {
+        let used = egress!
+        let outcome = await pageAtom.scrape(url, context)
+        const events: TraceEvent[] = []
+        while (egressFailed(outcome.result)) {
+          if (egress!.id === used.id) {
+            if (switches >= MAX_EGRESS_SWITCHES) break
+            egressPool.fail(used.id)
+            switches++
+            egress = egressPool.pick(used.id)
+            writeTaskEgress(egressFile, egress.id)
+            rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
+            ladder = ladderFor(rungs)
+            ladders.push(ladder)
+            // A session never changes egress: the cookies came through the failed one.
+            if (cookieSession !== undefined) {
+              await cookieSession.close()
+              cookieSession = new TaskCookieSession(cookieSessionFile)
+            }
+          }
+          events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.id, to: egress!.id, reason: outcome.result.failureReason, switches } })
+          used = egress!
+          outcome = await pageAtom.scrape(url, context)
+        }
+        return events.length === 0 ? outcome : { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, ...events] } }
+      },
+      close: () => pageAtom.close(),
     }
     const controller = new AbortController()
     crawlControllers.set(task.id, controller)
     // A crawl that reads a sitemap gets its own reader: the crawl mode's http identity (the mobile one when its
     // pages declare it), the engine's network policy, origin scheduler and this mode's robots.txt cache; a hosted
     // engine's policy has no proxy and no private ranges. A batch never reads one.
-    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode), ignoreRobotsTxt: ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) !== undefined })
+    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy: egress?.policy ?? networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode, egress), ignoreRobotsTxt: ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) !== undefined })
     // Each persisted step is one job event: a webhook delivery when the task has a receiver (a delivery error is logged, never the page's), then the hub's.
     const webhook = webhookOf(task)
     const kind = jobKindOf(task)
@@ -1251,7 +1338,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       : Math.min(context.deadlineAt ?? Infinity, Date.now() + req.timeout)
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [])
+    // A scrape takes the next healthy egress, when the operator set some; it does not switch.
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, egressPool?.pick())
     const policy: CrawlPolicy = {
       mode,
       ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
@@ -1330,15 +1418,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (readsPage && options.channelPolicy?.(req.url) === 'browser_only') throw new RequestError('map is not available for this URL: this server reads it with the browser lane only')
     const mode = req.mode ?? 'standard'
     // The start page under the standard identity the response reports (identity below), not the compatible transport's.
-    const rungs = readsPage ? channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml'], true, false) : null
+    // A map reads its start page, robots.txt and sitemaps through one egress, when the operator set some.
+    const egress = egressPool?.pick()
+    const rungs = readsPage ? channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml'], true, false, egress) : null
     const requestedAt = new Date().toISOString()
     const id = crypto.randomUUID()
     const signal = context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal
     const userAgentFor = (url: string): string => prepareHttpIdentity(mode, networkPolicy.contact ?? null, new URL(url).hostname).identity.userAgent
-    const robots = robotsCacheFor(mode)
+    const robots = robotsCacheFor(mode, egress)
     const lookups = new Map<string, ReturnType<RobotsOriginCache['lookup']>>()
     const runner = rungs === null ? null : new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
-    const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy, scheduler: originScheduler, robots, ignoreRobotsTxt: robotsOverride !== undefined })
+    const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy: egress?.policy ?? networkPolicy, scheduler: originScheduler, robots, ignoreRobotsTxt: robotsOverride !== undefined })
     const sources: MapSources = {
       async readStartPage(url, scope) {
         if (runner === null) throw new Error('a sitemap-only map reads no page')
