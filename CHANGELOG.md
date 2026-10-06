@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-06
+
+The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.3.1: everything below since 0.3.0 on 2026-10-05, and `@octocrawl/mcp` now carries `mcpName` for the official MCP Registry.
+
 - The published `@octocrawl/mcp` carries `mcpName: io.github.77777R7/octocrawl` and the repository has `server.json` for the official MCP Registry (registry.modelcontextprotocol.io): the npm package over stdio, with `W2L_API_URL` and `W2L_API_TOKEN`, and the hosted remote `https://mcp.octocrawl.dev/mcp`. `scripts/release-version.mjs` keeps `server.json`'s versions equal to the packages'. Publishing to the registry takes a release that carries `mcpName` (0.3.1 or later), then `mcp-publisher login github` and `mcp-publisher publish`.
 - docs/hosted-api.md: the key and waitlist scripts need `NODE_USE_ENV_PROXY=1` behind a proxy, since Node's `fetch` ignores `HTTPS_PROXY`; and where to keep a freshly issued key.
 - Egress proxies (ADR 0005 `egress_sessions`, ROADMAP PA item 3): `W2L_EGRESS_PROXIES` names the operator's own http(s) proxies. A batch or crawl keeps one for its run (kept in `egress.json` in its directory, so a resumed task goes on through it) and moves to the next healthy one only when the proxy itself fails (after a page got no HTTP answer, a probe finds the proxy does not answer or refuses its credentials), at most twice a run, with a new cookie session; the page is read again there and its trace says so (`egress_switched`). A block, a challenge, a 429 or a connection the site reset never moves it. Cookie session files are kept per route, so a task resumed on another route starts a new session; mode `authed` never uses the pool. A failed proxy cools down for 10 minutes; scrapes and maps take the next healthy one. Each proxy reads robots.txt and sitemaps for its own pages; per-host pacing stays shared. Needs the grant; refused on a hosted server; credentials are never recorded.
