@@ -1,0 +1,61 @@
+name: Native dependencies
+
+# The packed CLI on Linux, Windows and macOS with its native modules: better-sqlite3 (the task store)
+# and impit (the browser-compatible HTTP transport). Each ships prebuilt binaries per platform, so the
+# Linux test job alone does not show they load elsewhere. Release runs the same check before it
+# publishes; this runs it on a pull request that changes what is installed, and on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - package-lock.json
+      - packages/*/package.json
+      - packages/bench/src/compatTransport.ts
+      - scripts/pack-packages.mjs
+      - scripts/check-native-deps.mjs
+      - .github/workflows/native-deps.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run pack:packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-tarballs
+          path: .w2l/pack/tarballs/*.tgz
+          if-no-files-found: error
+
+  native:
+    needs: pack
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: scripts/check-native-deps.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: npm-tarballs
+          path: tarballs
+      - name: Install the packed CLI and scrape over undici and impit
+        run: node scripts/check-native-deps.mjs tarballs
