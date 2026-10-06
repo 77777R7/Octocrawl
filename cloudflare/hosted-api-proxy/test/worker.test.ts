@@ -31,9 +31,9 @@ describe('hosted api proxy worker', () => {
   })
 
   it('redirects plain http to https and keeps a protocol-relative path on the origin host', async () => {
-    const redirect = await worker.fetch(new Request('http://api.octocrawl.dev/healthz'), env)
+    const redirect = await worker.fetch(new Request('http://api.octocrawl.dev/health'), env)
     expect(redirect.status).toBe(301)
-    expect(redirect.headers.get('location')).toBe('https://api.octocrawl.dev/healthz')
+    expect(redirect.headers.get('location')).toBe('https://api.octocrawl.dev/health')
     const fetchStub = vi.fn(async () => new Response('ok'))
     vi.stubGlobal('fetch', fetchStub)
     await worker.fetch(new Request('https://api.octocrawl.dev//evil.example/x'), env)
