@@ -278,14 +278,17 @@ export function glyphForLuminance(luminance: number): string {
  * contain its first line. Only text the result itself holds can match: nothing is inferred. */
 export function extractedElements(elements: CaptureElement[], title: string | null, markdown: string | null): CaptureElement[] {
   const norm = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim()
-  const words = norm(markdown ? plainText(markdown) : '')
+  // Bare addresses are not words the page said: "faq" in a link's path does not make a "FAQ" heading read.
+  const words = norm((markdown ? plainText(markdown) : '').replace(/https?:\/\/\S+/g, ' '))
   const heading = norm(title ?? '')
   const raw = norm(markdown ?? '')
+  // The phrase as whole words: "AI" is not in "said", nor "go" in "going".
+  const holds = (haystack: string, phrase: string): boolean => new RegExp(`(^|[^\\p{L}\\p{N}])${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'u').test(haystack)
   return elements.filter(element => {
     const text = norm(element.text)
     if (element.tag === 'img') return text.length >= 2 && raw.includes(`![${text}`)
     const isHeading = /^h[1-4]$/.test(element.tag)
-    if (text.length < (isHeading ? 2 : 6)) return false
-    return words.includes(text) || (isHeading && heading === text)
+    if (text.length < (isHeading ? 3 : 6)) return false
+    return holds(words, text) || (isHeading && heading === text)
   })
 }

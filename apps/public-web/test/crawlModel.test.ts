@@ -161,6 +161,16 @@ describe('which of the picture\'s elements the result read', () => {
       .toEqual(['Tide report', 'The harbour office records tide height, wind and visibility for every hour of the day.', 'Pricing and plans', 'Harbour at dawn'])
   })
 
+  it('never marks a short heading or link from the inside of a word or an address', () => {
+    const sidebar = [
+      { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'AI' }, { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Go' },
+      { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Tide' }, { tag: 'h3', x: 0, y: 0, width: 10, height: 10, text: 'FAQ' },
+      { tag: 'a', x: 0, y: 0, width: 10, height: 10, text: 'About us' }, { tag: 'h2', x: 0, y: 0, width: 10, height: 10, text: 'Harbour' },
+    ]
+    const words = 'He said the tide was going out; see https://example.com/faq and learn more about us today. The harbour sleeps.'
+    expect(extractedElements(sidebar, 'Harbour notes', words).map(element => element.text)).toEqual(['Tide', 'About us', 'Harbour'])
+  })
+
   it('keeps nothing for a result without words', () => {
     expect(extractedElements(elements, null, null)).toEqual([])
     expect(extractedElements(elements, 'Tide report', null).map(element => element.text)).toEqual(['Tide report'])
