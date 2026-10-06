@@ -53,6 +53,8 @@ export interface PageLayout {
   glyph: Uint16Array
   /** The main content's blocks, top to bottom: what the octopus reaches for. */
   blocks: Block[]
+  /** The footer's rule near the page's foot: the ground the octopus lands on. */
+  floor: number
 }
 
 /** A small deterministic generator, so one link always draws the same page. */
@@ -101,7 +103,7 @@ export function layoutPage(cols: number, rows: number, seed: number): PageLayout
   const sidebar = cols >= 64
   const mainLeft = margin
   const mainRight = sidebar ? Math.round(cols * 0.66) : cols - margin
-  const footer = rows - 5
+  const footer = rows - 2
   // Sidebar: short link lists down the right.
   if (sidebar) {
     const left = mainRight + 4
@@ -148,10 +150,10 @@ export function layoutPage(cols: number, rows: number, seed: number): PageLayout
   }
   // Footer.
   for (let x = 0; x < cols; x++) set(x, footer, Cell.Chrome, '·')
-  for (let row = footer + 2; row < rows - 1; row++) {
+  for (let row = footer + 1; row < rows; row++) {
     for (let x = margin; x < cols - margin; x += 9) for (let i = 0; i < 5 && x + i < cols - margin; i++) set(x + i, row, Cell.Chrome, '-')
   }
-  return { cols, rows, kind, glyph, blocks }
+  return { cols, rows, kind, glyph, blocks, floor: footer }
 }
 
 /** A page's Markdown as plain words: no link targets, pictures, emphasis marks, code fences or table rules. */

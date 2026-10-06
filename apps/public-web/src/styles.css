@@ -185,7 +185,7 @@ a { color: inherit; }
 /* A short bottom padding: the hero's own padding and free space already sit below the form, and that free
    space lets a message and a hint appear under the card without pushing the cue off the first screen. */
 .hero-form-row { padding: 40px 24px 12px; }
-.url-form { width: min(760px, 100%); margin: 0 auto; text-align: left; }
+.url-form { position: relative; width: min(760px, 100%); margin: 0 auto; text-align: left; }
 .url-card { overflow: hidden; border: 1px solid rgba(255, 255, 255, .85); border-radius: 16px; background: #fff; box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 6px rgba(244, 249, 255, .13); }
 .url-card:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 159, 111, .4); }
 .url-card.is-invalid, .url-card.is-invalid:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 112, 88, .8); }
@@ -237,6 +237,10 @@ a { color: inherit; }
 .url-card.is-crawling, .url-card.is-crawling:focus-within { border-color: transparent; background: var(--navy-deep); box-shadow: 0 24px 80px rgba(1, 10, 36, .55); }
 .crawl-stage { position: relative; height: clamp(320px, 56vh, 520px); color: #dce8ff; font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .crawl-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* The opening and closing are drawn on a layer over the card that reaches past it (crawlView.ts). */
+.crawl-fx { position: absolute; z-index: 2; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+/* While the window opens, its address line waits for the falling letters to land in it. */
+.crawl-window.is-arriving .crawl-url { opacity: 0; }
 .crawl-top { position: absolute; inset: 0 0 auto; display: flex; align-items: center; gap: 14px; padding: 8px 10px 0 16px; }
 .crawl-url { flex: 1; min-width: 0; overflow: hidden; color: #9db2d6; text-overflow: ellipsis; white-space: nowrap; }
 .crawl-always { display: inline-flex; flex: none; align-items: center; gap: 6px; color: #7f95bd; cursor: pointer; }

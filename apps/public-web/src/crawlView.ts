@@ -2,13 +2,18 @@ import { crawlCap, fillWords, hashText, layoutPage, mayRead, PROGRESS_STEPS, sta
 
 /** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs crawls a page
  * drawn as a grid, the page scrolling under it. It never goes further down than the server's reported stages allow
- * (crawlModel.ts), and nothing dissolves until the result says the page was read; then it finishes within 1.5 s, the
- * cells of the main content it passes dissolve into glyphs, the read page's own words settle into the lines, the
- * page's chrome dims, and the window folds back into the card. A page that was not read keeps the octopus at the door
- * with the reason. Along the foot runs a bar of glyphs: each stage the server reports sweeps its segment alight,
- * while the awaited segment only shows a spark running to and fro, never filling. Every cell keeps its place on the
- * grid: only its glyph, brightness and colour change. Escape or Skip closes it at once; the run goes on. Nothing
- * plays with reduced motion or once the visitor chose to always skip. */
+ * (crawlModel.ts), and nothing dissolves until the result says the page was read; then it drops to the foot within
+ * 1.5 s and lands with a thud, the cells of the main content it passes dissolve into glyphs, the read page's own words
+ * settle into the lines, the page's chrome dims, and the window folds back into the card. A page that was not read
+ * keeps the octopus at the door with the reason. Along the foot runs a bar of glyphs: each stage the server reports
+ * sweeps its segment alight, while the awaited segment only shows a spark running to and fro, never filling.
+ *
+ * Opening (about 0.9 s, while the request is already out): the white card dissolves into cells from the button out,
+ * the address's letters turn into glyphs and drop, an orange scan line pushes the window open with the rows weaving in
+ * behind it while two glyph arms hook the card's lower corners and pull, and the letters land as the window's address
+ * as the octopus peeks in. Closing (0.5 s) runs it back: the scan line rises, the rows unweave, and cells gather into
+ * the white card. Every cell keeps its place on its grid: only its glyph, brightness and colour change. Escape or Skip
+ * closes it at once; the run goes on. Nothing plays with reduced motion or once the visitor chose to always skip. */
 
 export interface CrawlResult {
   read: boolean
@@ -30,10 +35,10 @@ export interface CrawlView {
 }
 
 const SKIP_KEY = 'octocrawl.crawl.skip'
-const MORPH_MS = 420
 /** Once the result is back the octopus finishes the page within this, however far it had to go. */
 const FINISH_MS = 1500
-const SETTLE_MS = 600
+/** After it lands: the thud, then the window folds. */
+const SETTLE_MS = 850
 const FAILURE_MS = 2200
 /** A cell runs down the density ramp as it is read. */
 const READ_MS = 280
@@ -42,6 +47,7 @@ const RAMP = ['X', 'x', '+', ':']
 const TEXTURE = ['x', '+', ':', '*', '/', '\\', '=', 'x', '+', '#']
 const HOT = ['#fff1e0', '#ffc59a', '#ff9a66', '#fb7b4c']
 const NAVY = '#081b42'
+const HALO = 'rgba(4, 18, 58, .7)'
 const FRAME_MS = 33
 // The page's grid sits between the window's top line (the address, Skip) and its foot (the bar, what the server said).
 const GRID_TOP = 44
@@ -49,6 +55,21 @@ const GRID_FOOT = 78
 // The bar: a reported segment sweeps alight in this long, and the cells around its end spark for this long.
 const SWEEP_MS = 420
 const BURST_MS = 520
+// Opening, in ms from the click: the card dissolves until DISSOLVE_MS and turns into the window at SWITCH_MS; the
+// window grows from GROW_FROM for GROW_MS; a revealed row weaves in over WEAVE_MS; all is still by INTRO_MS.
+const DISSOLVE_MS = 200
+const SWITCH_MS = 150
+const GROW_FROM = 150
+const GROW_MS = 500
+const WEAVE_MS = 240
+const INTRO_MS = 900
+// Closing: the window shrinks for SHRINK_MS, then the cells gather into the card for GATHER_MS.
+const SHRINK_MS = 350
+const GATHER_MS = 150
+/** A cell turns from white through blue to navy in this long. */
+const CELL_MS = 80
+/** The effects layer reaches this far past the card, for the arms and the falling letters. */
+const FX_MARGIN = 110
 
 // The octopus: its mantle, eyes (O, drawn as navy cells as on the hero's static octopus) and two strides of arms.
 const MANTLE = [
@@ -67,10 +88,28 @@ const ARMS = [[
   '   \\ \\x||x/ /   ',
   '  :  + :: +  :  ',
 ]]
+// Landing: squashed flat, arms splayed.
+const SQUASH = [
+  '   ,=########=,   ',
+  ' =####O####O####= ',
+  '=################=',
+  ' \\##############/ ',
+  '/x/x/ x||||x \\x\\x\\',
+]
 const SPRITE_W = MANTLE[0]!.length
 const SPRITE_H = MANTLE.length + ARMS[0]!.length
+/** The thud's flying bits: column speed, upward row speed and glyph, fixed so every landing looks alike. */
+const DEBRIS: ReadonlyArray<readonly [number, number, string]> = [
+  [-15, 11, '.'], [-11, 15, "'"], [-7, 18, '*'], [-4, 13, ','], [-2, 20, '.'], [1, 16, "'"],
+  [3, 19, '*'], [5, 12, '.'], [8, 17, ','], [11, 14, "'"], [14, 10, '.'], [17, 13, '*'],
+]
 
 type Phase = 'idle' | 'crawling' | 'finishing' | 'settled' | 'failed' | 'closing'
+type Letter = { char: string; x: number; y: number; tx: number; ty: number; land: number; gone: boolean }
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+const easeOut = (t: number): number => 1 - (1 - t) ** 3
+const easeIn = (t: number): number => t ** 3
 
 function storedSkip(): boolean {
   try { return localStorage.getItem(SKIP_KEY) === '1' } catch { return false }
@@ -80,6 +119,7 @@ function storeSkip(skip: boolean): void {
 }
 
 export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView {
+  const form = card.parentElement!
   const windowEl = card.querySelector<HTMLElement>('#crawl-window')!
   const canvas = windowEl.querySelector<HTMLCanvasElement>('.crawl-canvas')!
   const stageEl = windowEl.querySelector<HTMLElement>('.crawl-stage')!
@@ -90,9 +130,15 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   const skipButton = windowEl.querySelector<HTMLButtonElement>('#crawl-skip')!
   const alwaysSkip = windowEl.querySelector<HTMLInputElement>('#crawl-always-skip')!
   const status = windowEl.querySelector<HTMLElement>('#crawl-status')!
+  const input = card.querySelector<HTMLInputElement>('input[type="url"]')
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   const coarse = window.matchMedia('(max-width: 600px)')
   const context = canvas.getContext('2d')
+  const fx = document.createElement('canvas')
+  fx.className = 'crawl-fx'
+  fx.setAttribute('aria-hidden', 'true')
+  form.append(fx)
+  const fxContext = fx.getContext('2d')
 
   let phase: Phase = 'idle'
   let layout: PageLayout | null = null
@@ -114,6 +160,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   let reach: { x: number; y: number; at: number } | null = null
   /** When each of the bar's steps was reported (performance.now), Infinity until then. */
   let stepAt: number[] = []
+  let slamAt = -Infinity
   let octoX = 0
   let raf = 0
   let lastFrame = 0
@@ -125,7 +172,18 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   let ratio = 1
   let closed: (() => void) | null = null
   let closing: Promise<void> | null = null
+  let closeDone: (() => void) | null = null
   let focusInside = false
+  // Opening and closing.
+  let introAt = -Infinity
+  let outroAt = -Infinity
+  let switched = false
+  let h0 = 0
+  let h1 = 0
+  let shrinkFrom = 0
+  let origin = { x: 0, y: 0 }
+  let letters: Letter[] = []
+  let fxDirty = false
 
   alwaysSkip.checked = storedSkip()
   alwaysSkip.addEventListener('change', () => {
@@ -143,7 +201,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     const w = stageEl.clientWidth
     const h = stageEl.clientHeight
     const r = Math.min(2, window.devicePixelRatio || 1)
-    if (w === width && h === height && r === ratio) return
+    // Hidden (before the card turns into the window, or after) it has no size: keep the last one.
+    if (w === 0 || h === 0 || (w === width && h === height && r === ratio)) return
     width = w
     height = h
     ratio = r
@@ -152,18 +211,42 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     if (layout) pitchX = width / layout.cols
   }
 
-  function morph(change: () => void): Promise<void> {
-    const from = card.getBoundingClientRect().height
-    change()
-    const to = card.getBoundingClientRect().height
-    if (from === to) return Promise.resolve()
-    const animation = card.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: MORPH_MS, easing: 'cubic-bezier(.2, .7, .2, 1)' })
-    return animation.finished.then(() => {}, () => {})
+  /** Where each visible letter of the address sits in the input, relative to the card. */
+  function readLetters(url: string, box: DOMRect): Letter[] {
+    if (!input || !fxContext) return []
+    const style = getComputedStyle(input)
+    const field = input.getBoundingClientRect()
+    fxContext.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const text = input.value || url
+    const start = field.left - box.left + parseFloat(style.paddingLeft) - input.scrollLeft
+    const out: Letter[] = []
+    for (let i = 0; i < text.length && out.length < 140; i++) {
+      const x = start + fxContext.measureText(text.slice(0, i)).width + fxContext.measureText(text[i]!).width / 2
+      if (x < field.left - box.left || x > field.right - box.left) continue
+      out.push({ char: text[i]!, x, y: field.top - box.top + field.height / 2, tx: x, ty: 0, land: 0, gone: false })
+    }
+    return out
+  }
+
+  /** Where each letter lands: its place in the window's address line. */
+  function aimLetters(): void {
+    if (!fxContext) return
+    const box = card.getBoundingClientRect()
+    const line = address.getBoundingClientRect()
+    const style = getComputedStyle(address)
+    fxContext.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const advance = fxContext.measureText('0').width
+    const spacing = Math.min(6, 300 / Math.max(1, letters.length))
+    letters.forEach((letter, i) => {
+      letter.tx = line.left - box.left + i * advance + advance / 2
+      letter.ty = line.top - box.top + line.height / 2
+      letter.gone = letter.tx > line.right - box.left
+      letter.land = 600 + i * spacing
+    })
   }
 
   function begin(url: string): boolean {
-    if (phase !== 'idle' || motion.matches || alwaysSkip.checked || !context || typeof card.animate !== 'function') return false
-    focusInside = false
+    if (phase !== 'idle' || motion.matches || alwaysSkip.checked || !context || !fxContext) return false
     seen = new Set()
     robotsAllowed = null
     robotsUnreachable = false
@@ -172,21 +255,26 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     words = null
     depth = 0
     reach = null
+    slamAt = -Infinity
     stepAt = PROGRESS_STEPS.map(() => Infinity)
     note.hidden = true
     note.textContent = ''
     address.textContent = url
-    startedAt = phaseAt = performance.now()
-    phase = 'crawling'
-    hero.classList.add('is-crawling')
-    void morph(() => {
-      windowEl.hidden = false
-      card.classList.add('is-crawling')
-    })
+    const box = card.getBoundingClientRect()
+    h0 = card.offsetHeight
+    const button = form.querySelector('#submit-button')?.getBoundingClientRect()
+    origin = button ? { x: button.left + button.width / 2 - box.left, y: button.top + button.height / 2 - box.top } : { x: box.width - 60, y: h0 - 30 }
+    letters = readLetters(url, box)
+    // The window is laid out for one synchronous measure, then hidden again until the card has dissolved.
+    windowEl.hidden = false
+    card.classList.add('is-crawling')
+    h1 = card.offsetHeight
     pitchX = coarse.matches ? 9 : 8
     pitchY = coarse.matches ? 16 : 14
     width = height = 0
     fit()
+    card.classList.remove('is-crawling')
+    windowEl.hidden = true
     const cols = Math.max(24, Math.floor(width / pitchX))
     visibleRows = Math.max(10, Math.floor((height - GRID_TOP - GRID_FOOT) / pitchY))
     layout = layoutPage(cols, visibleRows * 3, hashText(url))
@@ -194,15 +282,18 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     readAt = new Float64Array(cols * layout.rows).fill(Infinity)
     reached = layout.blocks.map(() => false)
     octoX = Math.round(layout.blocks[0]!.left + 2)
+    const active = document.activeElement
+    focusInside = active instanceof HTMLElement && form.contains(active)
+    card.style.transition = 'none'
+    switched = false
+    startedAt = phaseAt = introAt = performance.now()
+    outroAt = -Infinity
+    phase = 'crawling'
+    hero.classList.add('is-crawling')
     updateFoot(startedAt)
     status.textContent = 'Extracting the page. Press Escape to skip the animation.'
-    const active = document.activeElement
-    if (active instanceof HTMLElement && card.closest('form')?.contains(active)) {
-      skipButton.focus({ preventScroll: true })
-      focusInside = true
-    }
     // Bring the whole window on screen without moving more than needed.
-    window.setTimeout(() => card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), MORPH_MS)
+    window.setTimeout(() => { if (phase !== 'idle' && phase !== 'closing') card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, GROW_FROM + GROW_MS)
     if (!raf) raf = requestAnimationFrame(frame)
     return true
   }
@@ -257,22 +348,38 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   function close(): Promise<void> {
     if (closing) return closing
-    phase = 'closing'
     focusInside = focusInside || windowEl.contains(document.activeElement)
-    closing = morph(() => {
-      card.classList.remove('is-crawling')
-      windowEl.hidden = true
-    }).then(() => {
-      hero.classList.remove('is-crawling')
-      cancelAnimationFrame(raf)
-      raf = 0
-      phase = 'idle'
-      closing = null
-      const resolve = closed
-      closed = null
-      resolve?.()
-    })
+    phase = 'closing'
+    outroAt = performance.now()
+    shrinkFrom = card.offsetHeight
+    card.style.transition = 'none'
+    if (switched) card.style.height = `${shrinkFrom}px`
+    windowEl.classList.remove('is-arriving')
+    closing = new Promise<void>(resolve => { closeDone = resolve })
+    // Before the card turned into the window there is nothing to fold: it is simply put back.
+    if (!switched) finalize()
     return closing
+  }
+
+  function finalize(): void {
+    card.classList.remove('is-crawling')
+    windowEl.hidden = true
+    card.style.height = ''
+    card.style.transition = ''
+    hero.classList.remove('is-crawling')
+    fxContext?.setTransform(1, 0, 0, 1, 0, 0)
+    fxContext?.clearRect(0, 0, fx.width, fx.height)
+    fxDirty = false
+    cancelAnimationFrame(raf)
+    raf = 0
+    phase = 'idle'
+    const doneClosing = closeDone
+    closeDone = null
+    closing = null
+    doneClosing?.()
+    const resolve = closed
+    closed = null
+    resolve?.()
   }
 
   function text(tag: 'strong' | 'span', value: string): HTMLElement {
@@ -292,11 +399,24 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     time.textContent = seconds
   }
 
-  /** The row the octopus's mantle starts on, from how far down the page it is. */
-  function headRow(): number {
+  /** The window's height while it opens, from the card's at the click to the window's own. */
+  const edgeAt = (t: number): number => h0 + (h1 - h0) * easeOut(clamp01((t - GROW_FROM) / GROW_MS))
+  /** When, after the click, the opening window reached a line `y` px below its top. */
+  function revealedAt(y: number): number {
+    if (y <= h0) return SWITCH_MS
+    const p = clamp01((y - h0) / Math.max(1, h1 - h0))
+    return GROW_FROM + GROW_MS * (1 - Math.cbrt(1 - p))
+  }
+  /** The window's height while it closes. */
+  const shrinkEdge = (t: number): number => shrinkFrom - (shrinkFrom - h0) * easeIn(clamp01(t / SHRINK_MS))
+
+  /** The row the octopus's mantle starts on, from how far down the page it is; while the window opens it peeks in. */
+  function headRow(now: number): number {
     const door = 4
-    const last = layout!.rows - SPRITE_H - 6
-    return Math.round(door + depth * (last - door))
+    // At the foot the octopus stands on the footer's rule, near the window's bottom.
+    const last = layout!.floor - SPRITE_H
+    const peek = Math.round((1 - easeOut(clamp01((now - introAt - 550) / 350))) * (SPRITE_H + 6))
+    return Math.round(door + depth * (last - door)) - peek
   }
 
   function advance(now: number, dt: number): void {
@@ -305,16 +425,17 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       // Toward the cap, slower as it nears it: never past what the server has reported.
       depth += (cap - depth) * (1 - Math.exp(-dt / (cap < depth ? 300 : 1400)))
     } else if (phase === 'finishing') {
+      // It drops faster and faster, so it lands with a thud.
       const t = Math.min(1, (now - phaseAt) / finishMs)
-      depth = finishFrom + (1 - finishFrom) * (1 - (1 - t) ** 2)
-      if (t >= 1) { phase = 'settled'; phaseAt = now; markAll(now) }
+      depth = finishFrom + (1 - finishFrom) * t * t
+      if (t >= 1) { phase = 'settled'; phaseAt = now; slamAt = now; markAll(now) }
     } else if (phase === 'failed') {
       depth += (0 - depth) * (1 - Math.exp(-dt / 160))
       if (now - phaseAt > FAILURE_MS) void close()
     } else if (phase === 'settled' && now - phaseAt > SETTLE_MS) void close()
     // Once the result says the page was read, the blocks the mantle has reached dissolve, from where an arm touched
     // them outward; the ones it passed before then dissolve together.
-    const head = headRow()
+    const head = headRow(now)
     const reading = phase !== 'failed' && mayRead(result?.read === true)
     layout!.blocks.forEach((block, index) => {
       if (reached[index] || !reading || head + SPRITE_H < block.top) return
@@ -354,14 +475,56 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   function frame(now: number): void {
     raf = requestAnimationFrame(frame)
-    if (now - lastFrame < FRAME_MS || !layout || !context) return
+    // Opening and closing run every frame; the crawl itself at about 30 fps.
+    const moving = now - introAt < INTRO_MS + WEAVE_MS || phase === 'closing'
+    if ((!moving && now - lastFrame < FRAME_MS) || !layout || !context) return
     const dt = Math.min(100, now - (lastFrame || now))
     lastFrame = now
-    if (phase === 'closing') return
-    fit()
-    advance(now, dt)
-    updateFoot(now)
+    if (phase === 'closing') {
+      if (outro(now)) return
+    } else {
+      opening(now)
+      fit()
+      advance(now, dt)
+      updateFoot(now)
+    }
     draw(now)
+    drawFx(now)
+  }
+
+  /** The card turns into the window, which grows. */
+  function opening(now: number): void {
+    const t = now - introAt
+    if (t >= INTRO_MS + WEAVE_MS) return
+    if (!switched && t >= SWITCH_MS) {
+      switched = true
+      card.style.height = `${h0}px`
+      windowEl.hidden = false
+      windowEl.classList.add('is-arriving')
+      card.classList.add('is-crawling')
+      aimLetters()
+      if (focusInside) skipButton.focus({ preventScroll: true })
+    }
+    if (!switched) return
+    if (t < GROW_FROM + GROW_MS) card.style.height = `${edgeAt(t)}px`
+    else if (card.style.height) card.style.height = ''
+    if (t >= INTRO_MS) {
+      windowEl.classList.remove('is-arriving')
+      card.style.transition = ''
+    }
+  }
+
+  /** The window folds back into the card. Returns true once it is closed. */
+  function outro(now: number): boolean {
+    const t = now - outroAt
+    if (t < SHRINK_MS) card.style.height = `${shrinkEdge(t)}px`
+    else if (card.classList.contains('is-crawling')) {
+      card.classList.remove('is-crawling')
+      windowEl.hidden = true
+      card.style.height = `${h0}px`
+    }
+    if (t >= SHRINK_MS + GATHER_MS + CELL_MS) { finalize(); return true }
+    return false
   }
 
   /** The vertical centre of a grid row on the canvas, given the first row shown. */
@@ -375,22 +538,41 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ctx.font = `${pitchY - 3}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const head = headRow()
+    const head = headRow(now)
     const top = Math.max(0, Math.min(rows - visibleRows, head - Math.floor(visibleRows * 0.35)))
     const ending = phase === 'settled' ? Math.min(1, (now - phaseAt) / 300) : 0
     const failing = phase === 'failed' ? Math.min(1, (now - phaseAt) / 300) : 0
     const chromeAlpha = 0.32 - 0.2 * ending - 0.14 * failing
+    const sinceOpen = now - introAt
+    const weaving = sinceOpen < INTRO_MS + WEAVE_MS
+    // While it closes, the rows just above the rising edge unweave.
+    const edge = phase === 'closing' ? shrinkEdge(now - outroAt) : Infinity
+    const band = pitchY * 2.5
     ctx.save()
     ctx.beginPath()
     ctx.rect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)
     ctx.clip()
     for (let row = top; row < Math.min(rows, top + visibleRows + 1); row++) {
       const y = rowY(row, top)
+      const woven = weaving ? sinceOpen - revealedAt(y + pitchY / 2) : Infinity
+      if (woven < 0) continue
+      const unwoven = edge - y
       for (let col = 0; col < cols; col++) {
         const i = row * cols + col
         const k = kind[i]!
-        if (k === Cell.Empty) continue
         const x = col * pitchX + pitchX / 2
+        // A row coming in, or going out, runs down the ramp across its whole width, empty cells too.
+        if (woven < WEAVE_MS || unwoven < band) {
+          const t = woven < WEAVE_MS ? woven / WEAVE_MS : clamp01(unwoven / band)
+          const step = Math.min(RAMP.length - 1, Math.floor(t * RAMP.length))
+          if (k === Cell.Empty && (col + row) % 3 !== 0) continue
+          ctx.fillStyle = HOT[step]!
+          ctx.globalAlpha = k === Cell.Empty ? 0.45 : 1
+          ctx.fillText(RAMP[step]!, x, y)
+          ctx.globalAlpha = 1
+          continue
+        }
+        if (k === Cell.Empty) continue
         if (k === Cell.Chrome) {
           ctx.fillStyle = `rgba(168, 201, 250, ${chromeAlpha})`
           ctx.fillText(String.fromCharCode(glyph[i]!), x, y)
@@ -416,6 +598,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
       }
     }
     drawReach(now, top)
+    drawThud(now, head, top)
     drawOctopus(now, head, top)
     ctx.restore()
     // The page fades into the window's navy at its top and foot.
@@ -431,9 +614,53 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     drawBar(now)
   }
 
+  /** The landing: a shock runs out along the ground both ways, and bits fly up and fall back. */
+  function drawThud(now: number, head: number, top: number): void {
+    const since = now - slamAt
+    if (since < 0 || since > 900) return
+    const ctx = context!
+    const ground = head + SPRITE_H
+    const centre = octoX + SPRITE_W / 2
+    ctx.save()
+    ctx.shadowColor = 'rgba(251, 123, 76, .9)'
+    for (let col = 0; col < layout!.cols; col++) {
+      const distance = Math.abs(col + 0.5 - centre)
+      const age = since - distance * 10
+      if (age < 0 || age >= 380) continue
+      const step = Math.min(RAMP.length - 1, Math.floor(age / 380 * RAMP.length))
+      const x = col * pitchX + pitchX / 2
+      // The ground row takes the shock; near the octopus it kicks up a row of dust above it too.
+      const rows: Array<readonly [number, number]> = [[ground, 1], [ground + 1, 0.45]]
+      if (distance < SPRITE_W) rows.push([ground - 1, 0.7 * (1 - distance / SPRITE_W)])
+      for (const [row, alpha] of rows) {
+        const y = rowY(row, top)
+        ctx.shadowBlur = row === ground && step < 2 ? 10 : 0
+        ctx.fillStyle = NAVY
+        ctx.fillRect(x - pitchX / 2, y - pitchY / 2, pitchX, pitchY)
+        ctx.globalAlpha = alpha
+        ctx.fillStyle = HOT[step]!
+        ctx.fillText(row === ground ? RAMP[step]! : RAMP[Math.min(RAMP.length - 1, step + 1)]!, x, y)
+        ctx.globalAlpha = 1
+      }
+    }
+    ctx.restore()
+    const s = since / 1000
+    for (const [speed, lift, char] of DEBRIS) {
+      const rise = lift * s - 0.5 * 60 * s * s
+      if (rise < 0 || s > 0.7) continue
+      const col = Math.round(centre + speed * s)
+      ctx.globalAlpha = 1 - s / 0.7
+      ctx.fillStyle = '#ffc59a'
+      ctx.fillText(char, col * pitchX + pitchX / 2, rowY(ground - 1 - Math.round(rise), top))
+    }
+    ctx.globalAlpha = 1
+  }
+
   /** The bar along the window's foot: a segment per step, lit only once the server reported it. */
   function drawBar(now: number): void {
     const ctx = context!
+    ctx.save()
+    ctx.font = `700 ${pitchY - 1}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
     const steps = PROGRESS_STEPS.length
     const left = 16
     const span = width - 32
@@ -443,8 +670,6 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     const y = height - GRID_FOOT + 22
     // A page that was not read: the step where it stopped turns red (robots.txt when it refused, otherwise the first
     // step the server never reported), and nothing after it lights.
-    ctx.save()
-    ctx.font = `700 ${pitchY - 1}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
     const failedAt = !done || !result || result.read ? -1 : robotsAllowed === false ? PROGRESS_STEPS.indexOf('robots') : Math.min(stepsDone(seen, false), steps - 1)
     // The awaited step: the first not yet reported, while the run goes on.
     const awaited = done ? -1 : stepAt.findIndex(at => at === Infinity)
@@ -511,7 +736,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     if (!reach || now - reach.at > 420 || phase === 'failed') return
     const ctx = context!
     const fromX = octoX + Math.floor(SPRITE_W / 2)
-    const fromY = headRow() + SPRITE_H - 1
+    const fromY = headRow(now) + SPRITE_H - 1
     const steps = Math.max(Math.abs(reach.x - fromX), Math.abs(reach.y - fromY))
     const life = 1 - (now - reach.at) / 420
     for (let s = 1; s < steps; s++) {
@@ -525,29 +750,206 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   function drawOctopus(now: number, head: number, top: number): void {
     const ctx = context!
+    const since = now - slamAt
+    // Landing: squashed flat with its eyes screwed shut, a short hop back up, then itself, eyes still shut a moment.
+    const squashed = since >= 0 && since < 200
+    const hop = since >= 200 && since < 320 ? 1 : 0
+    const squint = since >= 0 && since < 400
     const stride = Math.floor(now / (phase === 'failed' ? 520 : 240)) % 2
-    const blink = phase === 'failed' ? Math.floor(now / 700) % 3 === 0 : (now % 2600) < 140
-    const lines = [...MANTLE, ...ARMS[stride]!]
+    const blink = !squint && (phase === 'failed' ? Math.floor(now / 700) % 3 === 0 : (now % 2600) < 140)
+    const lines = squashed ? SQUASH : [...MANTLE, ...ARMS[stride]!]
+    const row0 = head + (squashed ? SPRITE_H - SQUASH.length : -hop)
+    const left = octoX - (squashed ? 1 : 0)
     lines.forEach((line, dy) => {
-      const y = rowY(head + dy, top)
+      const y = rowY(row0 + dy, top)
       if (y < GRID_TOP - pitchY || y > height - GRID_FOOT + pitchY) return
       // The cells under the octopus are covered, so the page never shows through its mantle or between its arms.
       const first = line.search(/\S/)
       const last = line.length - 1 - line.split('').reverse().join('').search(/\S/)
       ctx.fillStyle = NAVY
-      ctx.fillRect((octoX + first) * pitchX, y - pitchY / 2, (last - first + 1) * pitchX, pitchY)
+      ctx.fillRect((left + first - 1) * pitchX, y - pitchY / 2, (last - first + 3) * pitchX, pitchY)
+      let eye = 0
       for (let dx = 0; dx < line.length; dx++) {
         const char = line[dx]!
         if (char === ' ') continue
-        const x = (octoX + dx) * pitchX + pitchX / 2
+        const x = (left + dx) * pitchX + pitchX / 2
         if (char === 'O') {
-          if (blink) { ctx.fillStyle = '#a8c9fa'; ctx.fillText('-', x, y) }
+          if (squint) { ctx.fillStyle = '#ffffff'; ctx.fillText(eye++ === 0 ? '>' : '<', x, y) }
+          else if (blink) { ctx.fillStyle = '#a8c9fa'; ctx.fillText('-', x, y) }
           else { ctx.fillStyle = '#011758'; ctx.fillRect(x - pitchX * 0.4, y - pitchY * 0.3, pitchX * 0.8, pitchY * 0.6) }
           continue
         }
-        ctx.fillStyle = dy < MANTLE.length ? '#d6e6ff' : '#a8c9fa'
+        ctx.fillStyle = squashed || dy < MANTLE.length ? '#d6e6ff' : '#a8c9fa'
         ctx.fillText(char, x, y)
       }
+    })
+  }
+
+  /** The effects around the card while it opens and closes: its cells, the scan line, the arms and the letters. */
+  function drawFx(now: number): void {
+    const ctx = fxContext!
+    const openingNow = now - introAt < INTRO_MS
+    const closingNow = phase === 'closing'
+    if (!openingNow && !closingNow) {
+      if (fxDirty) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, fx.width, fx.height); fxDirty = false }
+      return
+    }
+    fxDirty = true
+    const w = card.offsetWidth + FX_MARGIN * 2
+    const h = Math.max(h0, h1) + FX_MARGIN * 2
+    const r = Math.min(2, window.devicePixelRatio || 1)
+    fx.style.left = `${card.offsetLeft - FX_MARGIN}px`
+    fx.style.top = `${card.offsetTop - FX_MARGIN}px`
+    fx.style.width = `${w}px`
+    fx.style.height = `${h}px`
+    if (fx.width !== Math.round(w * r) || fx.height !== Math.round(h * r)) { fx.width = Math.round(w * r); fx.height = Math.round(h * r) }
+    ctx.setTransform(r, 0, 0, r, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    ctx.translate(FX_MARGIN, FX_MARGIN)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `600 ${pitchY - 2}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    if (closingNow) {
+      const t = now - outroAt
+      if (t < SHRINK_MS) scanLine(shrinkEdge(t), 1)
+      // The card is white again under these: navy cells turn back to white, the far ones first, the button last.
+      else cells((age) => age < 0 ? 'navy' : age < CELL_MS ? 'back' : null, (d, far) => (1 - d / far) * GATHER_MS, t - SHRINK_MS)
+      return
+    }
+    const t = now - introAt
+    // Before the switch the card is still white under these, after it navy: a cell not yet turned stays white.
+    cells((age) => age < 0 ? (switched ? 'white' : null) : age < CELL_MS ? 'turn' : switched ? null : 'navy', (d, far) => d / far * DISSOLVE_MS, t)
+    if (t >= GROW_FROM && switched) scanLine(edgeAt(t), 1 - clamp01((t - GROW_FROM - GROW_MS) / 200))
+    arms(t)
+    drawLetters(t)
+  }
+
+  /** The card's own cells, each changing at the time `when` gives it from its distance to the button. */
+  function cells(state: (age: number) => 'white' | 'navy' | 'turn' | 'back' | null, when: (d: number, far: number) => number, t: number): void {
+    const ctx = fxContext!
+    const cw = card.offsetWidth
+    const far = Math.max(Math.hypot(origin.x, origin.y), Math.hypot(cw - origin.x, origin.y), Math.hypot(origin.x, h0 - origin.y), Math.hypot(cw - origin.x, h0 - origin.y))
+    for (let y = 0; y < h0; y += pitchY) {
+      for (let x = 0; x < cw; x += pitchX) {
+        const w = Math.min(pitchX, cw - x)
+        const h = Math.min(pitchY, h0 - y)
+        const age = t - when(Math.hypot(x + w / 2 - origin.x, y + h / 2 - origin.y), far)
+        const look = state(age)
+        if (look === null) continue
+        if (look === 'white' || look === 'navy') {
+          ctx.fillStyle = look === 'white' ? '#ffffff' : NAVY
+          ctx.fillRect(x, y, w, h)
+          continue
+        }
+        // White to pale blue to navy as it dissolves; the reverse as it gathers.
+        const k = clamp01(age / CELL_MS)
+        const late = look === 'turn' ? k > 0.45 : k < 0.55
+        ctx.fillStyle = late ? '#2f4f8f' : '#dce8ff'
+        ctx.fillRect(x, y, w, h)
+        ctx.fillStyle = late ? '#a8c9fa' : '#5f86c8'
+        ctx.fillText(late ? ':' : '+', x + w / 2, y + h / 2)
+      }
+    }
+  }
+
+  /** The orange line at the window's moving edge, with two cooler rows behind it. */
+  function scanLine(edge: number, alpha: number): void {
+    if (alpha <= 0) return
+    const ctx = fxContext!
+    const cw = card.offsetWidth
+    const base = Math.floor(edge / pitchY) * pitchY - pitchY / 2
+    ctx.save()
+    ctx.globalAlpha = alpha
+    for (const [dy, glow, colour, chars] of [[0, 12, '#fff1e0', 'X='], [-1, 6, '#fb7b4c', '+x'], [-2, 0, 'rgba(251, 123, 76, .45)', ':·']] as const) {
+      ctx.shadowColor = 'rgba(251, 123, 76, .9)'
+      ctx.shadowBlur = glow
+      ctx.fillStyle = colour
+      for (let x = 0, i = 0; x < cw; x += pitchX, i++) ctx.fillText(chars[i % 2]!, x + pitchX / 2, base + dy * pitchY)
+    }
+    ctx.restore()
+  }
+
+  /** Two arms of glyphs reach in from beside the card, hook its lower corners and pull them down, then let go. */
+  function arms(t: number): void {
+    const out = clamp01((t - 80) / 220)
+    const back = clamp01((t - 660) / 200)
+    if (out <= 0 || back >= 1) return
+    const ctx = fxContext!
+    const cw = card.offsetWidth
+    const edge = switched ? edgeAt(t) : h0
+    for (const side of [-1, 1] as const) {
+      const anchor = { x: side < 0 ? -FX_MARGIN + 18 : cw + FX_MARGIN - 18, y: -FX_MARGIN * 0.55 }
+      const tip = { x: side < 0 ? -6 : cw + 6, y: edge - 6 }
+      const bend = { x: side < 0 ? -FX_MARGIN * 0.75 : cw + FX_MARGIN * 0.75, y: (anchor.y + tip.y) * 0.55 }
+      const length = Math.hypot(tip.x - anchor.x, tip.y - anchor.y) * 1.15
+      const count = Math.max(6, Math.round(length / pitchY))
+      // Reaching out it grows from its root; letting go it draws back toward its root.
+      const shown = Math.round(count * out * (1 - back))
+      let last = { col: NaN, row: NaN }
+      for (let i = 0; i <= shown; i++) {
+        const u = i / count
+        const px = (1 - u) ** 2 * anchor.x + 2 * (1 - u) * u * bend.x + u * u * tip.x
+        const py = (1 - u) ** 2 * anchor.y + 2 * (1 - u) * u * bend.y + u * u * tip.y
+        const col = Math.round(px / pitchX)
+        const row = Math.round(py / pitchY)
+        if (col === last.col && row === last.row) continue
+        const dx = Number.isNaN(last.col) ? 0 : col - last.col
+        const dy = Number.isNaN(last.row) ? 1 : row - last.row
+        last = { col, row }
+        const tipCell = i >= shown - 1 && back === 0
+        const char = tipCell ? (side < 0 ? 'L' : 'J') : i % 4 === 3 ? 'x' : dx === 0 ? '|' : dy === 0 ? '-' : dx * dy > 0 ? '\\' : '/'
+        const y = row * pitchY + pitchY / 2
+        // Two strands, the outer one lighter, so the arm reads as a limb rather than a line.
+        for (const [offset, alpha] of tipCell ? [[0, 1]] as const : [[0, 1], [side, 0.55]] as const) {
+          const x = (col + offset) * pitchX + pitchX / 2
+          ctx.globalAlpha = alpha
+          ctx.lineWidth = 3
+          ctx.strokeStyle = HALO
+          ctx.strokeText(offset === 0 ? char : i % 2 ? ':' : '+', x, y)
+          ctx.fillStyle = tipCell ? '#ffc59a' : '#a8c9fa'
+          ctx.fillText(offset === 0 ? char : i % 2 ? ':' : '+', x, y)
+        }
+        ctx.globalAlpha = 1
+      }
+    }
+  }
+
+  /** The address's letters turn into glyphs, drop a few rows cell by cell, then hop to their place in the window. */
+  function drawLetters(t: number): void {
+    const ctx = fxContext!
+    letters.forEach((letter, i) => {
+      if (letter.gone && letter.land > 0 && t > letter.land - 120) return
+      // Landed, it holds its place in the address line until the line itself shows (at INTRO_MS).
+      if (letter.land > 0 && t >= letter.land) {
+        ctx.fillStyle = '#9db2d6'
+        ctx.fillText(letter.char, letter.tx, letter.ty)
+        return
+      }
+      const lift = Math.min(1, (t - i * 3) / 120)
+      if (lift < 0) return
+      const start = 150 + i * 2
+      const travel = 260
+      let x = letter.x
+      let y = letter.y
+      if (t > start) {
+        const fall = Math.min(3, Math.floor(((t - start) / 1000) ** 2 * 140))
+        y = letter.y + fall * pitchY
+        const hopFrom = letter.land - travel
+        if (letter.land > 0 && t > hopFrom) {
+          const k = easeOut(clamp01((t - hopFrom) / travel))
+          x = letter.x + (letter.tx - letter.x) * k
+          y = y + (letter.ty - y) * k
+        }
+      }
+      // A letter keeps its own column (snapping proportional letters to the grid would stack them); it falls and
+      // hops by whole rows.
+      const cx = x
+      const cy = Math.round(y / pitchY) * pitchY + pitchY / 2
+      ctx.lineWidth = 3
+      ctx.strokeStyle = HALO
+      ctx.strokeText(letter.char, cx, cy)
+      ctx.fillStyle = lift < 1 ? '#14254a' : letter.land > 0 && t > letter.land - 160 ? '#dce8ff' : '#ffc59a'
+      ctx.fillText(letter.char, cx, cy)
     })
   }
 
