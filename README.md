@@ -2,6 +2,8 @@
 
 A transparent, verifiable web extraction system built for RAG and Agent workflows.
 
+Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top), read the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=top), or [connect it to Claude Code, Cursor, OpenCode or Codex over MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=top).
+
 ## Why This Exists
 
 Most crawlers report "success" when they return empty pages, challenge screens, or the wrong content. Octocrawl makes failure visible and fixable:
@@ -34,17 +36,13 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 
 ## Quick Start
 
-For the no-install, single-page web preview and its deployment requirements, see
-[Public preview](docs/public-preview.md). Besides Markdown it returns a page's links and metadata,
-and up to 20 fields read from the page without a model. The page is implemented in this branch;
-it does not have a permanent public URL until the Cloud Run deployment and live
-acceptance are complete.
-
-The same local preview service now serves an English [documentation home](apps/public-web/content/introduction.md)
-at `/docs/`, with Codex MCP connection steps, four task guides, and limits.
-Run `npm run public:preview:local` and open `http://127.0.0.1:8798/docs/`.
-These pages are generated from Markdown during the public web build; their
-hosted status labels must be updated only after an actual public acceptance run.
+The no-install, single-page web preview runs at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=quick-start)
+(three previews a day; see [Public preview](docs/public-preview.md) for how it is deployed). Besides Markdown it
+returns a page's links and metadata, and up to 20 fields read from the page without a model. The same site serves
+the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=quick-start): MCP
+connection steps for four clients, four task guides, and limits. The pages are generated from
+[Markdown in this repository](apps/public-web/content/introduction.md) during the public web build;
+`npm run public:preview:local` serves them at `http://127.0.0.1:8798/docs/`.
 
 Install nothing first: with Node.js 22.13+ or 24+,
 
@@ -149,9 +147,20 @@ The ports the local services listen on, all on 127.0.0.1:
 | 8788 | The HTTPS webhook receiver of the first-use walkthrough | `npm run first-use:local` | fixed |
 | 8798 | The public site's local preview | `npm run public:preview:local` | `W2L_PUBLIC_PREVIEW_PORT` |
 
-For local MCP use, one background service runs the API, Monitor scheduler,
-delivery worker and MCP endpoint. On macOS, install it as a LaunchAgent and
-connect Codex to its loopback URL:
+For MCP use, start the API and add the published stdio server to your client; nothing from this checkout is needed:
+
+```bash
+npx octocrawl serve                                  # keep it running: the API on 127.0.0.1:8787
+claude mcp add octocrawl -- npx -y @octocrawl/mcp    # Claude Code; Cursor, OpenCode and Codex on the Connect MCP page
+```
+
+`@octocrawl/mcp` is a client of that API (`--base-url` or `W2L_API_URL` names another one) and offers scrape, map,
+crawl, batch, the Amazon.sg product tool and the Monitor tools. The configs for Cursor, OpenCode and Codex, and a
+first task, are on [Connect MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=mcp).
+
+The checkout's managed local service is for the Monitor → HTTPS delivery flow: one background service runs the API,
+Monitor scheduler, delivery worker and a Streamable HTTP MCP endpoint at `http://127.0.0.1:8791/mcp`. On macOS,
+install it as a LaunchAgent and connect Codex to its loopback URL:
 
 ```bash
 npm run local:mcp:install
