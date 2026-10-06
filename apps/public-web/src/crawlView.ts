@@ -295,6 +295,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     fit()
     card.classList.remove('is-crawling')
     windowEl.hidden = true
+    // A window that measures no size (the card not laid out) would give the grid no pitch: the run goes on unshown.
+    if (width === 0 || height === 0) return false
     const cols = Math.max(24, Math.floor(width / pitchX))
     visibleRows = Math.max(10, Math.floor((height - GRID_TOP - GRID_FOOT) / pitchY))
     layout = layoutPage(cols, visibleRows * 3, hashText(url))
