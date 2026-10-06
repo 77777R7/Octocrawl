@@ -87,9 +87,37 @@ Mode `authed` reads a page with the login you saved for its site, in Octocrawl's
 - A site that keeps its login in `localStorage` (a token its script reads) needs a tab of it open when you import: Chrome reads an origin's storage only through a page that shows it, so with none open the import saves the cookies alone and says `localStorageRead: false`. A tab whose storage Chrome does not give (it crashed, was discarded or closed meanwhile) is saved without it and named in `localStorageUnread`, with the request to Chrome that failed and Chrome's answer in `localStorageUnreadReasons`. Only tabs in the profile the cookies come from are read, never an Incognito window's, and only each tab's own origin, not a frame of another origin inside it; `sessionStorage` and IndexedDB are not saved. Chrome's remote debugging reaches the default profile only.
 - A site may tie its login to more than the cookies (a server-side session, the browser, the network address); Octocrawl does not imitate your browser, so such a site answers as if you were signed out (see the [I1 run](research/parity/runs/2026-10-03-i1-login.md)).
 
+### Enhanced access (an access grant)
+
+By default a server uses none of the capabilities [ADR 0005](docs/adr/0005-enhanced-access-policy.md) puts behind a grant: no provider browser, no challenge solving, no provider stealth. An operator who wants them starts the server with a grant, a JSON file the server checks at startup; a grant with any problem stops startup with every problem listed.
+
+```bash
+octocrawl serve --access-grant grant.json
+```
+
+```json
+{
+  "tier": "enhanced",
+  "capabilities": ["vendor_remote_browser", "vendor_captcha_solving"],
+  "budget": { "perRunUsd": 5 },
+  "attestation": { "principal": "you@example.com", "at": "2026-10-05T12:00:00Z", "statement": "I accept the provider's terms and the cost of these routes." }
+}
+```
+
+- `W2L_ACCESS_GRANT` takes the same, as a file path or the JSON itself.
+- A capability ADR 0005 refuses (identity rotation, patching your own Chrome, and the others it lists) or defers (an own browser engine, Camoufox, and the others) is an error, not ignored; a deferred one names the ROADMAP row that says when it restarts.
+- A `standard` or `my_browser` grant may name only `compatible_transport` and `egress_sessions`. A capability that can cost money needs a positive `perRunUsd`, and an `enhanced` one needs an attestation.
+- Provider rungs (`W2L_VENDORS` with its key, in mode `research` or `authed`) are built only when the grant names `vendor_remote_browser`; the provider's challenge solving and stealth follow `vendor_captcha_solving` and `vendor_stealth`.
+- `perRunUsd` caps each batch's and crawl's spend on providers, including a task created before the grant, resumed or appended to; a single scrape and a map have no run budget. Browserbase and Steel do not state a price per request, so under a run budget a batch stops at the first page a provider fetched, or was cut off while fetching (`budget_exceeded` with `cost_unknown`), rather than guess. A model's cost for JSON extraction is reported apart (`modelUsage`) and not counted. `perRequestUsd` is checked but not enforced yet, and a grant that names `scope.hosts` is refused, since nothing limits the routes to those hosts yet.
+- `W2L_BROWSER_ENGINE=patchright` runs the public browser rung on [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright), a maintained Playwright fork, when the grant names `enhanced_browser`; a hosted server refuses it, and a saved login's rung and a managed session keep stock Playwright. Patchright is not installed with Octocrawl: install the two together (`npm install octocrawl patchright`, or `npx -p octocrawl -p patchright octocrawl ...`), then `npx patchright install chromium`. An `executeJavascript` step still runs in the page's own JavaScript world on it. A page fetched on it says so in its trace (`browser_engine`). It is an experiment: whether it reaches more pages than stock Playwright is still being measured.
+- `W2L_COMPAT_HOSTS=example.com,shop.example` sends those hosts' pages, and their subdomains', over a browser-compatible HTTP transport ([impit](https://github.com/apify/impit)) when the grant names `compatible_transport`: the `http` rung becomes `http_compat`, in standard mode on a local server; a hosted server refuses it. The request carries Chrome's own headers and TLS handshake, so the page records that Chrome identity (`identity_sent`) and the transport (`transport`). A request with custom `headers` or `mobile` keeps the `http` rung, since the transport cannot send them without changing Chrome's header set, and so does a map's start page, read under the identity the map reports. impit decodes compressed bodies itself, so such a page reports its wire size as unknown. It is an experiment: whether it reaches more pages is measured on a frozen task set before any host list is recommended.
+- `egress_sessions`, `vendor_unlock_html` and `third_party_captcha_solver` can be granted, but the routes that use them are not built yet (ROADMAP PA items 3, 4 and 6).
+- The `octocrawl` commands read `W2L_ACCESS_GRANT` too, as their engine runs in their own process.
+- The grant is part of the page cache key, so a page fetched under one grant is not reused under another.
+
 ### A check you get through yourself (handoff)
 
-Octocrawl does not solve captchas or challenges and does not disguise itself. When a page of a batch stops at one (`blocked` with `captcha`, `cloudflare_challenge`, `bot_detected_generic` or `login_wall`), Octocrawl on your own machine can hand it to you in the Chrome you already use: `octocrawl batch <urls> --handoff`, `POST /v1/batches/:id/handoff` on a local server (`octocrawl serve` on loopback), or the local MCP tool `hand_off_batch`. Remote debugging must be on, as for `octocrawl login import`, and Chrome asks "Allow remote debugging?" once per handoff.
+By default Octocrawl does not solve captchas or challenges and does not disguise itself (see the access grant above for what a grant changes). When a page of a batch stops at one (`blocked` with `captcha`, `cloudflare_challenge`, `bot_detected_generic` or `login_wall`), Octocrawl on your own machine can hand it to you in the Chrome you already use: `octocrawl batch <urls> --handoff`, `POST /v1/batches/:id/handoff` on a local server (`octocrawl serve` on loopback), or the local MCP tool `hand_off_batch`. Remote debugging must be on, as for `octocrawl login import`, and Chrome asks "Allow remote debugging?" once per handoff.
 
 For one page, ask for it in the request: `octocrawl scrape <url> --handoff`, or `"handoff": true` (or `{ "waitMs": 60000 }`) on `POST /v1/scrape`, the SDK's `scrape` and the MCP `scrape` tool. When Octocrawl's own fetch stops at such a check, the page opens in your Chrome in the same way, and the scrape answers with the page you get through to. That answer is recorded as below, and its routing audit is the stopped run's. A page that is not read answers as stopped, with a `handoff_not_through` warning that says why. The scrape's `timeout` bounds Octocrawl's fetch, not your time; the SDK waits for the answer as long as the handoff takes. Without the option, a stopped page on a server that offers the handoff carries `handoff: { reason, liveViewUrl: null, rationale }`, saying how to ask for it. A server that does not offer the handoff refuses the option (`unsupported_parameter`), as it does beside `actions` or a screenshot.
 

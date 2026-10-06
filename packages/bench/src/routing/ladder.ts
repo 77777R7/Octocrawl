@@ -34,6 +34,9 @@ import { identityCompromised } from './identity.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One channel: a lane implementation the ladder can try. */
+/** The rungs of the http lane: undici's, and the browser-compatible transport's (ADR 0005 `compatible_transport`). */
+export const HTTP_CHANNELS: ReadonlySet<string> = new Set(['http', 'http_compat'])
+
 export interface Channel {
   /** Lane id, e.g. 'http', 'browser_local', 'provider'. */
   id: string
@@ -50,6 +53,11 @@ export interface Channel {
    * waits before capture. A request with waitFor skips rungs without it.
    */
   readonly waitsFor?: boolean
+  /**
+   * Whether this rung takes this URL; absent means every URL. A rung that does not is left out of
+   * the run as if it were not configured (the API engine keeps `http` or `http_compat` per host).
+   */
+  serves?(url: string, options: FetchOptions): boolean
   /**
    * Run the channel against url, optionally with a user session attached. A
    * channel that sets a robots.txt rule aside (`options.robotsOverride`) says
@@ -193,7 +201,7 @@ function withLowContentYield(result: FetchResult, channelsTried: readonly string
   const evidence = result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null
   if (!CONTENTFUL_STATUS.has(result.status) && !evidence) return result
   if (result.warnings?.some((warning) => warning.code === 'low_content_yield') === true) return result
-  return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => channel !== 'http'))] }
+  return { ...result, warnings: [...(result.warnings ?? []), lowContentYieldWarning(result, channelsTried.some((channel) => !HTTP_CHANNELS.has(channel)))] }
 }
 
 /**
@@ -322,10 +330,10 @@ export class LadderRunner {
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides) }
+    try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides)) }
     catch (error) {
       if (!deadlineReached(scope)) throw error
-      return carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides)
+      return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides))
     } finally { scope.dispose() }
   }
 
@@ -389,7 +397,7 @@ export class LadderRunner {
 
     const permitted = new Set(decision.permittedChannels)
     // Local lanes first, in declaration order, then providers (history-ranked).
-    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id))
+    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && (c.serves?.(url, options) ?? true))
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
@@ -533,7 +541,7 @@ export class LadderRunner {
         // lane rather than accepted as the answer. The status is NOT
         // rewritten — the record keeps the real success and its real token
         // count; the ladder just isn't done yet.
-        const qualityEvent = channel.id === 'http' ? qualityEscalationEvent(result) : null
+        const qualityEvent = HTTP_CHANNELS.has(channel.id) ? qualityEscalationEvent(result) : null
         const thinHttp = qualityEvent !== null
 
         // Worse-than-best: a later channel DID answer, but with less content
@@ -722,7 +730,7 @@ export class LadderRunner {
     const outcome: VendorOutcome = {
       contentful: CONTENTFUL_STATUS.has(result.status),
       wallMs: result.usage.wallMs,
-      costUsd: result.usage.externalCostUsd ?? 0,
+      costUsd: result.usage.externalCostUsd,
       failureClass: cls,
     }
     await this.history?.record(safeHost(url), vendorId, outcome)
@@ -873,7 +881,7 @@ export class LadderRunner {
         attemptCount: 0,
         contentTokens: null,
         browserMs: 0,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace: [{ at: 0, lane: 'http', event: 'governance_refusal', detail: { reason } }],
     }
@@ -956,7 +964,19 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: evidence === null ? detail : { ...detail, evidence: evidence.channel } }
     result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
   }
-  return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...summarize(channelsTried, attempts), totalMs: at } }
+  const summary = summarize(channelsTried, attempts)
+  // A provider rung the deadline cut before it returned may have billed: its cost is unknown, not the 0 of the rungs that did return.
+  const providerUnmeasured = interrupted !== null && attempts.length < channelsTried.length && laneOf(interrupted) === 'provider'
+  const costed = providerUnmeasured ? { ...summary, externalCostUsd: null, externalCost: { ...summary.externalCost, unknown: true } } : summary
+  return { result, channelsTried, handoffRequested: false, ladderTrace, summary: { ...costed, totalMs: at } }
+}
+
+/**
+ * The answer's third-party spend is the whole run's, not the kept rung's: a local answer kept after a provider attempt still
+ * cost what the provider charged, and an unknown charge anywhere in the run makes it unknown.
+ */
+function withRunCost(run: LadderRunResult): LadderRunResult {
+  return { ...run, result: { ...run.result, usage: { ...run.result.usage, externalCostUsd: run.summary.externalCostUsd } } }
 }
 
 /**
@@ -988,7 +1008,8 @@ function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
     compliance: null,
     evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
     // The interrupted rung's traffic was not measured; the ladder summary holds what was.
-    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: null },
+    // A vendor rung may have billed before the deadline; a local one calls no third party.
+    usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: lane === 'provider' ? null : 0 },
     trace: [],
   }
 }
@@ -1049,7 +1070,7 @@ function identityRefusedResult(
       attemptCount: 0,
       contentTokens: null,
       browserMs: 0,
-      externalCostUsd: null,
+      externalCostUsd: 0,
     },
     trace: [
       {

@@ -296,6 +296,7 @@ describe('lazy vendor connection', () => {
     const created: string[] = []
     const connected: string[] = []
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
       onVendorConnect: (id) => connected.push(id),
       vendorConnector: async () => fakeBrowser(),
@@ -328,6 +329,7 @@ describe('lazy vendor connection', () => {
   it('a URL governance refuses never reaches the vendor — zero vendor API calls', async () => {
     const created: string[] = []
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
       vendorConnector: async () => fakeBrowser(),
       robotsFetcher: async () => ({ text: 'User-agent: *\nDisallow:\n', status: 200, contentType: 'text/plain' }),
@@ -357,6 +359,7 @@ describe('lazy vendor connection', () => {
     const created: string[] = []
     const channels = buildChannels('research', {
       localSubjects: { http: blockedUnderOverride('http'), browser_local: blockedUnderOverride('browser_local') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
       vendorConnector: async () => fakeBrowser(),
       robotsFetcher: async () => ({ text: 'User-agent: *\nDisallow: /\n', status: 200, contentType: 'text/plain' }),
@@ -373,6 +376,7 @@ describe('lazy vendor connection', () => {
   it('first-use persistence: ensurePersistence runs BEFORE the first session, which receives the contextId', async () => {
     const createdResumes: unknown[] = []
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: {
         steel: fakeVendorOps('steel', (resume) => createdResumes.push(resume), { persist: true }),
       },
@@ -516,6 +520,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     const created: string[] = []
     const channels = buildChannels('authed', {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
       ...vendorEnv(),
     })
@@ -535,6 +540,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     const resumes: unknown[] = []
     let ensureCalls = 0
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: {
         browserbase: fakeVendorOps('browserbase', (r) => resumes.push(r), { onEnsure: () => ensureCalls++ }),
       },
@@ -562,6 +568,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     const resumes: unknown[] = []
     let ensureCalls = 0
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: {
         steel: fakeVendorOps('steel', (r) => resumes.push(r), { onEnsure: () => ensureCalls++ }),
       },
@@ -588,6 +595,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     const resumes: unknown[] = []
     let ensureCalls = 0
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: {
         browserbase: fakeVendorOps('browserbase', (r) => resumes.push(r), { persist: true, onEnsure: () => ensureCalls++ }),
       },
@@ -605,6 +613,7 @@ describe('buildChannels + LadderRunner session composition', () => {
   it('a Steel snapshot handed to the Browserbase channel is audited and skipped', async () => {
     const created: string[] = []
     const channels = buildChannels('research', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { browserbase: fakeVendorOps('browserbase', () => created.push('browserbase')) },
       ...vendorEnv(),
     })

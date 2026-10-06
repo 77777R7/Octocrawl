@@ -9,7 +9,8 @@ afterEach(() => {
   }
 })
 
-const vendors = (mode: 'research' | 'authed') => buildChannels(mode, {}).map((channel) => channel.vendorId).filter((id) => id !== undefined)
+const GRANTED = { authorized: ['vendor_remote_browser'] }
+const vendors = (mode: 'research' | 'authed', vendorPolicy: { authorized: string[] } = GRANTED) => buildChannels(mode, { vendorPolicy }).map((channel) => channel.vendorId).filter((id) => id !== undefined)
 
 /** A paid browser service is used when the person names it in W2L_VENDORS, not because its key happens to be in the shell. */
 describe('vendor lanes', () => {
@@ -35,6 +36,17 @@ describe('vendor lanes', () => {
 
   it('still take a key passed in the options', () => {
     delete process.env.W2L_VENDORS
-    expect(buildChannels('research', { keys: { steel: 'k' } }).map((channel) => channel.vendorId).filter((id) => id !== undefined)).toEqual(['steel'])
+    expect(buildChannels('research', { keys: { steel: 'k' }, vendorPolicy: GRANTED }).map((channel) => channel.vendorId).filter((id) => id !== undefined)).toEqual(['steel'])
+  })
+
+  // ADR 0005: a provider's browser is a grant-gated capability, whatever W2L_VENDORS and the keys say.
+  it('are not built unless the access grant names vendor_remote_browser', () => {
+    process.env.BROWSERBASE_API_KEY = 'bb-key'
+    process.env.STEEL_API_KEY = 'steel-key'
+    process.env.W2L_VENDORS = 'browserbase,steel'
+    expect(vendors('research', { authorized: [] })).toEqual([])
+    expect(vendors('authed', { authorized: ['vendor_captcha_solving', 'vendor_stealth', 'session_persistence'] })).toEqual([])
+    expect(buildChannels('research', { keys: { steel: 'k' } }).map((channel) => channel.vendorId).filter((id) => id !== undefined)).toEqual([])
+    expect(vendors('research').sort()).toEqual(['browserbase', 'steel'])
   })
 })

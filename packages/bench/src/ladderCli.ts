@@ -39,6 +39,10 @@ import {
   withOperatorContact,
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
+import { readFileSync } from 'node:fs'
+import { accessGrantFromText } from '@w2l/http-core'
+import { browserEngineChoice } from './subjects/browserEngine.js'
+import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
@@ -135,7 +139,11 @@ export function buildChannels(
     vendorOps?: Record<string, import('./vendors/transport.js').VendorOps>
     /** Test seam: robots fetcher for provider subjects. */
     robotsFetcher?: import('./subjects/provider.js').RobotsFetcher
-    /** Product policy for the vendor adapters (persistence / live view). */
+    /**
+     * Product policy for the vendor adapters: operational keys (persistence, live view) and the
+     * ADR 0005 access capabilities a grant names. No vendor rung is built unless it names
+     * `vendor_remote_browser`.
+     */
     vendorPolicy?: import('@w2l/http-core').VendorPolicy
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
@@ -145,6 +153,11 @@ export function buildChannels(
     }
     /** Opt-in headed Chromium on the browser arm only. Default remains headless. */
     headed?: boolean
+    /**
+     * The engine the public browser rung launches, as the entry point chose it after checking the
+     * access grant (browserEngineChoice). Default stock Playwright.
+     */
+    browserEngine?: import('./subjects/browserEngine.js').BrowserEngineName
     networkPolicy?: import('@w2l/contracts').NetworkPolicy
     originScheduler?: OriginScheduler
     /** Operator-created anonymous marketplace preferences; never a user login. */
@@ -168,6 +181,13 @@ export function buildChannels(
     previewProductToken?: boolean
     /** A robots.txt cache the http rung shares with a crawl's sitemap reader (one read of a host's robots.txt serves both); the rung keeps its own without one. */
     robotsCache?: RobotsOriginCache
+    /**
+     * Standard mode on a local server, as the entry point allowed it (ADR 0005 `compatible_transport`):
+     * an `http_compat` rung after `http`, the same lane over the browser-compatible transport
+     * (compatTransport.ts). The caller keeps one of the two for each URL (the API engine swaps them
+     * for the hosts it was given); with both, the ladder tries `http` first.
+     */
+    compatTransport?: boolean
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -178,8 +198,11 @@ export function buildChannels(
   const preview = opts.previewProductToken === true
   if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
   const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview, opts.robotsCache)
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview)
+  // The public browser alone may run another engine; the saved-login rung below is always stock Playwright.
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
+  if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
+  const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 
   // ----------------------------------------------------------------------
   // authed_session: the ONLY rung that uses login state. It exists solely in
@@ -226,6 +249,12 @@ export function buildChannels(
         await opts.localSubjects?.http?.teardown?.()
       },
     },
+    ...(compat === null ? [] : [{
+      id: 'http_compat',
+      identity: identityBundleFrom(compatIdentity()),
+      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride),
+      close: () => compat.teardown(),
+    } satisfies Channel]),
     {
       id: 'browser_local',
       identity: declared,
@@ -297,7 +326,7 @@ export function buildChannels(
               attemptCount: 0,
               contentTokens: null,
               browserMs: 0,
-              externalCostUsd: null,
+              externalCostUsd: 0,
             },
             trace,
           }
@@ -312,8 +341,9 @@ export function buildChannels(
   }
 
   // Provider rungs exist only when the vendor is named (W2L_VENDORS) with its key, or a key is passed, AND the mode permits the
-  // lane. connectVendor is deferred to the first fetch.
+  // lane, AND the access grant names vendor_remote_browser (ADR 0005). connectVendor is deferred to the first fetch.
   if (mode === 'standard') return channels
+  if (!(opts.vendorPolicy?.authorized ?? []).includes('vendor_remote_browser')) return channels
 
   // A paid browser service is used when the person names it in W2L_VENDORS (comma-separated: browserbase, steel), not
   // because its key happens to be in the environment: it bills them and sees the URLs.
@@ -410,7 +440,7 @@ export function buildChannels(
               attemptCount: 0,
               contentTokens: null,
               browserMs: 0,
-              externalCostUsd: null,
+              externalCostUsd: 0,
             },
             trace: [
               {
@@ -551,11 +581,16 @@ export async function runLadder(args: Args): Promise<number> {
   // The product policy the vendor adapters will evaluate. Only the two
   // authorizable capabilities can ever be turned on, and only by explicit
   // flags on this CLI — never by a default.
+  // W2L_ACCESS_GRANT (a file path, or the JSON itself) adds the ADR 0005 capabilities a grant
+  // names; without one no vendor rung is built.
+  const grantSource = (process.env.W2L_ACCESS_GRANT ?? '').trim()
+  const grant = grantSource === '' ? null : accessGrantFromText(grantSource.startsWith('{') ? grantSource : readFileSync(grantSource, 'utf8'))
   const vendorPolicy = {
     authorized: [
       ...(args.persistSession ? ['session_persistence'] : []),
       ...(args.liveView ? ['live_view_handoff'] : []),
-    ] as const,
+      ...(grant?.capabilities ?? []),
+    ],
   }
   // The CLI runs in local mode: outbound requests follow the operator's proxy
   // variables, and research mode declares W2L_CONTACT. Files are saved where
@@ -564,6 +599,7 @@ export async function runLadder(args: Args): Promise<number> {
   const fileStore = new FileStore(join(process.env.W2L_TASK_ROOT ?? '.w2l/api', 'files'))
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    browserEngine: browserEngineChoice(process.env, grant, false),
     networkPolicy,
     fileStore,
     onVendorConnect: (vendorId) => console.log(`vendor session : creating ${vendorId} session (lazy)`),

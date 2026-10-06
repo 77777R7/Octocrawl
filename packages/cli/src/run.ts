@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, loadImpit, loadPatchrightEngine, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -55,7 +55,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
     // A one-off command listens nowhere: the API server's listen address is not its concern, only the network policy is.
-    const listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
+    let listen: ReturnType<typeof parseListen>
+    try {
+      listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
+      if (listen.browserEngine === 'patchright') await loadPatchrightEngine()
+      if (listen.compatHosts.length > 0) await loadImpit()
+    } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)) }
     for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
       taskRoot,
@@ -67,6 +72,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       webhookPolicy: { allowHttpLoopback: listen.delivery.allowHttpLoopback },
       workerCount: listen.workerCount,
       resumeOnStart: false,
+      accessGrant: listen.accessGrant,
+      browserEngine: listen.browserEngine,
+      compatHosts: listen.compatHosts,
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)
@@ -294,7 +302,7 @@ async function urlsFrom(file: string): Promise<string[]> {
 
 async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv.includes('--help')) {
-    io.stdout('usage: octocrawl serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT.')
+    io.stdout('usage: octocrawl serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>] [--access-grant <file>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT. --access-grant (or W2L_ACCESS_GRANT) names what enhanced access may do (ADR 0005).')
     return 0
   }
   // --task-root, as on the other commands; the server reads W2L_TASK_ROOT.

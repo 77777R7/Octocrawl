@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
+import { browserEngineChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
 import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
@@ -57,6 +60,50 @@ export interface ListenConfig {
   delivery: DeliveryConfig
   /** Whether the job stream routes (`/events`, `/ws` on crawls and batches) are served; `W2L_JOB_STREAMS=off` turns them into 404s. */
   jobStreams: boolean
+  /**
+   * What the operator allows enhanced access to do on this server (ADR 0005): `--access-grant
+   * <file>` or `W2L_ACCESS_GRANT` (a file path, or the JSON itself). Null when none is given, and
+   * then every capability ADR 0005 puts behind a grant stays off.
+   */
+  accessGrant: AccessGrant | null
+  /**
+   * The engine the public browser rung launches (`W2L_BROWSER_ENGINE`): stock Playwright unless the
+   * grant names `enhanced_browser` and Patchright is asked for; a hosted server refuses Patchright.
+   */
+  browserEngine: BrowserEngineName
+  /**
+   * The hosts whose standard-mode pages go over the browser-compatible transport (`W2L_COMPAT_HOSTS`):
+   * only with a grant that names `compatible_transport`, never on a hosted server. Empty: none.
+   */
+  compatHosts: string[]
+}
+
+/**
+ * The server's access grant, validated. A grant with any problem stops startup with every problem
+ * listed: a server that silently dropped a refused or deferred capability would run with less than
+ * the operator thinks, or with more than they meant. A hosted server has no person's browser, so
+ * tier `my_browser` is refused there.
+ */
+function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted: boolean): AccessGrant | null {
+  const source = (readFlag(argv, '--access-grant') ?? env['W2L_ACCESS_GRANT'] ?? '').trim()
+  if (source === '') return null
+  let text: string
+  try {
+    text = source.startsWith('{') ? source : readFileSync(source, 'utf8')
+  } catch (error) {
+    throw new Error(`access grant: cannot read ${source}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const grant = accessGrantFromText(text)
+  if (hosted && grant.tier === 'my_browser') {
+    throw new Error("access grant refused: tier my_browser reads the person's own Chrome, which a hosted server does not have")
+  }
+  return grant
+}
+
+/** The startup line that says what the grant allows. */
+export function accessGrantNotice(grant: AccessGrant): string {
+  const usd = (value: number | null) => (value === null ? 'none' : `${value} USD`)
+  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)} (not enforced yet)${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
 }
 
 /** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
@@ -72,6 +119,11 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const tokens = readTokens(argv, env)
   const rateLimit = parseRateLimit(argv, env)
   const workerCount = parseWorkerCount(env)
+  const accessGrant = readAccessGrant(argv, env, hosted)
+  const browserEngine = browserEngineChoice(env, accessGrant, hosted)
+  const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
+  const compatHosts = compatHostsChoice(env, accessGrant, hosted)
+  const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains; a request with custom headers or mobile keeps the http rung`]
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -88,10 +140,13 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       mapMaxLimit: HOSTED_MAP_MAX_LIMIT,
       mapMaxTimeoutMs: HOSTED_MAP_MAX_TIMEOUT_MS,
       allowRobotsOverride: false,
-      notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])].filter(notice => notice !== null),
+      notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)])].filter(notice => notice !== null),
       ...(rateLimit === undefined ? {} : { rateLimit }),
       delivery: deliveryConfig('hosted', env),
       jobStreams: jobStreamsEnabled(env),
+      accessGrant,
+      browserEngine,
+      compatHosts,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -112,10 +167,13 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE])],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...compatNotice],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
+    accessGrant,
+    browserEngine,
+    compatHosts,
   }
 }
 

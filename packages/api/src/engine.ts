@@ -10,6 +10,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildChannels,
+  compatHostListed,
+  HTTP_CHANNELS,
   BrowserLocalSubject,
   FileStore,
   HttpSitemapSource,
@@ -104,10 +106,10 @@ import {
   cacheStateOf,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, evaluateGovernance, type CrawlPolicy } from '@w2l/http-core'
+import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { ChannelsFiltered } from '@w2l/bench'
+import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
@@ -346,6 +348,21 @@ export interface ApiEngineOptions {
    * engine takes https to a public address only, whatever this says.
    */
   webhookPolicy?: { allowHttpLoopback: boolean }
+  /**
+   * The server's access grant (ADR 0005), validated at startup. Its capabilities are the vendor
+   * policy every vendor rung is built with, its run budget caps each batch's and crawl's
+   * third-party spend, and it enters the page cache key so a page fetched under one grant is not
+   * reused under another. Null or absent: no grant, so every grant-gated capability stays off.
+   */
+  accessGrant?: AccessGrant | null
+  /** The engine the public browser rung launches, as the server chose it (browserEngineChoice). Default stock Playwright. */
+  browserEngine?: BrowserEngineName
+  /**
+   * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
+   * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
+   * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
+   */
+  compatHosts?: readonly string[]
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed') => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
@@ -430,6 +447,26 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** The saved logins a run of `mode` may use: mode `authed` alone. */
   const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
   const headed = options.headed === true
+  const accessGrant = options.accessGrant ?? null
+  const compatHosts = options.compatHosts ?? []
+  if (compatHosts.length > 0 && options.hosted === true) throw new Error('the compatible transport is refused on a hosted engine (ADR 0005)')
+  if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
+  /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
+  const compatOptionsRefusal = (page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): string | null => {
+    const wire = [...(page.headers !== undefined && Object.keys(page.headers).length > 0 ? ['headers'] : []), ...(page.mobile === true ? ['mobile'] : [])]
+    return wire.length === 0 ? null : wire.join(', ')
+  }
+  /** Whether a page goes over the compatible transport: a listed host, and options its profile can send. */
+  const compatTakes = (url: string, page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): boolean => compatHostListed(compatHosts, url) && compatOptionsRefusal(page) === null
+  /**
+   * A run's budget under the server's grant: the stricter of the task's own cost cap and the grant's run budget, applied every time
+   * a task runs, so a task created before the grant, resumed, or appended to is capped as one created under it.
+   */
+  const grantedBudget = (budget: Task['budget']): Task['budget'] => {
+    const cap = accessGrant?.budget.perRunUsd ?? null
+    if (cap === null) return budget
+    return { ...budget, maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }
+  }
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
     ...basePolicy,
@@ -466,7 +503,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const { timeout: _timeout, ...shape } = fetchOptions(page, formats)
     const rungs = channels.map((channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`)
     const build = { extractor: EXTRACTOR_VERSION, pdf: PDF_TEXT_VERSION, file: FILE_TEXT_VERSION, commit: sourceCommitFromEnv() }
-    const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build })
+    // Absent without a grant, so a server without one keeps every key it had.
+    const access = accessGrant === null ? undefined : { tier: accessGrant.tier, capabilities: [...accessGrant.capabilities].sort() }
+    const key = pageCacheKey(url, { mode, fetch: shape, rungs, fastMode: page.fastMode === true, robotsOverride: robotsOverride ?? null, build, ...(access === undefined ? {} : { access }) })
     return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store, robotsSetAside }
   }
   /**
@@ -652,8 +691,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const createChannels =
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed') => {
-      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode) })
-      return options.httpOnly ? channels.filter(channel => channel.id === 'http') : channels
+      const channels = buildChannels(mode, { headed, networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0 })
+      return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
   const historiesByMode = new Map<string, MemoryRoutingHistory>()
@@ -674,11 +713,21 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * lanes alone honour (`headers`, `mobile`, `skipTlsVerification`), for
    * which the vendor rungs are dropped. Each drop opens the run's ladder
    * audit as a `ladder_channels_filtered` event.
+   *
+   * With the compatible transport configured, the rungs of one URL (`oneUrl`)
+   * keep one http rung: `http_compat` for a listed host, which drops `http`
+   * and says so, else `http`. A batch's or crawl's rungs serve many URLs and
+   * keep both; each page takes one (Channel.serves). Options the transport
+   * cannot send (`headers`, `mobile`) drop `http_compat` either way.
+   * `compat` false leaves it out altogether: a map reads its start page with
+   * the identity its response names, the one it reads robots.txt with.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = []): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
-    let selected = policy === 'ladder' ? channels : channels.filter(channel => channel.id === (policy === 'http_only' ? 'http' : 'browser_local'))
+    let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
+    // A host the server did not list never sees the compatible rung, in the audit either.
+    if (!compat || (oneUrl && !compatHostListed(compatHosts, url))) selected = selected.filter(channel => channel.id !== 'http_compat')
     if (selected.length === 0) throw new RequestError(`capture channel unavailable for ${policy}`)
     const filtered: ChannelsFiltered[] = []
     const name = (channel: Channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`
@@ -701,9 +750,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     if (page.fastMode === true) {
       if (policy === 'browser_only') throw new RequestError('fastMode is not available for this URL: it is served by the browser lane only')
-      const kept = selected.filter(channel => channel.id === 'http')
+      const kept = selected.filter(channel => HTTP_CHANNELS.has(channel.id))
       if (kept.length === 0) throw new RequestError('fastMode is not available for this URL: no http rung is configured for it')
-      const dropped = selected.filter(channel => channel.id !== 'http').map(name)
+      const dropped = selected.filter(channel => !HTTP_CHANNELS.has(channel.id)).map(name)
       if (dropped.length > 0) filtered.push({ reason: 'fastMode', dropped })
       selected = kept
     }
@@ -712,6 +761,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const dropped = selected.filter(channel => channel.vendorId !== undefined).map(name)
       if (dropped.length > 0) filtered.push({ reason: wire.join(', '), dropped })
       selected = selected.filter(channel => channel.vendorId === undefined)
+    }
+    if (selected.some(channel => channel.id === 'http_compat')) {
+      const refusal = compatOptionsRefusal(page)
+      if (refusal !== null) {
+        filtered.push({ reason: refusal, dropped: ['http_compat'] })
+        selected = selected.filter(channel => channel.id !== 'http_compat')
+      } else if (oneUrl && selected.some(channel => channel.id === 'http')) {
+        filtered.push({ reason: 'compatible_transport', dropped: ['http'] })
+        selected = selected.filter(channel => channel.id !== 'http')
+      }
+    }
+    // A batch's or crawl's rungs that keep both http rungs: each page takes one, the compatible one for a listed host.
+    if (selected.some(channel => channel.id === 'http_compat') && selected.some(channel => channel.id === 'http')) {
+      selected = selected.map((channel): Channel =>
+        channel.id === 'http' ? { ...channel, serves: (target, fetch) => !compatTakes(target, fetch) }
+          : channel.id === 'http_compat' ? { ...channel, serves: (target, fetch) => compatTakes(target, fetch) }
+            : channel)
     }
     return { channels: selected, filtered }
   }
@@ -989,7 +1055,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
-    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [])
+    const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false)
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
@@ -1062,6 +1128,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const orchestrator = new CrawlOrchestrator({
       store, atom,
+      // A page whose scrape threw called a provider only if this mode has one: otherwise its third-party cost is a known 0.
+      scrapeErrorCostUsd: channelsFor(mode).some((channel) => channel.vendorId !== undefined) ? null : 0,
       workerCount,
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,
@@ -1082,7 +1150,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.batch ? { seedUrls: task.batch.urls } : {}),
         taskDir: task.taskDir,
         mode,
-        budget: task.budget,
+        budget: grantedBudget(task.budget),
         maxDepth: req.maxDepth,
         allowlistedDomains: req.allowlistedDomains,
         resumeFrom: req.resume ? task.id : null,
@@ -1185,12 +1253,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
       const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
+      // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
+      const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) }
       const full: ScrapeRun = {
         ...result,
+        // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
+        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd },
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
-        // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
-        summary: read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) },
+        summary,
         ...(agentHints.length === 0 ? {} : { agentHints }),
       }
       // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
@@ -1232,7 +1303,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const readsPage = req.sitemap !== 'only'
     if (readsPage && options.channelPolicy?.(req.url) === 'browser_only') throw new RequestError('map is not available for this URL: this server reads it with the browser lane only')
     const mode = req.mode ?? 'standard'
-    const rungs = readsPage ? channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml']) : null
+    // The start page under the standard identity the response reports (identity below), not the compatible transport's.
+    const rungs = readsPage ? channelsForUrl(mode, req.url, { fastMode: true }, ['rawHtml'], true, false) : null
     const requestedAt = new Date().toISOString()
     const id = crypto.randomUUID()
     const signal = context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal
@@ -1366,7 +1438,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         budget: {
           maxPages: req.maxPages ?? defaultMaxPages,
           maxWallMs: null,
-          maxCostUsd: null,
+          maxCostUsd: accessGrant?.budget.perRunUsd ?? null,
           maxTokens: null,
         },
         crawl: {
@@ -1455,7 +1527,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
-        budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: null, maxTokens: null },
+        budget: { maxPages: null, maxWallMs: options.batchMaxWallMs ?? null, maxCostUsd: accessGrant?.budget.perRunUsd ?? null, maxTokens: null },
         batch,
         ...attributionOf(req),
         createdAt: now, updatedAt: now,
@@ -1902,7 +1974,7 @@ function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(res
     ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
     ...(timings.totalMs === undefined ? {} : { totalMs: timings.totalMs }),
   }
-  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: null, ...(own === undefined ? {} : { timings: own }) } }
+  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

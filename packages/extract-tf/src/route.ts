@@ -97,11 +97,19 @@ export interface PageSignals {
   postArticles: number
   /**
    * Whether the page's microdata Product scopes are cards of one listing: at
-   * least PRODUCT_CARDS of them, the outermost ones all of one tag and the
-   * same classes (some), none holding an h1, none inside an element named for
-   * recommendations, and no recommendation heading before the first.
+   * least PRODUCT_CARDS of them, the outermost ones all of one tag with at
+   * least one class they all carry, none holding an h1, none inside an element
+   * named for recommendations, and no recommendation heading before the first.
    */
   productCards: boolean
+  /**
+   * JSON-LD Products declared as items of an ItemList (a CollectionPage's
+   * products). They are not counted in `jsonLdTypes`: a list of products is
+   * not the page's own product.
+   */
+  listedProducts: number
+  /** Normalized @type names of the JSON-LD's top-level nodes and @graph members: what the page declares itself. */
+  pageTypes: string[]
 }
 
 /** The fewest alike Product scopes that are a listing's cards rather than one product. */
@@ -129,24 +137,37 @@ function normalizeTypeName(raw: string): string {
   return last.toLowerCase()
 }
 
+/** The normalized @type names of a parsed JSON-LD script's top-level nodes and @graph members. */
+function collectPageTypes(root: unknown, out: string[]): void {
+  for (const node of Array.isArray(root) ? root : [root]) {
+    if (typeof node !== 'object' || node === null) continue
+    const record = node as Record<string, unknown>
+    const t = record['@type']
+    for (const type of typeof t === 'string' ? [t] : Array.isArray(t) ? t : []) if (typeof type === 'string') out.push(normalizeTypeName(type))
+    if (Array.isArray(record['@graph'])) collectPageTypes(record['@graph'], out)
+  }
+}
+
 /**
  * Recursively walk parsed JSON-LD (objects, arrays, @graph) and collect
- * every normalized @type. Malformed JSON is caught by the caller.
+ * every normalized @type. A Product inside an ItemList is counted in
+ * `listed.products` instead. Malformed JSON is caught by the caller.
  */
-function collectJsonLdTypes(node: unknown, out: string[]): void {
+function collectJsonLdTypes(node: unknown, out: string[], listed: { products: number }, inList = false): void {
   if (Array.isArray(node)) {
-    for (const item of node) collectJsonLdTypes(item, out)
+    for (const item of node) collectJsonLdTypes(item, out, listed, inList)
     return
   }
   if (typeof node !== 'object' || node === null) return
   const t = (node as Record<string, unknown>)['@type']
-  if (typeof t === 'string') {
-    out.push(normalizeTypeName(t))
-  } else if (Array.isArray(t)) {
-    for (const item of t) if (typeof item === 'string') out.push(normalizeTypeName(item))
+  const types = (typeof t === 'string' ? [t] : Array.isArray(t) ? t.filter((item): item is string => typeof item === 'string') : []).map(normalizeTypeName)
+  for (const type of types) {
+    if (inList && type === 'product') listed.products++
+    else out.push(type)
   }
+  const list = inList || types.includes('itemlist')
   for (const value of Object.values(node as Record<string, unknown>)) {
-    if (typeof value === 'object' && value !== null) collectJsonLdTypes(value, out)
+    if (typeof value === 'object' && value !== null) collectJsonLdTypes(value, out, listed, list)
   }
 }
 
@@ -159,11 +180,15 @@ function collectJsonLdTypes(node: unknown, out: string[]): void {
  */
 function collectPageSignals(doc: Document): PageSignals {
   const jsonLdTypes: string[] = []
+  const listed = { products: 0 }
+  const pageTypes: string[] = []
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
     try {
-      collectJsonLdTypes(JSON.parse(text), jsonLdTypes)
+      const parsed: unknown = JSON.parse(text)
+      collectJsonLdTypes(parsed, jsonLdTypes, listed)
+      collectPageTypes(parsed, pageTypes)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
@@ -186,6 +211,8 @@ function collectPageSignals(doc: Document): PageSignals {
     itemTypeTokens,
     postArticles: qsa(doc, 'article.post').length,
     productCards: productCards(doc),
+    listedProducts: listed.products,
+    pageTypes,
   }
 }
 
@@ -203,9 +230,16 @@ function productCards(doc: Document): boolean {
     return true
   })
   if (outer.length < PRODUCT_CARDS) return false
-  const classes = (el: Element): string => splitTokens(el.getAttribute('class') ?? '').sort().join(' ')
-  const shapes = new Set(outer.map((el) => `${tagOf(el)} ${classes(el)}`))
-  if (shapes.size !== 1 || classes(outer[0]!) === '' || outer.some((el) => el.querySelector('h1') !== null)) return false
+  // One template: one tag and the same classes. Siblings of one container
+  // need only share a class, as a card's own classes may differ from its
+  // neighbours' (WooCommerce marks each with its post id, its place in the
+  // row, its stock and its categories); a product page's own scope is not a
+  // sibling of the cards beside it.
+  const classes = (el: Element): string[] => splitTokens(el.getAttribute('class') ?? '')
+  const exact = new Set(outer.map((el) => `${tagOf(el)} ${classes(el).sort().join(' ')}`)).size === 1 && classes(outer[0]!).length > 0
+  const siblings = outer.every((el) => el.parentElement === outer[0]!.parentElement) && new Set(outer.map(tagOf)).size === 1
+  const shared = classes(outer[0]!).some((name) => outer.every((el) => classes(el).includes(name)))
+  if (!(exact || (siblings && shared)) || outer.some((el) => el.querySelector('h1') !== null)) return false
   for (const card of outer) {
     for (let up = card.parentElement; up !== null; up = up.parentElement) {
       if (hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)) return false
@@ -214,9 +248,10 @@ function productCards(doc: Document): boolean {
   const all = qsa(doc, '*')
   const first = all.indexOf(outer[0]!)
   if (all.some((el, at) => at < first && /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el)))) return false
-  // A lone h1 with a price of its own outside the cards is a product page's buy box, whatever the cards show.
+  // A lone h1 with a price of its own outside the cards is a product page's buy box, whatever the cards show. A
+  // price in the page's header or navigation is not one (a cart total).
   const h1s = qsa(doc, 'h1')
-  return !(h1s.length === 1 && visiblePrices(doc).some((price) => !outer.some((card) => card.contains(price))))
+  return !(h1s.length === 1 && visiblePrices(doc).some((price) => price.closest('header, nav') === null && !outer.some((card) => card.contains(price))))
 }
 
 /** Exact, case-insensitive membership across all tokens. */
@@ -246,7 +281,9 @@ function hasProductSignals(s: PageSignals): boolean {
     hasToken(s.itemTypeTokens, 'product') ||
     hasToken(s.itempropTokens, 'product') ||
     hasToken(s.itempropTokens, 'offer')
-  if (strong) return true
+  // Products a page lists in JSON-LD made it a product page before they were
+  // counted apart; a page they do not make a listing (routeByCounts) stays one.
+  if (strong || s.listedProducts > 0) return true
   return countTokens(s.itempropTokens, PRICE_ITEMPROPS) >= 2
 }
 
@@ -391,6 +428,9 @@ function hasCardGrid(doc: Document): boolean {
   return inside >= outside * 2
 }
 
+/** JSON-LD page types by which a publisher declares a page a collection of things. */
+const COLLECTION_PAGE_TYPES = ['collectionpage', 'searchresultspage'] as const
+
 function routeByCounts(c: RouterCounts, s: PageSignals, doc: Document): RouteDecision {
   let grid: boolean | undefined
   const cardGrid = (): boolean => (grid ??= hasCardGrid(doc))
@@ -402,8 +442,15 @@ function routeByCounts(c: RouterCounts, s: PageSignals, doc: Document): RouteDec
   // that actually produced the output, not the one it hoped for.
   // Alike Product cards with no product declared in JSON-LD are a listing of
   // products (a category page), not one: the product strategy would cut them
-  // as recommendations.
-  if (s.productCards && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
+  // as recommendations. So are products a page its publisher declares a
+  // collection (a top-level CollectionPage or SearchResultsPage node; one the
+  // page is only part of does not count) lists as an ItemList's
+  // items, when no microdata scope declares one product. A product page that
+  // lists only its related products declares no such page.
+  const listedOnly = s.listedProducts >= PRODUCT_CARDS &&
+    COLLECTION_PAGE_TYPES.some((type) => hasToken(s.pageTypes, type)) &&
+    (s.productCards || !hasToken(s.itemTypeTokens, 'product'))
+  if ((s.productCards || listedOnly) && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }
   }
   if (hasProductSignals(s)) {
@@ -559,12 +606,48 @@ function textOutsideLinks(node: Node): string {
 
 /**
  * A listing card: an item carrying a link and text of its own besides the
- * link (a price, a date, a description). A menu or breadcrumb item is only
- * its link and never qualifies.
+ * link (a price, a date, a description), or a link that holds the item's
+ * name as a heading (WooCommerce puts a product's picture, name and price all
+ * inside one link). A menu or breadcrumb item is only its link and never
+ * qualifies.
  */
 function isCard(item: Element): boolean {
-  if (qsa(item, 'a[href]').length === 0) return false
-  return (textOutsideLinks(item).match(/[\p{L}\p{N}]/gu) ?? []).length >= 3
+  const links = qsa(item, 'a[href]')
+  if (links.length === 0) return false
+  if ((textOutsideLinks(item).match(/[\p{L}\p{N}]/gu) ?? []).length >= 3) return true
+  return links.some((link) => qsa(link, 'h2,h3,h4,h5,h6').some((heading) => /[\p{L}\p{N}]/u.test(textOf(heading))))
+}
+
+/**
+ * The most sibling cards of one template: one tag, and either no class on
+ * any of them or at least one class they all carry (a WooCommerce card also
+ * carries its own post id, place in the row, stock and categories). When the
+ * cards of one tag share no class, those with the very same classes.
+ */
+function alikeCards(cards: readonly Element[]): number {
+  const byTag = new Map<string, Element[]>()
+  for (const card of cards) {
+    const group = byTag.get(tagOf(card))
+    if (group === undefined) byTag.set(tagOf(card), [card])
+    else group.push(card)
+  }
+  let most = 0
+  for (const group of byTag.values()) {
+    const classes = group.map((card) => new Set(splitTokens(card.getAttribute('class') ?? '')))
+    const classless = classes.every((set) => set.size === 0)
+    const shared = [...classes[0]!].some((name) => classes.every((set) => set.has(name)))
+    if (classless || shared) {
+      most = Math.max(most, group.length)
+      continue
+    }
+    const exact = new Map<string, number>()
+    for (const set of classes) {
+      const key = [...set].sort().join(' ')
+      exact.set(key, (exact.get(key) ?? 0) + 1)
+    }
+    most = Math.max(most, ...exact.values())
+  }
+  return most
 }
 
 /**
@@ -591,13 +674,7 @@ export function selectCardList(doc: Document): Element | null {
   for (const [at, el] of all.entries()) {
     if (at <= h1At || el.children.length < 3 || h1.contains(el) || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
     if (el.closest('header') !== null) continue
-    const templates = new Map<string, number>()
-    for (const kid of Array.from(el.children)) {
-      if (!isCard(kid)) continue
-      const template = `${kid.tagName} ${kid.getAttribute('class') ?? ''}`
-      templates.set(template, (templates.get(template) ?? 0) + 1)
-    }
-    const cards = Math.max(0, ...templates.values())
+    const cards = alikeCards(Array.from(el.children).filter(isCard))
     if (cards >= 3 && cards > bestCards) {
       bestCards = cards
       best = el
