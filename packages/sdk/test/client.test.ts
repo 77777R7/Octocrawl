@@ -192,7 +192,10 @@ describe('W2L SDK', () => {
       const client = new W2L({ baseUrl: `http://127.0.0.1:${(api.address() as AddressInfo).port}`, token: '' })
       expect(await client.scrape('https://example.com/', { timeout: 1_000 })).toMatchObject({ status: 'failed', failureReason: 'timeout' })
       await client.scrape('https://example.com/')
-      expect(waits).toEqual([31_000, 330_000])
+      // A page read in the person's Chrome, by lane or by access, waits for them: no limit (0).
+      await client.scrape('https://example.com/', { lane: 'my-browser', timeout: 1_000 })
+      await client.scrape('https://example.com/', { access: 'my-browser', timeout: 1_000 })
+      expect(waits).toEqual([31_000, 330_000, 0, 0])
       // Other requests keep the dispatcher's own wait.
       await expect(client.getBatch('task-1')).rejects.toThrow(TypeError)
     } finally {

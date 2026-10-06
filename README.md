@@ -94,7 +94,7 @@ Mode `authed` reads a page with the login you saved for its site, in Octocrawl's
 For people who do not want the technical switches, one option chooses how pages are reached: `"access": "standard"`, `"enhanced"` or `"my-browser"` on `POST /v1/scrape` and `POST /v1/batches` (`standard` or `enhanced` on `POST /v1/crawl`), the MCP `scrape`, `batch_scrape` and `crawl` tools, and `--access` on the command line.
 
 - `standard`: Octocrawl's own fetching and its local browser. No rung that costs a third party runs; the routing audit says which it dropped (`ladder_channels_filtered`, reason `access standard`).
-- `enhanced`: also what the server's access grant of tier enhanced approves (the paid providers below), within its budget. A server without such a grant refuses it by name (`unsupported_parameter`).
+- `enhanced`: also what the server's access grant of tier enhanced approves: the paid providers below, in any mode, mode standard included. The grant's run budget caps a batch or a crawl; a single scrape calls each provider the server names at most once. A server without such a grant refuses it by name (`unsupported_parameter`).
 - `my-browser`: your own Chrome, the same as `"lane": "my-browser"` (below). A crawl does not take it.
 
 Without `access`, a request runs as the server is configured. A batch or crawl keeps its choice, so a resumed run makes the same one. The per-route options below stay for developers.

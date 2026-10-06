@@ -36,6 +36,11 @@ export const MODE_CHANNELS: Readonly<Record<GovernedMode, readonly string[]>> = 
 export interface CrawlPolicy {
   mode: GovernedMode
   /**
+   * The request chose `access: "enhanced"` (ADR 0005): the provider lane is permitted in mode standard too. The server's
+   * access grant still decides whether any provider rung exists; mode keeps only its identity meaning here.
+   */
+  enhanced?: boolean
+  /**
    * Hosts the run is authorized to touch. Empty = no restriction (the
    * caller's own judgment); non-empty = exact host or `*.example.com`
    * wildcard. Checked per request, before robots even.
@@ -95,5 +100,5 @@ export function evaluateGovernance(url: string, policy: CrawlPolicy): Governance
     return { allowed: false, permittedChannels: [], reason: `unknown mode: ${policy.mode}` }
   }
 
-  return { allowed: true, permittedChannels: permitted, reason: null }
+  return { allowed: true, permittedChannels: policy.enhanced === true && !permitted.includes('provider') ? [...permitted, 'provider'] : permitted, reason: null }
 }

@@ -175,6 +175,36 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
     expect((await storedTask(crawl.taskId ?? crawl.id))?.crawl).toMatchObject({ access: 'standard' })
   })
 
+  it('access enhanced reaches the provider the grant allows in mode standard, from a scrape, /fc proxy stealth and a batch', async () => {
+    const reached: string[] = []
+    const provider: Channel = {
+      id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'),
+      fetch: async (url: string): Promise<FetchResult> => {
+        reached.push(url)
+        return {
+          requestedUrl: url, status: 'success', failureReason: null, blockReason: null, budgetExceeded: null, lane: 'provider', escalations: [],
+          markdown: '# From the provider', links: [], truncated: false, truncatedAt: null, compliance: null,
+          evidence: { finalUrl: url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] },
+          usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 10, requestCount: 1, attemptCount: 1, contentTokens: 3, browserMs: 1, externalCostUsd: 0.01 },
+          trace: [{ at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'fake' } }],
+        }
+      },
+    }
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    // The enhanced set is the provider alone: only a request that chose enhanced, and a governance that permits it in mode standard, reaches it.
+    const asked: string[] = []
+    const { origin, post, engine } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => { asked.push(`${mode}${enhanced === true ? '+enhanced' : ''}`); return enhanced === true ? [provider] : buildChannels(mode, {}) } })
+    expect((await post('/v1/scrape', { url: `${origin}/chrome`, access: 'enhanced' })).body).toMatchObject({ status: 'success', lane: 'provider', channelsTried: ['provider'] })
+    expect((await post('/fc/v1/scrape', { url: `${origin}/chrome`, proxy: 'stealth' })).body).toMatchObject({ success: true })
+    const batch = (await post('/v1/batches', { urls: [`${origin}/chrome`], access: 'enhanced' })).body
+    await finished(() => engine.getBatch(batch.taskId ?? batch.id))
+    expect(reached).toEqual([`${origin}/chrome`, `${origin}/chrome`, `${origin}/chrome`])
+    // Without the choice, mode standard keeps its own rungs.
+    expect((await post('/v1/scrape', { url: `${origin}/chrome` })).body).toMatchObject({ status: 'success', lane: 'http' })
+    expect(asked).toContain('standard+enhanced')
+    expect(reached).toHaveLength(3)
+  })
+
   it('fastMode keeps the http rung alone, reports its verdict, and says what it declined', async () => {
     const { origin, post, engine, browser } = await setup()
     const shell = `${origin}/shell`

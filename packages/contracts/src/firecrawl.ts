@@ -383,7 +383,7 @@ function readShimScrapeOptions(rec: Record<string, unknown>, prefix: string, key
   if (rec.proxy !== undefined) {
     if (rec.proxy === 'basic') mapped.access = 'standard'
     else if (rec.proxy === 'stealth' || rec.proxy === 'auto' || rec.proxy === 'enhanced') mapped.access = 'enhanced'
-    else throw new RequestError(`${prefix}proxy must be one of: basic, stealth, auto`)
+    else throw new RequestError(`${prefix}proxy must be one of: basic, stealth, auto, enhanced`)
   }
   for (const key of SHIM_PAGE_OPTIONS) if (rec[key] !== undefined) mapped[key] = rec[key]
   if (takesActions && rec.actions !== undefined) mapped.actions = rec.actions

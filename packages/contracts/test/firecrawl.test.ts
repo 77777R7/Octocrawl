@@ -390,7 +390,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(parseFirecrawlScrapeRequest({ url, proxy: 'stealth' })).toMatchObject({ access: 'enhanced' })
     expect(parseFirecrawlScrapeRequest({ url, proxy: 'auto' })).toMatchObject({ access: 'enhanced' })
     expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'basic' } })).toMatchObject({ access: 'standard' })
-    expect(() => parseFirecrawlScrapeRequest({ url, proxy: 'residential' })).toThrow('proxy must be one of: basic, stealth, auto')
+    expect(() => parseFirecrawlScrapeRequest({ url, proxy: 'residential' })).toThrow('proxy must be one of: basic, stealth, auto, enhanced')
     expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'enhanced', ignoreRobotsTxt: true } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
     expect((thrown(() => parseFirecrawlScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /scrapeId/.test(d) && /creditsUsed/.test(d))).toBe(true)

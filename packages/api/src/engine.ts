@@ -384,7 +384,7 @@ export interface ApiEngineOptions {
    */
   compatHosts?: readonly string[]
   /** Test seam: override local ladder channels without changing fetch. */
-  channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress) => Channel[]
+  channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
   httpOnly?: boolean
   /** Server-owned acquisition rule; callers cannot disable it per request. */
@@ -768,18 +768,20 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const runningCrawls = new Map<string, CrawlOrchestrator>()
   const createChannels =
     options.channelsFor ??
-    ((mode: 'standard' | 'research' | 'authed', egress?: Egress) => {
+    ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0 })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
   const historiesByMode = new Map<string, MemoryRoutingHistory>()
-  const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress): Channel[] => {
-    const key = egress === undefined ? mode : `${mode}|${egress.id}`
+  const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): Channel[] => {
+    // A request that chose access enhanced gets mode standard's rungs with the provider ones the grant allows: a set of its own.
+    const asEnhanced = enhanced && mode === 'standard'
+    const key = `${egress === undefined ? mode : `${mode}|${egress.id}`}${asEnhanced ? '|enhanced' : ''}`
     const existing = channelsByMode.get(key)
     if (existing !== undefined) return existing
-    const channels = createChannels(mode, egress)
+    const channels = asEnhanced ? createChannels(mode, egress, true) : createChannels(mode, egress)
     channelsByMode.set(key, channels)
     return channels
   }
@@ -803,7 +805,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the identity its response names, the one it reads robots.txt with.
    */
   const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
-    const channels = channelsFor(mode, egress)
+    const channels = channelsFor(mode, egress, page.access === 'enhanced')
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
     // A host the server did not list never sees the compatible rung, in the audit either.
@@ -1293,7 +1295,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -1532,6 +1534,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
     const policy: CrawlPolicy = {
       mode,
+      // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
+      ...(req.access === 'enhanced' ? { enhanced: true } : {}),
       ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
