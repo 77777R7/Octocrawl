@@ -374,7 +374,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     let streaming = false
     // The crawl window's screenshot: started by the robots stage once it allowed the page (startScreenshot is set
     // when the request is eligible), sent on the stream before a result that read the page, dropped otherwise.
-    let screenshot: { pending: Promise<ScreenshotCapture | null>; abort: AbortController; state: 'pending' | 'sent' | 'late' | 'failed' | 'dropped'; startedAt: number; readyAt: number | null } | null = null
+    let screenshot: { pending: Promise<ScreenshotCapture | null>; abort: AbortController; state: 'pending' | 'sent' | 'late' | 'failed' | 'dropped'; startedAt: number; readyAt: number | null; progress: Record<string, number> } | null = null
     let startScreenshot: (() => void) | null = null
     // The browser is launched as the capture starts, so its launch overlaps the robots.txt read; it touches no site
     // until the robots stage allows the page. Closed unused if that stage never allows it.
@@ -422,10 +422,12 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       const account = {
         state: screenshot.state, startedAtMs: Math.round(screenshot.startedAt - started),
         lagMs: screenshot.readyAt === null ? null : Math.round(screenshot.readyAt - resultAt),
+        // The steps done so far, in ms since the capture began: where a late picture had got to.
+        progress: screenshot.progress,
         ...(picture === null ? {} : { timings: picture.timings, blocked: picture.blocked, jpegBytes: picture.jpeg.length }),
       }
       if (owner && body.evaluation !== undefined) body.evaluation.screenshot = account
-      if (!owner && !optedOut(req)) log({ event: 'w2l_screenshot', host: targetHost(submitted), ...account })
+      if (owner || !optedOut(req)) log({ event: 'w2l_screenshot', host: targetHost(submitted), owner, ...account })
     }
     const send: typeof sendJson = (target, status, body, headers) => {
       const outcome = body as PreviewResponse
@@ -496,11 +498,12 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
           browserAhead = null
           const pending = (options.screenshot ?? captureScreenshot)(target.url, {
             signal: controller.signal, budgetMs: SCREENSHOT_BUDGET_MS,
+            onProgress: (step, ms) => { if (screenshot !== null) screenshot.progress[step] = ms },
             ...(ahead === null ? {} : { browser: ahead.then(browser => { if (browser === null) throw new Error('The browser did not launch.'); return browser }) }),
           })
             .then(capture => { if (screenshot !== null) screenshot.readyAt = performance.now(); return capture }, () => null)
             .finally(() => abort.signal.removeEventListener('abort', stop))
-          screenshot = { pending, abort: controller, state: 'pending', startedAt: performance.now(), readyAt: null }
+          screenshot = { pending, abort: controller, state: 'pending', startedAt: performance.now(), readyAt: null, progress: {} }
         }
       }
       // Read-only precheck keeps exhausted anonymous Amazon requests out of

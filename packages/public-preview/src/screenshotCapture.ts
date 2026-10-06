@@ -43,6 +43,8 @@ export interface CaptureOptions {
   budgetMs: number
   /** A browser already launching (launchBrowser), so the launch overlaps whatever came before: used and closed here. */
   browser?: Promise<Browser>
+  /** Told each step as it completes, with the ms since the capture began: what a capture that ran late had done. */
+  onProgress?: (step: 'launched' | 'navigated' | 'loaded' | 'pictured' | 'elements', ms: number) => void
   policy?: NetworkPolicy
   viewport?: { width: number; height: number }
   /** How many viewports tall the picture is at most. */
@@ -127,6 +129,8 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
   const browser = await within('launching the browser', deadline, options.browser ?? launchBrowser(remaining('launching the browser')))
   // With a browser launched earlier this is only the wait for it, which may be nothing.
   const launchMs = Math.round(performance.now() - launchStarted)
+  const progress = (step: Parameters<NonNullable<CaptureOptions['onProgress']>>[0]): void => { try { options.onProgress?.(step, Math.round(performance.now() - started)) } catch { /* advisory */ } }
+  progress('launched')
   const close = (): void => { void browser.close().catch(() => {}) }
   options.signal.addEventListener('abort', close, { once: true })
   try {
@@ -189,9 +193,11 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
       }
     }
     const navigateMs = Math.round(performance.now() - navigateStarted)
+    progress('navigated')
     let loadCapped = false
     await page.waitForLoadState('load', { timeout: Math.min(LOAD_WAIT_MS, remaining('loading the page')) }).catch(() => { loadCapped = true })
     const loadMs = Math.round(performance.now() - navigateStarted)
+    progress('loaded')
     const screenshotStarted = performance.now()
     const pageHeight = await within('measuring the page', deadline, page.evaluate(() => document.documentElement.scrollHeight))
     const height = Math.min(viewport.height * (options.viewports ?? VIEWPORTS), Math.max(viewport.height, pageHeight))
@@ -200,6 +206,7 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
       clip: { x: 0, y: 0, width: viewport.width, height }, timeout: remaining('taking the picture'),
     })
     const screenshotMs = Math.round(performance.now() - screenshotStarted)
+    progress('pictured')
     const elements = await within('finding the elements', deadline, page.evaluate(({ selector, limit, atMost, textAtMost, smallest }) => {
       const found: CaptureElement[] = []
       for (const element of Array.from(document.querySelectorAll(selector))) {
@@ -213,6 +220,7 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
       }
       return found.sort((a, b) => a.y - b.y || a.x - b.x)
     }, { selector: ELEMENTS_SELECTOR, limit: height, atMost: ELEMENTS_AT_MOST, textAtMost: TEXT_AT_MOST, smallest: ELEMENT_SMALLEST_PX }))
+    progress('elements')
     await within('closing the page', deadline, context.close())
     return { finalUrl, jpeg, width: viewport.width, height, elements, blocked, timings: { launchMs, navigateMs, loadMs, loadCapped, screenshotMs, totalMs: Math.round(performance.now() - started) } }
   } finally {
