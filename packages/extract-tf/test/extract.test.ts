@@ -387,6 +387,88 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     expect(out.escalate).toBe(false)
   })
 
+  describe('a small product page whose options are controls', () => {
+    // webscraper.io's test shop: a microdata product with a price, a name, a
+    // one-line description, HDD sizes as swatch buttons, and 2 KB of inline
+    // script for its widgets. Everything it shows is in the server HTML.
+    const SCRIPT = `<script>${'window.dataLayer = window.dataLayer || []; '.repeat(55)}</script>`
+    const product = (options: string) => `<!doctype html><html><head><title>Asus VivoBook</title></head><body>
+<nav class="navbar"><a href="/">Web Scraper</a> <a href="/cloud">Cloud</a> <a href="/pricing">Pricing</a></nav>
+<main><div class="card thumbnail" itemscope itemtype="https://schema.org/Product"><div class="caption">
+<h4 class="price" itemprop="offers" itemscope itemtype="https://schema.org/Offer"><span itemprop="price">$295.99</span><meta itemprop="priceCurrency" content="USD"></h4>
+<h4 class="title" itemprop="name">Asus VivoBook X441NA-GA190</h4>
+<p class="description" itemprop="description">Asus VivoBook X441NA-GA190 Chocolate Black, 14", Celeron N3450, 4GB, 128GB SSD, Endless OS</p></div>
+${options}
+<p class="review-count"><span itemprop="reviewCount">14</span> reviews</p></div></main>${SCRIPT}</body></html>`
+    const swatches = '<label class="memory">HDD:</label><div class="swatches"><button type="button" class="btn swatch active" value="128">128</button><button type="button" class="btn swatch" value="256">256</button><button type="button" class="btn swatch" value="512">512</button><button type="button" class="btn swatch disabled" value="1024">1024</button></div>'
+
+    it('keeps the option values a product shows as buttons', () => {
+      const out = extractTf.extract(product(swatches))
+      expect(out.pageType).toBe('product')
+      expect(htmlToMarkdown(out.mainHtml)).toContain('128, 256, 512, 1024')
+      expect(out.mainHtml).not.toContain('<button')
+    })
+
+    // WooCommerce's variation form: the picker is a table inside the add-to-cart form.
+    const cartForm = (cells: string) => `<form class="variations_form cart" action="/cart/"><table class="variations"><tr><th class="label">${cells.split('|')[0]}</th><td class="value">${cells.split('|')[1]}</td></tr></table><button type="submit">Add to cart</button></form>`
+
+    it('keeps the choices of a select, without its placeholder', () => {
+      const select = cartForm('<label for="size">Size</label>|<select id="size" name="attribute_size"><option value="">Choose an option</option><option value="S">S</option><option value="M">M</option><option value="L">L</option></select>')
+      const out = extractTf.extract(product(select))
+      expect(htmlToMarkdown(out.mainHtml)).toContain('S, M, L')
+      expect(out.mainHtml).not.toContain('Choose an option')
+    })
+
+    it('leaves a quantity picker out, and keeps a link after a select apart from its values', () => {
+      const quantity = cartForm('<label for="qty">Quantity</label>|<select id="qty" name="quantity">' + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('') + '</select>')
+      expect(htmlToMarkdown(extractTf.extract(product(quantity)).mainHtml)).not.toContain('1, 2, 3')
+      const padded = cartForm('<label for="qty">Qty</label>|<select id="qty" name="qty">' + Array.from({ length: 10 }, (_, i) => `<option>${String(i + 1).padStart(2, '0')}</option>`).join('') + '</select>')
+      expect(htmlToMarkdown(extractTf.extract(product(padded)).mainHtml)).not.toContain('01, 02, 03')
+      // Named for nothing but its place in the add-to-cart form.
+      const colour = cartForm('<label for="color">Color</label>|<select id="color" name="pa_colour"><option value="">Choose an option</option><option value="blue">Blue</option><option value="red">Red</option></select><a class="reset_variations" href="#">Clear</a>')
+      expect(htmlToMarkdown(extractTf.extract(product(colour)).mainHtml)).toContain('Blue, Red [Clear](#)')
+    })
+
+    it('leaves a product page\'s other labelled controls out: review sorting, dates, a player\'s settings', () => {
+      // Amazon's product pages carry a gift-date picker and a video player's caption settings; any shop, a review sort.
+      const others = [
+        '<section class="reviews"><h2>Reviews</h2><label for="sort">Sort by</label><select id="sort"><option>Most recent</option><option>Highest rated</option><option>Lowest rated</option></select></section>',
+        '<div class="delivery"><select id="onlineMonth" aria-label="Select Month">' + Array.from({ length: 12 }, (_, i) => `<option>${String(i + 1).padStart(2, '0')}</option>`).join('') + '</select></div>',
+        '<div role="dialog" class="captions"><label for="fg">Color</label><select id="fg"><option>White</option><option>Black</option><option>Red</option></select></div>',
+        '<section class="reviews"><label>Filter:</label><div class="review-filters"><button type="button">All stars</button><button type="button">5 stars</button><button type="button">4 stars</button></div></section>',
+      ]
+      for (const other of others) {
+        const markdown = htmlToMarkdown(extractTf.extract(product(swatches + other)).mainHtml)
+        expect(markdown).toContain('128, 256, 512, 1024')
+        for (const noise of ['Most recent, Highest rated', '01, 02, 03', 'White, Black, Red', 'All stars, 5 stars']) expect(markdown).not.toContain(noise)
+      }
+    })
+
+    it('leaves a product page\'s unlabelled buttons out', () => {
+      const out = extractTf.extract(product('<div class="actions"><button type="button">Add to cart</button><button type="button">Buy now</button></div>'))
+      expect(out.mainHtml).not.toContain('Add to cart')
+    })
+
+    it('does not read the page for a shell: its declared product is what it shows', () => {
+      const out = extractTf.extract(product(swatches))
+      expect(out.render).toMatchObject({ clientRendered: false, reason: null })
+    })
+
+    it('leaves controls out of a page that is not a product page', () => {
+      const prose = Array.from({ length: 4 }, (_, i) => `<p>Paragraph ${i + 1}: the survey covers forty villages and three hundred households in the upper valley over two winters.</p>`).join('')
+      const out = extractTf.extract(`<!doctype html><html><body><article><h1>Survey</h1>${prose}<label>Sort:</label><div class="sort"><button>Newest</button><button>Oldest</button></div><select><option>English</option><option>Deutsch</option></select></article></body></html>`)
+      expect(out.pageType).toBe('article')
+      expect(out.mainHtml).not.toContain('Newest')
+      expect(out.mainHtml).not.toContain('Deutsch')
+    })
+
+    it('still reads a product page with nothing of its product shown for a shell', () => {
+      // The product is declared, but its name and price are not in what was extracted: scripts draw them.
+      const html = `<!doctype html><html><head><title>Item</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Cobalt teapot","offers":{"@type":"Offer","price":"84.00","priceCurrency":"USD"}}</script></head><body><main><h1>Our shop</h1><p>Please wait while we load the details of this item for you.</p></main>${SCRIPT}</body></html>`
+      expect(extractTf.extract(html).render).toMatchObject({ clientRendered: true, reason: 'script_shell' })
+    })
+  })
+
   it('still escalates a script shell and flags it as client-rendered', () => {
     const html = `<!doctype html><html><body><div id="root">Loading…</div><script>${'x'.repeat(3_000)}</script></body></html>`
     const out = extractTf.extract(html)

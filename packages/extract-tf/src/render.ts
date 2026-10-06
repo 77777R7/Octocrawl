@@ -213,6 +213,12 @@ export interface RenderContext {
   /** The page shows every passage of text its hydration JSON holds (hydrationShown). */
   hydrationShown?: boolean
   /**
+   * The extracted region shows the product the page declares in its own
+   * markup (see extract.ts): a page of little text beside its scripts is then
+   * a small page, not a shell.
+   */
+  contentShown?: boolean
+  /**
    * The page was routed as a listing or collection: only there is a
    * hydration list that outnumbers the shown records the page's content.
    */
@@ -253,7 +259,7 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, co
   let reason: RenderReason | null = null
   if (emptyTables > 0 && raw.scriptChars >= 1_000) reason = 'empty_table_with_scripts'
   else if (has('app_root_empty') && raw.scriptChars >= 500) reason = 'empty_app_root'
-  else if (textChars < 300 && raw.scriptChars >= 2_000) reason = 'script_shell'
+  else if (textChars < 300 && raw.scriptChars >= 2_000 && context.contentShown !== true) reason = 'script_shell'
   else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
   else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
   // A product page that shows its buy box and description, and all its

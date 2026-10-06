@@ -337,6 +337,91 @@ export function fillPriceFromText(facts: ProductFacts, doc: Document): void {
  * Both passes at once, for callers holding a single document. Prefer the
  * split form inside the cascade, where pruning happens in between.
  */
+/**
+ * Whether a control group is labelled: a <label> right before it or around
+ * it, one naming it by id, or an aria-label or option role of its own. A
+ * product's options are named ("HDD:", "Size"); a cart's buttons are not.
+ */
+function isLabelled(el: Element, doc: Document): boolean {
+  if (el.previousElementSibling !== null && tagOf(el.previousElementSibling) === 'label') return true
+  if (el.closest('label') !== null || (el.getAttribute('aria-label') ?? '').trim() !== '') return true
+  if (['radiogroup', 'listbox'].includes((el.getAttribute('role') ?? '').toLowerCase())) return true
+  const id = el.getAttribute('id')
+  return id !== null && id !== '' && qsa(doc, 'label[for]').some((label) => label.getAttribute('for') === id)
+}
+
+/** Words in a form's action, id or class that make it the add-to-cart form. */
+const CART_FORM = /cart|basket|bag/i
+/** Words in a control's or its container's name, id or class that name a product option. */
+const OPTION_NAME = /swatch|variant|variation|attribute/i
+
+/**
+ * Whether a control group is one of the product's options, not some other
+ * labelled control on its page (a review sort, a gift-date picker, a video
+ * player's settings): it sits in the add-to-cart form, or it or its
+ * container is named for a variant, a variation, an attribute or a swatch.
+ */
+function isProductOption(el: Element): boolean {
+  const form = el.closest('form')
+  if (form !== null && CART_FORM.test(`${form.getAttribute('action') ?? ''} ${form.getAttribute('id') ?? ''} ${form.getAttribute('class') ?? ''}`)) return true
+  return [el, el.parentElement, ...Array.from(el.children)].some((node) =>
+    node !== null && OPTION_NAME.test(`${node.getAttribute('name') ?? ''} ${node.getAttribute('id') ?? ''} ${node.getAttribute('class') ?? ''}`))
+}
+
+/**
+ * A product's options shown as controls, which cleaning removes with every
+ * other control: each labelled <select>, and each labelled element whose
+ * children are two or more buttons (swatches), that is one of the product's
+ * options (isProductOption). Each is replaced by an empty
+ * placeholder, returned with the option values it stands for: a select's
+ * choices without its empty-valued prompt, the buttons' texts. Run before
+ * cleanTree; settleOptionGroups decides once the page is routed. A quantity
+ * picker, whose choices count up from 0 or 1 ("01" too), is not an option group.
+ */
+export function markOptionGroups(doc: Document, excluded: ReadonlySet<Element> = new Set()): Map<Element, string> {
+  const marked = new Map<Element, string>()
+  const outside = (el: Element) => ![...excluded].some((ex) => ex.contains(el))
+  const place = (replaced: Element, values: string[]): void => {
+    const unique = [...new Set(values.map((v) => v.replace(/\s+/g, ' ').trim()).filter((v) => v !== ''))]
+    if (unique.length < 2) return
+    const placeholder = doc.createElement('span')
+    replaced.parentNode?.insertBefore(placeholder, replaced)
+    marked.set(placeholder, unique.join(', '))
+  }
+  for (const select of qsa(doc, 'select')) {
+    if (!outside(select) || !isLabelled(select, doc) || !isProductOption(select)) continue
+    const choices = qsa(select, 'option').filter((option) => option.getAttribute('value') !== '').map((option) => textOf(option).trim())
+    // A quantity picker (1, 2, 3, …) is how many to buy, not one of the product's options.
+    const counts = choices.every((choice, at) => /^\d+$/.test(choice) && Number(choice) === Number(choices[0]) + at) && [0, 1].includes(Number(choices[0]))
+    if (!counts) place(select, choices)
+  }
+  for (const group of qsa(doc, 'div,span,ul,fieldset,p')) {
+    const kids = Array.from(group.children)
+    if (kids.length < 2 || !kids.every((kid) => tagOf(kid) === 'button' && (kid.getAttribute('type') ?? '').toLowerCase() !== 'submit')) continue
+    if (!outside(group) || !isLabelled(group, doc) || !isProductOption(group)) continue
+    place(kids[0]!, kids.map((kid) => textOf(kid)))
+  }
+  return marked
+}
+
+/**
+ * Settle markOptionGroups' placeholders: on a product page each becomes its
+ * values as text ("128, 256, 512"), on any other page it is removed.
+ */
+/** The text settleOptionGroups wrote: a product's option values, which describe it no more than their labels do. */
+const optionValues = new WeakSet<Node>()
+
+export function settleOptionGroups(marked: ReadonlyMap<Element, string>, keep: boolean): void {
+  for (const [placeholder, values] of marked) {
+    if (keep && placeholder.parentNode !== null) {
+      // Spaced, so the values stand apart from a link or label beside them.
+      const text = placeholder.ownerDocument.createTextNode(` ${values} `)
+      optionValues.add(text)
+      placeholder.parentNode.replaceChild(text, placeholder)
+    } else placeholder.parentNode?.removeChild(placeholder)
+  }
+}
+
 export function collectProductFacts(doc: Document): ProductFacts {
   const facts = collectDeclaredProductFacts(doc)
   fillPriceFromText(facts, doc)
@@ -372,13 +457,14 @@ function isRootish(doc: Document, el: Element | null): boolean {
  */
 /**
  * Whether a block says something of its own, not only the labels of form
- * controls: a variation picker's table cells ("Size", "Color") label the
- * selects that cleaning removed, and describe nothing.
+ * controls, the option values settleOptionGroups wrote for them and links: a
+ * variation picker's table cells ("Size", "Color", "XS, S, M", its "Clear"
+ * link) describe nothing.
  */
 function describes(block: TextBlock): boolean {
   const unlabelled = (node: Node): string => {
-    if (node.nodeType === 3) return node.textContent ?? ''
-    if (node.nodeType !== 1 || tagOf(node as Element) === 'label') return ''
+    if (node.nodeType === 3) return optionValues.has(node) ? '' : node.textContent ?? ''
+    if (node.nodeType !== 1 || tagOf(node as Element) === 'label' || tagOf(node as Element) === 'a') return ''
     return Array.from(node.childNodes).map(unlabelled).join('')
   }
   return /[\p{L}\p{N}]/u.test(unlabelled(block.el))

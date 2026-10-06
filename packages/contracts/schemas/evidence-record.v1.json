@@ -99,6 +99,10 @@
         { "$ref": "#/$defs/pageActions" },
         { "type": "null" }
       ]
+    },
+    "access": {
+      "description": "How the result was reached: the route, the client that sent its requests and the third-party spend of the run, read from the result's own trace (ADR 0005). Added to v1 with enhanced access: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "$ref": "#/$defs/access"
     }
   },
   "allOf": [
@@ -332,6 +336,34 @@
         "valueSha256": {
           "description": "SHA-256 (hex) of the UTF-8 bytes of the value as sent.",
           "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route", "executor", "executorVersion", "profile", "externalCostUsd"],
+      "properties": {
+        "route": {
+          "description": "The route that produced the result: http (W2L's HTTP client), http_compat (the browser-compatible HTTP transport, compatible_transport), browser (the local headless browser), enhanced_browser (the local browser on Patchright, enhanced_browser), authed_browser (the local browser with the user's saved login), user_browser (the person's own browser, after a handoff) or vendor (a third-party browser service). Null when no lane produced the result: the ladder's own answer for a rung the deadline cut, that failed or whose identity was refused, or a cache-only request that found nothing; nothing then says which client ran.",
+          "enum": ["http", "http_compat", "browser", "enhanced_browser", "authed_browser", "user_browser", "vendor", null]
+        },
+        "executor": {
+          "description": "The client that sent the requests: undici, impit, playwright, patchright, the person's browser as it named itself, or the vendor's id. Null when the result does not say (a vendor result without its vendor).",
+          "type": ["string", "null"]
+        },
+        "executorVersion": {
+          "description": "The executor's version as the lane reported it; null when it reported none.",
+          "type": ["string", "null"]
+        },
+        "profile": {
+          "description": "The browser profile the HTTP transport sent (impit's, for example chrome142); null on every other route. Its header set is in identity; its TLS fingerprint was not observed.",
+          "type": ["string", "null"]
+        },
+        "externalCostUsd": {
+          "description": "Third-party spend, in USD, of the run that produced the result (for a cache hit, of the fetch it reuses): 0 when no paid service was called, null when a called service stated no price. The egress (a person's own proxy) is not counted.",
+          "type": ["number", "null"],
+          "minimum": 0
         }
       }
     }

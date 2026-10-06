@@ -1254,7 +1254,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
       const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
       // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
-      const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read }]) }
+      const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read, ordinal: run.summary.attempts.length + 1 }]) }
       const full: ScrapeRun = {
         ...result,
         // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
