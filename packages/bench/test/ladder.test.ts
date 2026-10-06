@@ -377,6 +377,20 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
   })
 
+  it('numbers each attempt and says when its rung was asked and answered, and which vendor a provider rung was', async () => {
+    const url = 'https://example.com/p'
+    const browser = channel('browser_local', [{ ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }])
+    const vendor = { ...channel('provider', [contentfulResult(url, 'browser_local')]), vendorId: 'steel' }
+    const run = await new LadderRunner([channel('http', [thinHttpSuccess(url)]), browser, vendor], { mode: 'research' }).run(url)
+    const attempts = run.summary.attempts
+    expect(attempts.map((a) => [a.channel, a.ordinal, a.vendorId])).toEqual([['http', 1, undefined], ['browser_local', 2, undefined]])
+    for (const a of attempts) expect(Date.parse(a.endedAt!)).toBeGreaterThanOrEqual(Date.parse(a.startedAt!))
+    expect(Date.parse(attempts[1]!.startedAt!)).toBeGreaterThanOrEqual(Date.parse(attempts[0]!.endedAt!))
+    const failing = channel('browser_local', [{ ...contentfulResult(url, 'browser_local'), status: 'blocked', blockReason: 'bot_detected_generic', markdown: null }])
+    const viaVendor = await new LadderRunner([failing, vendor], { mode: 'research' }).run(url)
+    expect(viaVendor.summary.attempts.at(-1)).toMatchObject({ channel: 'provider', ordinal: 2, vendorId: 'steel' })
+  })
+
   it('offers a thin answer of the compatible http rung to the browser too, and leaves out a rung that does not serve the URL', async () => {
     const url = 'https://example.com/p'
     const compat = channel('http_compat', [thinHttpSuccess(url)])

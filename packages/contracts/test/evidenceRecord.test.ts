@@ -7,6 +7,7 @@ import {
   EVIDENCE_RECORD_ADDED_KEYS,
   EVIDENCE_RECORD_KEYS,
   EVIDENCE_SCHEMA_VERSION,
+  ACCESS_ROUTES,
   FAILURE_REASON,
   FIELD_EVIDENCE_SOURCES,
   LANE,
@@ -45,7 +46,7 @@ describe('Evidence Record v1 schema file', () => {
   it('has exactly the type\'s nested objects; a key added to v1 later is optional, every other one required', () => {
     const { record: _record, ...nested } = EVIDENCE_RECORD_KEYS
     expect(Object.keys(schema.$defs).filter(name => name !== 'sha256').sort()).toEqual(Object.keys(nested).sort())
-    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'] })
+    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'] })
     for (const [name, keys] of Object.entries(nested)) {
       const def = schema.$defs[name]!
       const added: readonly string[] = EVIDENCE_RECORD_ADDED_KEYS[name as keyof typeof EVIDENCE_RECORD_KEYS] ?? []
@@ -67,6 +68,7 @@ describe('Evidence Record v1 schema file', () => {
     expect(d.artifact!.properties.kind!.enum).toEqual([...EVIDENCE_ARTIFACT_KINDS, null])
     expect(d.robotsDecision!.properties.decision!.enum).toEqual(['allowed', 'disallowed', 'no_robots'])
     expect(d.robotsDecision!.properties.unreachable!.enum).toEqual(['server_error', 'network_error', 'timeout', null])
+    expect(d.access!.properties.route!.enum).toEqual([...ACCESS_ROUTES, null])
   })
 })
 

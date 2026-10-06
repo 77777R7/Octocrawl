@@ -270,8 +270,6 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
     }
-    // Which client sent the request, when it is not the lane's own: what the record's identity was sent with.
-    if (this.compat !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'transport', detail: { library: COMPAT_LIBRARY.name, version: COMPAT_LIBRARY.version, profile: this.compat.profile } })
     // What the caller added is on the record, values included.
     const customHeaders = Object.entries(prepared.customHeaders).map(([name, value]) => ({ name, value }))
     if (customHeaders.length > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'request_headers_added', detail: { headers: customHeaders } })
@@ -357,6 +355,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (signal?.aborted) return timedDenied('timeout')
     const host = new URL(url).origin
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
+    // Which client sends the page's requests, when it is not the lane's own; said here, after robots.txt (which undici reads), as it goes out.
+    if (this.compat !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'transport', detail: { library: COMPAT_LIBRARY.name, version: COMPAT_LIBRARY.version, profile: this.compat.profile } })
     const transportStart = performance.now()
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     // The coding the compatible transport decoded on the latest response; the lane never sees its header.
