@@ -1,6 +1,6 @@
 # Monitor a document and deliver an event
 
-The local MCP service can watch a public documentation page, keep its baseline and run history in SQLite, and send an event to a separately managed HTTPS receiver. This guide uses the tested `firecrawl-introduction` preset. It is a **local operator workflow**, not a hosted service for friends yet.
+The local MCP service can watch a public documentation page, keep its baseline and run history in SQLite, and send an event to a separately managed HTTPS receiver. This guide uses the tested `firecrawl-introduction` preset. It runs on your own computer from a repository checkout; a hosted Monitor is a later phase of the roadmap.
 
 ## Input
 
