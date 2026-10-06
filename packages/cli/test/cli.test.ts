@@ -33,6 +33,8 @@ describe('flags', () => {
   it('takes --lane my-browser on a scrape', () => {
     expect(parseCommandLine('scrape', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
     expect(usage('scrape')).toContain('--lane my-browser')
+    expect(parseCommandLine('batch', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
+    expect(usage('batch')).toContain('--lane my-browser')
   })
 
   it('reads booleans, integers, lists, repeated patterns, formats, parsers and headers into the API body', () => {

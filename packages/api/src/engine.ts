@@ -1013,8 +1013,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   }
 
   /** A scrape's `lane: "my-browser"` is offered here, and asks for what a page read in the person's Chrome can give. */
-  function checkMyBrowser(req: ScrapeRequest): void {
+  function checkMyBrowser(req: ScrapeRequest | ParsedBatchStartRequest): void {
     if (req.lane !== 'my-browser') return
+    if ('urls' in req && req.maxConcurrency !== undefined && req.maxConcurrency > 1) throw new RequestError('lane my-browser reads one page at a time, in your Chrome: maxConcurrency above 1 does not apply', 'unsupported_parameter', { parameters: ['lane', 'maxConcurrency'] })
     if (userChrome === null) throw new RequestError('lane my-browser: this server does not read pages in your Chrome; run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['lane'] })
     const unread = unreadByPerson(fetchOptions(req, req.formats))
     if (unread !== null) throw new RequestError(`lane my-browser: the request asks for ${unread}, which the my-browser lane does not give yet`, 'unsupported_parameter', { parameters: ['lane'] })
@@ -1042,32 +1043,84 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       let allowed: AllowedSites
       try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal }) }
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
-      const fetchOpts = fetchOptions(req, req.formats)
       try {
-        const read = await chrome.read(req.url, {
-          unattended: true,
-          allowedHosts: allowed.hosts,
-          ...(req.handoff?.waitMs === undefined ? {} : { waitMs: req.handoff.waitMs }),
-          ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
-          ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
-          signal: AbortSignal.any([signal, allowed.signal]),
-          ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }),
-          ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }),
-          ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }),
-        })
-        return pageFromUserBrowser(read, null, fetchOpts)
-      } catch (error) {
-        if (!(error instanceof HandoffNotThrough)) throw error
-        const wallMs = Date.now() - started
-        if (allowed.signal.aborted) return unreadInUserBrowser(req.url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${req.url} was read`, wallMs)
-        if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(req.url, { status: 'cancelled' }, error.message, wallMs)
-        const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
-        return unreadInUserBrowser(req.url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
+        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started)
       } finally {
         await allowed.close()
       }
     } finally {
       chrome.close()
+    }
+  }
+
+  /**
+   * One page read in the person's Chrome on a site they allowed (`allowed`), without a click of theirs; a check it
+   * shows waits for them. The page, or why it was not read: revoked, its tab closed or the caller gone (`cancelled`),
+   * the check it still showed (`blocked`), or the wait over (`timeout`).
+   */
+  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
+    try {
+      const read = await chrome.read(url, {
+        unattended: true,
+        allowedHosts: allowed.hosts,
+        ...(waitMs === undefined ? {} : { waitMs }),
+        ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
+        ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
+        signal: AbortSignal.any([signal, allowed.signal]),
+        ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }),
+        ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }),
+        ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }),
+      })
+      return pageFromUserBrowser(read, null, fetchOpts)
+    } catch (error) {
+      if (!(error instanceof HandoffNotThrough)) throw error
+      const wallMs = Date.now() - started
+      if (allowed.signal.aborted) return unreadInUserBrowser(url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${url} was read`, wallMs)
+      if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(url, { status: 'cancelled' }, error.message, wallMs)
+      const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
+      return unreadInUserBrowser(url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
+    }
+  }
+
+  /**
+   * A batch's pages on the my-browser lane, one at a time: one Chrome connection for the run, the person asked once,
+   * in the page Octocrawl opens there, to allow every site of the batch (host and port). A page on a site not among
+   * them is not read; nor is any after they revoked the sites, or when Chrome was not reached or the sites not
+   * allowed. A run resumed later (a restart, a pause) asks again. Nothing is cached.
+   */
+  function myBrowserBatchReader(urls: readonly string[], taskId: string, fetchOpts: FetchOptions): { scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome>; close(): Promise<void> } {
+    const hosts = [...new Set(urls.map((url) => new URL(url).host))]
+    type Opened = { chrome: UserChrome; allowed: AllowedSites } | { refused: string; status: 'cancelled' | 'connection_error' }
+    let opened: Promise<Opened> | null = null
+    const signal = AbortSignal.any([shutdownController.signal, handoffClosing.signal])
+    const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
+      if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
+      let chrome: UserChrome
+      try { chrome = await openUserChrome(userChrome, signal) }
+      catch (error) { return { refused: error instanceof Error ? error.message : String(error), status: 'connection_error' } }
+      try { return { chrome, allowed: await chrome.allow({ hosts, task: `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}` }, { signal }) } }
+      catch (error) { chrome.close(); return { refused: error instanceof Error ? error.message : String(error), status: 'cancelled' } }
+    })()
+    const unread = (url: string, status: 'cancelled' | 'connection_error', message: string, started: number): ScrapeOutcome =>
+      ({ result: unreadInUserBrowser(url, status === 'cancelled' ? { status } : { status: 'failed', failureReason: status }, message, Date.now() - started), links: [] })
+    return {
+      async scrape(url, context) {
+        const started = Date.now()
+        const connection = await open()
+        if ('refused' in connection) return unread(url, connection.status, connection.refused, started)
+        if (connection.allowed.signal.aborted) return unread(url, 'cancelled', `you revoked the sites in Chrome before ${url} was read`, started)
+        if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
+        // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
+        const read = await readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started)
+        return { result: read, links: read.links ?? [] }
+      },
+      async close() {
+        if (opened === null) return
+        const connection = await opened
+        if ('refused' in connection) return
+        await connection.allowed.close()
+        connection.chrome.close()
+      },
     }
   }
 
@@ -1188,7 +1241,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // The task's egress (W2L_EGRESS_PROXIES), kept in its directory so a resumed task goes on through it while it is in the
     // pool and not cooling down. Mode authed's saved login keeps its own route: it never takes one.
     const egressFile = join(task.taskDir, EGRESS_FILE)
-    const firstEgress = egressPool === null || mode === 'authed' ? undefined : bindTaskEgress(egressPool, egressFile)
+    // A batch on the my-browser lane reads its pages in the person's Chrome: no egress, no ladder, no cache.
+    const myBrowser = task.batch?.lane === 'my-browser' ? myBrowserBatchReader(task.batch.urls, task.id, fetchOptions(task.batch, task.batch.formats)) : null
+    const firstEgress = egressPool === null || mode === 'authed' || myBrowser !== null ? undefined : bindTaskEgress(egressPool, egressFile)
     let switches = 0
     /** Everything a page goes out with, replaced as one on a switch: a page takes the lane whole when it starts. */
     type Lane = { egress: Egress | undefined; rungs: ReturnType<typeof channelsForUrl>; ladder: LadderScrapeAtom; cookieSession: TaskCookieSession | undefined }
@@ -1237,7 +1292,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     removeCookieSessions(task.taskDir, cookieSessionFileFor(task.taskDir, routeOf(firstEgress)))
     let current = laneFor(firstEgress)
     lanes.push(current)
-    const closeLadders = async (): Promise<void> => { await Promise.all(lanes.map((lane) => lane.ladder.close())) }
+    const closeLadders = async (): Promise<void> => { await Promise.all(lanes.map((lane) => lane.ladder.close())); await myBrowser?.close() }
     const pageAtom: ScrapeAtom = selection === undefined ? { scrape: (url, context) => { const lane = current; return lane.ladder.scrape(url, lane.cookieSession === undefined ? context : { ...context, cookieSession: lane.cookieSession }) }, close: closeLadders } : {
       async scrape(url, context) {
         const lane = current
@@ -1248,12 +1303,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const custom = customJsonFormat(formats)
         const cachePlan = cachePlanFor(url, mode, selection, selection.formats, lane.rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
         // A page fetched with the session's cookies neither reuses an anonymous one nor is stored; a lockdown request fetches nothing, so its cache-only answer stands.
-        const plan = lane.cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
+        const plan = myBrowser !== null ? null : lane.cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
           const outcome: ScrapeOutcome = answer.kind === 'fetch'
-            ? await lane.ladder.scrape(url, page).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+            ? await (myBrowser !== null ? myBrowser.scrape(url, context) : lane.ladder.scrape(url, page)).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
             : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
@@ -1732,6 +1787,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkListSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
+      checkMyBrowser(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       batchStartInProgress = true
       try {
@@ -1756,6 +1812,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
         ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
+        ...(req.lane === undefined ? {} : { lane: req.lane }),
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
@@ -2314,8 +2371,9 @@ const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParam
  * still gets its own robots.txt, SSRF and identity checks, and the mode's
  * channel set is unchanged.
  */
-function batchRunOptions(batch: Pick<NonNullable<Task['batch']>, 'urls' | 'maxConcurrency'>, resume: boolean): TaskRunOptions {
-  return { maxDepth: 0, allowlistedDomains: [], useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: batch.maxConcurrency ?? null, policyAllowlist: [] }
+function batchRunOptions(batch: Pick<NonNullable<Task['batch']>, 'urls' | 'maxConcurrency' | 'lane'>, resume: boolean): TaskRunOptions {
+  // The my-browser lane reads one page at a time, in the person's Chrome.
+  return { maxDepth: 0, allowlistedDomains: [], useCached: false, resume, scope: BATCH_SCOPE, sitemap: 'skip', maxConcurrency: batch.lane === 'my-browser' ? 1 : batch.maxConcurrency ?? null, policyAllowlist: [] }
 }
 
 /**

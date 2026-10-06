@@ -560,6 +560,14 @@ export interface ActiveCrawlList {
 export interface BatchStartRequest extends PageOptions, RequestAttribution {
   urls: readonly string[]
   mode?: ApiCrawlMode
+  /**
+   * `my-browser`: read every page in the person's own Chrome, one at a time, as a scrape's `lane` does. The person
+   * allows the connection in Chrome, then all the batch's sites (host and port) in the page W2L opens there, once for
+   * the run; a site not among them is not read. A resumed run asks again. Offered only by a server on the person's own
+   * machine; refused elsewhere, with `actions`, a screenshot, lockdown, a mode other than standard, `maxConcurrency`
+   * above 1 or a webhook (`unsupported_parameter`).
+   */
+  lane?: 'my-browser'
   formats?: readonly ScrapeFormat[]
   includeLinks?: boolean
   /** Recorded robots overrides, each for one URL of `urls`. A hosted server refuses the field (`unsupported_parameter`). */
@@ -941,7 +949,7 @@ export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'ded
 export const CRAWL_KEYS = ['url', 'mode', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'lane', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -2067,6 +2075,8 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const mode = readMode(rec.mode)
   // Pages read with the person's session stay with the caller: a webhook would send them to another address.
   if (mode === 'authed' && webhook !== undefined) throw new RequestError("webhook is not available in mode 'authed': pages read with your session are not sent to another address; read them from the batch")
+  if (rec.lane !== undefined && !(REQUEST_LANES as readonly unknown[]).includes(rec.lane)) throw new RequestError(`lane must be one of: ${REQUEST_LANES.join(', ')}`)
+  if (rec.lane !== undefined && webhook !== undefined) throw new RequestError('webhook is not available on lane my-browser: pages read in your own Chrome are not sent to another address; read them from the batch', 'unsupported_parameter', { parameters: ['lane', 'webhook'] })
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const req: ParsedBatchStartRequest = {
@@ -2081,6 +2091,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(appendToId === undefined ? {} : { appendToId }),
     ...(webhook === undefined ? {} : { webhook }),
+    ...(rec.lane === undefined ? {} : { lane: rec.lane as 'my-browser' }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)

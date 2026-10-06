@@ -88,7 +88,7 @@ export interface Task {
    * place, pushing to the end in order: the orchestrator seeds the tail past
    * what it has seeded, by index, and never a URL twice.
    */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook } & PageOptions
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook; lane?: 'my-browser' } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
