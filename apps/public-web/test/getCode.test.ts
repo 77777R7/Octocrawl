@@ -30,7 +30,8 @@ describe('Get code', () => {
 
   it('writes a curl command whose body survives a URL with a quote in it', () => {
     const snippet = restSnippet(request({ url: `https://docs.example/it's` }))
-    expect(snippet).toContain('curl -sS -X POST http://127.0.0.1:8787/v1/scrape')
+    expect(snippet).toContain('curl -sS -X POST https://api.octocrawl.dev/v1/scrape')
+    expect(snippet).toContain('npx octocrawl serve')
     expect(snippet).toContain(`'\\''`)
     const quoted = snippet.split('-d ')[1]!
     // Undo the shell quoting and read the JSON back.

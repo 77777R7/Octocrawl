@@ -5,7 +5,7 @@ import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
-import { API_SERVER, fieldsSchema, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
+import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -123,7 +123,7 @@ const QUOTA_NOTE = quotaNote.textContent ?? ''
 const waitlist = mountWaitlist()
 /** After the daily previews run out: a link to the hosted early-access form. */
 function waitlistLink(className: string): HTMLAnchorElement {
-  const link = textElement('a', 'Get early access to hosted ↓', className)
+  const link = textElement('a', 'Ask for a hosted key ↓', className)
   link.href = '#waitlist'
   link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
   return link
@@ -344,7 +344,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run Octocrawl on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, connect your agent to mcp.octocrawl.dev or call api.octocrawl.dev (keyless within a daily allowance; a key for more), or run Octocrawl on your own computer with no limit.'],
   })[result.status]
 }
 
@@ -1274,9 +1274,9 @@ let codeTexts: Record<CodeTab, string> = { curl: '', mcp: '', prompt: '' }
 
 /** What to start before the listing, as a prompt line: plain words with the commands in code. */
 function codeStepFor(tab: CodeTab): Array<string | [string]> {
-  if (tab === 'curl') return ['Start the local API with ', [API_SERVER], ', then run this in another terminal:']
-  if (tab === 'mcp') return ['Start ', [API_SERVER], ', add ', [MCP_SERVER], ' to your client, then call the tool:']
-  return ['Start ', [API_SERVER], ', add ', [MCP_SERVER], ' to your client, then ask:']
+  if (tab === 'curl') return ['Hosted, no key needed within the daily allowance; or on your computer after ', [API_SERVER], ':']
+  if (tab === 'mcp') return ['Add ', [HOSTED_MCP], ' to your client (or ', [MCP_SERVER], ' after ', [API_SERVER], '), then call the tool:']
+  return ['Add ', [HOSTED_MCP], ' to your client (or ', [MCP_SERVER], ' after ', [API_SERVER], '), then ask:']
 }
 
 /** Show one listing. Each line is printed in turn (the styles stagger them by --i), so a tab reads as typed. */

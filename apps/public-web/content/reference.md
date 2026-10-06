@@ -103,7 +103,7 @@ MCP tool errors start with the same code, for example `unsupported_format: POST 
 
 `npx octocrawl serve` runs the API on `127.0.0.1:8787` for the computer it runs on. `octocrawl serve --hosted --token <token>` serves other machines behind a bearer token: private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks are refused in that mode. The repository's managed local service adds the Monitor scheduler and delivery worker with SQLite state; keep its task directory across restarts. The anonymous page preview on this site is a separate request-based service and runs no persistent Monitor or Delivery tasks.
 
-A hosted API and a remote MCP URL run by Octocrawl are being built (the roadmap's PH phase). Until they are announced on this site there is no public Octocrawl URL to point a client at, and `127.0.0.1` in any snippet means the computer the client runs on.
+Hosted Octocrawl, run by Octocrawl, serves the same `POST /v1/scrape` and `POST /v1/map` at `https://api.octocrawl.dev` and the MCP tools `scrape`, `map` and `scrape_product` at `https://mcp.octocrawl.dev/mcp`: keyless within a daily allowance over HTTP, with a key for more pages and the browser lane; every other route and tool answers 403 with a hint to run Octocrawl on your computer. Its allowances are on [Limits](/docs/limits/#hosted-api-and-mcp). `127.0.0.1` in a snippet means the computer the client runs on.
 
 ## Evidence and boundaries
 

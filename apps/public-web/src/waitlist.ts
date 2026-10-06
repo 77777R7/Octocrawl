@@ -38,7 +38,7 @@ export function mountWaitlist(): { open(trigger: WaitlistTrigger): void } {
       .then(code => {
         if (code === 204) {
           track('waitlist_submit', { trigger })
-          const done = Object.assign(document.createElement('p'), { className: 'waitlist-done', textContent: 'You are on the list. We will email you when hosted Octocrawl opens.' })
+          const done = Object.assign(document.createElement('p'), { className: 'waitlist-done', textContent: 'Received. We will email you about a key.' })
           form.replaceChildren(done)
           // The shorter form moves the page; keep the confirmation where the visitor is looking.
           done.scrollIntoView({ block: 'nearest' })

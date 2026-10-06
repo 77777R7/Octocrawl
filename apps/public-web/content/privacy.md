@@ -33,9 +33,19 @@ Requests to octocrawl.dev first pass through Cloudflare, which forwards them to 
 
 Nothing here is sold or shared for advertising.
 
+## Hosted API and MCP
+
+Calls to `api.octocrawl.dev` and `mcp.octocrawl.dev` pass through Cloudflare and Google Cloud Run in Singapore as the page does, and the same request log applies (30 days). In addition the service records:
+
+- **A daily counter** under a keyed hash of the UTC day and your address, or of your key, and one for the whole service; without the service's secret the hash cannot be turned back into either. They are kept in Firestore and deleted two days on.
+- **Your key's record**, if you have one: a hash of the key (never the key), the label you gave when you asked for it, its plan and allowance, and when it was issued.
+- **The result of each call** for ten minutes, so that `GET /v1/scrapes/:id` can return it, then deleted with any file it read. The page you asked for is not kept for reuse by anyone else.
+
+The request log carries the path of the call and, for a scrape, the address you asked for is in its body, which the log does not record.
+
 ## Waitlist
 
-If you join the early-access list for hosted Octocrawl, the service stores your email address, and the answers you chose to give: what you do, what you would need, and what you would collect. It also stores which link you joined from (after your daily previews ran out, the home page footer or the Limits page), the site that sent you to this page (its host, never its path), and the date. Your cookie, IP address and previews are not stored with it, and joining again with the same address replaces your earlier answers.
+If you ask for a key, the service stores your email address, and the answers you chose to give: what you do, what you would need, and what you would collect. It also stores which link you joined from (after your daily previews ran out, the home page footer or the Limits page), the site that sent you to this page (its host, never its path), and the date. Your cookie, IP address and previews are not stored with it, and joining again with the same address replaces your earlier answers.
 
 The list is kept in Google Cloud Firestore in Singapore and used only to tell you when hosted Octocrawl opens and, at most once, to ask how you would use it. Every email from it says how to leave. An entry is deleted 12 months after hosted Octocrawl opens and we have written to you, or 12 months after you joined, whichever comes first. To be removed sooner, or to see what we hold, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from that address.
 

@@ -1,18 +1,26 @@
 # Connect Octocrawl MCP
 
-Two steps on your own computer: start the Octocrawl API with `npx`, then add the MCP server to your client. Nothing is installed from a repository, nothing is sent to an Octocrawl server, and there is no daily limit. A hosted URL is coming; see [Hosted connection](#hosted-connection) below.
+Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It reads public pages (`scrape`) and lists a site's URLs (`map`) over HTTP, a few pages a day per address; a key gives more pages a day and the browser lane. The same packages run everything on your own computer, free and without limit: crawl, batch and Monitor too. Every answer carries an Evidence Record either way.
 
-## Step 1: Start the Octocrawl API
+{{MCP_CLIENT_PICKER:remote}}
 
-With Node.js 22.13 or later, in any terminal:
+## Add a key for more
+
+A key raises the daily allowance and opens the browser lane (pages that only appear in a browser, and `scrape_product` for Amazon.sg). Keys are issued by hand for now: [ask for one](/?from=connect-mcp#waitlist) with what you would use it for. The key goes in an `Authorization: Bearer` header, never in the URL:
 
 ```bash
-npx octocrawl serve
+# Claude Code
+claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_…"
+# Codex: the token is read from an environment variable
+export OCTOCRAWL_API_KEY=oc_…
+codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp --bearer-token-env-var OCTOCRAWL_API_KEY
 ```
 
-Keep it running while you use MCP. It listens on `http://127.0.0.1:8787`, on this computer only. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
+```json
+{ "mcpServers": { "octocrawl": { "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_…" } } } }
+```
 
-{{MCP_CLIENT_PICKER}}
+Cursor takes that block in `.cursor/mcp.json` (`"Bearer ${env:OCTOCRAWL_API_KEY}"` reads it from the environment); OpenCode takes the same `headers` object inside its `remote` entry. Over REST, `curl -H 'authorization: Bearer oc_…' https://api.octocrawl.dev/v1/scrape`.
 
 ## Send your first task
 
@@ -20,14 +28,30 @@ Keep it running while you use MCP. It listens on `http://127.0.0.1:8787`, on thi
 Use Octocrawl's scrape tool on https://docs.firecrawl.dev/introduction with formats ["markdown"]. Show the final URL, the HTTP status and the robots.txt decision from its evidenceRecord, then the first heading of the Markdown.
 ```
 
-The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. If the client reports no tools, check that step 1 is still running; if the call fails to connect, the API is not on `127.0.0.1:8787` (pass `--base-url` to the server command).
+The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key.
 
-The same server offers `map`, `crawl`, `batch_scrape`, `scrape_product` for an Amazon.sg product, and the Monitor tools; the [advanced reference](/docs/reference/) lists them. Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or [Amazon.sg product JSON](/docs/guides/amazon-product/).
+## What hosted Octocrawl does not do
 
-## From a repository checkout
+- `crawl`, `batch_scrape` and the Monitor tools: on your computer (below), where they run without limit. The hosted answer names this.
+- Proxies, CAPTCHA solving and stealth: not offered on the hosted service. A page that blocks a plain request comes back as `blocked` with the reason; the [access grant](https://github.com/77777R7/w2l#enhanced-access-an-access-grant) for those routes works on your own server.
+- Private network addresses, robots.txt overrides and saved logins: refused in hosted mode; robots.txt is obeyed for every URL.
 
-The [repository](https://github.com/77777R7/w2l) also has a managed local service for macOS (`npm run first-use:local`, then `npm run local:mcp:status`) that runs the API, the Monitor scheduler and the delivery worker as one background service with a Streamable HTTP endpoint at `http://127.0.0.1:8791/mcp`. The first-use walkthrough and the Monitor guides use it; the `npx` path above is enough for scrape, map, crawl and batch.
+The allowances and what is recorded are on [Limits](/docs/limits/#hosted-api-and-mcp) and [Privacy](/docs/privacy/#hosted-api-and-mcp).
 
-## Hosted connection
+## Run it on your computer
 
-**Coming.** A hosted API and a remote MCP URL run by Octocrawl are being built as the [roadmap's PH phase](https://github.com/77777R7/w2l/blob/main/ROADMAP.md#ph--hosted-octocrawl): one URL to connect, keyless to try within a daily allowance, a key for more. Until it is announced on this page, Octocrawl MCP runs on your own computer as described above. Want to hear when it opens? [Ask for early access](/?from=connect-mcp#waitlist).
+With Node.js 22.13 or later, start the API in any terminal and keep it running:
+
+```bash
+npx octocrawl serve
+```
+
+It listens on `http://127.0.0.1:8787`, on this computer only, with every tool: scrape, map, crawl, batch, the Amazon.sg product tool and the Monitor tools, and no daily limit. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
+
+{{MCP_CLIENT_PICKER:local}}
+
+If the client reports no tools, check that `npx octocrawl serve` is still running; if a call fails to connect, the API is not on `127.0.0.1:8787` (pass `--base-url` to the server command). The [repository](https://github.com/77777R7/w2l) also has a managed local service for macOS (`npm run first-use:local`) that adds the Monitor scheduler and the delivery worker behind `http://127.0.0.1:8791/mcp`; the Monitor guides use it. Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or [Amazon.sg product JSON](/docs/guides/amazon-product/).
+
+## Self-host for others
+
+`npx octocrawl serve --hosted --token <token>` serves other machines behind a bearer token, with private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks refused, as the hosted service does. Point `npx -y @octocrawl/mcp --base-url https://your.host --token <token>` at it, or any client's remote URL at your own `/mcp` once you put one in front of it; the [advanced reference](/docs/reference/#self-hosted-operation) has the details.

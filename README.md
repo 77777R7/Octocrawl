@@ -2,7 +2,11 @@
 
 A transparent, verifiable web extraction system built for RAG and Agent workflows.
 
-Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top), read the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=top), or [connect it to Claude Code, Cursor, OpenCode or Codex over MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=top).
+Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top), read the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=top), or connect your agent to hosted Octocrawl in one line, no key needed to start ([how, for Claude Code, Cursor, OpenCode and Codex](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=top)):
+
+```bash
+claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
+```
 
 ## Why This Exists
 
@@ -147,16 +151,23 @@ The ports the local services listen on, all on 127.0.0.1:
 | 8788 | The HTTPS webhook receiver of the first-use walkthrough | `npm run first-use:local` | fixed |
 | 8798 | The public site's local preview | `npm run public:preview:local` | `W2L_PUBLIC_PREVIEW_PORT` |
 
-For MCP use, start the API and add the published stdio server to your client; nothing from this checkout is needed:
+For MCP use there are three ways, from least to most setup; the configs for Cursor, OpenCode and Codex, and a first task, are on [Connect MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=mcp).
+
+**Hosted** (scrape and map; keyless within a daily allowance over HTTP, a key for more pages and the browser lane; see [docs/hosted-api.md](docs/hosted-api.md)):
+
+```bash
+claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
+curl -sS -X POST https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com"}'
+```
+
+**On your computer** (everything: scrape, map, crawl, batch, the Amazon.sg product tool and the Monitor tools; no limit; nothing from this checkout is needed):
 
 ```bash
 npx octocrawl serve                                  # keep it running: the API on 127.0.0.1:8787
-claude mcp add octocrawl -- npx -y @octocrawl/mcp    # Claude Code; Cursor, OpenCode and Codex on the Connect MCP page
+claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
-`@octocrawl/mcp` is a client of that API (`--base-url` or `W2L_API_URL` names another one) and offers scrape, map,
-crawl, batch, the Amazon.sg product tool and the Monitor tools. The configs for Cursor, OpenCode and Codex, and a
-first task, are on [Connect MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=mcp).
+**Self-hosted for others**: `npx octocrawl serve --hosted --token <token>` listens on all interfaces behind a bearer token, with private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks refused; point `@octocrawl/mcp` at it with `--base-url` and `--token` (or `W2L_API_URL` and `W2L_API_TOKEN`).
 
 The checkout's managed local service is for the Monitor → HTTPS delivery flow: one background service runs the API,
 Monitor scheduler, delivery worker and a Streamable HTTP MCP endpoint at `http://127.0.0.1:8791/mcp`. On macOS,
