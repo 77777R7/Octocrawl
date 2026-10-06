@@ -59,8 +59,7 @@ function confidenceOf(
   totalBlocks: number,
   mainLength: number,
   pageType: PageType,
-  buyBox: boolean,
-  described: boolean,
+  productShown: boolean,
   favorPrecision: boolean,
   favorRecall: boolean,
   product: ProductFacts | null,
@@ -100,7 +99,7 @@ function confidenceOf(
   // buy box whose description its scripts draw is what the browser can still
   // fill in. A page routed by its declarations (microdata cards) earns no
   // such floor.
-  else if (buyBox && described && main !== null && product !== null && product.price !== null && showsBuyBox(main, product.price.value)) {
+  else if (productShown) {
     conf = Math.max(conf, BUY_BOX_CONFIDENCE)
   }
   if (favorPrecision) conf = Math.min(conf, 0.85)
@@ -233,6 +232,12 @@ export class ExtractTf implements Extractor {
 
     const blocks = classifyBlocks(doc.document, classifyOptions)
     const mainLength = main ? textOf(main).length : 0
+    // A product page found by its visible buy box whose region shows the
+    // title, the price and a description (a text block of description length
+    // besides its headings): the confidence floor and the shell check read it.
+    const productShown = decision.buyBox === true && main !== null && product !== null && product.price !== null &&
+      showsBuyBox(main, product.price.value) &&
+      blocks.some((b) => main.contains(b.el) && !/^h[1-6]$/.test(b.el.tagName.toLowerCase()) && b.length >= DESCRIPTION_MIN_CHARS)
 
     const adapter = amazonProduct ? adapterFor(doc.document, options.url, product) : preliminaryAdapter
     // A selection the caller made (includeSelectors) is returned whole: it
@@ -256,8 +261,7 @@ export class ExtractTf implements Extractor {
         blocks.length,
         mainLength,
         decision.type,
-        decision.buyBox === true,
-        blocks.some((b) => main?.contains(b.el) === true && !/^h[1-6]$/.test(b.el.tagName.toLowerCase()) && b.length >= DESCRIPTION_MIN_CHARS),
+        productShown,
         favorPrecision,
         favorRecall,
         product,
@@ -274,7 +278,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document),
+      render: detectRenderSignals(raw, doc.document, { productShown }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

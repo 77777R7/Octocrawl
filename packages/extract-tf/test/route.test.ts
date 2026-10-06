@@ -169,6 +169,14 @@ describe('routePage', () => {
       }
     })
 
+    it('still reads it for a shell when its data holds text it does not show, its description shown', () => {
+      const specs = 'Requires the Controller Pak for saving, supports the Rumble Pak, and was released in Japan on 21 November 1998 before reaching other regions.'
+      // A second data block (2 KB and more, so hydration data) holds the full specification its scripts draw.
+      const more = page.replace('</main>', `</main><script type="application/json" id="product-specs">${JSON.stringify({ specs, sku: 'NUS-CZLE-USA', images: Array.from({ length: 60 }, (_, i) => `/images/specs/zelda-ocarina-spec-${i + 1}.png`) })}</script>`)
+      expect(more).toContain(specs)
+      expect(extractTf.extract(more).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
+
     it('is as confident in a terse buy box it found as the escalation needs', () => {
       expect(extractTf.extract(page).confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
     })
@@ -189,6 +197,15 @@ describe('routePage', () => {
       const out = extractTf.extract(shop)
       expect(out.pageType).toBe('product')
       expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('still reads any other page that shows its hydration data\'s text for a shell when it is thin', () => {
+      // An article whose rates arrive by a later fetch: its data holds only the intro it shows.
+      const intro = 'Our savings rates are reviewed every month against the market, and every account is protected up to the statutory limit.'
+      const article = wrap(`<main><h1>Savings rates</h1><p>${intro}</p><div class="rates">Loading rates…</div></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { intro, config: { locale: 'en-GB', currency: 'GBP', flags: Array.from({ length: 40 }, (_, i) => `feature-flag-${i}`) } } } })}</script>`)
+      const out = extractTf.extract(article)
+      expect(out.pageType).not.toBe('product')
+      expect(out.render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
     })
 
     it('still reads a Next.js page with nothing of its own server-rendered for a shell', () => {

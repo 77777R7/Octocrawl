@@ -149,7 +149,17 @@ export function countEmptyTables(doc: Document): number {
  * Every rule pairs a structural gap with script presence, so a static page
  * with an empty table or a "loading" word never trips it.
  */
-export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document): RenderSignals {
+/** What the extraction found of the page, weighed beside its signals. */
+export interface RenderContext {
+  /**
+   * The page is a product page found by its visible buy box, and its region
+   * shows the title, the price and a description (extract.ts, the same test
+   * as its confidence floor).
+   */
+  productShown?: boolean
+}
+
+export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, context: RenderContext = {}): RenderSignals {
   const textChars = cleaned.body ? collapsed(textOf(cleaned.body)).length : 0
   const emptyTables = countEmptyTables(cleaned)
   const markers = raw.markers
@@ -161,8 +171,11 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document): R
   else if (textChars < 300 && raw.scriptChars >= 2_000) reason = 'script_shell'
   else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
   else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
-  // A page that shows all its hydration data's text is no shell, however thin what its extraction kept.
-  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !raw.hydrationShown) reason = 'hydration_shell'
+  // A product page that shows its buy box and description, and all its
+  // hydration data's text, is no shell however thin what its extraction kept
+  // once its recommendations were cut. Any other thin page with hydration
+  // state still is: its data may arrive by a later fetch the JSON never held.
+  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && raw.hydrationShown)) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
 
   return {
