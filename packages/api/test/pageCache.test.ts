@@ -85,6 +85,26 @@ async function finished(kind: 'batch' | 'crawl', id: string): Promise<CrawlPage[
 const HOUR = 3_600_000
 
 describe('page cache: scrape', () => {
+  it('keys a stored page by the access grant too: a page fetched under one grant is not reused under another', async () => {
+    const url = `${origin}/granted`
+    const first = await scrape({ url, maxAge: HOUR })
+    expect(first.metadata).toMatchObject({ cacheState: 'miss' })
+    const granted = createApiEngine({
+      taskRoot, networkPolicy: policy,
+      accessGrant: { tier: 'standard', capabilities: ['compatible_transport'], budget: { perRequestUsd: null, perRunUsd: null }, scope: { hosts: null }, attestation: null },
+      channelsFor: mode => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http'),
+    })
+    try {
+      const res = await createApp(granted).request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, maxAge: HOUR }) })
+      const underGrant = await res.json() as Json
+      expect(underGrant.metadata).toMatchObject({ cacheState: 'miss' })
+    } finally { await granted.close() }
+    expect(hits.get('/granted')).toBe(2)
+    // Without a grant the key is the one it always was, so the first page is still reused.
+    expect((await scrape({ url, maxAge: HOUR })).metadata).toMatchObject({ cacheState: 'hit' })
+    expect(hits.get('/granted')).toBe(2)
+  })
+
   it('reuses a stored result within maxAge: nothing requested, the original fetch\'s Evidence Record, cacheState hit with cachedAt', async () => {
     const url = `${origin}/reuse`
     const first = await scrape({ url, maxAge: HOUR })

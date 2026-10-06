@@ -91,6 +91,11 @@ export interface OrchestratorOptions {
   signal?: AbortSignal
   /** Service shutdown interrupts work but leaves the task resumable. */
   shutdownSignal?: AbortSignal
+  /**
+   * The third-party cost of a page whose scrape threw: null (unknown, the default) when the scrape may have called a paid
+   * service before it threw, 0 when the caller knows no paid route exists, so a run under a cost cap is not stopped by it.
+   */
+  scrapeErrorCostUsd?: number | null
   /** Reads the site's sitemap for a crawl whose mode is not `skip`; closed with the run. Without one every crawl runs as `skip`. */
   sitemapSource?: SitemapSource
   /**
@@ -121,6 +126,7 @@ export class CrawlOrchestrator {
   private readonly frontierOptions: Pick<OrchestratorOptions, 'perHostConcurrency' | 'perHostMinDelayMs' | 'crawlDelayMsByHost'>
   private readonly workerCount: number
   private readonly signal?: AbortSignal
+  private readonly scrapeErrorCostUsd: number | null
   private readonly shutdownSignal?: AbortSignal
   private readonly sitemapSource?: SitemapSource
   private readonly onStep?: (step: StepRecord) => void | Promise<void>
@@ -134,6 +140,7 @@ export class CrawlOrchestrator {
     this.frontierOptions = options
     this.workerCount = Math.max(1, options.workerCount ?? 4)
     this.signal = options.signal
+    this.scrapeErrorCostUsd = options.scrapeErrorCostUsd === undefined ? null : options.scrapeErrorCostUsd
     this.shutdownSignal = options.shutdownSignal
     this.sitemapSource = options.sitemapSource
     this.onStep = options.onStep
@@ -331,7 +338,7 @@ export class CrawlOrchestrator {
                 // Any other exception belongs to this URL: it becomes the URL's
                 // failed item, and one page never fails a whole batch or crawl.
                 if (stopped()) throw error
-                outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt), links: [] }
+                outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt, this.scrapeErrorCostUsd), links: [] }
               }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
               if (outcome.cached === true) {
@@ -731,7 +738,7 @@ function newAttempt(id: string, taskId: string, startedAt: string, recoveredFrom
  * response fact is known, so the evidence stays null and the usage meters
  * stay unknown; the lane is the ladder's first rung, as in its own refusals.
  */
-function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchResult {
+function scrapeErrorResult(url: string, error: unknown, wallMs: number, externalCostUsd: number | null): FetchResult {
   const name = error instanceof Error ? error.name : typeof error
   const message = error instanceof Error ? error.message : String(error)
   return {
@@ -748,7 +755,7 @@ function scrapeErrorResult(url: string, error: unknown, wallMs: number): FetchRe
     truncatedAt: null,
     compliance: null,
     evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
-    usage: { ...EMPTY_USAGE, wallMs, bytesWire: null },
+    usage: { ...EMPTY_USAGE, wallMs, bytesWire: null, externalCostUsd },
     trace: [{ at: wallMs, lane: 'http', event: 'scrape_error', detail: { name, error: message.slice(0, 500) } }],
   }
 }

@@ -109,6 +109,44 @@ ${prose(5, 23)}
     ),
 }
 
+const ROBOT_OR_HUMAN_FACT = 'The exhibit opens with a quiz called Robot or human? that asks visitors to date each portrait.'
+
+const staticArticleRobotOrHuman: Fixture = {
+  truth: {
+    id: 'static-article-robot-or-human',
+    target: '/static/article-robot-or-human',
+    kind: 'fixture',
+    category: 'static',
+    mustContain: [ROBOT_OR_HUMAN_FACT, ARTICLE_FACT],
+    mustNotContain: B,
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: { min: 260, max: 900 },
+    budget: budget(2000),
+    expectedStatus: 'success',
+    notes:
+      'Ordinary article on a PerimeterX-protected site: the sensor sets window._pxAppId on ' +
+      'every page (Walmart\'s home page did on 2026-10-05), and the prose says "Robot or ' +
+      'human?". Neither is the challenge, so a contentful page must stay success.',
+  },
+  respond: () =>
+    html(
+      htmlPage({
+        title: 'Kiln temperatures and glaze vitrification',
+        headExtra: "<script>window._pxAppId='PXfixture1'</script>",
+        bodyHtml: `<article>
+<h1>Kiln temperatures and glaze vitrification</h1>
+<p>${ROBOT_OR_HUMAN_FACT}</p>
+<p>${ARTICLE_FACT}</p>
+${prose(6, 11)}
+<h2>Estuary sediment</h2>
+<p>${ARTICLE_FACT_2}</p>
+${prose(5, 23)}
+</article>`,
+      }),
+    ),
+}
+
 const CJK_FACT = '窑温达到一千二百四十度后釉面开始玻化。'
 
 const staticCjk: Fixture = {
@@ -1225,6 +1263,83 @@ const blockLoginWallBenefits: Fixture = {
   }),
 }
 
+const blockPerimeterX: Fixture = {
+  truth: {
+    id: 'block-perimeterx',
+    target: '/block/perimeterx',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Robot or human?', 'Activate and hold the button'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'captcha',
+    notes:
+      'Shaped like the PerimeterX press-and-hold page Walmart served with HTTP 200 (after a ' +
+      '307 to /blocked) on 2026-10-05, which browser_local returned as success. The widget ' +
+      'renders into #px-captcha from the captcha script the page loads, configured by ' +
+      'window._pxAppId. captcha, not ' +
+      'bot_detected_generic: the button needs a person to press and hold it, and the ' +
+      'browser lane had already run the page\'s JS when it got this page.',
+  },
+  respond: () => ({
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: `<!doctype html><html lang="en"><head><title>Robot or human?</title>
+<script>window._pxAppId = 'PXfixture1'; window._pxJsClientSrc = '/px/' + window._pxAppId + '/init.js'; window._pxFirstPartyEnabled = true;
+var captchajs = "/px/" + window._pxAppId + "/captcha/captcha.js?a=c&m=0&g=b"</script>
+</head><body><div id="sign-in-widget"><a class="header-logo" href="/" aria-label="Home Page"></a>
+<h1 class="heading">Robot or human?</h1>
+<div class="re-captcha"><p class="bot-message" id="message">Activate and hold the button to confirm that you’re human. Thank You!</p>
+<div id="px-captcha" style="margin:16px"></div></div>
+<div class="lite-footer"><a href="/terms">Terms of Use</a> <a href="/privacy">Privacy Policy</a><p>© Fixture Stores, Inc.</p></div>
+</div><script id="blockScript"></script><script>document.getElementById('blockScript').src = captchajs</script></body></html>`,
+  }),
+}
+
+const blockPerimeterX429: Fixture = {
+  truth: {
+    id: 'block-perimeterx-429',
+    target: '/block/perimeterx-429',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Press & Hold'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'captcha',
+    notes:
+      'Shaped like the PerimeterX stock block template Wayfair (and its sibling stores) served ' +
+      'with HTTP 429 and no Retry-After on 2026-10-05. The status says rate limit, the page is ' +
+      'the press-and-hold challenge: captcha, because a person can get through it and slowing ' +
+      'down does not.',
+  },
+  respond: () => ({
+    status: 429,
+    headers: { 'content-type': 'text/html' },
+    body: `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="description" content="px-captcha"><title>Access to this page has been denied</title></head>
+<body><script>
+window._pxVid = ''; window._pxUuid = '00000000-0000-4000-8000-000000000000'; window._pxAppId = 'PXfixture2';
+window._pxHostUrl = '/fixture2/xhr'; window._pxJsClientSrc = '/fixture2/init.js'; window._pxFirstPartyEnabled = true;
+var pxCaptchaSrc = '/fixture2/captcha/captcha.js?a=c&u=00000000-0000-4000-8000-000000000000&v=&m=0';
+var script = document.createElement('script'); script.src = pxCaptchaSrc; script.onerror = onScriptError; document.head.appendChild(script);
+function onScriptError() { script = document.createElement('script');
+  script.src = 'https://captcha.px-cloud.net/PXfixture2/captcha.js?a=c&u=00000000-0000-4000-8000-000000000000&v=&m=0';
+  document.head.appendChild(script); }
+window._pxOnError = function () { var div = document.createElement('div');
+  div.innerHTML = '<div>Before we continue...</div><div>Press & Hold to confirm you are a human (and not a bot).</div>';
+  document.body.appendChild(div); };
+</script></body></html>`,
+  }),
+}
+
 // ---------------------------------------------------------------------------
 // Wrong-page content
 // ---------------------------------------------------------------------------
@@ -1768,6 +1883,7 @@ const homePage: Fixture = {
 export const FIXTURES: readonly Fixture[] = [
   staticArticle,
   staticArticleWithWidget,
+  staticArticleRobotOrHuman,
   staticCjk,
   staticTable,
   t_thead,
@@ -1805,6 +1921,8 @@ export const FIXTURES: readonly Fixture[] = [
   blockRateLimit,
   blockLoginWall,
   blockLoginWallBenefits,
+  blockPerimeterX,
+  blockPerimeterX429,
   soft404,
   redirectToHome,
   redirectChain,

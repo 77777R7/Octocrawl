@@ -55,7 +55,7 @@ describe('agent hints', () => {
     expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
-        'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity; a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
+        'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity unless this server\'s access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
@@ -81,6 +81,8 @@ describe('agent hints', () => {
     const shell = result({ status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'client_rendered_suspected', message: 'shell' }], escalations: [{ from: 'http', to: 'browser_local', trigger: 'extract_low_confidence', improved: null }], trace: [{ at: 1, lane: 'http', event: 'quality_client_rendered' }] })
     expect(hints(shell, ['http', 'browser_local'])).toEqual(['the page fills its data with JavaScript; the browser lane was tried'])
     expect(hints(shell, ['http'])).toEqual(['the page fills its data with JavaScript; the browser lane was not tried'])
+    // http_compat is the http lane over another transport, not a browser.
+    expect(hints(shell, ['http_compat'])).toEqual(['the page fills its data with JavaScript; the browser lane was not tried'])
     expect(hints(shell, ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
     // A success the http lane offered to the browser lane carries the fastMode hint too; a rendered page carries none.
     expect(hints(result({ trace: [{ at: 1, lane: 'http', event: 'quality_low_yield' }] }), ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
@@ -116,6 +118,12 @@ describe('agent hints', () => {
     })
     expect(served({ status: 'blocked', blockReason: 'bot_detected_generic' })).toEqual(['the http lane got blocked/bot_detected_generic (HTTP 403) from example.test and the local browser lane served the page; expect other pages of example.test to need the browser lane too'])
     expect(served({ status: 'failed', failureReason: 'http_error' }, 503)).toEqual(['the http lane got failed/http_error (HTTP 503) from example.test and the local browser lane served the page; expect other pages of example.test to need the browser lane too'])
+    // The same over the compatible transport, whose rung is http_compat.
+    expect(agentHintsFor({}, {
+      channelsTried: ['http_compat', 'browser_local'],
+      result: result({ lane: 'browser_local' }),
+      summary: { attempts: [{ channel: 'http_compat', result: { status: 'blocked', failureReason: null, blockReason: 'bot_detected_generic', evidence: { httpStatus: 403 } } }, { channel: 'browser_local', result: { status: 'success', failureReason: null, blockReason: null, evidence: { httpStatus: 200 } } }] },
+    })).toEqual(['the http lane got blocked/bot_detected_generic (HTTP 403) from example.test and the local browser lane served the page; expect other pages of example.test to need the browser lane too'])
     // A thin or empty http answer the browser lane improved on is the ladder's ordinary hop, not a hint; so is a page the http lane served itself, and a run without its summary.
     expect(served({ status: 'failed', failureReason: 'empty_unverified' }, 200)).toEqual([])
     expect(served({ status: 'success' }, 200)).toEqual([])

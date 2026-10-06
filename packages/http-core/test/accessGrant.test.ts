@@ -22,9 +22,14 @@ describe('normalizeAccessGrant', () => {
   })
 
   it('needs a positive run budget before a third party can be paid', () => {
-    for (const budget of [undefined, { perRunUsd: null }, { perRunUsd: 0 }]) {
+    for (const budget of [undefined, { perRunUsd: null }]) {
       const r = normalizeAccessGrant({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget, attestation: ATTESTATION })
       expect(r).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'budget.perRunUsd', kind: 'budget_required' })] })
+    }
+    // Zero is not a budget: a cap reached before anything is spent would stop every run at once.
+    for (const budget of [{ perRunUsd: 0 }, { perRequestUsd: 0 }]) {
+      const field = Object.keys(budget)[0]
+      expect(normalizeAccessGrant({ tier: 'standard', budget })).toEqual({ ok: false, problems: [expect.objectContaining({ field: `budget.${field}`, kind: 'invalid' })] })
     }
     const ok = normalizeAccessGrant({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 2 }, attestation: ATTESTATION })
     expect(ok.ok && ok.grant.budget).toEqual({ perRequestUsd: null, perRunUsd: 2 })

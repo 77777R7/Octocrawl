@@ -50,6 +50,11 @@ export interface ActionRunContext {
   refuseLanded: (url: string) => Promise<string | null>
   /** The URL of every document the main frame has loaded so far, in order; a URL changed within the page (pushState) loads none. */
   loadedDocuments: () => readonly string[]
+  /**
+   * Runs an `executeJavascript` step's script in the page's own JavaScript world, where its globals are.
+   * Patchright evaluates in an isolated world unless told otherwise, which would hide them; absent, `page.evaluate`.
+   */
+  evaluateScript?: (expression: string) => Promise<unknown>
 }
 
 export interface ActionRun {
@@ -227,7 +232,8 @@ async function runStep(action: PageAction, ctx: ActionRunContext, result: Action
       try {
         // A function body, as Firecrawl takes it (`return` gives the value), awaited. Evaluated through the
         // DevTools protocol, so the page's Content-Security-Policy does not stop it.
-        value = await bounded(ctx, page.evaluate(`(async () => {\n${action.script}\n})()`))
+        const expression = `(async () => {\n${action.script}\n})()`
+        value = await bounded(ctx, ctx.evaluateScript === undefined ? page.evaluate(expression) : ctx.evaluateScript(expression))
       } catch (error) {
         if (signal?.aborted || error instanceof StepFailure) throw error
         throw new StepFailure('script_error', message(error))

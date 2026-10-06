@@ -6,6 +6,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { SqliteTaskStore } from '@w2l/runtime'
+import { buildChannels } from '@w2l/bench'
 import { W2L, type BatchAccepted } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
@@ -640,6 +641,62 @@ describe('persistent URL-array batch', () => {
     expect(recorded((await client.getBatchItems(taskId, { debug: true })).items[0]!.trace)).toEqual(events)
     // Each of the three requests went out past the rule before its deadline.
     expect(f.seen.filter(path => path === '/private/item/2')).toHaveLength(3)
+  })
+
+  it("caps a batch's third-party spend with the access grant's run budget, and local pages, which cost nothing, never trip it", async () => {
+    const f = await fixture()
+    const engine = f.engine({ accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [1, 2, 3].map(n => `${f.origin}/item/${n}`)
+    const accepted = await w2l.batchScrape(urls)
+    // Before local lanes reported a known 0, every page's cost read as unknown and a capped batch stopped after its first page (cost_unknown).
+    expect(await w2l.waitBatch(accepted.taskId)).toMatchObject({ status: 'completed', completed: 3 })
+    const items = (await w2l.getBatchItems(accepted.taskId)).items
+    expect(items.map(item => item.status)).toEqual(['success', 'success', 'success'])
+    const store = SqliteTaskStore.openReadOnly(join(f.root, accepted.taskId))
+    try { expect((await store.getTask(accepted.taskId))?.budget).toMatchObject({ maxCostUsd: 1 }) } finally { await store.close() }
+  })
+
+  it('does not stop a capped batch for a page whose scrape threw, when the server has no paid route', async () => {
+    const f = await fixture()
+    const policy = { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }
+    const throwing = (mode: 'standard' | 'research' | 'authed') => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http').map(channel => ({
+      ...channel,
+      fetch: async (...args: Parameters<typeof channel.fetch>) => { if (String(args[0]).endsWith('/item/2')) throw new Error('scrape broke'); return channel.fetch(...args) },
+    }))
+    const engine = f.engine({ channelsFor: throwing, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const { taskId } = await w2l.batchScrape([1, 2, 3, 4].map(n => `${f.origin}/item/${n}`))
+    // The page that threw is one failed item; with no provider to have called, its cost is a known 0 and the cap holds no reason to stop.
+    expect(await w2l.waitBatch(taskId)).toMatchObject({ status: 'completed', completed: 4 })
+    const items = (await w2l.getBatchItems(taskId)).items
+    expect(items.map(item => [new URL(item.url).pathname, item.status]).sort()).toEqual([['/item/1', 'success'], ['/item/2', 'failed'], ['/item/3', 'success'], ['/item/4', 'success']])
+    const store = SqliteTaskStore.openReadOnly(join(f.root, taskId))
+    try { expect((await store.listAttempts(taskId)).at(-1)?.budgetExceeded).toBeNull() } finally { await store.close() }
+  })
+
+  it('applies the run budget of a grant given after the batch was created, when the batch runs again', async () => {
+    const f = await fixture()
+    const policy = { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 0 }
+    // The http rung with its cost made unknown stands in for a provider that does not state a price.
+    const unpriced = (mode: 'standard' | 'research' | 'authed') => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http').map(channel => ({
+      ...channel,
+      fetch: async (...args: Parameters<typeof channel.fetch>) => { const r = await channel.fetch(...args); return { ...r, usage: { ...r.usage, externalCostUsd: null } } },
+    }))
+    const before = f.engine({ channelsFor: unpriced })
+    const { taskId } = await client(before).client.batchScrape([`${f.origin}/item/1`])
+    expect(await client(before).client.waitBatch(taskId)).toMatchObject({ status: 'completed', completed: 1 })
+    await before.close()
+    const granted = f.engine({ channelsFor: unpriced, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    cleanup.push(() => granted.close())
+    const { client: w2l } = client(granted)
+    await w2l.appendToBatch(taskId, [`${f.origin}/item/2`, `${f.origin}/item/3`])
+    // The batch was created with no cost cap; run again under the grant, its first unpriced page stops it rather than a guess.
+    expect(await w2l.waitBatch(taskId)).toMatchObject({ requested: 3, completed: 2 })
+    const store = SqliteTaskStore.openReadOnly(join(f.root, taskId))
+    try { expect((await store.listAttempts(taskId)).at(-1)?.budgetExceeded).toBe('cost_unknown') } finally { await store.close() }
   })
 
   it('pages a 100-URL durable batch without returning the whole result set at once', async () => {

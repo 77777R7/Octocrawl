@@ -19,6 +19,7 @@ import {
   type ComplianceSentHeader,
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
+import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -253,6 +254,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
   private readonly accessConfig: AccessConfigInput | null
   /** The operator's environment proxy for every context this subject opens (local mode). */
   private readonly envProxy: ReturnType<typeof browserProxySettings>
+  /** The launched engine's package version, once known (Patchright only). */
+  private engineVersion: string | null = null
 
   constructor(
     private readonly mode: CrawlMode = 'standard',
@@ -271,7 +274,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly previewProductToken = false,
     /** The ad-serving hosts `blockAds` aborts requests to (adHosts.ts); a test seam. */
     private readonly adHosts: readonly string[] = AD_HOSTS,
+    /**
+     * The engine the browser it launches runs (browserEngine.ts): stock Playwright unless the entry
+     * point, having checked the access grant, chose Patchright. A managed profile always runs Playwright.
+     */
+    private readonly browserEngine: BrowserEngineName = 'playwright',
   ) {
+    if (browserEngine !== 'playwright' && (access != null || managedProfileDir !== null)) {
+      throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
+    }
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
     }
@@ -397,6 +408,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
       const managedContext = this.managedProfileDir === null ? null : await raceWithSignal(this.getManagedContext(execution), signal)
       const browser = managedContext?.browser() ?? await raceWithSignal(this.getBrowser(execution), signal)
+      // Only a run on another engine says so: a default run's trace is what it always was.
+      if (this.browserEngine !== 'playwright') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: this.engineVersion } })
       throwIfExecutionStopped(execution)
       // Real Chromium major, not the floor constant: declaring a Chrome
       // version we are not running is an inconsistency, not a feature.
@@ -521,7 +534,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             attemptCount: 0,
             contentTokens: null,
             browserMs: 0,
-            externalCostUsd: null,
+            externalCostUsd: 0,
           },
           trace,
         }
@@ -892,8 +905,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
           void opened.close().catch(() => {})
         }
         context.on('page', popupCloser)
+        const actionPage = page
         ran.actions = await runPageActions(options.actions, {
           page,
+          // Patchright's evaluate takes (pageFunction, arg, options, isolatedContext) and defaults to an isolated world.
+          evaluateScript: this.browserEngine === 'patchright'
+            ? (expression) => (actionPage.evaluate as unknown as (fn: string, arg: undefined, options: undefined, isolatedContext: boolean) => Promise<unknown>)(expression, undefined, undefined, false)
+            : (expression) => actionPage.evaluate(expression),
           execution,
           trace,
           at: () => Date.now() - start,
@@ -1073,7 +1091,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           navigationFollowupCount: variantFollowups,
           contentTokens: null as number | null,
           browserMs,
-          externalCostUsd: null,
+          externalCostUsd: 0,
           timings: {retryWaitMs,totalMs:wallMs},
         },
         trace,
@@ -1280,7 +1298,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           attemptCount: 1,
           contentTokens: null,
           browserMs: wallMs,
-          externalCostUsd: null,
+          externalCostUsd: 0,
         },
         trace,
       }
@@ -1363,7 +1381,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
         },
         // The file's bytes are counted; what crossed the wire (compressed) is not measured.
-        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: null },
+        usage: { wallMs: at(), bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: at(), externalCostUsd: 0 },
         trace,
       }
     }
@@ -1443,7 +1461,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         artifacts: [],
         ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
       },
-      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: null },
+      usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: attemptCount, attemptCount, contentTokens: null, browserMs: wallMs, externalCostUsd: 0 },
       trace,
     }
   }
@@ -1478,7 +1496,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       truncatedAt: null,
       compliance: null,
       evidence: { finalUrl, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
-      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: null },
+      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: 0 },
       trace,
     }
   }
@@ -1532,7 +1550,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         attemptCount: 0,
         contentTokens: null,
         browserMs: wallMs,
-        externalCostUsd: null,
+        externalCostUsd: 0,
       },
       trace,
     }
@@ -1562,7 +1580,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         if (this.activeExecutions === 0) throw new DOMException('Browser startup abandoned', 'AbortError')
         // Never the operating system's proxy: the environment proxy when W2L
         // uses one, otherwise direct (a user's proxy is set per context).
-        return chromium.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
+        const engine = await browserEngineFor(this.browserEngine)
+        if (engine.version !== undefined) this.engineVersion = engine.version
+        return engine.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
       }
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {

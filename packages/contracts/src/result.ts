@@ -56,9 +56,17 @@ export interface ResourceUsage {
   contentTokens: number | null
   browserMs: number
   /**
-   * Cost incurred outside this process, paid by the user to a third party
-   * (BYO proxy egress, provider browser minutes, model calls).
-   * `null` means no external cost path was used — never means "free".
+   * What this fetch spent on third-party services it called: a provider's
+   * browser minutes or its challenge solving. `0` when it called none (the
+   * local lanes, a refusal before any request, a scrape answered from the
+   * cache; a cached batch or crawl page keeps the cost of the fetch that
+   * stored it). For a run
+   * through several rungs it is the whole run's spend. A model call for JSON
+   * extraction is reported apart (`modelUsage`) and not counted here. `null` when it called
+   * one that did not say what it cost: unknown, never free, and a run with a
+   * cost cap stops on it rather than guess (`budgetExceeded: cost_unknown`).
+   * The network path is not included: a proxy's own bill is recorded apart
+   * once proxy sessions declare a price.
    */
   externalCostUsd: number | null
   /** Stage timings use a monotonic clock. Optional for legacy producers. */

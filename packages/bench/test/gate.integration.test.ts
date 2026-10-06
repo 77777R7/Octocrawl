@@ -78,6 +78,18 @@ const GATES: ReadonlyArray<{
     why: '200 with a password field and a list beside it the extractor takes only as a last resort',
     evidence: null,
   },
+  {
+    path: '/block/perimeterx',
+    reason: 'captcha',
+    why: '200 PerimeterX press-and-hold page (Walmart, 2026-10-05) that browser_local returned as success',
+    evidence: null,
+  },
+  {
+    path: '/block/perimeterx-429',
+    reason: 'captcha',
+    why: '429 carrying the PerimeterX block template (Wayfair, 2026-10-05): the challenge, not a rate limit',
+    evidence: null,
+  },
 ]
 
 describe.each([
@@ -116,6 +128,15 @@ describe.each([
     expect(rateLimit.escalations).toEqual([])
   })
 
+  it('offers a human handoff for a challenge served with 429', async () => {
+    const out = await subject.fetch(`${server.url}/block/perimeterx-429`)
+    expect(out.escalations).toEqual([
+      { from: 'http', to: 'browser_local_authed', trigger: 'blocked:captcha', improved: null },
+    ])
+    const gate = out.trace.find((t) => t.event === 'gate_detected')
+    expect(gate?.detail?.signals).toEqual(['px_captcha_script', 'px_app_id', 'status_429'])
+  })
+
   it('offers a human handoff for a login wall, never a bypass', async () => {
     const out = await subject.fetch(`${server.url}/block/login-wall`)
     expect(out.escalations).toEqual([
@@ -145,6 +166,13 @@ describe.each([
     expect(out.status).toBe('success')
     expect(out.blockReason).toBeNull()
     expect(out.markdown).toContain('The kiln reached 1240 degrees')
+  })
+
+  it('does not block an article on a PerimeterX-protected site that says "Robot or human?"', async () => {
+    const out = await subject.fetch(`${server.url}/static/article-robot-or-human`)
+    expect(out.status).toBe('success')
+    expect(out.blockReason).toBeNull()
+    expect(out.markdown).toContain('Robot or human?')
   })
 })
 
