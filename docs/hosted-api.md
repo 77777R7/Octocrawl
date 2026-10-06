@@ -107,6 +107,10 @@ node scripts/hosted/issue-key.mjs list
 node scripts/hosted/issue-key.mjs revoke <digest>
 ```
 
+The script, like `scripts/public-preview/waitlist.mjs`, calls Firestore with Node's `fetch`, which ignores `HTTPS_PROXY`. On a machine that reaches Google only through a proxy, set `NODE_USE_ENV_PROXY=1` (Node 24 and later) so `fetch` uses it; `gcloud` honours the proxy variables on its own. Without it the call ends in `ConnectTimeoutError` against `firestore.googleapis.com` (seen 2026-10-06).
+
+The key is printed once. Keep it somewhere ignored by git, such as `.w2l/hosted/`, with owner-only permissions, until it has been sent.
+
 ## Read the service
 
 Every request is in Cloud Run's request log. The two-week cost record the roadmap asks for is read from Cloud Billing (the service's own SKU lines) against the request counts:
