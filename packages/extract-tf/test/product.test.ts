@@ -294,6 +294,73 @@ describe('recommendation pruning: precision guards', () => {
     doc.close()
   })
 
+  it('does not take the page for a grid when its header, product and sticky bar each show a link and a price', () => {
+    // WooCommerce's Storefront theme (scrapeme.live): the page wrapper's
+    // children are the header with its cart total, the breadcrumb, the
+    // product, the footer and a sticky add-to-cart bar.
+    const html = `<!doctype html><html><head><title>Bulbasaur</title>${PRODUCT_LD}</head><body>
+<div id="page" class="hfeed site">
+<header id="masthead" class="site-header"><a class="cart-contents" href="/basket/"><span class="amount">£0.00</span> 0 items</a></header>
+<div class="storefront-breadcrumb"><a href="/">Home</a> / Bulbasaur</div>
+<div id="content" class="site-content"><div class="product"><h1 class="product_title">Bulbasaur</h1><p class="price"><span class="amount">£63.00</span></p>
+<p>Bulbasaur can be seen napping in bright sunlight. There is a seed on its back that grows by soaking up the sun's rays.</p>
+<a href="#reviews">Reviews (0)</a>
+<section class="related products"><h2>Related products</h2><ul class="products">${[1, 2, 3].map((n) => `<li><a href="/shop/${n}/">Related ${n}</a><span class="amount">£${60 + n}.00</span></li>`).join('')}</ul></section></div></div>
+<footer id="colophon" class="site-footer"><p>© ScrapeMe 2026</p></footer>
+<section class="storefront-sticky-add-to-cart"><a href="#product">Bulbasaur</a><span class="amount">£63.00</span></section>
+</div></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.pageType).toBe('product')
+    expect(out.escalate).toBe(false)
+    expect(out.mainHtml).toContain('napping in bright sunlight')
+    expect(out.mainHtml).not.toContain('Related 1')
+  })
+
+  it('does not take such a page wrapper for a grid when the product title is not an h1', () => {
+    const doc = parse(`<!doctype html><html><body><div id="page" class="hfeed site">
+<header class="site-header"><a class="cart-contents" href="/basket/"><span class="amount">£0.00</span> 0 items</a></header>
+<div id="content" class="site-content"><h2 class="product_title">Bulbasaur</h2><p class="price">£63.00</p><a href="#reviews">Reviews (0)</a><p>Bulbasaur can be seen napping in bright sunlight.</p></div>
+<section class="sticky-add-to-cart"><a href="#product">Bulbasaur</a><span class="amount">£63.00</span></section>
+</div></body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('napping in bright sunlight')
+    doc.close()
+  })
+
+  it('does not cut the product for a merchandising class that names recommendations', () => {
+    const doc = parse(`<!doctype html><html><body>
+<div class="product recommended"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+</body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('reduction kiln')
+    doc.close()
+  })
+
+  it('never cuts the element that holds the page\'s h1', () => {
+    // A page laid out in alike rows: the header with its cart, the product, a sticky bar.
+    const doc = parse(`<!doctype html><html><body><div id="page">
+<div class="row"><a href="/cart">Cart</a><span class="price">$0.00</span></div>
+<div class="row"><h1>Cobalt teapot</h1><span class="price">$84.00</span><a href="#reviews">Reviews</a><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+<div class="row"><a href="#buy">Buy now</a><span class="price">$84.00</span></div>
+</div></body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('reduction kiln')
+    doc.close()
+  })
+
+  it('still cuts a grid whose cards each carry an h1 of their own', () => {
+    // The guard is for the page's one h1; cards that each hold one are no product's title.
+    const doc = parse(`<!doctype html><html><body>
+<div class="product"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+<div class="shelf">${[1, 2, 3].map((n) => `<div class="card"><h1><a href="/p/${n}">Other teapot ${n}</a></h1><span class="price">$${n}9.00</span></div>`).join('')}</div>
+</body></html>`)
+    pruneRecommendations(doc.document)
+    const html = doc.document.body.innerHTML
+    expect(html).toContain('reduction kiln')
+    expect(html).not.toContain('Other teapot')
+    doc.close()
+  })
+
   it('cuts CJK recommendation headings too', () => {
     const doc = parse(`<!doctype html><html><body>
 <div id="main"><h1>四嘴泡茶壶</h1><p>手工拉坯的炻器茶壶，四个壶嘴使茶汤浸出更均匀，在还原焰中烧至一千二百六十度。</p></div>
