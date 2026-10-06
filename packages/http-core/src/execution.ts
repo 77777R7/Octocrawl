@@ -12,7 +12,8 @@ export function throwIfExecutionStopped(context: ExecutionBudget): void {
   }
 }
 
-export function createExecutionScope(context: ExecutionBudget = {}): ExecutionBudget & { signal: AbortSignal; dispose(): void } {
+/** The context's own fields are kept on the scope (a task's cookie session, for one), with its signal and deadline. */
+export function createExecutionScope<C extends ExecutionBudget>(context: C = {} as C): C & { signal: AbortSignal; dispose(): void } {
   const controller = new AbortController()
   const abort = () => controller.abort(context.signal?.reason ?? new DOMException('Execution aborted', 'AbortError'))
   context.signal?.addEventListener('abort', abort, { once: true })

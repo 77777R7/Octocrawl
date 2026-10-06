@@ -15,6 +15,42 @@ export interface ExecutionContext {
    * when that lane never returns (a deadline) or another rung's result answers.
    */
   onRobotsOverride?: (applied: RobotsOverrideApplied) => void
+  /**
+   * The task's cookie session (ADR 0005 `egress_sessions`): the cookies a page's responses set,
+   * sent again to their site on the task's later pages, by every local rung. Absent: no cookie is
+   * kept or sent, as before.
+   */
+  cookieSession?: CookieSession
+}
+
+/** A cookie as a browser context takes and gives it (Playwright's shape). */
+export interface ContextCookie {
+  name: string
+  value: string
+  domain: string
+  path: string
+  /** Seconds since the epoch; -1 for a session cookie. */
+  expires: number
+  httpOnly: boolean
+  secure: boolean
+  sameSite: 'Strict' | 'Lax' | 'None'
+}
+
+/**
+ * One task's cookies, matched to a URL by RFC 6265 (domain, path, secure, expiry). Values never
+ * leave it into a record or a trace: a lane reports the session's `id` and counts.
+ */
+export interface CookieSession {
+  /** An opaque id for the record, unrelated to any cookie value. */
+  readonly id: string
+  /** The `Cookie` header for a request to this URL; empty when none applies. */
+  cookieHeader(url: string): Promise<string>
+  /** Keep the `Set-Cookie` lines a response to this URL carried; returns how many were kept. */
+  store(url: string, setCookies: readonly string[]): Promise<number>
+  /** The cookies a browser context loading this URL should start with. */
+  browserCookies(url: string): Promise<ContextCookie[]>
+  /** Keep the cookies a browser context holds after a page; returns how many were kept. */
+  storeBrowserCookies(cookies: readonly ContextCookie[]): Promise<number>
 }
 
 /** What a lane reports when it sets a robots.txt rule aside under a recorded override. */

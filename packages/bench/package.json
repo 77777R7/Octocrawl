@@ -30,6 +30,7 @@
     "@w2l/runtime": "*",
     "impit": "0.14.5",
     "playwright": "^1.62.1",
+    "tough-cookie": "6.0.2",
     "undici": "^7.4.0"
   },
   "optionalDependencies": {
