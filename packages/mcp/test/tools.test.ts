@@ -463,8 +463,12 @@ describe('MCP tools', () => {
     expect(bodies).toEqual([expect.objectContaining({ lane: 'my-browser' })])
     expect(TOOLS.find((tool) => tool.name === 'scrape')?.inputSchema.properties).toMatchObject({ lane: { type: 'string', enum: ['my-browser'] } })
     expect(TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties).toMatchObject({ lane: { type: 'string', enum: ['my-browser'] } })
+    for (const name of ['scrape', 'batch_scrape']) expect(TOOLS.find((tool) => tool.name === name)?.inputSchema.properties).toMatchObject({ access: { type: 'string', enum: ['standard', 'enhanced', 'my-browser'] } })
+    expect(TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties).toMatchObject({ access: { type: 'string', enum: ['standard', 'enhanced'] } })
+    await callTool(client, 'scrape', { url: 'https://example.com/', access: 'standard' })
+    expect(bodies.at(-1)).toMatchObject({ access: 'standard' })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/'], lane: 'my-browser' })
-    expect(bodies[1]).toMatchObject({ lane: 'my-browser' })
+    expect(bodies.at(-1)).toMatchObject({ lane: 'my-browser' })
     await expect(callTool(client, 'scrape', { url: 'https://example.com/', lane: 'browser' })).rejects.toThrow('lane must be one of: my-browser')
   })
 

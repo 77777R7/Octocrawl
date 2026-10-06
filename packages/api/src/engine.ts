@@ -124,7 +124,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type AccessChoice, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
@@ -695,6 +695,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
   }
+  /**
+   * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
+   * budget: a server without one refuses it by name, naming the other choices. `standard` and `my-browser` need none.
+   */
+  const checkAccessChoice = (req: { access?: AccessChoice }): void => {
+    if (req.access !== 'enhanced' || accessGrant?.tier === 'enhanced') return
+    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [REFUSAL_HINTS.stealth])
+  }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
   const jobWebhooks = new JobWebhooks(deliveryStore, { hosted, allowHttpLoopback: options.webhookPolicy?.allowHttpLoopback ?? !hosted })
@@ -794,7 +802,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * `compat` false leaves it out altogether: a map reads its start page with
    * the identity its response names, the one it reads robots.txt with.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode, egress)
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
@@ -827,6 +835,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const dropped = selected.filter(channel => !HTTP_CHANNELS.has(channel.id)).map(name)
       if (dropped.length > 0) filtered.push({ reason: 'fastMode', dropped })
       selected = kept
+    }
+    // `access: "standard"`: no rung that costs a third party.
+    if (page.access === 'standard') {
+      const dropped = selected.filter(channel => channel.vendorId !== undefined).map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'access standard', dropped })
+      selected = selected.filter(channel => channel.vendorId === undefined)
     }
     const wire = (['headers', 'mobile', 'skipTlsVerification'] as const).filter(option => option === 'headers' ? page.headers !== undefined && Object.keys(page.headers).length > 0 : page[option] === true)
     if (wire.length > 0) {
@@ -1497,6 +1511,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkHandoff(req)
+    checkAccessChoice(req)
     checkMyBrowser(req)
     checkFileCap(req)
     checkSelectors(req)
@@ -1712,6 +1727,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkAttributeSelectors(req.formats)
       checkListSelectors(req.formats)
       checkHostedOptions(req)
+      checkAccessChoice(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
@@ -1745,6 +1761,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxTokens: null,
         },
         crawl: {
+          ...(req.access === undefined ? {} : { access: req.access }),
           formats: req.formats ?? ['markdown'],
           includeLinks: req.includeLinks === true,
           includePaths: req.includePaths ?? [],
@@ -1803,6 +1820,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkListSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
+      checkAccessChoice(req)
       checkMyBrowser(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       batchStartInProgress = true
@@ -1829,6 +1847,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
         ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
         ...(req.lane === undefined ? {} : { lane: req.lane }),
+        ...(req.access === undefined ? {} : { access: req.access }),
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',
