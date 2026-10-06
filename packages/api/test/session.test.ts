@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,12 +44,17 @@ describe('B3 managed session API', () => {
     expect(created.status).toBe(201)
     const session = await created.json() as { sessionRef: string; state: string; grantEpoch: number }
     expect(session.state).toBe('waiting_user')
+    // The profile's path on the server and a CDP endpoint never leave it.
+    expect(Object.keys(session)).not.toContain('profileDir')
+    expect(Object.keys(session)).not.toContain('cdpEndpoint')
 
     const waiting = await app.request(`/v1/sessions/${session.sessionRef}/capture`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId: 'w1', accountRef: 'acct-a', url: `${origin}/` }) })
     expect((await waiting.json() as { kind: string }).kind).toBe('waiting_user')
 
     const authorized = await app.request(`/v1/sessions/${session.sessionRef}/authorize`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accountRef: 'acct-a' }) })
-    expect((await authorized.json() as { state: string }).state).toBe('active')
+    const active = await authorized.json() as Record<string, unknown>
+    expect(active.state).toBe('active')
+    expect(active).not.toHaveProperty('profileDir')
     const captured = await app.request(`/v1/sessions/${session.sessionRef}/capture`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId: 'w1', accountRef: 'acct-a', url: `${origin}/` }) })
     const capture = await captured.json() as { status: string; markdown: string | null }
     expect(capture.status).toBe('success')
@@ -62,7 +68,10 @@ describe('B3 managed session API', () => {
     const handoff = await app.request(`/v1/sessions/${session.sessionRef}/handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 're-authentication_required' }) })
     expect(handoff.status).toBe(409)
     const queried = await app.request(`/v1/sessions/${session.sessionRef}`)
-    expect((await queried.json() as { state: string }).state).toBe('revoked')
+    const stored = await queried.json() as Record<string, unknown>
+    expect(stored.state).toBe('revoked')
+    expect(stored).not.toHaveProperty('profileDir')
+    expect(stored).not.toHaveProperty('cdpEndpoint')
   }, 120000)
 
   it('renews an expired active session into waiting_user with a new epoch', async () => {
@@ -77,5 +86,28 @@ describe('B3 managed session API', () => {
     expect(body.state).toBe('waiting_user')
     expect(body.grantEpoch).toBe(2)
     expect(body.handoff.reason).toBe('renewal_authorization_required')
+    expect(body).not.toHaveProperty('profileDir')
+  })
+
+  it('a hosted server keeps no managed sessions: every route refuses, and no profile is made', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-b3-api-'))
+    engine = createApiEngine({ taskRoot: root, hosted: true })
+    const app = createApp(engine)
+    const json = { 'content-type': 'application/json' }
+    const routes: [string, string, unknown?][] = [
+      ['POST', '/v1/sessions/managed', { workspaceId: 'w1', accountRef: 'acct-a', originScope: origin }],
+      ['POST', '/v1/sessions/s1/authorize', { accountRef: 'acct-a' }],
+      ['POST', '/v1/sessions/s1/revoke'],
+      ['GET', '/v1/sessions/s1'],
+      ['POST', '/v1/sessions/s1/renew', {}],
+      ['POST', '/v1/sessions/s1/handoff', { reason: 're-authentication_required' }],
+      ['POST', '/v1/sessions/s1/capture', { workspaceId: 'w1', accountRef: 'acct-a', url: `${origin}/` }],
+    ]
+    for (const [method, path, body] of routes) {
+      const response = await app.request(path, { method, headers: json, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+      expect(response.status, `${method} ${path}`).toBe(409)
+      expect((await response.json() as { error: string }).error, `${method} ${path}`).toContain('keeps no managed sessions')
+    }
+    expect(existsSync(join(root, 'profiles'))).toBe(false)
   })
 })

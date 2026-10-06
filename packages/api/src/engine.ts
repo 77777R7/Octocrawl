@@ -122,9 +122,9 @@ import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, FileSessionStore, SessionBroker, type SessionStore } from '@w2l/bench'
+import { FileSessionBrokerStore, FileSessionStore, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
 import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
-import type { ManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
+import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
@@ -149,6 +149,11 @@ export interface CrawlStatusPage {
 /** Saved logins this engine does not manage: a hosted engine, or one without the person's sessions file or Chrome. */
 export class LoginsUnavailableError extends Error {
   override readonly name = 'LoginsUnavailableError'
+}
+
+/** Managed sessions keep a browser profile on the server and drive a browser with it: a hosted server keeps none. */
+export class SessionsUnavailableError extends Error {
+  override readonly name = 'SessionsUnavailableError'
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -290,12 +295,13 @@ export interface ApiEngine {
   getDeliveriesPage(query?: DeliveryPageQuery): DeliveryPage
   getDelivery(id: string): DeliveryDetail | null
   retryDelivery(id: string): WebhookDelivery
-  createManagedSession(input: { workspaceId: string; accountRef: string; originScope: string; expiresAt?: string | null }): Promise<ManagedSessionRef>
-  authorizeManagedSession(sessionRef: string, accountRef: string): Promise<ManagedSessionRef>
+  /** Managed sessions answer without the profile's path or a CDP endpoint (publicSession); a hosted server refuses them all (SessionsUnavailableError). */
+  createManagedSession(input: { workspaceId: string; accountRef: string; originScope: string; expiresAt?: string | null }): Promise<PublicManagedSessionRef>
+  authorizeManagedSession(sessionRef: string, accountRef: string): Promise<PublicManagedSessionRef>
   revokeManagedSession(sessionRef: string): Promise<void>
-  getManagedSession(sessionRef: string): Promise<ManagedSessionRef>
-  renewManagedSession(sessionRef: string, expiresAt?: string | null): Promise<ManagedSessionRef>
-  requestManagedHandoff(sessionRef: string, reason: string, expiresAt?: string | null): Promise<ManagedSessionRef>
+  getManagedSession(sessionRef: string): Promise<PublicManagedSessionRef>
+  renewManagedSession(sessionRef: string, expiresAt?: string | null): Promise<PublicManagedSessionRef>
+  requestManagedHandoff(sessionRef: string, reason: string, expiresAt?: string | null): Promise<PublicManagedSessionRef>
   captureManagedSession(input: { sessionRef: string; workspaceId: string; accountRef: string; url: string }): Promise<FetchResult | SessionAccessResult>
   close(options?: {cancelActive?: boolean}): Promise<void>
 }
@@ -488,6 +494,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const shutdownController = new AbortController()
   const monitorControllers = new Map<string, Set<AbortController>>()
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
+  const managedSessionsServed = (): void => { if (options.hosted === true) throw new SessionsUnavailableError('this server keeps no managed sessions: run Octocrawl on your own machine (octocrawl serve) for them') }
   const userChrome: UserChromeOptions | null = options.hosted === true ? null : options.userChrome ?? null
   /** The batches being handed to the person now: one handoff of a batch at a time. */
   const handoffs = new Set<string>()
@@ -1944,25 +1951,29 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     retryDelivery: (id) => deliveryStore.replayDeadLetter(id),
 
     async createManagedSession(input) {
+      managedSessionsServed()
       const profileDir = join(taskRoot, 'profiles', crypto.randomUUID())
-      return sessionBroker.createManagedSession({ ...input, profileDir })
+      return publicSession(await sessionBroker.createManagedSession({ ...input, profileDir }))
     },
 
     async authorizeManagedSession(sessionRef, accountRef) {
-      return sessionBroker.markAuthorized(sessionRef, accountRef)
+      managedSessionsServed()
+      return publicSession(await sessionBroker.markAuthorized(sessionRef, accountRef))
     },
 
     async revokeManagedSession(sessionRef) {
+      managedSessionsServed()
       await sessionBroker.revoke(sessionRef)
     },
 
-    async getManagedSession(sessionRef) { return sessionBroker.getSession(sessionRef) },
+    async getManagedSession(sessionRef) { managedSessionsServed(); return publicSession(await sessionBroker.getSession(sessionRef)) },
 
-    async renewManagedSession(sessionRef, expiresAt) { return sessionBroker.renewExpired(sessionRef, expiresAt) },
+    async renewManagedSession(sessionRef, expiresAt) { managedSessionsServed(); return publicSession(await sessionBroker.renewExpired(sessionRef, expiresAt)) },
 
-    async requestManagedHandoff(sessionRef, reason, expiresAt) { return sessionBroker.requestHandoff(sessionRef, reason, expiresAt) },
+    async requestManagedHandoff(sessionRef, reason, expiresAt) { managedSessionsServed(); return publicSession(await sessionBroker.requestHandoff(sessionRef, reason, expiresAt)) },
 
     async captureManagedSession(input) {
+      managedSessionsServed()
       const access = await sessionBroker.grant({ ...input, origin: input.url })
       if (access.kind !== 'granted') return access
       const session = await sessionBrokerStoreGet(sessionBroker, input.sessionRef)

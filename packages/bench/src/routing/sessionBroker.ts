@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, chmod, rename, rmdir, unlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import type { ManagedSessionRef, SessionAccessResult, SessionGrant } from '@w2l/contracts'
+import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult, SessionGrant } from '@w2l/contracts'
 
 export interface SessionBrokerStore {
   get(sessionRef: string): Promise<ManagedSessionRef | null>
@@ -188,7 +188,7 @@ export function validateCdpEndpoint(value: string): string {
   return u.href
 }
 
-export function publicSession(session: ManagedSessionRef): Omit<ManagedSessionRef, 'profileDir' | 'cdpEndpoint'> {
+export function publicSession(session: ManagedSessionRef): PublicManagedSessionRef {
   const { profileDir: _dir, cdpEndpoint: _endpoint, ...publicFields } = session
   return publicFields
 }

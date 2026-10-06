@@ -20,6 +20,9 @@ export interface ManagedSessionRef {
   cdpEndpoint?: string
 }
 
+/** A managed session as the API answers with it: no server path, no CDP endpoint. */
+export type PublicManagedSessionRef = Omit<ManagedSessionRef, 'profileDir' | 'cdpEndpoint'>
+
 export interface SessionHandoff {
   handoffId: string
   reason: string
