@@ -8,34 +8,108 @@
  * `Secure` one over https only, and an expired one is dropped. One session belongs to one task and
  * one egress: it is never shared between tasks, and nothing in it reaches a record. A lane reports
  * the session's random `id` and how many cookies it sent and kept.
+ *
+ * On disk. Given a file (the task's directory), the session is read from it when it exists and
+ * written back after every change, so a task resumed after a restart keeps its cookies and its id.
+ * The file holds cookie values: it is created readable by its owner alone (0600), replaced whole
+ * (a temporary file renamed over it), and removed when the task ends (TaskCookieSession.remove).
  */
 
 import { randomUUID } from 'node:crypto'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { CookieJar, type Cookie } from 'tough-cookie'
 import type { CookieSession, ContextCookie } from '@w2l/contracts'
 
 const SAME_SITE: Readonly<Record<string, ContextCookie['sameSite']>> = { strict: 'Strict', lax: 'Lax', none: 'None' }
 
 export class TaskCookieSession implements CookieSession {
-  readonly id = randomUUID()
+  private sessionId: string = randomUUID()
   // Lenient about what a site sends: a cookie it would not keep is skipped, never an error.
-  private readonly jar = new CookieJar(undefined, { looseMode: true })
+  private jar = new CookieJar(undefined, { looseMode: true })
+  /** Done once the file, if any, has been read; every method waits for it. */
+  private readonly ready: Promise<void>
+  private writing: Promise<void> = Promise.resolve()
+  /** Set when the task ended: a page still finishing afterwards changes the session in memory alone. */
+  private closed = false
+
+  /** `file`: where the session lives between runs of its task; without one it lives in memory alone. */
+  constructor(private readonly file?: string) {
+    this.ready = file === undefined ? Promise.resolve() : this.load(file)
+  }
+
+  /** An opaque id for the record, unrelated to any cookie value; a session read from its file keeps the id it had. */
+  get id(): string {
+    return this.sessionId
+  }
+
+  /** Deletes a task's session file: the task has ended, and its cookies go with it. */
+  static async remove(file: string): Promise<void> {
+    await rm(file, { force: true })
+  }
+
+  /**
+   * The task has ended: deletes the file after the writes already queued, and writes nothing again,
+   * so a page that finishes after the task (one a cancel or a deadline stopped waiting for) cannot put it back.
+   */
+  async close(): Promise<void> {
+    this.closed = true
+    const file = this.file
+    if (file === undefined) return
+    this.writing = this.writing.then(() => rm(file, { force: true })).catch(() => {})
+    await this.writing
+  }
+
+  private async load(file: string): Promise<void> {
+    let text: string
+    try { text = await readFile(file, 'utf8') } catch { return }
+    try {
+      const saved = JSON.parse(text) as { version?: number; id?: unknown; jar?: object }
+      if (saved.version !== 1 || typeof saved.id !== 'string' || saved.jar === undefined) return
+      this.jar = await CookieJar.deserialize({ ...saved.jar, looseMode: true })
+      this.sessionId = saved.id
+    } catch {
+      // A file that does not read is not the session: start a new one, which replaces it on its first change.
+    }
+  }
+
+  /** Writes the session to its file after a change, one write at a time. */
+  private persist(): Promise<void> {
+    const file = this.file
+    if (file === undefined) return Promise.resolve()
+    this.writing = this.writing.then(async () => {
+      if (this.closed) return
+      const temporary = `${file}.${randomUUID()}.tmp`
+      try {
+        await writeFile(temporary, JSON.stringify({ version: 1, id: this.sessionId, jar: await this.jar.serialize() }), { mode: 0o600 })
+        await rename(temporary, file)
+      } catch {
+        // A write that failed (a full disk) leaves no copy of the cookies behind.
+        await rm(temporary, { force: true }).catch(() => {})
+      }
+    }).catch(() => {})
+    return this.writing
+  }
 
   async cookieHeader(url: string): Promise<string> {
+    await this.ready
     return this.jar.getCookieString(url).catch(() => '')
   }
 
   async store(url: string, setCookies: readonly string[]): Promise<number> {
+    await this.ready
     let kept = 0
     for (const line of setCookies) {
       const cookie = await this.jar.setCookie(line, url, { ignoreError: true }).catch(() => undefined)
       // An expired cookie deletes the one it names: nothing is kept.
       if (cookie !== undefined && cookie.TTL() > 0) kept++
     }
+    // A Set-Cookie that deleted a cookie changed the session too.
+    if (setCookies.length > 0) await this.persist()
     return kept
   }
 
   async browserCookies(url: string): Promise<ContextCookie[]> {
+    await this.ready
     const cookies = await this.jar.getCookies(url).catch(() => [] as Cookie[])
     return cookies.map((cookie) => ({
       name: cookie.key,
@@ -54,6 +128,7 @@ export class TaskCookieSession implements CookieSession {
     const key = (c: ContextCookie) => `${c.name}\u0000${c.domain}\u0000${c.path}`
     const before = new Map(startedWith.map((c) => [key(c), c]))
     const after = new Map(held.map((c) => [key(c), c]))
+    await this.ready
     let kept = 0
     let removed = 0
     // New and changed cookies: what the page itself set. A changed expiry alone is kept only while the
@@ -72,6 +147,7 @@ export class TaskCookieSession implements CookieSession {
       await this.setLine(c, true)
       removed++
     }
+    if (kept + removed > 0) await this.persist()
     return { kept, removed }
   }
 
