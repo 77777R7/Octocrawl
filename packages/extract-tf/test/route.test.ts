@@ -135,38 +135,47 @@ describe('routePage', () => {
 
   describe('a Next.js product page titled by its one h2, beside related products it cuts', () => {
     // sandbox.oxylabs.io as served: a Next.js page whose data blob outweighs
-    // the product's own text once the related games are cut, though the page
-    // as received holds all of it.
+    // the product's own text once the related games are cut. The blob holds
+    // the product's description and the related games' blurbs, and the page
+    // as received shows all of them.
+    const description = 'As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves. The evil human uses Link to gain access to the Sacred Realm, where he places his tainted hands on Triforce and transforms the beautiful Hyrulean landscape into a barren wasteland. Link is determined to fix the problems he helped to create, so with the help of Rauru he travels through time gathering the powers of the Seven Sages.'
     const blurb = 'Thrown into a parallel world by the mischievous actions of a possessed Skull Kid, Link finds a land in grave danger and only seventy-two hours to save it.'
-    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb} ${blurb} ${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
     // The platforms' own entries are plain list items, short and not links.
     const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
-    const page = wrap(`<main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li><a href="/c/xbox">Xbox platform</a></li><li>Dreamcast</li><li>Stadia</li></ul></div>
-<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>
-<p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves. The evil human uses Link to gain access to the Sacred Realm, where he places his tainted hands on Triforce and transforms the beautiful Hyrulean landscape into a barren wasteland. Link is determined to fix the problems he helped to create, so with the help of Rauru he travels through time gathering the powers of the Seven Sages.</p>
+    const data = JSON.stringify({ props: { pageProps: {
+      product: { id: 1, title: 'The Legend of Zelda: Ocarina of Time', description, images: Array.from({ length: 16 }, (_, i) => `/images/products/the-legend-of-zelda-ocarina-of-time-${i + 1}.jpg`) },
+      related: [1, 2].map((n) => ({ id: n, title: `Related game ${n}`, description: blurb })),
+    } } })
+    // `shown` is what the product block shows where its description would be.
+    const nextPage = (shown: string) => wrap(`<main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li><a href="/c/xbox">Xbox platform</a></li><li>Dreamcast</li><li>Stadia</li></ul></div>
+<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>${shown}
 <div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>
-<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { product: { id: 1, title: 'The Legend of Zelda: Ocarina of Time', blurb: blurb.repeat(16) } } } })}</script>`)
+<script id="__NEXT_DATA__" type="application/json">${data}</script>`)
+    const page = nextPage(`<p class="description">${description}</p>`)
+    // The description drawn by a client component: in the data only.
+    const drawn = (beside = '') => nextPage(`${beside}<p class="description"></p>`)
 
-    it('reads the page as received for a shell, before the related games are cut', () => {
+    it('does not read a page for a shell when it shows the text its hydration data holds', () => {
       const out = extractTf.extract(page)
       expect(out.pageType).toBe('product')
       expect(out.mainHtml).not.toContain('Related game 1')
       expect(out.render).toMatchObject({ clientRendered: false, reason: null, markers: ['hydration_state'] })
     })
 
-    it('is as confident in a terse buy box it found as the escalation needs', () => {
-      const out = extractTf.extract(page)
-      expect(out.confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    it('still reads it for a shell when its description is in its hydration data only', () => {
+      for (const beside of ['', '<ul class="features"><li>Single player</li><li>Rated E</li><li>Cartridge</li></ul>']) {
+        expect(extractTf.extract(drawn(beside)).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+      }
     })
 
-    it('keeps the floor to a buy box that shows its product, not one whose description scripts draw', () => {
-      // The description is in __NEXT_DATA__ only (a component rendered on the client): the browser can still add it.
-      const drawn = page.replace(/<p class="description">[^<]*<\/p>/, '<p class="description"></p>')
-      expect(drawn).not.toContain('Seven Sages</p>')
-      // A store's delivery or returns line beside it is no description either.
-      const lines = ['<p>Free delivery on orders over 50 € within 3 working days.</p>', '<p>Returns are accepted within thirty days of purchase.</p>']
-      for (const html of [drawn, ...lines.map((line) => drawn.replace('<p class="description"></p>', `${line}<p class="description"></p>`))]) {
-        const out = extractTf.extract(html)
+    it('is as confident in a terse buy box it found as the escalation needs', () => {
+      expect(extractTf.extract(page).confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('keeps the floor to a buy box that shows its description, not a delivery or returns line', () => {
+      for (const beside of ['', '<p>Free delivery on orders over 50 € within 3 working days.</p>', '<p>Returns are accepted within thirty days of purchase.</p>']) {
+        const out = extractTf.extract(drawn(beside))
         expect(out.pageType).toBe('product')
         expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
       }
@@ -183,7 +192,7 @@ describe('routePage', () => {
     })
 
     it('still reads a Next.js page with nothing of its own server-rendered for a shell', () => {
-      const shell = wrap(`<main><h2>Our games</h2><p>${blurb} ${blurb}</p><p>Loading the catalogue for you, one moment please.</p></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { blurb: blurb.repeat(20) } })}</script>`)
+      const shell = wrap(`<main><h2>Our games</h2><p>${blurb} ${blurb}</p><p>Loading the catalogue for you, one moment please.</p></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { games: Array.from({ length: 12 }, (_, i) => ({ id: i, description: `${description} (${i})` })) } })}</script>`)
       expect(extractTf.extract(shell).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
     })
   })

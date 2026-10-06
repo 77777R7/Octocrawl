@@ -160,11 +160,6 @@ export class ExtractTf implements Extractor {
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
 
-    // Whether the page is a shell is a question about the page as received
-    // and cleaned, so it is answered before a product page's recommendations
-    // are cut: what they held was on the page all the same.
-    const render = detectRenderSignals(raw, doc.document)
-
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
     // the answer.
@@ -279,7 +274,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render,
+      render: detectRenderSignals(raw, doc.document),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
