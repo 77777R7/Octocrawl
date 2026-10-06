@@ -119,6 +119,8 @@ export interface RouteDecision {
   type: PageType
   /** Which strategy's result to use. */
   strategy: 'article' | 'list' | 'table' | 'product'
+  /** Set when the page is a product page by its visible buy box (a title heading and its price) alone. */
+  buyBox?: true
 }
 
 export interface PageSignals {
@@ -336,7 +338,7 @@ function routeByCounts(c: RouterCounts, s: PageSignals): RouteDecision {
   // A visible buy box is a product page that declares nothing: the product
   // strategy anchors on the same heading and price. A page its publisher
   // declares an article (a price box under a news headline) is not one.
-  if (c.buyBox && !hasArticleSignals(s)) return { type: 'product', strategy: 'product' }
+  if (c.buyBox && !hasArticleSignals(s)) return { type: 'product', strategy: 'product', buyBox: true }
 
   // Documentation / reference pages: breadcrumbs and in-page TOC look like
   // lists, but several prose paragraphs under <main> are the payload.

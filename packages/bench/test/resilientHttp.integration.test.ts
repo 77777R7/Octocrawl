@@ -310,6 +310,42 @@ describe('HTTP lane on a client-rendered shell', () => {
   })
 })
 
+describe('HTTP lane on a terse product page beside cut recommendations', () => {
+  it('answers it itself: no low-yield or shell offer to the browser', async () => {
+    const { createServer } = await import('node:http')
+    // sandbox.oxylabs.io: a Next.js product page, titled by its one h2, whose
+    // related games are cut and whose sidebar holds short platform entries.
+    const blurb = 'Thrown into a parallel world by the mischievous actions of a possessed Skull Kid, Link finds a land in grave danger and only seventy-two hours to save it.'
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb} ${blurb} ${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
+    const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        `<!doctype html><html><head><title>Zelda</title></head><body><main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li>Dreamcast</li><li>Stadia</li></ul></div>` +
+          '<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>' +
+          '<p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves, and travels through time gathering the powers of the Seven Sages.</p>' +
+          `<div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>` +
+          `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { product: { id: 1, blurb: blurb.repeat(16) } } } })}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/products/1`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Seven Sages')
+      expect(out.markdown).not.toContain('Related game 1')
+      expect(out.warnings ?? []).toEqual([])
+      expect(out.trace.some((event) => event.event === 'quality_low_yield' || event.event === 'quality_client_rendered')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
 describe('hosted network policy on the HTTP arm', () => {
   it('denies cloud metadata before a wire request', async () => {
     const hosted = new ResilientHttpSubject('standard', hostedNetworkPolicy())

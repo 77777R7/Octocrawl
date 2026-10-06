@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { extractTf, htmlToMarkdown, routePage, selectList, selectTable } from '../src/index.js'
 import { parse } from '../src/dom.js'
+import { QUALITY_ESCALATION_MAX_CONFIDENCE } from '@w2l/contracts'
 
 const wrap = (bodyHtml: string, headExtra = '') =>
   `<!doctype html><html><head><title>Page</title>${headExtra}</head><body>${bodyHtml}</body></html>`
@@ -128,8 +129,50 @@ describe('routePage', () => {
     const doc = parse(wrap('<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li><a href="/poetry">Poetry</a></li><li>A Light in the Attic</li></ul>' +
       '<article><div class="product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p><p class="availability">In stock (22 available)</p></div>' +
       '<h2>Product Description</h2><p>A collection of poems and line drawings.</p></article>'))
-    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product', buyBox: true })
     doc.close()
+  })
+
+  describe('a Next.js product page titled by its one h2, beside related products it cuts', () => {
+    // sandbox.oxylabs.io as served: a Next.js page whose data blob outweighs
+    // the product's own text once the related games are cut, though the page
+    // as received holds all of it.
+    const blurb = 'Thrown into a parallel world by the mischievous actions of a possessed Skull Kid, Link finds a land in grave danger and only seventy-two hours to save it.'
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb} ${blurb} ${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
+    // The platforms' own entries are plain list items, short and not links.
+    const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
+    const page = wrap(`<main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li><a href="/c/xbox">Xbox platform</a></li><li>Dreamcast</li><li>Stadia</li></ul></div>
+<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>
+<p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves, and travels through time gathering the powers of the Seven Sages.</p>
+<div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { product: { id: 1, title: 'The Legend of Zelda: Ocarina of Time', blurb: blurb.repeat(16) } } } })}</script>`)
+
+    it('reads the page as received for a shell, before the related games are cut', () => {
+      const out = extractTf.extract(page)
+      expect(out.pageType).toBe('product')
+      expect(out.mainHtml).not.toContain('Related game 1')
+      expect(out.render).toMatchObject({ clientRendered: false, reason: null, markers: ['hydration_state'] })
+    })
+
+    it('is as confident in a terse buy box it found as the escalation needs', () => {
+      const out = extractTf.extract(page)
+      expect(out.confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('keeps the floor to a buy box the router found, not a page routed by its declarations', () => {
+      // A shop listing whose cards are microdata Products (WooCommerce on main) routes as product by them; its region is
+      // no buy box, however a heading and a price sit in it.
+      const card = (n: number) => `<li itemscope itemtype="http://schema.org/Product" class="product post-${n}"><a href="/p/${n}"><h2>Hoodie ${n}</h2><span class="price">$${n}9.00</span></a></li>`
+      const shop = wrap(`<div id="page" class="hfeed site"><header><a class="cart-contents" href="/cart"><span class="product-price woocommerce-Price-amount amount">$0.00</span> 0 items</a></header><main><h1>Shop</h1><p>Showing 1–4 of 188 results</p><ul class="products">${[1, 2, 3, 4].map(card).join('')}</ul></main></div>`)
+      const out = extractTf.extract(shop)
+      expect(out.pageType).toBe('product')
+      expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('still reads a Next.js page with nothing of its own server-rendered for a shell', () => {
+      const shell = wrap(`<main><h2>Our games</h2><p>${blurb} ${blurb}</p><p>Loading the catalogue for you, one moment please.</p></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { blurb: blurb.repeat(20) } })}</script>`)
+      expect(extractTf.extract(shell).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
   })
 
   describe('a product page titled by its one h2, beside related products', () => {
@@ -144,7 +187,7 @@ describe('routePage', () => {
 
     it('routes it to product and keeps the related games out', () => {
       const doc = parse(pdp)
-      expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+      expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product', buyBox: true })
       doc.close()
       const out = extractTf.extract(pdp)
       expect(out.pageType).toBe('product')

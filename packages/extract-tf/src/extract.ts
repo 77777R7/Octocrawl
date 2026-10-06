@@ -43,12 +43,21 @@ function pickTitle(doc: Document, main: Element | null): string | null {
   return docTitle ? textOf(docTitle).trim() : null
 }
 
+/** The confidence floor of a product region that shows its title heading and its price (confidenceOf). */
+const BUY_BOX_CONFIDENCE = 0.45
+
+/** Whether the region holds a title heading and shows the price. */
+function showsBuyBox(main: Element, price: string): boolean {
+  return main.querySelector('h1,h2') !== null && textOf(main).replace(/\s+/g, ' ').includes(price.replace(/\s+/g, ' ').trim())
+}
+
 function confidenceOf(
   blocksLen: number,
   main: Element | null,
   totalBlocks: number,
   mainLength: number,
   pageType: PageType,
+  buyBox: boolean,
   favorPrecision: boolean,
   favorRecall: boolean,
   product: ProductFacts | null,
@@ -77,6 +86,15 @@ function confidenceOf(
     product.price.source !== 'text'
   ) {
     conf = Math.max(conf, 0.6)
+  }
+  // A page the router found a product page by its visible buy box, a title
+  // heading and its price, with both in the region, is the same terse shape
+  // read from what the page shows rather than what it declares: a lower
+  // floor, still above the low-yield escalation's ceiling, so an answer the
+  // browser cannot improve is not rendered again for its brevity. A page
+  // routed by its declarations (microdata cards) earns no such floor.
+  else if (buyBox && main !== null && product !== null && product.price !== null && showsBuyBox(main, product.price.value)) {
+    conf = Math.max(conf, BUY_BOX_CONFIDENCE)
   }
   if (favorPrecision) conf = Math.min(conf, 0.85)
   if (favorRecall) conf = Math.max(conf, 0.3)
@@ -134,6 +152,11 @@ export class ExtractTf implements Extractor {
     detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
+
+    // Whether the page is a shell is a question about the page as received
+    // and cleaned, so it is answered before a product page's recommendations
+    // are cut: what they held was on the page all the same.
+    const render = detectRenderSignals(raw, doc.document)
 
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
@@ -231,6 +254,7 @@ export class ExtractTf implements Extractor {
         blocks.length,
         mainLength,
         decision.type,
+        decision.buyBox === true,
         favorPrecision,
         favorRecall,
         product,
@@ -247,7 +271,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document),
+      render,
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
