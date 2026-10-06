@@ -58,6 +58,8 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
         const expression = String(p.expression)
         if (kind === 'scope') {
           if (expression.includes('document.write')) { written.push(expression); return {} }
+          // The page's own script wired its buttons.
+          if (expression.includes("getElementById('allow')")) return { result: { value: true } }
           const now = answerNow()
           if (now === 'closed') throw new ChromeLoginError('Chrome refused the request: Session with given id not found.')
           if (p.contextId === 7) { polled++; return { result: { value: now.active } } }
@@ -215,6 +217,23 @@ describe('the my-browser lane in a batch', () => {
     expect(await later.json()).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
   }, 30_000)
 
+  it('says it waits for the person while they have not allowed the sites, and no longer once they have', async () => {
+    const answers: Answer[] = [...Array(6).fill({ answer: '', active: false }), { answer: 'allowed', active: true }]
+    const chrome = fakeChrome(answers, { html: PAGE })
+    const app = await setup(chrome)
+    const started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    let waiting = false
+    for (let i = 0; i < 200 && !waiting; i++) {
+      waiting = (await (await app.request(`/v1/batches/${id}`)).json() as { waitingForApproval?: boolean }).waitingForApproval === true
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(waiting).toBe(true)
+    const { report } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed' })
+    expect(report.waitingForApproval).toBeUndefined()
+  }, 30_000)
+
   it('reads none of its pages when the person does not allow the sites, and says why on each', async () => {
     const chrome = fakeChrome([{ answer: 'revoked', active: true }], { html: PAGE })
     const app = await setup(chrome)
@@ -313,7 +332,16 @@ describe('the person\'s Chrome, asked to allow sites', () => {
     const reader2 = await openUserChrome({ userDataDir, connect: silent.connect })
     const late = await reader2.allow({ hosts: ['site.test'], task: 't' }, { pollMs: 1, waitMs: 30 }).catch((error: unknown) => error)
     expect(late).toBeInstanceOf(HandoffNotThrough)
-    expect(late).toMatchObject({ kind: 'timeout' })
+    expect(late).toMatchObject({ kind: 'timeout', message: expect.stringContaining('the page was not clicked') })
+    // Allowed on the page but no click Chrome counts: the refusal says so, and each step is told to the log.
+    const steps: Array<[string, Record<string, unknown>]> = []
+    const scripted = fakeChrome([{ answer: 'allowed', active: false }], { href: 'https://site.test/a', html: PAGE })
+    const reader3 = await openUserChrome({ userDataDir, connect: scripted.connect })
+    const unclicked = await reader3.allow({ hosts: ['site.test'], task: 't' }, { pollMs: 1, waitMs: 30, log: (step, detail) => steps.push([step, detail]) }).catch((error: unknown) => error)
+    expect(unclicked).toMatchObject({ kind: 'timeout', message: expect.stringContaining('the page answered allowed, but no click of yours on it was seen') })
+    expect(steps.map(([step]) => step)).toEqual(['shown', 'ready', 'answer', 'refused'])
+    expect(steps[1]![1]).toEqual({ buttons: true })
+    expect(steps[3]![1]).toMatchObject({ reason: 'timeout', answer: 'allowed', active: false })
   }, 20_000)
 
   it('reads without the person only on the host they allowed, exactly: not a subdomain or a parent it leads to', async () => {

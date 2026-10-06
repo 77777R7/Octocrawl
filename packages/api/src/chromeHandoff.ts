@@ -108,6 +108,9 @@ export interface AllowedSites {
   close(): Promise<void>
 }
 
+/** One step of asking the person to allow sites, for the server's log: never a page's content, only the page's own state. */
+export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused', detail: Record<string, unknown>) => void
+
 /** The sites and the task the person is asked to allow. */
 export interface SiteScope {
   hosts: readonly string[]
@@ -121,9 +124,11 @@ export interface UserChrome {
   /**
    * Show the person, in a page W2L opens in their Chrome, the sites and task it asks to read, and wait for them to
    * click Allow there (a click Chrome counts as theirs). Refused (HandoffNotThrough) when they close the page, click
-   * Revoke, or do not answer within `waitMs` (default 120 s).
+   * Revoke, or do not answer within `waitMs` (default 10 minutes); the refusal says what the page last answered.
+   * `log` is told each step (the page shown, its buttons ready, each change in its answer or in the person's click), so
+   * a wait that ends unanswered can be told from a click that was not recognised.
    */
-  allow(scope: SiteScope, options?: { waitMs?: number; pollMs?: number; signal?: AbortSignal }): Promise<AllowedSites>
+  allow(scope: SiteScope, options?: { waitMs?: number; pollMs?: number; signal?: AbortSignal; log?: ApprovalLog }): Promise<AllowedSites>
   close(): void
 }
 
@@ -203,8 +208,9 @@ document.getElementById('revoke').onclick = () => { root.dataset.octocrawl = 're
 </script></body></html>`
 }
 
-async function allowSites(connection: CdpConnection, scope: SiteScope, options: { waitMs?: number; pollMs?: number; signal?: AbortSignal }): Promise<AllowedSites> {
-  const waitMs = options.waitMs ?? 120_000
+async function allowSites(connection: CdpConnection, scope: SiteScope, options: { waitMs?: number; pollMs?: number; signal?: AbortSignal; log?: ApprovalLog }): Promise<AllowedSites> {
+  const waitMs = options.waitMs ?? 600_000
+  const log: ApprovalLog = options.log ?? (() => undefined)
   const pollMs = options.pollMs ?? 500
   const refused = (message: string, kind: NotThroughCause) => new HandoffNotThrough(message, null, kind)
   let targetId: string
@@ -230,16 +236,24 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
     await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
     await connection.send('Runtime.evaluate', { expression: `document.open(); document.write(${JSON.stringify(scopePage(scope))}); document.close()` }, sessionId)
     const world = (await connection.send('Page.createIsolatedWorld', { frameId: targetId, worldName: WORLD }, sessionId) as { executionContextId: number }).executionContextId
+    log('shown', { targetId, hosts: scope.hosts.length })
+    // The page's buttons answer only when its own script ran: said once, so a page that cannot answer is told from one nobody clicked.
+    const wired = await connection.send('Runtime.evaluate', { expression: `typeof document.getElementById('allow')?.onclick === 'function' && typeof document.getElementById('revoke')?.onclick === 'function'`, returnByValue: true }, sessionId).then((r) => (r as { result?: { value?: unknown } }).result?.value === true, () => false)
+    log('ready', { buttons: wired })
     const started = Date.now()
+    let last: { answer: string; active: boolean } = { answer: '', active: false }
+    const lastSeen = () => last.answer === 'allowed' ? 'the page answered allowed, but no click of yours on it was seen (Chrome did not count one)' : last.active ? 'you clicked on the page, but not on Allow reading these sites' : 'the page was not clicked'
     for (;;) {
-      if (options.signal?.aborted === true) throw refused('the request was cancelled before you allowed the sites', 'cancelled')
-      if (Date.now() - started >= waitMs) throw refused(`you did not allow the sites in Chrome within ${Math.round(waitMs / 1000)} s`, 'timeout')
+      if (options.signal?.aborted === true) { log('refused', { reason: 'cancelled', ...last }); throw refused('the request was cancelled before you allowed the sites', 'cancelled') }
+      if (Date.now() - started >= waitMs) { log('refused', { reason: 'timeout', ...last, buttons: wired }); throw refused(`you did not allow the sites in Chrome within ${Math.round(waitMs / 1000)} s: ${lastSeen()}`, 'timeout') }
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       const seen = await answerOf(sessionId, world)
-      if (seen === null) throw refused('you closed Octocrawl\'s page in Chrome before allowing the sites', 'cancelled')
-      if (seen.answer === 'revoked') throw refused('you did not allow the sites: you clicked Revoke', 'cancelled')
+      if (seen === null) { log('refused', { reason: 'closed', ...last }); throw refused('you closed Octocrawl\'s page in Chrome before allowing the sites', 'cancelled') }
+      if (seen.answer !== last.answer || seen.active !== last.active) log('answer', { ...seen, afterMs: Date.now() - started })
+      last = seen
+      if (seen.answer === 'revoked') { log('refused', { reason: 'revoked' }); throw refused('you did not allow the sites: you clicked Revoke', 'cancelled') }
       // Allowed only by a click Chrome counts as the person's: a script cannot set it for them.
-      if (seen.answer === 'allowed' && seen.active) break
+      if (seen.answer === 'allowed' && seen.active) { log('allowed', { afterMs: Date.now() - started }); break }
     }
     // Allowed: the page is watched until it is closed or revoked.
     const revoked = new AbortController()
