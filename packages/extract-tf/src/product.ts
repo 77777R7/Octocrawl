@@ -408,11 +408,17 @@ export function markOptionGroups(doc: Document, excluded: ReadonlySet<Element> =
  * Settle markOptionGroups' placeholders: on a product page each becomes its
  * values as text ("128, 256, 512"), on any other page it is removed.
  */
+/** The text settleOptionGroups wrote: a product's option values, which describe it no more than their labels do. */
+const optionValues = new WeakSet<Node>()
+
 export function settleOptionGroups(marked: ReadonlyMap<Element, string>, keep: boolean): void {
   for (const [placeholder, values] of marked) {
-    // Spaced, so the values stand apart from a link or label beside them.
-    if (keep && placeholder.parentNode !== null) placeholder.parentNode.replaceChild(placeholder.ownerDocument.createTextNode(` ${values} `), placeholder)
-    else placeholder.parentNode?.removeChild(placeholder)
+    if (keep && placeholder.parentNode !== null) {
+      // Spaced, so the values stand apart from a link or label beside them.
+      const text = placeholder.ownerDocument.createTextNode(` ${values} `)
+      optionValues.add(text)
+      placeholder.parentNode.replaceChild(text, placeholder)
+    } else placeholder.parentNode?.removeChild(placeholder)
   }
 }
 
@@ -451,13 +457,14 @@ function isRootish(doc: Document, el: Element | null): boolean {
  */
 /**
  * Whether a block says something of its own, not only the labels of form
- * controls: a variation picker's table cells ("Size", "Color") label the
- * selects that cleaning removed, and describe nothing.
+ * controls, the option values settleOptionGroups wrote for them and links: a
+ * variation picker's table cells ("Size", "Color", "XS, S, M", its "Clear"
+ * link) describe nothing.
  */
 function describes(block: TextBlock): boolean {
   const unlabelled = (node: Node): string => {
-    if (node.nodeType === 3) return node.textContent ?? ''
-    if (node.nodeType !== 1 || tagOf(node as Element) === 'label') return ''
+    if (node.nodeType === 3) return optionValues.has(node) ? '' : node.textContent ?? ''
+    if (node.nodeType !== 1 || tagOf(node as Element) === 'label' || tagOf(node as Element) === 'a') return ''
     return Array.from(node.childNodes).map(unlabelled).join('')
   }
   return /[\p{L}\p{N}]/u.test(unlabelled(block.el))
