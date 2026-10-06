@@ -111,7 +111,8 @@ jobs:
               echo "$name@$version is already published; skipped"
               continue
             fi
-            npm publish "$file" --access public
+            # ./ in front: without it npm 11 reads tarballs/<name>.tgz as a GitHub owner/repo shorthand and runs git.
+            npm publish "./$file" --access public
           done
 
   pypi:

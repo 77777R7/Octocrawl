@@ -108,14 +108,25 @@ try {
 } catch (error) {
   check('run', false, error instanceof Error ? `${error.message}\n${error.stderr ?? ''}`.slice(0, 2000) : String(error))
 } finally {
-  serve?.kill('SIGINT')
+  // The v0.3.1 Release run (2026-10-06) passed every check and then sat until the job's 30-minute timeout: the server's
+  // stderr pipe and the site's keep-alive connections kept the process alive. The server gets ten seconds to leave on
+  // SIGINT, then SIGKILL; its pipe is let go; the site's connections are closed, not waited for.
+  if (serve) {
+    serve.stderr?.destroy()
+    const exited = new Promise((done) => { if (serve.exitCode !== null || serve.signalCode !== null) done(); else serve.once('exit', done) })
+    serve.kill('SIGINT')
+    await Promise.race([exited, new Promise((done) => setTimeout(done, 10_000).unref())])
+    if (serve.exitCode === null && serve.signalCode === null) serve.kill('SIGKILL')
+  }
+  site.closeAllConnections()
   await new Promise((done) => site.close(done))
   rmSync(project, { recursive: true, force: true })
   rmSync(aliasProject, { recursive: true, force: true })
 }
 const failed = results.filter((result) => !result.pass).length
 console.log(`${results.length - failed} of ${results.length} checks passed`)
-process.exitCode = failed === 0 ? 0 : 1
+// Nothing of this process is worth keeping alive after the summary: a handle a child or a library left open must not hold a CI job.
+process.exit(failed === 0 ? 0 : 1)
 
 /** One stdio session with the installed octocrawl-mcp: initialize, tools/list, one scrape call; each answer by its id. */
 async function mcpSession(api) {
