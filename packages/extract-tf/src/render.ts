@@ -23,11 +23,10 @@ export interface RawRenderSignals {
   /** Markers found, in a fixed order: hydration state, app root, noscript notice, js-fallback class, aria-busy. */
   markers: readonly RenderMarker[]
   /**
-   * Whether the page as received shows every passage of text its hydration
-   * JSON holds (HYDRATION_TEXT_MIN_CHARS or more, in words): its scripts then
-   * draw nothing the HTML lacks. False when the JSON holds no such passage.
+   * The text of the page's hydration JSON blocks, unparsed: hydrationShown
+   * reads them only for a page that can use the answer.
    */
-  hydrationShown: boolean
+  hydrationJson: readonly string[]
 }
 
 const APP_ROOT_SELECTOR = '#root, #app, #__next, #__nuxt, #___gatsby, [data-reactroot], [ng-app], [ng-version], [data-server-rendered]'
@@ -52,7 +51,7 @@ function collapsed(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-/** The passages of text in parsed hydration JSON (see RawRenderSignals.hydrationShown), walked without recursion. */
+/** The passages of text in parsed hydration JSON (see hydrationShown), walked without recursion. */
 function hydrationPassages(data: unknown, out: string[]): void {
   const stack: unknown[] = [data]
   while (stack.length > 0 && out.length < HYDRATION_MAX_PASSAGES) {
@@ -68,17 +67,27 @@ function hydrationPassages(data: unknown, out: string[]): void {
   }
 }
 
-/** The text a reader sees in the page as received: the body's, without scripts, styles and templates. */
-function visibleText(doc: Document): string {
-  const parts: string[] = []
-  const walk = (node: Node): void => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === 3) parts.push(child.textContent ?? '')
-      else if (child.nodeType === 1 && !['script', 'style', 'noscript', 'template'].includes((child as Element).tagName.toLowerCase())) walk(child)
+/**
+ * Whether the page shows every passage of text its hydration JSON holds
+ * (HYDRATION_TEXT_MIN_CHARS or more, in words): its scripts then draw
+ * nothing the HTML lacks. False when the JSON holds no such passage. `doc` is
+ * the cleaned page, before any of it is cut as recommendations; a passage
+ * only in its navigation or footer, which cleaning removed, counts as not
+ * shown. Parsing a large blob costs, so extract.ts asks only on a page whose
+ * buy box the router found.
+ */
+export function hydrationShown(raw: RawRenderSignals, doc: Document): boolean {
+  const passages: string[] = []
+  for (const text of raw.hydrationJson) {
+    try {
+      hydrationPassages(JSON.parse(text), passages)
+    } catch {
+      // Malformed JSON holds no passages to look for.
     }
   }
-  if (doc.body) walk(doc.body)
-  return collapsed(parts.join(' '))
+  if (passages.length === 0 || doc.body === null) return false
+  const seen = collapsed(textOf(doc.body))
+  return passages.every((passage) => seen.includes(passage))
 }
 
 /** Signals that only exist before `cleanTree` removes their carriers. */
@@ -86,26 +95,15 @@ export function rawSignals(doc: Document): RawRenderSignals {
   const markers = new Set<RenderMarker>()
   let scriptChars = 0
   let hydration = false
-  const passages: string[] = []
+  const hydrationJson: string[] = []
   for (const script of qsa(doc, 'script')) {
     const text = script.textContent ?? ''
     if (script.getAttribute('src') === null) scriptChars += text.length
     const type = (script.getAttribute('type') ?? '').toLowerCase()
     if (script.id === '__NEXT_DATA__' || (type === 'application/json' && text.length >= HYDRATION_MIN_CHARS)) {
       hydration = true
-      if (text.length <= HYDRATION_MAX_JSON_CHARS) {
-        try {
-          hydrationPassages(JSON.parse(text), passages)
-        } catch {
-          // Malformed JSON holds no passages to look for.
-        }
-      }
+      if (text.length <= HYDRATION_MAX_JSON_CHARS) hydrationJson.push(text)
     } else if (text.length >= 64 && HYDRATION_SCRIPT.test(text)) hydration = true
-  }
-  let hydrationShown = false
-  if (passages.length > 0) {
-    const seen = visibleText(doc)
-    hydrationShown = passages.every((passage) => seen.includes(passage))
   }
   if (hydration) markers.add('hydration_state')
 
@@ -132,7 +130,7 @@ export function rawSignals(doc: Document): RawRenderSignals {
 
   if (qsa(doc, '[aria-busy="true"]').length > 0) markers.add('aria_busy')
 
-  return { scriptChars, markers: Array.from(markers), hydrationShown }
+  return { scriptChars, markers: Array.from(markers), hydrationJson }
 }
 
 /** A table whose rows carry no data cells at all. */
@@ -144,11 +142,6 @@ export function countEmptyTables(doc: Document): number {
   return empty
 }
 
-/**
- * Decide whether the page's data is most likely rendered client-side.
- * Every rule pairs a structural gap with script presence, so a static page
- * with an empty table or a "loading" word never trips it.
- */
 /** What the extraction found of the page, weighed beside its signals. */
 export interface RenderContext {
   /**
@@ -157,7 +150,15 @@ export interface RenderContext {
    * as its confidence floor).
    */
   productShown?: boolean
+  /** The page shows every passage of text its hydration JSON holds (hydrationShown). */
+  hydrationShown?: boolean
 }
+
+/**
+ * Decide whether the page's data is most likely rendered client-side.
+ * Every rule pairs a structural gap with script presence, so a static page
+ * with an empty table or a "loading" word never trips it.
+ */
 
 export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, context: RenderContext = {}): RenderSignals {
   const textChars = cleaned.body ? collapsed(textOf(cleaned.body)).length : 0
@@ -175,7 +176,7 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, co
   // hydration data's text, is no shell however thin what its extraction kept
   // once its recommendations were cut. Any other thin page with hydration
   // state still is: its data may arrive by a later fetch the JSON never held.
-  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && raw.hydrationShown)) reason = 'hydration_shell'
+  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && context.hydrationShown === true)) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
 
   return {

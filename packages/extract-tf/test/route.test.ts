@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { extractTf, htmlToMarkdown, routePage, selectList, selectTable } from '../src/index.js'
 import { parse } from '../src/dom.js'
 import { QUALITY_ESCALATION_MAX_CONFIDENCE } from '@w2l/contracts'
@@ -206,6 +206,21 @@ describe('routePage', () => {
       const out = extractTf.extract(article)
       expect(out.pageType).not.toBe('product')
       expect(out.render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
+
+    it('reads its hydration data\'s text only on a page whose buy box the router found', () => {
+      // A large data blob is parsed for its passages only where they can matter.
+      const items = Array.from({ length: 400 }, (_, i) => ({ id: i, description: `${blurb} (${i})` }))
+      const listing = wrap(`<main><h1>Catalogue</h1>${items.slice(0, 20).map((item) => `<div class="card"><a href="/p/${item.id}">Game ${item.id}</a><p>${item.description}</p></div>`).join('')}</main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { items } })}</script>`)
+      const parse = vi.spyOn(JSON, 'parse')
+      try {
+        extractTf.extract(listing)
+        expect(parse.mock.calls.filter(([text]) => typeof text === 'string' && text.length > 20_000)).toEqual([])
+        extractTf.extract(page)
+        expect(parse.mock.calls.some(([text]) => typeof text === 'string' && text.includes('the-legend-of-zelda-ocarina-of-time-1.jpg'))).toBe(true)
+      } finally {
+        parse.mockRestore()
+      }
     })
 
     it('still reads a Next.js page with nothing of its own server-rendered for a shell', () => {

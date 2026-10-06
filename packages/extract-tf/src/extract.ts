@@ -14,7 +14,7 @@
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
-import { detectRenderSignals, rawSignals } from './render.js'
+import { detectRenderSignals, hydrationShown, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
@@ -158,6 +158,10 @@ export class ExtractTf implements Extractor {
     detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
+    // Whether the page shows its hydration data's text is asked of the cleaned
+    // page before its recommendations are cut, and only on a page whose buy
+    // box the router found: the shell check reads the answer nowhere else.
+    const dataShown = decision.buyBox === true && raw.hydrationJson.length > 0 && hydrationShown(raw, doc.document)
 
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
@@ -278,7 +282,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document, { productShown }),
+      render: detectRenderSignals(raw, doc.document, { productShown, hydrationShown: dataShown }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
