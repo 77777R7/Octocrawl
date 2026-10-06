@@ -35,10 +35,14 @@ export interface ScreenshotCapture {
   timings: { launchMs: number; navigateMs: number; loadMs: number; loadCapped: boolean; screenshotMs: number; totalMs: number }
 }
 
+export type Browser = Awaited<ReturnType<Awaited<ReturnType<typeof browserEngineFor>>['launch']>>
+
 export interface CaptureOptions {
   signal: AbortSignal
   /** The whole capture, launch to close, ends within this. */
   budgetMs: number
+  /** A browser already launching (launchBrowser), so the launch overlaps whatever came before: used and closed here. */
+  browser?: Promise<Browser>
   policy?: NetworkPolicy
   viewport?: { width: number; height: number }
   /** How many viewports tall the picture is at most. */
@@ -52,7 +56,7 @@ const VIEWPORT = { width: 1280, height: 800 }
 const VIEWPORTS = 3
 const QUALITY = 70
 /** After the document loaded, the window waits this long at most for its images and fonts. */
-const LOAD_WAIT_MS = 1_500
+const LOAD_WAIT_MS = 800
 const ELEMENTS_SELECTOR = 'h1,h2,h3,h4,p,li,a,img,table,pre,blockquote'
 const ELEMENTS_AT_MOST = 400
 const TEXT_AT_MOST = 120
@@ -83,6 +87,15 @@ export function previewBrowserUserAgent(): string {
   return `${modeIdentity('standard').userAgent} ${PREVIEW_PRODUCT_TOKEN}`
 }
 
+/** A headless Chromium, launched now and handed to a capture later. Launching touches no site, so it may begin before
+ * robots.txt is read; the caller closes it if no capture takes it. */
+export async function launchBrowser(timeoutMs: number): Promise<Browser> {
+  const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
+  const engine = await browserEngineFor('playwright')
+  // The environment's proxy when there is one, otherwise direct: never the operating system's proxy settings.
+  return engine.launch({ headless: true, timeout: timeoutMs, ...(proxy ? { proxy: { server: proxy } } : { args: ['--proxy-server=direct://'] }) })
+}
+
 export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
   const policy = options.policy ?? hostedNetworkPolicy()
   const viewport = options.viewport ?? VIEWPORT
@@ -110,11 +123,9 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
     }
     return verdict
   }
-  const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
-  const engine = await browserEngineFor('playwright')
   const launchStarted = performance.now()
-  // The environment's proxy when there is one, otherwise direct: never the operating system's proxy settings.
-  const browser = await engine.launch({ headless: true, timeout: remaining('launching the browser'), ...(proxy ? { proxy: { server: proxy } } : { args: ['--proxy-server=direct://'] }) })
+  const browser = await within('launching the browser', deadline, options.browser ?? launchBrowser(remaining('launching the browser')))
+  // With a browser launched earlier this is only the wait for it, which may be nothing.
   const launchMs = Math.round(performance.now() - launchStarted)
   const close = (): void => { void browser.close().catch(() => {}) }
   options.signal.addEventListener('abort', close, { once: true })

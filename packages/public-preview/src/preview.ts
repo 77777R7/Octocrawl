@@ -87,6 +87,9 @@ export interface PreviewResponse {
     amazonStateSha256?: string
     schemaSha256?: string
     usage?: { attemptCount: number; statusRetryCount: number; retryWaitMs: number; browserMs: number; externalCostUsd: number | null }
+    /** The crawl window's picture on a streamed evaluation: its state, when it started after the request, how long
+     * after the result it was ready (null when it was not), and its steps when it finished. */
+    screenshot?: { state: string; startedAtMs: number; lagMs: number | null; timings?: Record<string, number | boolean>; blocked?: number; jpegBytes?: number }
   }
 }
 

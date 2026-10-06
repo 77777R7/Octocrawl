@@ -7,7 +7,7 @@ import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
-import { captureScreenshot, type ScreenshotCapture, type ScreenshotCapturer } from './screenshotCapture.js'
+import { captureScreenshot, launchBrowser, type Browser, type ScreenshotCapture, type ScreenshotCapturer } from './screenshotCapture.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
@@ -374,8 +374,12 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
     let streaming = false
     // The crawl window's screenshot: started by the robots stage once it allowed the page (startScreenshot is set
     // when the request is eligible), sent on the stream before a result that read the page, dropped otherwise.
-    let screenshot: { pending: Promise<ScreenshotCapture | null>; abort: AbortController; state: 'pending' | 'sent' | 'late' | 'failed' | 'dropped' } | null = null
+    let screenshot: { pending: Promise<ScreenshotCapture | null>; abort: AbortController; state: 'pending' | 'sent' | 'late' | 'failed' | 'dropped'; startedAt: number; readyAt: number | null } | null = null
     let startScreenshot: (() => void) | null = null
+    // The browser is launched as the capture starts, so its launch overlaps the robots.txt read; it touches no site
+    // until the robots stage allows the page. Closed unused if that stage never allows it.
+    let browserAhead: Promise<Browser | null> | null = null
+    let launchBrowserAhead: (() => void) | null = null
     const stage = (step: PreviewStage | { stage: 'started' }): void => {
       if (!wantsStages || res.destroyed || res.writableEnded) return
       if (!streaming) {
@@ -383,21 +387,45 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         streaming = true
       }
       res.write(`${JSON.stringify({ type: 'stage', ...step, ms: Math.round(performance.now() - started) })}\n`)
+      if (step.stage === 'started' && launchBrowserAhead !== null) { launchBrowserAhead(); launchBrowserAhead = null }
       if (step.stage === 'robots' && step.allowed && startScreenshot !== null) { startScreenshot(); startScreenshot = null }
+    }
+    /** A browser launched ahead that no capture took is closed. */
+    const releaseBrowserAhead = (): void => {
+      const ahead = browserAhead
+      browserAhead = null
+      if (ahead !== null && screenshot === null) void ahead.then(browser => browser?.close()).catch(() => {})
     }
     /** With a result that read the page, the screenshot goes on the stream before it, when it is in within the grace;
      * with any other result it is dropped and its browser stopped, so nothing is ever shown as read that was not. */
     const settleScreenshot = async (body: PreviewResponse): Promise<void> => {
+      releaseBrowserAhead()
       if (screenshot === null) return
+      const resultAt = performance.now()
       const read = body.status === 'success' || body.status === 'incomplete'
-      if (!read || !streaming || res.destroyed || res.writableEnded) { screenshot.abort.abort(); screenshot.state = 'dropped'; return }
-      let grace: ReturnType<typeof setTimeout> | undefined
-      const outcome = await Promise.race([screenshot.pending, new Promise<'late'>(resolve => { grace = setTimeout(() => resolve('late'), SCREENSHOT_GRACE_MS) })])
-      clearTimeout(grace)
-      if (outcome === 'late' || outcome === null) { screenshot.abort.abort(); screenshot.state = outcome === 'late' ? 'late' : 'failed'; return }
-      if (res.destroyed || res.writableEnded) { screenshot.state = 'dropped'; return }
-      res.write(`${JSON.stringify({ type: 'capture', width: outcome.width, height: outcome.height, jpeg: outcome.jpeg.toString('base64'), elements: outcome.elements, blocked: outcome.blocked, ms: Math.round(performance.now() - started) })}\n`)
-      screenshot.state = 'sent'
+      let outcome: ScreenshotCapture | null | 'late' = 'late'
+      if (!read || !streaming || res.destroyed || res.writableEnded) { screenshot.abort.abort(); screenshot.state = 'dropped' }
+      else {
+        let grace: ReturnType<typeof setTimeout> | undefined
+        outcome = await Promise.race([screenshot.pending, new Promise<'late'>(resolve => { grace = setTimeout(() => resolve('late'), SCREENSHOT_GRACE_MS) })])
+        clearTimeout(grace)
+        if (outcome === 'late' || outcome === null) { screenshot.abort.abort(); screenshot.state = outcome === 'late' ? 'late' : 'failed' }
+        else if (res.destroyed || res.writableEnded) screenshot.state = 'dropped'
+        else {
+          res.write(`${JSON.stringify({ type: 'capture', width: outcome.width, height: outcome.height, jpeg: outcome.jpeg.toString('base64'), elements: outcome.elements, blocked: outcome.blocked, ms: Math.round(performance.now() - started) })}\n`)
+          screenshot.state = 'sent'
+        }
+      }
+      // What the picture cost, for the operator: when it started after the request came, how long after the result
+      // it was ready (null when it was not), and its steps when it finished.
+      const picture = outcome !== 'late' && outcome !== null ? outcome : null
+      const account = {
+        state: screenshot.state, startedAtMs: Math.round(screenshot.startedAt - started),
+        lagMs: screenshot.readyAt === null ? null : Math.round(screenshot.readyAt - resultAt),
+        ...(picture === null ? {} : { timings: picture.timings, blocked: picture.blocked, jpegBytes: picture.jpeg.length }),
+      }
+      if (owner && body.evaluation !== undefined) body.evaluation.screenshot = account
+      if (!owner && !optedOut(req)) log({ event: 'w2l_screenshot', host: targetHost(submitted), ...account })
     }
     const send: typeof sendJson = (target, status, body, headers) => {
       const outcome = body as PreviewResponse
@@ -454,18 +482,25 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       }
       const abort = new AbortController()
       res.once('close', () => { if (!res.writableEnded) abort.abort(new DOMException('Client disconnected', 'AbortError')) })
+      abort.signal.addEventListener('abort', releaseBrowserAhead, { once: true })
       // Only an ordinary readable page, for a client on the stream; the browser's own rules are in screenshotCapture.ts.
       // It starts when the robots stage allows the page, and it stops with the request.
       const capability = resolvePreviewCapability(target)
       if (wantsStages && options.screenshots !== false && target.amazonAsin === null && capability.task === 'readable_page' && capability.support !== 'unsupported') {
+        if (options.screenshot === undefined) launchBrowserAhead = () => { browserAhead = launchBrowser(SCREENSHOT_BUDGET_MS).catch(() => null) }
         startScreenshot = () => {
           const controller = new AbortController()
           const stop = (): void => controller.abort(abort.signal.reason)
           abort.signal.addEventListener('abort', stop, { once: true })
-          const pending = (options.screenshot ?? captureScreenshot)(target.url, { signal: controller.signal, budgetMs: SCREENSHOT_BUDGET_MS })
-            .then(capture => capture, () => null)
+          const ahead = browserAhead
+          browserAhead = null
+          const pending = (options.screenshot ?? captureScreenshot)(target.url, {
+            signal: controller.signal, budgetMs: SCREENSHOT_BUDGET_MS,
+            ...(ahead === null ? {} : { browser: ahead.then(browser => { if (browser === null) throw new Error('The browser did not launch.'); return browser }) }),
+          })
+            .then(capture => { if (screenshot !== null) screenshot.readyAt = performance.now(); return capture }, () => null)
             .finally(() => abort.signal.removeEventListener('abort', stop))
-          screenshot = { pending, abort: controller, state: 'pending' }
+          screenshot = { pending, abort: controller, state: 'pending', startedAt: performance.now(), readyAt: null }
         }
       }
       // Read-only precheck keeps exhausted anonymous Amazon requests out of
