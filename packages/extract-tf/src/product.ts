@@ -370,7 +370,22 @@ function isRootish(doc: Document, el: Element | null): boolean {
  * when no defensible region exists, which is the extractor's signal to fall
  * back to the article cascade rather than emit a guess.
  */
+/**
+ * Whether a block says something of its own, not only the labels of form
+ * controls: a variation picker's table cells ("Size", "Color") label the
+ * selects that cleaning removed, and describe nothing.
+ */
+function describes(block: TextBlock): boolean {
+  const unlabelled = (node: Node): string => {
+    if (node.nodeType === 3) return node.textContent ?? ''
+    if (node.nodeType !== 1 || tagOf(node as Element) === 'label') return ''
+    return Array.from(node.childNodes).map(unlabelled).join('')
+  }
+  return /[\p{L}\p{N}]/u.test(unlabelled(block.el))
+}
+
 export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Element | null {
+  const described = blocks.filter(describes)
   // A declared microdata scope is the publisher telling us the boundary
   // outright — but only when it is not simply the whole page.
   const scope = microdataProductScope(doc)
@@ -383,12 +398,11 @@ export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Elem
     const lca = commonAncestor(heading, price)
     if (!isRootish(doc, lca)) {
       const region = lca!
-      const prose = blocks.filter((b) => region.contains(b.el))
-      if (prose.length > 0) return region
+      if (described.some((b) => region.contains(b.el))) return region
       // Title + price but no description: widen to the nearest container
       // that reaches it, never to the page itself.
       for (let wider = region.parentElement; !isRootish(doc, wider); wider = wider!.parentElement) {
-        if (blocks.some((b) => wider!.contains(b.el))) return wider
+        if (described.some((b) => wider!.contains(b.el))) return wider
       }
       return region
     }
