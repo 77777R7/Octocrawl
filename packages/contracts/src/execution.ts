@@ -21,6 +21,12 @@ export interface ExecutionContext {
    * kept or sent, as before.
    */
   cookieSession?: CookieSession
+  /**
+   * Hear of each trace event the moment the HTTP lane records it (robots.txt checked, the response arrived, the
+   * page extracted), for a caller that shows progress while the fetch runs. The result's `trace` stays the record;
+   * a listener's error never changes the fetch. Absent: nothing is told early.
+   */
+  onTrace?: (event: TraceEvent) => void
 }
 
 /** A cookie as a browser context takes and gives it (Playwright's shape). */

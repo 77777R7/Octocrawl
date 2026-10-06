@@ -448,3 +448,44 @@ describe('anonymous preview contract', () => {
     expect(quotaCalls).toBe(1)
   })
 })
+
+describe('preview stages', () => {
+  const lines = async (response: Response) => (await response.text()).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+  const capture: NonNullable<Parameters<typeof createPreviewServer>[0]['capture']> = async (target, _signal, _deadline, _state, _evaluation, _retry, _proxy, _exception, _options, onStage) => {
+    onStage?.({ stage: 'robots', allowed: true })
+    onStage?.({ stage: 'page' })
+    return fixture(target.url)
+  }
+  const post = (url: string, accept?: string) => fetch(`${url}/api/preview`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(accept ? { accept } : {}) }, body: JSON.stringify({ url: 'https://docs.example/page' }),
+  })
+
+  it('streams each stage as it happens, then the result, to a client that asks for them', async () => {
+    const url = await endpoint({ consume: async () => 'ok' }, capture)
+    const response = await post(url, 'application/x-ndjson, application/json')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson; charset=utf-8')
+    const told = await lines(response)
+    expect(told.map(line => line.type === 'stage' ? line.stage : line.type)).toEqual(['started', 'robots', 'page', 'result'])
+    expect(told[1]).toMatchObject({ allowed: true })
+    for (const line of told.slice(0, 3)) expect(typeof line.ms).toBe('number')
+    expect(told[3]).toMatchObject({ http: 200, body: { status: 'success', title: 'Example page' } })
+  })
+
+  it('answers plain JSON to a client that does not ask for stages', async () => {
+    const url = await endpoint({ consume: async () => 'ok' }, capture)
+    const response = await post(url)
+    expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8')
+    expect(await response.json()).toMatchObject({ status: 'success', title: 'Example page' })
+  })
+
+  it('answers an outcome decided before the capture as plain JSON with its own status', async () => {
+    let captures = 0
+    const url = await endpoint({ consume: async () => 'visitor_limited' }, async target => { captures++; return fixture(target.url) })
+    const response = await post(url, 'application/x-ndjson')
+    expect(response.status).toBe(429)
+    expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8')
+    expect(await response.json()).toMatchObject({ status: 'quota_exceeded' })
+    expect(captures).toBe(0)
+  })
+})
