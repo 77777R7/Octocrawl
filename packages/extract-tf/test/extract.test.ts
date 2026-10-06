@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { extractTf, htmlToMarkdown, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
+import { cleanTree, detectRenderSignals, extractTf, htmlToMarkdown, pruneTree, rawSignals, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
+import { parse } from '../src/dom.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -406,6 +407,63 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     expect(report?.textChars).toBeGreaterThan(1_500)
     // The same notice on a thin page is what a script-filled shell looks like.
     expect(extractTf.extract(page(3)).render).toMatchObject({ clientRendered: true, reason: 'js_fallback' })
+  })
+
+  describe('a listing whose own data lists more records than its markup shows', () => {
+    // A Walmart category page: the server draws the first few product tiles,
+    // and __NEXT_DATA__ lists the whole page of products the scripts draw next.
+    const TOOLS = Array.from({ length: 16 }, (_, i) => `Cedar Ridge Garden Trowel Model ${i + 1}`)
+    const card = (name: string, i: number) => `<li class="tile"><a href="/ip/${i + 1}">${name}</a><span class="price">$${12 + i}.99</span><span>4.${i % 10} out of 5 stars</span><div>Forged stainless steel blade with depth markings, a sealed ash handle and a hanging loop. Free shipping, arrives in 3+ days; free pickup today at your store.</div></li>`
+    const listing = (shown: number, data: unknown) => `<!doctype html><html><head><title>Garden tools</title></head><body>
+<nav class="site-nav"><a href="/">Home</a> <a href="/garden">Garden</a></nav>
+<main><h1>Garden tools (16)</h1><div class="intro">Trowels, transplanters and weeders for beds, borders and containers. Prices shown are online prices and may differ in store; availability depends on your pickup store and delivery address.</div><ul class="grid">${TOOLS.slice(0, shown).map(card).join('')}</ul></main>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script>
+</body></html>`
+    const products = (names: readonly string[]) => ({ props: { pageProps: { search: { items: names.map((name, i) => ({ id: `${i + 1}`, name, price: 12 + i })) } } } })
+
+    it('flags the listing as client-rendered and counts the records', () => {
+      const out = extractTf.extract(listing(4, products(TOOLS)))
+      expect(['listing', 'collection']).toContain(out.pageType)
+      expect(out.escalate).toBe(false)
+      expect(out.render).toMatchObject({ clientRendered: true, reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 4 } })
+    })
+
+    it('does not flag it when the markup shows more than half the records the data lists', () => {
+      // A page that shows 9 or more of these tiles routes as an article, so the
+      // detector is called as a listing directly, at the half-way boundary.
+      const signals = (shown: number) => {
+        const doc = parse(listing(shown, products(TOOLS)))
+        const raw = rawSignals(doc.document)
+        cleanTree(doc.document)
+        pruneTree(doc.document)
+        const render = detectRenderSignals(raw, doc.document, { listing: true })
+        doc.close()
+        return render
+      }
+      expect(signals(8)).toMatchObject({ clientRendered: true, reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 8 } })
+      expect(signals(9)).toMatchObject({ clientRendered: false, reason: null })
+      expect(signals(9).listRecords).toBeUndefined()
+      expect(signals(16)).toMatchObject({ clientRendered: false, reason: null })
+    })
+
+    it('does not flag data the page never shows, or shows only a record or two of', () => {
+      // Menus, facets and settings a page carries for its scripts.
+      const menu = TOOLS.map((name) => name.replace('Garden Trowel', 'Department Menu'))
+      expect(extractTf.extract(listing(4, products(menu))).render).toMatchObject({ clientRendered: false, reason: null })
+      const two = [...TOOLS.slice(0, 2), ...menu.slice(2)]
+      expect(extractTf.extract(listing(4, products(two))).render).toMatchObject({ clientRendered: false, reason: null })
+    })
+
+    it('does not flag an article whose data lists more related posts than it shows', () => {
+      const posts = TOOLS.map((name) => `${name}: a field review`)
+      const prose = Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1}: the trowel held its edge through a season of clay soil, and the handle did not split after the first frost.</p>`).join('')
+      const html = `<!doctype html><html><head><title>Trowel review</title></head><body><main><article><h1>Trowel review</h1>${prose}
+<h2>Related</h2><ul>${posts.slice(0, 4).map((name, i) => `<li><a href="/r/${i}">${name}</a></li>`).join('')}</ul></article></main>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(products(posts))}</script></body></html>`
+      const out = extractTf.extract(html)
+      expect(out.pageType).toBe('article')
+      expect(out.render).toMatchObject({ clientRendered: false, reason: null })
+    })
   })
 
   it('filters link-farm paragraphs by link density', () => {

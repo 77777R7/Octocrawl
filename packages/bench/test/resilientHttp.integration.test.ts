@@ -308,6 +308,39 @@ describe('HTTP lane on a client-rendered shell', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
+
+  it('offers a listing to the browser when its own data lists more records than the markup shows', async () => {
+    const { createServer } = await import('node:http')
+    // A Walmart category page: the server draws 4 of the 16 products its
+    // __NEXT_DATA__ lists, and the scripts draw the rest.
+    const names = Array.from({ length: 16 }, (_, i) => `Cedar Ridge Garden Trowel Model ${i + 1}`)
+    const tile = (name: string, i: number) => `<li class="tile"><a href="/ip/${i + 1}">${name}</a><span class="price">$${12 + i}.99</span><span>4.${i % 10} out of 5 stars</span><div>Forged stainless steel blade with depth markings, a sealed ash handle and a hanging loop. Free shipping, arrives in 3+ days; free pickup today at your store.</div></li>`
+    const data = { props: { pageProps: { search: { items: names.map((name, i) => ({ id: `${i + 1}`, name, price: 12 + i })) } } } }
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Garden tools</title></head><body><main><h1>Garden tools (16)</h1>' +
+          '<div class="intro">Trowels, transplanters and weeders for beds, borders and containers. Prices shown are online prices and may differ in store; availability depends on your pickup store and delivery address.</div>' +
+          `<ul class="grid">${names.slice(0, 4).map(tile).join('')}</ul></main>` +
+          `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/browse/garden-tools`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Cedar Ridge Garden Trowel Model 4')
+      expect(out.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (hydration_list_partial); this HTTP capture may be a shell.' }])
+      // The quality event is what the ladder reads as an offer to the browser rung.
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 4 } }) }))
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
 })
 
 describe('HTTP lane on a terse product page beside cut recommendations', () => {

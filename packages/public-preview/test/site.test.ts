@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type { FetchResult } from '@w2l/contracts'
 import { createPreviewServer, type PreviewServerOptions } from '../src/server.js'
 import type { CaptureOutcome } from '../src/preview.js'
-import { dailyVisitorId, parsePublicOrigin, parseWebEvent, type LogLine } from '../src/site.js'
+import { dailyVisitorId, looksAutomated, parsePublicOrigin, parseWebEvent, type LogLine } from '../src/site.js'
 
 const servers: Server[] = []
 const tempDirs: string[] = []
@@ -223,6 +223,36 @@ describe('first-party analytics', () => {
     expect((await post({ name: 'page_view' }, { origin: 'https://evil.example' })).status).toBe(403)
     expect((await fetch(`${url}/api/events`)).status).toBe(405)
     expect(lines).toEqual([{ event: 'w2l_web_event', name: 'page_view', props: { path: '/', ref: 'news.ycombinator.com' }, vid: expect.stringMatching(/^[a-f0-9]{16}$/), automated: true }])
+  })
+
+  it('flags self-named tools, monitors and stale browser strings as automated, and current browsers as not', () => {
+    const automated = (agent: string | undefined) => looksAutomated({ headers: agent === undefined ? {} : { 'user-agent': agent } } as Parameters<typeof looksAutomated>[0])
+    const current = [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 26_3_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/144.0.7559.95 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',
+      'Mozilla/5.0 (Linux; Android 16; SM-S921U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
+    ]
+    for (const agent of current) expect(automated(agent), agent).toBe(false)
+    const stale = [
+      undefined,
+      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36',
+      'Mozilla/5.0 (compatible; FossickBot/1.0; +https://fossick.bot)',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 WebtelemetryBot/1.0 (+https://webtelemetry.dev/bot)',
+      'Mozilla/5.0 (compatible; Dataprovider.com)',
+      'Mozilla/5.0 (compatible; DomainMonitor/0.1)',
+      'curl/8.7.1',
+      // Browsers no one runs any more: iOS 11 and 13 Safari, Chrome 79 and 102.
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (iPad; CPU OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36',
+    ]
+    for (const agent of stale) expect(automated(agent), String(agent)).toBe(true)
   })
 
   it('logs each anonymous preview outcome with the target host only', async () => {

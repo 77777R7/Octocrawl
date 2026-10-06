@@ -62,9 +62,21 @@ export function optedOut(req: IncomingMessage): boolean {
   return req.headers.dnt === '1' || req.headers['sec-gpc'] === '1'
 }
 
+/** Tools that name themselves, including monitors that do not say "bot" (Dataprovider.com, DomainMonitor). */
+const AUTOMATED_AGENT = /bot|crawl|spider|slurp|headless|preview|fetch|curl|wget|python|node|go-http|java\/|dataprovider|domainmonitor/i
+/** Browsers no one runs any more. A client that claims iOS before 15 or Chrome before 110 in 2026 is a scanner with a
+ * stale string, not a visitor; the site's own page events showed them opening the page and never touching it. */
+const STALE_IOS_BEFORE = 15
+const STALE_CHROME_BEFORE = 110
+
 export function looksAutomated(req: IncomingMessage): boolean {
   const agent = req.headers['user-agent']
-  return typeof agent !== 'string' || /bot|crawl|spider|slurp|headless|preview|fetch|curl|wget|python|node|go-http|java\//i.test(agent)
+  if (typeof agent !== 'string' || AUTOMATED_AGENT.test(agent)) return true
+  const ios = /(?:iPhone|CPU) OS (\d+)_\d/.exec(agent)
+  if (ios && Number(ios[1]) < STALE_IOS_BEFORE) return true
+  const chrome = /\bChrome\/(\d+)\./.exec(agent)
+  if (chrome && Number(chrome[1]) < STALE_CHROME_BEFORE) return true
+  return false
 }
 
 export const EVENT_BODY_BYTES = 2_048

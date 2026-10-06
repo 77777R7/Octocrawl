@@ -1,0 +1,80 @@
+# commerce: listings and product pages
+https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960
+https://www.bestbuy.com/site/searchpage.jsp?st=laptop
+https://www.target.com/c/laptops-electronics/-/N-5xtfm
+https://www.homedepot.com/b/Tools-Power-Tools-Drills/N-5yc1vZc27f
+https://www.nike.com/w/mens-running-shoes-37v7jznik1zy7ok
+https://www.zara.com/us/en/man-shirts-l737.html
+https://www2.hm.com/en_us/men/products/shirts.html
+https://www.wayfair.com/furniture/sb0/sofas-c413892.html
+https://www.costco.com/laptops.html
+https://www.newegg.com/p/pl?d=laptop
+https://www.ebay.com/b/Laptops-Netbooks/175672/bn_1648276
+https://www.ikea.com/us/en/cat/sofas-fu003/
+https://www.sephora.com/shop/moisturizing-cream-oils-mists
+https://www.ulta.com/shop/skin-care/moisturizers
+https://www.nordstrom.com/browse/women/clothing/dresses
+https://www.zalando.de/herrenschuhe/
+https://www.otto.de/technik/laptop/
+https://www.mediamarkt.de/de/category/notebooks-27.html
+https://www.idealo.de/preisvergleich/ProductCategory/3751.html
+https://www.aliexpress.com/category/702/laptops.html
+https://www.temu.com/
+https://www.shein.com/
+https://www.amazon.com/s?k=laptop
+https://www.etsy.com/c/jewelry/necklaces
+# travel
+https://www.booking.com/city/fr/paris.html
+https://www.airbnb.com/paris-france/stays
+https://www.expedia.com/Paris-Hotels.d179898.Travel-Guide-Hotels
+https://www.tripadvisor.com/Hotels-g187147-Paris_Ile_de_France-Hotels.html
+https://www.skyscanner.net/routes/lond/pari/london-to-paris.html
+https://www.kayak.com/flight-routes/London-LON/Paris-PAR
+# real estate
+https://www.zillow.com/homes/for_sale/Seattle,-WA_rb/
+https://www.realtor.com/realestateandhomes-search/Seattle_WA
+https://www.redfin.com/city/16163/WA/Seattle
+https://www.rightmove.co.uk/property-for-sale/London.html
+https://www.idealista.com/venta-viviendas/madrid-madrid/
+# business data and software directories
+https://www.g2.com/categories/crm
+https://www.capterra.com/customer-relationship-management-software/
+https://www.crunchbase.com/organization/openai
+https://www.yelp.com/search?find_desc=coffee&find_loc=San+Francisco%2C+CA
+https://www.similarweb.com/website/wikipedia.org/
+https://www.indeed.com/jobs?q=data+analyst&l=Remote
+# statistics, finance, markets
+https://www.census.gov/quickfacts/fact/table/US/PST045224
+https://www.imf.org/en/Publications/WEO
+https://www.statista.com/statistics/262966/number-of-apple-iphones-sold/
+https://ec.europa.eu/eurostat/databrowser/view/tps00001/default/table
+https://data.worldbank.org/indicator/NY.GDP.MKTP.CD
+https://www.investing.com/indices/us-spx-500-historical-data
+https://finance.yahoo.com/quote/AAPL/history/
+https://www.marketwatch.com/investing/stock/aapl
+https://www.nasdaq.com/market-activity/stocks/aapl/historical
+https://www.morningstar.com/stocks/xnas/aapl/quote
+https://www.coingecko.com/
+https://coinmarketcap.com/
+# news
+https://www.reuters.com/markets/
+https://www.bloomberg.com/markets/stocks
+https://www.wsj.com/market-data/stocks
+https://www.ft.com/technology
+https://www.economist.com/finance-and-economics
+# vehicles and tickets
+https://www.carvana.com/cars
+https://www.autotrader.com/cars-for-sale/all-cars/seattle-wa
+https://www.cars.com/shopping/results/?stock_type=used&zip=98101
+https://www.ticketmaster.com/discover/concerts
+https://www.stubhub.com/
+# communities and docs
+https://medium.com/tag/programming
+https://www.reddit.com/r/datascience/
+https://stackoverflow.com/questions/tagged/web-scraping
+https://openai.com/research/
+# organisation pages behind a login wall
+https://www.instagram.com/nasa/
+https://x.com/NASA
+https://www.linkedin.com/company/microsoft/
+https://www.facebook.com/NASA/

@@ -19,6 +19,7 @@ import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, Deco
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
+import { COMPAT_LIBRARY, prepareCompatIdentity, type CompatTransport } from '../compatTransport.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
@@ -53,7 +54,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `wire.onWithheld` says so); `routes` are the request's own routes when it
    * relaxed certificate verification, else the subject's.
    */
-  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null, onResponseCoding?: (decodedFrom: string | null) => void, deadlineAt?: number) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -67,10 +68,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved.
    * `previewProductToken`: the hosted public preview's standard User-Agent carries PREVIEW_PRODUCT_TOKEN (previewIdentity).
    * `robotsCache`: a robots.txt cache shared with the crawl's sitemap reader, so one robots.txt read serves both; without one the subject keeps its own.
+   * `compat`: the browser-compatible transport (compatTransport.ts) in place of undici, with its profile's identity; standard mode on a local server only.
    */
-  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false, robotsCache?: RobotsOriginCache) {
+  constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false, robotsCache?: RobotsOriginCache, private readonly compat: CompatTransport | null = null) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
-    this.prepared = prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, 'desktop', undefined, previewProductToken)
+    if (compat !== null && (mode !== 'standard' || previewProductToken || localPreviewProxyUrl !== undefined)) throw new Error(`the compatible transport sends its profile's standard identity: not for ${mode !== 'standard' ? `mode ${mode}` : 'the hosted preview'}`)
+    this.prepared = compat !== null ? prepareCompatIdentity(compat.profile) : prepareHttpIdentity(mode, this.networkPolicy.contact ?? null, null, 'desktop', undefined, previewProductToken)
     if (localPreviewRobotsException && !localPreviewProxyUrl) throw new Error('Local platform exception requires a loopback proxy')
     this.localPreviewRobotsException = localPreviewRobotsException
     if (localPreviewRobotsException) this.prepared.identity.respectsRobots = false
@@ -80,10 +83,29 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.route = new EgressRoute(this.networkPolicy, this.egress, this.localPreviewProxy)
     this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null) => async (url, init) => {
+    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null, onResponseCoding, deadlineAt) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
+      if (this.compat !== null) {
+        // impit sends the profile's headers itself (`headers` are those); only the validators go beside them.
+        onResponseCoding?.(null)
+        return this.compat.fetch(url, {
+          signal: init.signal ?? signal,
+          headersTimeoutMs: init.headersTimeoutMs,
+          bodyTimeoutMs: init.bodyTimeoutMs,
+          capFor: (contentType, decodedFrom) => {
+            const kind = classifyContentType(contentType)
+            // A decoded page is held to the decompressed cap, as the lane holds what it decodes itself.
+            return kind === 'unsupported' ? null : kind === 'page' ? (decodedFrom === null ? maxBodyBytes : this.networkPolicy.maxDecompressedBytes) : maxFileBytes
+          },
+          extraHeaders: url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {},
+          ignoreTlsErrors: routes !== null,
+          ...(deadlineAt === undefined ? {} : { deadlineAt }),
+          onDecoded: coding => onResponseCoding?.(coding),
+          ...(onBodyRead === undefined ? {} : { onBodyRead }),
+        })
+      }
       // The caller's headers go to the origin it named; a hop elsewhere gets the identity alone.
       const customNames = wire === undefined ? [] : Object.keys(wire.headers)
       const sameOrigin = new URL(url).origin === new URL(initialUrl).origin
@@ -134,6 +156,13 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * request's custom headers (`headers`) before it.
    */
   private preparedFor(url: string, options: FetchOptions): ReturnType<typeof prepareHttpIdentity> {
+    if (this.compat !== null) {
+      // The engine routes neither here (channelsForUrl): the profile's header set cannot take them unchanged.
+      if (options.mobile === true || Object.keys(options.headers ?? {}).length > 0) throw new Error('the compatible transport sends its profile\'s headers alone: no custom headers, no mobile identity')
+      const prepared = prepareCompatIdentity(this.compat.profile)
+      prepared.identity.respectsRobots = this.prepared.identity.respectsRobots
+      return prepared
+    }
     const prepared = prepareHttpIdentity(this.prepared.mode, this.networkPolicy.contact ?? null, new URL(url).hostname, options.mobile === true ? 'mobile' : 'desktop', options.headers, this.previewProductToken)
     prepared.identity.respectsRobots = this.prepared.identity.respectsRobots
     return prepared
@@ -241,6 +270,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
     }
+    // Which client sent the request, when it is not the lane's own: what the record's identity was sent with.
+    if (this.compat !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'transport', detail: { library: COMPAT_LIBRARY.name, version: COMPAT_LIBRARY.version, profile: this.compat.profile } })
     // What the caller added is on the record, values included.
     const customHeaders = Object.entries(prepared.customHeaders).map(([name, value]) => ({ name, value }))
     if (customHeaders.length > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'request_headers_added', detail: { headers: customHeaders } })
@@ -328,6 +359,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
     const transportStart = performance.now()
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
+    // The coding the compatible transport decoded on the latest response; the lane never sees its header.
+    const transportCoding: { decoded: string | null } = { decoded: null }
     const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
@@ -337,7 +370,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     }, maxFileBytes, {
       headers: prepared.customHeaders,
       onWithheld: (to, names) => trace.push({ at: Date.now() - start, lane: 'http', event: 'custom_headers_withheld', detail: { to, names: [...names] } }),
-    }, relaxed), {
+    }, relaxed, coding => { transportCoding.decoded = coding }, deadlineAt), {
       signal,
       deadlineAt,
       onRetryAfter: (target, retryAt) => {
@@ -407,7 +440,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // The final body is read unless its type is one W2L does not download; it is
     // decoded by its Content-Encoding whether or not the coding was asked for
     // (W2L sends no Accept-Encoding), under the decompressed cap.
-    const contentEncoding = out.kind === 'ok' && classifyContentType(contentType) !== 'unsupported' ? contentEncodingLabel(out.headers?.get('content-encoding')) : undefined
+    const contentEncoding = out.kind === 'ok' && classifyContentType(contentType) !== 'unsupported' ? contentEncodingLabel(out.headers?.get('content-encoding') ?? transportCoding.decoded) : undefined
+    // impit decoded the body before the lane saw it: the bytes on the wire were not counted.
+    const transportDecoded = transportCoding.decoded
+    if (transportDecoded !== null && out.kind === 'ok') trace.push({ at: Date.now() - start, lane: 'http', event: 'transport_decoded', detail: { contentEncoding: transportDecoded, by: COMPAT_LIBRARY.name } })
     let wire: Uint8Array
     let bytes: Uint8Array
     // Set when the body was read but did not decode: there is no body to hash.
@@ -485,7 +521,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
       usage: {
         wallMs,
-        bytesWire: wire.byteLength,
+        bytesWire: transportDecoded === null ? wire.byteLength : null,
         bytesDecompressed: file === null ? Buffer.byteLength(body) : bytes.byteLength,
         requestCount: out.requestCount,
         attemptCount: out.attemptCount,
@@ -670,6 +706,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           emptyTables: render.emptyTables,
           textChars: render.textChars,
           scriptChars: render.scriptChars,
+          ...(render.listRecords === undefined ? {} : { listRecords: render.listRecords }),
         },
       })
       return [{
