@@ -1,9 +1,9 @@
 import { track } from './analytics'
 
-export type WaitlistTrigger = 'quota' | 'footer' | 'limits'
+export type WaitlistTrigger = 'quota' | 'footer' | 'limits' | 'connect-mcp'
 
 /** Shows the early-access form (prerendered hidden by src/waitlistMarkup.ts) and sends it to /api/waitlist.
- * `open` is for the calls to action: after the daily previews run out, and the Limits page's link (?from=limits). */
+ * `open` is for the calls to action: after the daily previews run out, and the Limits and Connect MCP pages' links (?from=limits, ?from=connect-mcp). */
 export function mountWaitlist(): { open(trigger: WaitlistTrigger): void } {
   const section = document.querySelector<HTMLElement>('#waitlist')
   const form = section?.querySelector<HTMLFormElement>('.waitlist-form')
@@ -53,11 +53,12 @@ export function mountWaitlist(): { open(trigger: WaitlistTrigger): void } {
   })
 
   const query = new URLSearchParams(location.search)
-  if (query.get('from') === 'limits') {
+  const from = query.get('from')
+  if (from === 'limits' || from === 'connect-mcp') {
     query.delete('from')
     const rest = query.toString()
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
-    open('limits')
+    open(from)
   }
   return { open }
 }
