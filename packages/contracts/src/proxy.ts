@@ -50,6 +50,21 @@ export function withEnvironmentProxy(policy: NetworkPolicy, env: Env): NetworkPo
   return egressProxy === null ? policy : { ...policy, egressProxy }
 }
 
+/**
+ * The operator's egress proxies (`W2L_EGRESS_PROXIES`, ADR 0005 `egress_sessions`): http:// or https://
+ * URLs, credentials in their userinfo, separated by commas or white space. Each one is a whole egress:
+ * every URL's scheme goes through it. Duplicates (the same endpoint) are kept once.
+ */
+export function egressProxies(raw: string | undefined): ProxyServer[] {
+  const servers = (raw ?? '').split(/[\s,]+/).filter((entry) => entry !== '').map((entry, i) => proxyServer(`W2L_EGRESS_PROXIES entry ${i + 1}`, entry)!)
+  return servers.filter((server, i) => servers.findIndex((other) => other.endpoint === server.endpoint) === i)
+}
+
+/** A policy whose every request leaves through this egress proxy; NO_PROXY entries and loopback still go direct. */
+export function withPoolProxy(policy: NetworkPolicy, server: ProxyServer): NetworkPolicy {
+  return { ...policy, origin: 'operator', egressProxy: { source: 'pool', https: server, http: server, noProxy: policy.egressProxy?.noProxy ?? [] } }
+}
+
 /** The operator proxy a URL leaves through under this policy; null means a direct connection. */
 export function proxyFor(url: string | URL, policy: Pick<NetworkPolicy, 'origin' | 'egressProxy'>): ProxyServer | null {
   const proxy = policy.origin === 'operator' ? policy.egressProxy ?? null : null

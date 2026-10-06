@@ -59,6 +59,20 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_COMPAT_HOSTS: 'shop.test' })).toThrow(/refused on a hosted server/)
   })
 
+  it('takes W2L_EGRESS_PROXIES only under a grant that names egress_sessions, never hosted, and never names their credentials', () => {
+    expect(parseListen([], {}).egressProxies).toEqual([])
+    const grant = JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })
+    const local = parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://user:secret@proxy-a.test:8080, http://proxy-b.test:3128 http://proxy-a.test:8080' })
+    expect(local.egressProxies.map((proxy) => proxy.endpoint)).toEqual(['proxy-a.test:8080', 'proxy-b.test:3128'])
+    expect(local.egressProxies[0]).toMatchObject({ username: 'user', password: 'secret' })
+    const notice = local.notices.find((line) => line.startsWith('egress proxies'))
+    expect(notice).toContain('proxy-a.test:8080, proxy-b.test:3128')
+    expect(local.notices.join('\n')).not.toContain('secret')
+    expect(() => parseListen([], { W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/needs an access grant that names egress_sessions/)
+    expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/refused on a hosted server/)
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'socks5://proxy-a.test:1080' })).toThrow(/http:\/\/ and https:\/\/ proxies/)
+  })
+
   it("refuses tier my_browser on a hosted server, which has no person's browser", () => {
     const grant = JSON.stringify({ tier: 'my_browser' })
     expect(parseListen([], { W2L_ACCESS_GRANT: grant }).accessGrant).toMatchObject({ tier: 'my_browser' })

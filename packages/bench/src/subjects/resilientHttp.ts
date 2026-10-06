@@ -377,7 +377,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
     }, (target, proxy) => {
-      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: this.networkPolicy.egressProxy?.source ?? 'environment' } })
     }, maxFileBytes, {
       headers: prepared.customHeaders,
       onWithheld: (to, names) => trace.push({ at: Date.now() - start, lane: 'http', event: 'custom_headers_withheld', detail: { to, names: [...names] } }),

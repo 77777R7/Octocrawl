@@ -75,6 +75,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       accessGrant: listen.accessGrant,
       browserEngine: listen.browserEngine,
       compatHosts: listen.compatHosts,
+      egressProxies: listen.egressProxies,
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)
