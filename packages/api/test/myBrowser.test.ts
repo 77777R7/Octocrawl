@@ -171,4 +171,22 @@ describe('the person\'s Chrome, asked to allow sites', () => {
     expect(late).toBeInstanceOf(HandoffNotThrough)
     expect(late).toMatchObject({ kind: 'timeout' })
   }, 20_000)
+
+  it('reads without the person only on the host they allowed, exactly: not a subdomain or a parent it leads to', async () => {
+    userDataDir = await mkdtemp(join(tmpdir(), 'w2l-my-browser-chrome-'))
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
+    // The page asked for leads to `landsOn`: read only when that is the host allowed.
+    const readOn = async (allowedHost: string, asked: string, landsOn: string) => {
+      const chrome = fakeChrome([{ answer: 'allowed', active: true }], { href: landsOn, html: PAGE })
+      const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+      const allowed = await reader.allow({ hosts: [allowedHost], task: 't' }, { pollMs: 1 })
+      try { return await reader.read(asked, { unattended: true, allowedHosts: allowed.hosts, pollMs: 1, waitMs: 300 }) }
+      catch (error) { return error }
+      finally { await allowed.close(); reader.close() }
+    }
+    expect(await readOn('site.test', 'https://site.test/a', 'https://site.test/a')).toMatchObject({ finalUrl: 'https://site.test/a', act: null })
+    // A subdomain the allowed host leads to (an apex to its mail host), and the parent a subdomain leads to.
+    expect(await readOn('site.test', 'https://site.test/mail', 'https://mail.site.test/mail')).toMatchObject({ message: expect.stringContaining('mail.site.test, which you did not allow') })
+    expect(await readOn('docs.site.test', 'https://docs.site.test/x', 'https://site.test/settings')).toMatchObject({ message: expect.stringContaining('site.test, which you did not allow') })
+  }, 20_000)
 })

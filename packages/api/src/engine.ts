@@ -1045,6 +1045,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try {
         const read = await chrome.read(req.url, {
           unattended: true,
+          allowedHosts: allowed.hosts,
           ...(req.handoff?.waitMs === undefined ? {} : { waitMs: req.handoff.waitMs }),
           ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
           ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
