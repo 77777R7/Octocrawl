@@ -13,7 +13,7 @@ const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mo
 ])))
 const pages = [
   { slug: '', file: 'introduction.md', title: 'Introduction', description: 'Try Octocrawl with one public URL and learn what a verified result looks like.', group: 'Get started' },
-  { slug: 'connect-mcp', file: 'connect-mcp.md', title: 'Connect MCP', description: 'Choose an MCP client, copy its local Octocrawl setup, and run a first task.', group: 'Get started' },
+  { slug: 'connect-mcp', file: 'connect-mcp.md', title: 'Connect MCP', description: 'Start the Octocrawl API with npx, add @octocrawl/mcp to Claude Code, Cursor, OpenCode or Codex, and run a first task.', group: 'Get started' },
   { slug: 'guides/extract-page', file: 'extract-page.md', title: 'Extract a public page', description: 'Get readable Markdown, a final URL, status, and elapsed time from a public web page.', group: 'Guides' },
   { slug: 'guides/amazon-product', file: 'amazon-product.md', title: 'Amazon.sg product JSON', description: 'Check a product ASIN, Singapore delivery region, currency, and missing fields.', group: 'Guides' },
   { slug: 'guides/monitor-webhook', file: 'monitor-webhook.md', title: 'Monitor to HTTPS Webhook', description: 'Create a document Monitor and verify durable delivery by eventId.', group: 'Guides' },
@@ -75,50 +75,50 @@ function renderMarkdown(source, toc = []) {
 
 const mcpClients = [
   {
-    id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Verified locally',
-    icon: 'codex.svg',
-    intro: 'The macOS first-use setup normally adds this entry automatically. Use this command if it did not.',
-    code: 'codex mcp add w2l-local --url http://127.0.0.1:8791/mcp', language: 'bash',
-    verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that preview_monitor is available.',
-    source: 'https://developers.openai.com/codex/extend/mcp',
-  },
-  {
-    id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Client task check pending',
+    id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Verified locally',
     icon: 'claude-code.svg',
-    intro: 'Add the local HTTP server to Claude Code in the current project. Run this in the checkout where you use Claude Code.',
-    code: 'claude mcp add --transport http --scope local w2l-local http://127.0.0.1:8791/mcp', language: 'bash',
-    verify: 'Run claude mcp list. In Claude Code, use /mcp to check the connection and tools before sending the first task.',
+    intro: 'Add the Octocrawl MCP server to Claude Code. Run this in the project where you use Claude Code; --scope user adds it everywhere.',
+    code: 'claude mcp add octocrawl -- npx -y @octocrawl/mcp', language: 'bash',
+    verify: 'Run claude mcp list: octocrawl shows as Connected. In Claude Code, /mcp lists its tools; then send the first task below.',
     source: 'https://code.claude.com/docs/en/mcp',
   },
   {
-    id: 'cursor', name: 'Cursor', mode: 'Copy config', status: 'Client task check pending',
+    id: 'cursor', name: 'Cursor', mode: 'Copy config', status: 'Verified locally',
     icon: 'cursor.svg',
     intro: 'Merge this server into your project .cursor/mcp.json (or your user-level ~/.cursor/mcp.json). Keep existing servers.',
-    code: '{\n  "mcpServers": {\n    "w2l-local": {\n      "url": "http://127.0.0.1:8791/mcp"\n    }\n  }\n}', language: 'json',
-    verify: 'Reload Cursor, then check MCP tools in its settings. In Cursor CLI, cursor-agent mcp list-tools w2l-local lists tools.',
+    code: '{\n  "mcpServers": {\n    "octocrawl": {\n      "command": "npx",\n      "args": ["-y", "@octocrawl/mcp"]\n    }\n  }\n}', language: 'json',
+    verify: 'Approve the server when Cursor asks, then check its tools in Cursor Settings → MCP. In Cursor CLI, cursor-agent mcp enable octocrawl approves it and cursor-agent mcp list-tools octocrawl lists the tools.',
     source: 'https://prod.cursor.com/help/customization/mcp',
   },
   {
-    id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Client task check pending',
+    id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Verified locally',
     icon: 'opencode.svg',
     intro: 'For OpenCode 1.x, merge this entry into the mcp object in opencode.json. Keep your existing settings and servers.',
-    code: '{\n  "mcp": {\n    "w2l-local": {\n      "type": "remote",\n      "url": "http://127.0.0.1:8791/mcp",\n      "enabled": true\n    }\n  }\n}', language: 'json',
-    verify: 'Run opencode mcp list and confirm w2l-local is connected, then ask for the sample task below.',
+    code: '{\n  "mcp": {\n    "octocrawl": {\n      "type": "local",\n      "command": ["npx", "-y", "@octocrawl/mcp"],\n      "enabled": true\n    }\n  }\n}', language: 'json',
+    verify: 'Run opencode mcp list: octocrawl shows as connected. Then ask for the first task below.',
     source: 'https://opencode.ai/docs/mcp-servers',
+  },
+  {
+    id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Follows the Codex docs; not run here yet',
+    icon: 'codex.svg',
+    intro: 'Add the Octocrawl MCP server to Codex as a stdio server.',
+    code: 'codex mcp add octocrawl -- npx -y @octocrawl/mcp', language: 'bash',
+    verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
+    source: 'https://developers.openai.com/codex/extend/mcp',
   },
 ]
 
 function mcpClientPicker() {
   const tabs = mcpClients.map((client, index) => `<button type="button" class="mcp-client-tab" role="tab" id="mcp-tab-${client.id}" aria-controls="mcp-panel-${client.id}" aria-selected="${index === 0}" tabindex="${index === 0 ? '0' : '-1'}"><img src="/docs-assets/agent-clients/${escape(client.icon)}" width="48" height="48" alt="" /><strong>${escape(client.name)}</strong><small>${escape(client.mode)}</small></button>`).join('')
-  const panels = mcpClients.map((client, index) => `<section class="mcp-client-panel" role="tabpanel" id="mcp-panel-${client.id}" aria-labelledby="mcp-tab-${client.id}"${index === 0 ? '' : ' hidden'}><p class="mcp-client-intro">${escape(client.intro)}</p><div class="doc-code mcp-command-row${client.language === 'json' ? ' is-json' : ''}"><span class="mcp-command-prefix" aria-hidden="true">${client.language === 'bash' ? '$' : '{}'}</span><pre><code>${escape(client.code)}</code></pre><button type="button" class="copy-code" aria-label="Copy ${escape(client.name)} setup">Copy</button></div><p class="mcp-client-verify">${escape(client.verify)}</p><div class="mcp-client-panel-meta"><span class="mcp-client-status${index === 0 ? ' is-verified' : ''}">${escape(client.status)}</span><a href="${escape(client.source)}" rel="noopener noreferrer" target="_blank">${escape(client.name)} setup docs ↗</a></div></section>`).join('')
-  return `<div class="mcp-picker"><div class="mcp-picker-head"><div><h2>Set up Octocrawl MCP</h2><p>Connect to the local Octocrawl service on this computer.</p></div><a href="#start-octocrawl-on-your-computer">Start local service <span aria-hidden="true">→</span></a></div><div class="mcp-client-tabs" role="tablist" aria-label="Choose an MCP client">${tabs}</div>${panels}<div class="mcp-picker-foot"><p>Using another MCP client? Point it at:</p><div class="doc-code mcp-command-row"><pre><code>http://127.0.0.1:8791/mcp</code></pre><button type="button" class="copy-code" aria-label="Copy local MCP endpoint">Copy</button></div><small>Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.</small></div></div>`
+  const panels = mcpClients.map((client, index) => `<section class="mcp-client-panel" role="tabpanel" id="mcp-panel-${client.id}" aria-labelledby="mcp-tab-${client.id}"${index === 0 ? '' : ' hidden'}><p class="mcp-client-intro">${escape(client.intro)}</p><div class="doc-code mcp-command-row${client.language === 'json' ? ' is-json' : ''}"><span class="mcp-command-prefix" aria-hidden="true">${client.language === 'bash' ? '$' : '{}'}</span><pre><code>${escape(client.code)}</code></pre><button type="button" class="copy-code" aria-label="Copy ${escape(client.name)} setup">Copy</button></div><p class="mcp-client-verify">${escape(client.verify)}</p><div class="mcp-client-panel-meta"><span class="mcp-client-status${client.status.startsWith('Verified') ? ' is-verified' : ''}">${escape(client.status)}</span><a href="${escape(client.source)}" rel="noopener noreferrer" target="_blank">${escape(client.name)} setup docs ↗</a></div></section>`).join('')
+  return `<div class="mcp-picker"><div class="mcp-picker-head"><div><h2>Step 2: Add the server to your client</h2><p>The server runs on this computer as <code>npx -y @octocrawl/mcp</code> and talks to the API from step 1.</p></div><a href="#step-1-start-the-octocrawl-api">Step 1 first <span aria-hidden="true">↑</span></a></div><div class="mcp-client-tabs" role="tablist" aria-label="Choose an MCP client">${tabs}</div>${panels}<div class="mcp-picker-foot"><p>Using another MCP client? Register this stdio command:</p><div class="doc-code mcp-command-row"><pre><code>npx -y @octocrawl/mcp</code></pre><button type="button" class="copy-code" aria-label="Copy the MCP server command">Copy</button></div><small>It calls the API at http://127.0.0.1:8787; pass --base-url to use another. Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.</small></div></div>`
 }
 
 /** The client picker as plain Markdown, for the page's .md copy and llms-full.txt. */
 function mcpClientMarkdown() {
-  return ['## Set up Octocrawl MCP', '', 'Connect to the local Octocrawl service on this computer.', '',
+  return ['## Step 2: Add the server to your client', '', 'The server runs on this computer as `npx -y @octocrawl/mcp` and talks to the API from step 1.', '',
     ...mcpClients.flatMap(client => [`### ${client.name}`, '', `${client.intro} (${client.mode}; ${client.status}.)`, '', `\`\`\`${client.language}`, client.code, '```', '', client.verify, '', `Setup docs: ${client.source}`, '']),
-    'Using another MCP client? Point it at `http://127.0.0.1:8791/mcp`. Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.', ''].join('\n')
+    'Using another MCP client? Register the stdio command `npx -y @octocrawl/mcp`. It calls the API at `http://127.0.0.1:8787`; pass `--base-url` to use another. Hosted HTTPS and browser login are paused on the roadmap; see Hosted connection below.', ''].join('\n')
 }
 
 /** The page's Markdown as published beside it (index.md) and in llms-full.txt. */

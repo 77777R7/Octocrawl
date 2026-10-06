@@ -1,5 +1,5 @@
-/** The same extraction on your own computer, for the hero's Get code panel: the local REST API (`npm run api`) and
- * the local MCP service, with no daily limit. It follows the URL, the chosen view and the options. Pure functions,
+/** The same extraction on your own computer, for the hero's Get code panel: the local REST API (`npx octocrawl serve`)
+ * and the MCP server (`npx -y @octocrawl/mcp`), with no daily limit. It follows the URL, the chosen view and the options. Pure functions,
  * so they are tested without a page. */
 
 /** What the result panel shows: readable Markdown, the page's links, what the page declares about itself, the
@@ -15,7 +15,8 @@ export interface CodeRequest {
 }
 
 export const LOCAL_API = 'http://127.0.0.1:8787'
-export const LOCAL_MCP = 'http://127.0.0.1:8791/mcp'
+export const MCP_SERVER = 'npx -y @octocrawl/mcp'
+export const API_SERVER = 'npx octocrawl serve'
 
 /** A POSIX shell word: single-quoted, with each quote closed, escaped and reopened. */
 export function shellQuote(value: string): string {
@@ -58,7 +59,7 @@ export function restBody(request: CodeRequest): Record<string, unknown> {
 
 export function restSnippet(request: CodeRequest): string {
   return [
-    '# In an Octocrawl checkout, start the local API first: npm run api',
+    '# Start the local API first: npx octocrawl serve',
     `curl -sS -X POST ${LOCAL_API}/v1/scrape \\`,
     `  -H 'content-type: application/json' \\`,
     `  -d ${shellQuote(JSON.stringify(restBody(request)))}`,
@@ -77,13 +78,13 @@ export function mcpSnippet(request: CodeRequest): string {
   return `{\n  "tool": ${JSON.stringify(call.tool)},\n  "arguments": ${JSON.stringify(call.arguments)}\n}`
 }
 
-/** What to ask an MCP client connected to w2l-local. */
+/** What to ask an MCP client with the Octocrawl server added. */
 export function mcpPrompt(request: CodeRequest): string {
-  if (isAmazonProduct(request.url)) return `Use w2l-local scrape_product on ${request.url} and show the checked product fields.`
+  if (isAmazonProduct(request.url)) return `Use Octocrawl's scrape_product tool on ${request.url} and show the checked product fields.`
   const wanted = request.fields.length ? `these fields: ${request.fields.map(field => field.name).join(', ')}`
     : request.view === 'links' ? 'its links'
       : request.view === 'info' ? 'its page metadata'
         : request.view === 'json' ? 'the full result'
           : 'its readable Markdown'
-  return `Use w2l-local scrape on ${request.url}${request.onlyMainContent ? '' : ' (the whole page, not only the main content)'} and return ${wanted}.`
+  return `Use Octocrawl's scrape tool on ${request.url}${request.onlyMainContent ? '' : ' (the whole page, not only the main content)'} and return ${wanted}.`
 }

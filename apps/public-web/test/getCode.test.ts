@@ -49,8 +49,8 @@ describe('Get code', () => {
 
   it('says in plain words what to ask an MCP client', () => {
     expect(mcpCall(request({ view: 'links' }))).toEqual({ tool: 'scrape', arguments: { url: 'https://docs.example/a', formats: ['links'] } })
-    expect(mcpPrompt(request({ view: 'links' }))).toBe('Use w2l-local scrape on https://docs.example/a and return its links.')
-    expect(mcpPrompt(request({ onlyMainContent: false, fields: [{ name: 'price', type: 'number' }] }))).toBe('Use w2l-local scrape on https://docs.example/a (the whole page, not only the main content) and return these fields: price.')
+    expect(mcpPrompt(request({ view: 'links' }))).toBe("Use Octocrawl's scrape tool on https://docs.example/a and return its links.")
+    expect(mcpPrompt(request({ onlyMainContent: false, fields: [{ name: 'price', type: 'number' }] }))).toBe("Use Octocrawl's scrape tool on https://docs.example/a (the whole page, not only the main content) and return these fields: price.")
   })
 })
 
