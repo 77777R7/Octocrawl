@@ -62,7 +62,18 @@ export interface EvidenceAccess {
   profile: string | null
   /** Third-party spend of the run that produced the result: 0 when no paid service was called, null when a called service stated no price. */
   externalCostUsd: number | null
+  /**
+   * How the page was read, counted apart (ROADMAP PA items 7 and 8): `unattended` (W2L's own lanes, no session of the
+   * person's), `authorized_session` (with the person's saved login), `user_browser` (in the person's own Chrome, on a
+   * site they allowed, without a step of theirs), `handed_to_person` (in their Chrome, after they got through a check).
+   * Null when no page was read: the result is not success, partial or empty_verified, or no lane produced it. Added with
+   * the my-browser lane: optional, so that records written before it stay valid.
+   */
+  completion?: AccessCompletion | null
 }
+
+export const ACCESS_COMPLETIONS = ['unattended', 'authorized_session', 'user_browser', 'handed_to_person'] as const
+export type AccessCompletion = (typeof ACCESS_COMPLETIONS)[number]
 
 export interface EvidenceRedirectChain {
   /**
@@ -234,7 +245,7 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
-  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd']),
+  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion']),
 } as const
 
 /**
@@ -246,4 +257,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
+  access: ['completion'],
 }

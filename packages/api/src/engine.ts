@@ -26,6 +26,7 @@ import {
   RobotsOriginCache,
   pageFromUserBrowser,
   summarize,
+  unreadInUserBrowser,
   type Channel,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -116,14 +117,14 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
-import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, type AllowedSites, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
-import { FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
@@ -164,6 +165,8 @@ export interface HandoffHooks {
   onConfirm?: (url: string) => void
   /** The tab W2L opened has stayed out of sight: the person is to switch to it. */
   onHidden?: (url: string) => void
+  /** The my-browser lane asks the person, in a page it opened in their Chrome, to allow these sites. */
+  onAllow?: (hosts: readonly string[]) => void
   signal?: AbortSignal
 }
 
@@ -1009,6 +1012,63 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (unread !== null) throw new RequestError(`handoff: the request asks for ${unread}, which a page read in your own Chrome cannot give`, 'unsupported_parameter', { parameters: ['handoff'] })
   }
 
+  /** A scrape's `lane: "my-browser"` is offered here, and asks for what a page read in the person's Chrome can give. */
+  function checkMyBrowser(req: ScrapeRequest): void {
+    if (req.lane !== 'my-browser') return
+    if (userChrome === null) throw new RequestError('lane my-browser: this server does not read pages in your Chrome; run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', 'unsupported_parameter', { parameters: ['lane'] })
+    const unread = unreadByPerson(fetchOptions(req, req.formats))
+    if (unread !== null) throw new RequestError(`lane my-browser: the request asks for ${unread}, which the my-browser lane does not give yet`, 'unsupported_parameter', { parameters: ['lane'] })
+    if (req.mode !== undefined && req.mode !== 'standard') throw new RequestError(`lane my-browser reads the page as you, in your Chrome: mode ${req.mode} does not apply`, 'unsupported_parameter', { parameters: ['lane', 'mode'] })
+    if (req.lockdown === true) throw new RequestError('lane my-browser reads the page in your Chrome: lockdown answers from the cache alone, and a page read there is never cached', 'unsupported_parameter', { parameters: ['lane', 'lockdown'] })
+  }
+
+  /**
+   * A scrape on the my-browser lane: the person's Chrome, with their approval (Chrome's Allow, then the site in the
+   * page Octocrawl opens there), reads the page without a click of theirs; a check it shows waits for them. The
+   * result is the page, or why it was not read; Chrome not reached, or the site not allowed, refuses the request.
+   */
+  async function myBrowserScrape(req: ScrapeRequest, context: ExecutionContext, hooks: HandoffHooks): Promise<FetchResult> {
+    if (handoffClosing.signal.aborted) throw new HandoffUnavailableError('Octocrawl is shutting down')
+    // The caller going away, or this engine shutting down, ends it; the scrape's own timeout does not: the person's time is theirs.
+    const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
+    const started = Date.now()
+    let chrome: UserChrome
+    try { chrome = await openUserChrome(userChrome!, signal) }
+    catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
+    try {
+      const hosts = [new URL(req.url).hostname]
+      hooks.onAllow?.(hosts)
+      let allowed: AllowedSites
+      try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal }) }
+      catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
+      const fetchOpts = fetchOptions(req, req.formats)
+      try {
+        const read = await chrome.read(req.url, {
+          unattended: true,
+          ...(req.handoff?.waitMs === undefined ? {} : { waitMs: req.handoff.waitMs }),
+          ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
+          ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
+          signal: AbortSignal.any([signal, allowed.signal]),
+          ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }),
+          ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }),
+          ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }),
+        })
+        return pageFromUserBrowser(read, null, fetchOpts)
+      } catch (error) {
+        if (!(error instanceof HandoffNotThrough)) throw error
+        const wallMs = Date.now() - started
+        if (allowed.signal.aborted) return unreadInUserBrowser(req.url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${req.url} was read`, wallMs)
+        if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(req.url, { status: 'cancelled' }, error.message, wallMs)
+        const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
+        return unreadInUserBrowser(req.url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
+      } finally {
+        await allowed.close()
+      }
+    } finally {
+      chrome.close()
+    }
+  }
+
   /** The scrape's stopped page handed to the person, with its own Chrome connection: the page read, or why not. */
   async function handOffScrape(req: ScrapeRequest, prior: FetchResult, context: ExecutionContext, hooks: HandoffHooks): Promise<{ result: FetchResult } | { reason: string }> {
     if (handoffClosing.signal.aborted) return { reason: 'Octocrawl is shutting down' }
@@ -1364,6 +1424,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkHandoff(req)
+    checkMyBrowser(req)
     checkFileCap(req)
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
@@ -1392,7 +1453,31 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride, robotsOverride !== undefined) : null
+    /** The shaped response and, for an API call, the scrape record, written before the response is sent. */
+    const deliver = async (full: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {
+      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
+      // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
+      const response = fetched ? shaped : withoutFetchUsage(shaped)
+      if (!record) return response
+      // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
+      try {
+        await writeScrapeRecord(scrapeRecordOf(scrapeId, requestedAt, req, full, response))
+        return response
+      } catch (error) {
+        console.error(JSON.stringify({ component: 'api', event: 'scrape_record_unwritten', scrapeId, error: error instanceof Error ? error.message : String(error) }))
+        if (!('trace' in response)) return response
+        return { ...response, trace: [...response.trace, { at: Math.round(performance.now() - overallStart), lane: response.lane, event: 'scrape_record_unwritten', detail: { scrapeId } }] }
+      }
+    }
     const operation = (async () => {
+      // The my-browser lane: the page read in the person's Chrome, nothing fetched by Octocrawl, nothing cached.
+      if (req.lane === 'my-browser') {
+        const read = await myBrowserScrape(req, context, hooks)
+        const agentHints = agentHintsFor(req, { channelsTried: [read.lane], result: read })
+        const full: ScrapeRun = { ...read, channelsTried: [read.lane], ladderTrace: [], summary: summarize([read.lane], [{ channel: read.lane, result: read }]), ...(agentHints.length === 0 ? {} : { agentHints }) }
+        // Its JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline: the person's time is theirs.
+        return deliver(full, createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }), true)
+      }
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
         ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
@@ -1422,19 +1507,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A page read in the person's Chrome came after the scrape's deadline may have passed (the person's time is theirs): its
       // JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline.
       const shapeScope = handed !== null && 'result' in handed ? createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }) : scope
-      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
-      // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
-      const response = answer.kind === 'fetch' ? shaped : withoutFetchUsage(shaped)
-      if (!record) return response
-      // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
-      try {
-        await writeScrapeRecord(scrapeRecordOf(scrapeId, requestedAt, req, full, response))
-        return response
-      } catch (error) {
-        console.error(JSON.stringify({ component: 'api', event: 'scrape_record_unwritten', scrapeId, error: error instanceof Error ? error.message : String(error) }))
-        if (!('trace' in response)) return response
-        return { ...response, trace: [...response.trace, { at: Math.round(performance.now() - overallStart), lane: response.lane, event: 'scrape_record_unwritten', detail: { scrapeId } }] }
-      }
+      return deliver(full, shapeScope, answer.kind === 'fetch')
     })()
     activeScrapes.add(operation)
     try { return await operation } finally { activeScrapes.delete(operation); scope.dispose() }

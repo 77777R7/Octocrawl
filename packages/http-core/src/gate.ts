@@ -50,7 +50,7 @@ export type GateBlockReason =
   | 'bot_detected_generic'
 
 /** Structural subset of the contract's `Lane`. */
-export type GateLane = 'http' | 'browser_local' | 'browser_local_authed' | 'browser_proxy' | 'provider'
+export type GateLane = 'http' | 'browser_local' | 'browser_local_authed' | 'browser_proxy' | 'provider' | 'my_browser'
 
 export interface GateResponse {
   /** Response status, or null when no response arrived (transport error). */

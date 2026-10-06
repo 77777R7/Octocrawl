@@ -56,7 +56,7 @@ export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<Lad
 export const MAX_AGENT_HINTS = 5
 
 /** The lanes that render a page. */
-const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_local_authed', 'browser_proxy'])
+const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_local_authed', 'browser_proxy', 'my_browser'])
 
 /**
  * Whether the http lane's result asked for a higher lane: an unresolved hop

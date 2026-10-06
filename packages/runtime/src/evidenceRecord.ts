@@ -12,6 +12,7 @@ import {
   declaredContact,
   type ActionsResult,
   type CrawlMode,
+  type AccessCompletion,
   type EvidenceAccess,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
@@ -118,16 +119,22 @@ export function toEvidenceRecord(
  * miss) records no lane identity: its route and client are null. A cache hit states the cost of the
  * fetch it reuses, which its `cache_hit` event carries. A fact the result did not record is null.
  */
+/** Statuses a page was read with: the result carries content, or the page verifiably has none. */
+const READ_STATUSES: ReadonlySet<string> = new Set(['success', 'partial', 'empty_verified'])
+
 function evidenceAccess(result: FetchResult): EvidenceAccess {
   const event = (name: string) => result.trace.find((e) => e.event === name)?.detail
   const text = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null)
   const hit = event('cache_hit')
   const stored = hit?.externalCostUsd
   const externalCostUsd = hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
-  const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null): EvidenceAccess =>
-    ({ route: r, executor, executorVersion, profile, externalCostUsd })
+  const read = READ_STATUSES.has(result.status)
+  const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
+    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
   if (!laneRan) return route(null, null)
+  // A page read in the person's Chrome: theirs alone when it showed no check, handed to them when it did.
+  const userBrowser = (detail: Record<string, unknown>) => route('user_browser', text(detail.browser), null, null, detail.sawGate === null || detail.sawGate === undefined ? 'user_browser' : 'handed_to_person')
   switch (result.lane) {
     case 'http': {
       const transport = event('transport')
@@ -136,12 +143,17 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     case 'browser_local':
     case 'browser_proxy': {
       const engine = event('browser_engine')
-      if (event('session_attached') !== undefined) return route('authed_browser', 'playwright')
+      if (event('session_attached') !== undefined) return route('authed_browser', 'playwright', null, null, 'authorized_session')
       return engine !== undefined && engine.engine === 'patchright' ? route('enhanced_browser', 'patchright', text(engine.version)) : route('browser', 'playwright')
     }
     case 'browser_local_authed': {
-      const read = event('user_browser_read')
-      return read === undefined ? route('authed_browser', 'playwright') : route('user_browser', text(read.browser))
+      const handed = event('user_browser_read')
+      // A handoff's page: the person got through what stopped W2L.
+      return handed === undefined ? route('authed_browser', 'playwright', null, null, 'authorized_session') : route('user_browser', text(handed.browser), null, null, 'handed_to_person')
+    }
+    case 'my_browser': {
+      const opened = event('user_browser_read')
+      return opened === undefined ? route(null, null) : userBrowser(opened)
     }
     case 'provider':
       return route('vendor', text(event('provider_selected')?.provider))
