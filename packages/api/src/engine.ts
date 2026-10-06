@@ -904,7 +904,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         succeeded: (counts.success ?? 0) + (counts.partial ?? 0) + (counts.empty_verified ?? 0),
         failed: (counts.failed ?? 0) + (counts.blocked ?? 0) + (counts.cancelled ?? 0) + (counts.budget_exceeded ?? 0),
         // The cap in force: the batch's own, never above this service's worker count.
-        maxConcurrency: Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+        maxConcurrency: task.batch.lane === 'my-browser' ? 1 : Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(webhook === undefined ? {} : { webhook }),
@@ -1092,7 +1092,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const hosts = [...new Set(urls.map((url) => new URL(url).host))]
     type Opened = { chrome: UserChrome; allowed: AllowedSites } | { refused: string; status: 'cancelled' | 'connection_error' }
     let opened: Promise<Opened> | null = null
-    const signal = AbortSignal.any([shutdownController.signal, handoffClosing.signal])
+    // Closing the reader (the task cancelled, paused or out of time, or the engine shutting down) ends the wait for the
+    // person and every read; close() waits for the read in flight, so its tab is closed before the connection is.
+    const stop = new AbortController()
+    const signal = AbortSignal.any([shutdownController.signal, handoffClosing.signal, stop.signal])
+    let reading: Promise<unknown> | null = null
     const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
       if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
       let chrome: UserChrome
@@ -1110,13 +1114,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         if ('refused' in connection) return unread(url, connection.status, connection.refused, started)
         if (connection.allowed.signal.aborted) return unread(url, 'cancelled', `you revoked the sites in Chrome before ${url} was read`, started)
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
+        if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
-        const read = await readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started)
-        return { result: read, links: read.links ?? [] }
+        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started)
+        reading = pending
+        try {
+          const read = await pending
+          return { result: read, links: read.links ?? [] }
+        } finally {
+          if (reading === pending) reading = null
+        }
       },
       async close() {
+        stop.abort()
         if (opened === null) return
         const connection = await opened
+        // The read in flight ends at its next poll and closes its own tab; the connection is closed after it.
+        while (reading !== null) await reading.catch(() => undefined)
         if ('refused' in connection) return
         await connection.allowed.close()
         connection.chrome.close()
@@ -1297,7 +1311,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       async scrape(url, context) {
         const lane = current
         // `timeout` is each page's own deadline, inside the task's.
-        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(lane.cookieSession === undefined ? {} : { cookieSession: lane.cookieSession }) })
+        // A page read in the person's Chrome has no deadline of its own (the person's time is theirs), only the task's.
+        const pageDeadline = myBrowser !== null ? context?.deadlineAt ?? Infinity : Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS))
+        const page = createExecutionScope({ ...context, ...(pageDeadline === Infinity ? {} : { deadlineAt: pageDeadline }), ...(lane.cookieSession === undefined ? {} : { cookieSession: lane.cookieSession }) })
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
