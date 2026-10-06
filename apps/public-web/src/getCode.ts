@@ -1,5 +1,6 @@
-/** The same extraction on your own computer, for the hero's Get code panel: the local REST API (`npx octocrawl serve`)
- * and the MCP server (`npx -y @octocrawl/mcp`), with no daily limit. It follows the URL, the chosen view and the options. Pure functions,
+/** The same extraction from your code or agent, for the hero's Get code panel: the hosted API (api.octocrawl.dev, keyless
+ * within a daily allowance, a key for more) and the hosted MCP URL, or the same on your own computer (`npx octocrawl serve`
+ * and `npx -y @octocrawl/mcp`) with no daily limit. It follows the URL, the chosen view and the options. Pure functions,
  * so they are tested without a page. */
 
 /** What the result panel shows: readable Markdown, the page's links, what the page declares about itself, the
@@ -15,6 +16,8 @@ export interface CodeRequest {
 }
 
 export const LOCAL_API = 'http://127.0.0.1:8787'
+export const HOSTED_API = 'https://api.octocrawl.dev'
+export const HOSTED_MCP = 'https://mcp.octocrawl.dev/mcp'
 export const MCP_SERVER = 'npx -y @octocrawl/mcp'
 export const API_SERVER = 'npx octocrawl serve'
 
@@ -59,8 +62,9 @@ export function restBody(request: CodeRequest): Record<string, unknown> {
 
 export function restSnippet(request: CodeRequest): string {
   return [
-    '# Start the local API first: npx octocrawl serve',
-    `curl -sS -X POST ${LOCAL_API}/v1/scrape \\`,
+    '# Hosted: no key needed within the daily allowance; add -H \'authorization: Bearer <key>\' for more.',
+    `# On your computer instead: npx octocrawl serve, then ${LOCAL_API} in place of ${HOSTED_API}.`,
+    `curl -sS -X POST ${HOSTED_API}/v1/scrape \\`,
     `  -H 'content-type: application/json' \\`,
     `  -d ${shellQuote(JSON.stringify(restBody(request)))}`,
   ].join('\n')
