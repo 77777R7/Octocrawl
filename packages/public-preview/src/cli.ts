@@ -6,7 +6,6 @@ import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
 import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
-import { warmBrowser } from './screenshotCapture.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
@@ -33,7 +32,5 @@ const server = createPreviewServer({
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
-  // The instance's first screenshot would otherwise pay Chromium's cold start; a failure here only means it will.
-  if (process.env.W2L_PREVIEW_SCREENSHOTS !== 'false') warmBrowser().catch(error => console.log(JSON.stringify({ event: 'browser_warmup_failed', error: error instanceof Error ? error.message : String(error) })))
 })
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => server.close(() => process.exit(0)))

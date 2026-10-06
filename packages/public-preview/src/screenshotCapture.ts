@@ -83,15 +83,6 @@ export function previewBrowserUserAgent(): string {
   return `${modeIdentity('standard').userAgent} ${PREVIEW_PRODUCT_TOKEN}`
 }
 
-/** Launches and closes a browser once, so an instance's first picture does not pay the cold start (2–3 s on Cloud
- * Run, against 0.1–0.3 s after): called when the service starts, never awaited by a request. */
-export async function warmBrowser(): Promise<void> {
-  const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
-  const engine = await browserEngineFor('playwright')
-  const browser = await engine.launch({ headless: true, timeout: 30_000, ...(proxy ? { proxy: { server: proxy } } : { args: ['--proxy-server=direct://'] }) })
-  await browser.close()
-}
-
 export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
   const policy = options.policy ?? hostedNetworkPolicy()
   const viewport = options.viewport ?? VIEWPORT
