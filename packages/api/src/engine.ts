@@ -20,6 +20,7 @@ import {
   MemoryRoutingHistory,
   ResilientHttpSubject,
   OriginScheduler,
+  TaskCookieSession,
   prepareHttpIdentity,
   RobotsOriginCache,
   pageFromUserBrowser,
@@ -449,6 +450,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const headed = options.headed === true
   const accessGrant = options.accessGrant ?? null
   const compatHosts = options.compatHosts ?? []
+  /** ADR 0005 `egress_sessions`: each batch or crawl keeps the cookies its pages set and sends them again to their site. */
+  const egressSessions = (accessGrant?.capabilities ?? []).includes('egress_sessions')
   if (compatHosts.length > 0 && options.hosted === true) throw new Error('the compatible transport is refused on a hosted engine (ADR 0005)')
   if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
@@ -1056,6 +1059,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false)
+    // The task's cookie session (egress_sessions): one per run of the task, in memory, so a resumed task starts a new one.
+    // A saved login is mode authed's own session, and pages read with a session's cookies are never cached.
+    const cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession() : undefined
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
@@ -1071,14 +1077,16 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
     })
-    const atom: ScrapeAtom = selection === undefined ? ladder : {
+    const atom: ScrapeAtom = selection === undefined ? (cookieSession === undefined ? ladder : { scrape: (url, context) => ladder.scrape(url, { ...context, cookieSession }), close: () => ladder.close() }) : {
       async scrape(url, context) {
         // `timeout` is each page's own deadline, inside the task's.
-        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) })
+        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(cookieSession === undefined ? {} : { cookieSession }) })
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
-        const plan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
+        const cachePlan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
+        // A page fetched with the session's cookies neither reuses an anonymous one nor is stored; a lockdown request fetches nothing, so its cache-only answer stands.
+        const plan = cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
