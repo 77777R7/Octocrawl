@@ -81,7 +81,7 @@ const batchId = started.json.taskId ?? started.json.id
 let report
 for (let last = ''; ;) {
   report = (await call('GET', `/v1/batches/${batchId}`)).json
-  const line = `${report.status}: ${report.completed}/${report.requested}`
+  const line = `${report.status}: ${report.completed}/${report.requested}${report.waitingForApproval === true ? ' (waiting for you to click Allow reading these sites in Chrome)' : ''}`
   if (line !== last) { console.log(line); last = line }
   if (!['pending', 'running'].includes(report.status)) break
   await new Promise((resolve) => setTimeout(resolve, 2_000))
