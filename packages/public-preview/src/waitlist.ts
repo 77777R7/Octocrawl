@@ -6,7 +6,7 @@ import { metadataAccessToken } from './quota.js'
 export const WAITLIST_ROLES = ['academic', 'student', 'journalist', 'analyst', 'ai_developer', 'commerce', 'other'] as const
 export const WAITLIST_NEEDS = ['hosted', 'more_previews', 'api_key', 'team', 'monitoring'] as const
 /** Where the form was opened: after the daily previews ran out, in the home page footer, or from the Limits page. */
-export const WAITLIST_TRIGGERS = ['quota', 'footer', 'limits'] as const
+export const WAITLIST_TRIGGERS = ['quota', 'footer', 'limits', 'connect-mcp'] as const
 export const WAITLIST_BODY_BYTES = 2_048
 export const WAITLIST_USE_CASE_CHARS = 200
 /** Sign-ups one visitor may send per UTC day, per service instance. */

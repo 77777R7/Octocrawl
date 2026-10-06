@@ -1,10 +1,10 @@
 # Advanced reference
 
-Use the browser preview or [Codex MCP setup](/docs/connect-mcp/) for a first result. REST, SDK, and self-hosted operation are available for developers who need explicit configuration and persistent task control; they currently require a checkout of this repository.
+Use the browser preview or [Connect MCP](/docs/connect-mcp/) for a first result. REST, the SDK and self-hosting are for developers who need explicit configuration and persistent task control; they come from the published packages (`npx octocrawl serve`, `@octocrawl/sdk`, `octocrawl-client` on PyPI), not from a repository checkout.
 
 ## REST and SDK
 
-The local API has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The `@w2l/sdk` package is currently a private workspace package, not an independently published npm install.
+The API (`npx octocrawl serve`, on `127.0.0.1:8787`) has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The TypeScript SDK is published as `@octocrawl/sdk` and the Python client as `octocrawl-client` (0.3.0, 2026-10-05); each takes the API's base URL and an optional token.
 
 A server started with tokens (`--token`, which can be repeated, or `W2L_API_TOKEN` and the comma-separated `W2L_API_TOKENS`) accepts a request only with `Authorization: Bearer <token>` naming one of them. Give each client its own token; restarting the server without a token revokes it. Tokens are compared as fixed-length SHA-256 digests in constant time. The SDK sends its `token` option, or `W2L_API_TOKEN` from the environment when no `token` is passed.
 
@@ -31,7 +31,7 @@ A result is `complete`, `incomplete` (a required field has no source: `missing_r
 
 Numbers are read as the page writes them: a decimal `.` or `,`; thousands grouped by `.`, `,`, a space or an apostrophe in groups of three (or India's lakh groups); a currency symbol or code before or after; `,-` for a whole amount. `12,99 €` is 12.99, and `1.299,00 €`, `1 299,00 €` and `CHF 1'299.–` are 1299. A single `.` or `,` before exactly three digits (`1.299 €`, `$1,299`) is read only when the value settles it: a review count, an amount in a currency without minor units (`JPY`, `KRW`, `₩`, `円`, …), or a JSON-LD or `product:price:amount` price, whose format writes `.` as the decimal point. The page's language, currency or domain is not used to guess. Otherwise the field is left out (`null` when nullable) with a `field_unavailable` issue quoting the text. The model fallback (`modelFallback: true` and `W2L_EXTRACT_BASE_URL` / `W2L_EXTRACT_MODEL` set) fills only what the page did not give, or a page value that breaks the schema; every other value keeps what the page said and its evidence. It asks the provider for strict structured outputs with a strict-safe copy of the schema, or for the schema as given when strict mode cannot express it; `json.modelUsage.strict` and `strictReason` say which and why.
 
-Start the repository API only after reviewing its network and task-store settings. For full request shapes and examples, use the repository's `docs/onboarding.md`, `docs/batch-scrape.md`, and `examples/monitor-workflow.ts` from the **same checkout and commit** as the running service. Mixing a guide from another branch with a local server can change the apparent contract.
+Start the API only after reviewing its network and task-store settings (`npx octocrawl serve --help`). For full request shapes and examples, read the repository's `docs/onboarding.md`, `docs/batch-scrape.md` and `examples/monitor-workflow.ts` at the tag of the version you run, since the contract moves between versions.
 
 ## Evidence Record
 
@@ -101,10 +101,10 @@ MCP tool errors start with the same code, for example `unsupported_format: POST 
 
 ## Self-hosted operation
 
-The local managed MCP service starts the API, scheduler, and delivery worker together; task state is SQLite-backed. Keep its task directory across restarts. The anonymous page preview is a separate request-based service and does not run persistent Monitor or Delivery tasks. A remote owner-only MCP implementation exists, but its WorkOS login, public URL, and hosted restart acceptance have not been completed.
+`npx octocrawl serve` runs the API on `127.0.0.1:8787` for the computer it runs on. `octocrawl serve --hosted --token <token>` serves other machines behind a bearer token: private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks are refused in that mode. The repository's managed local service adds the Monitor scheduler and delivery worker with SQLite state; keep its task directory across restarts. The anonymous page preview on this site is a separate request-based service and runs no persistent Monitor or Delivery tasks.
 
-If you are evaluating a hosted deployment, verify the authentication resource identifier, HTTPS receiver, persistent disk, outbound restrictions, quota store, and actual client flow before sharing a link. Do not point another user's Codex installation at the loopback URL; `127.0.0.1` refers to their own computer.
+A hosted API and a remote MCP URL run by Octocrawl are being built (the roadmap's PH phase). Until they are announced on this site there is no public Octocrawl URL to point a client at, and `127.0.0.1` in any snippet means the computer the client runs on.
 
 ## Evidence and boundaries
 
-The [result states](/docs/limits/) page explains user-facing outcomes. Repository evidence separates tested local transport, delivery recovery, Amazon field review, and still-open hosted gates. A green unit test or local sample is not evidence of a deployed service or an independent first-time user completing the flow.
+The [result states](/docs/limits/) page explains user-facing outcomes. The repository's records say what was tested where; a passing test on one computer is not evidence that a hosted service does the same.

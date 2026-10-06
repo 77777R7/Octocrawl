@@ -142,7 +142,7 @@ export function pageMarkup(): string {
                 </div>
                 <div class="code-body">
                   <h2 class="code-title" id="code-title">Run it on your computer</h2>
-                  <p class="code-lead" id="code-lead">The same page, format and options, with no daily limit. It needs a checkout of the Octocrawl repository. A local run can also use a local browser, so its result may differ from this preview.</p>
+                  <p class="code-lead" id="code-lead">The same page, format and options, with no daily limit, from the published packages: <code>npx octocrawl serve</code> and <code>npx -y @octocrawl/mcp</code>. A local run can also use a local browser, so its result may differ from this preview.</p>
                   <div class="code-bar">
                     <div class="code-tabs" role="tablist" aria-label="How to run it">
                       <button class="code-tab" id="code-tab-curl" type="button" role="tab" aria-controls="code-panel" aria-selected="true" data-tab="curl"><span class="row-mark" aria-hidden="true"></span>cURL</button>

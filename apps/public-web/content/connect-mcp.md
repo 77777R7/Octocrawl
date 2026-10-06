@@ -1,6 +1,6 @@
 # Connect Octocrawl MCP
 
-Two steps on your own computer: start the Octocrawl API with `npx`, then add the MCP server to your client. Nothing is installed from a repository, nothing is sent to an Octocrawl server, and there is no daily limit. Hosted MCP is paused on the roadmap.
+Two steps on your own computer: start the Octocrawl API with `npx`, then add the MCP server to your client. Nothing is installed from a repository, nothing is sent to an Octocrawl server, and there is no daily limit. A hosted URL is coming; see [Hosted connection](#hosted-connection) below.
 
 ## Step 1: Start the Octocrawl API
 
@@ -30,4 +30,4 @@ The [repository](https://github.com/77777R7/w2l) also has a managed local servic
 
 ## Hosted connection
 
-**Paused.** There is no permanent HTTPS MCP URL, hosted login, or copyable remote command. The [roadmap](https://github.com/77777R7/w2l/blob/main/ROADMAP.md#paused) puts a hosted API and hosted MCP on hold until people need runs while their computer is off; until then, Octocrawl MCP runs on your own computer as described above.
+**Coming.** A hosted API and a remote MCP URL run by Octocrawl are being built as the [roadmap's PH phase](https://github.com/77777R7/w2l/blob/main/ROADMAP.md#ph--hosted-octocrawl): one URL to connect, keyless to try within a daily allowance, a key for more. Until it is announced on this page, Octocrawl MCP runs on your own computer as described above. Want to hear when it opens? [Ask for early access](/?from=connect-mcp#waitlist).
