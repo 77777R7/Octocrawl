@@ -12,6 +12,7 @@ import {
   declaredContact,
   type ActionsResult,
   type CrawlMode,
+  type EvidenceAccess,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
   type EvidencePageActions,
@@ -104,6 +105,38 @@ export function toEvidenceRecord(
       requestHeaders: requested ? sentCustomHeaders(result) : null,
     },
     pageActions: pageActions(result),
+    access: evidenceAccess(result),
+  }
+}
+
+/**
+ * How the result was reached, from its lane and the events its lane recorded: the HTTP lane's
+ * `transport` (the compatible transport), the browser lane's `browser_engine` (Patchright; stock
+ * Playwright records none), the person's browser's `user_browser_read`, the provider's
+ * `provider_selected`. A fact the result did not record is null.
+ */
+function evidenceAccess(result: FetchResult): EvidenceAccess {
+  const event = (name: string) => result.trace.find((e) => e.event === name)?.detail
+  const text = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null)
+  const externalCostUsd = result.usage.externalCostUsd ?? null
+  const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null): EvidenceAccess =>
+    ({ route: r, executor, executorVersion, profile, externalCostUsd })
+  switch (result.lane) {
+    case 'http': {
+      const transport = event('transport')
+      return transport === undefined ? route('http', 'undici') : route('http_compat', text(transport.library), text(transport.version), text(transport.profile))
+    }
+    case 'browser_local':
+    case 'browser_proxy': {
+      const engine = event('browser_engine')
+      return engine !== undefined && engine.engine === 'patchright' ? route('enhanced_browser', 'patchright', text(engine.version)) : route('browser', 'playwright')
+    }
+    case 'browser_local_authed': {
+      const read = event('user_browser_read')
+      return read === undefined ? route('authed_browser', 'playwright') : route('user_browser', text(read.browser))
+    }
+    case 'provider':
+      return route('vendor', text(event('provider_selected')?.provider))
   }
 }
 

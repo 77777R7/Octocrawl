@@ -38,6 +38,31 @@ export type FieldEvidenceSource = (typeof FIELD_EVIDENCE_SOURCES)[number]
 export const EVIDENCE_ARTIFACT_KINDS = ['snapshot', 'screenshot', 'file'] as const
 export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]
 
+/**
+ * The route that produced a result (ADR 0005): `http` (W2L's HTTP client, undici), `http_compat` (the
+ * browser-compatible HTTP transport, impit), `browser` (the local headless browser), `enhanced_browser`
+ * (the local browser on Patchright), `authed_browser` (the local browser with the user's saved login),
+ * `user_browser` (the person's own browser after a handoff), `vendor` (a third-party browser service).
+ */
+export const ACCESS_ROUTES = ['http', 'http_compat', 'browser', 'enhanced_browser', 'authed_browser', 'user_browser', 'vendor'] as const
+export type AccessRoute = (typeof ACCESS_ROUTES)[number]
+
+/**
+ * How a result was reached, read from the result's own trace. Added to v1 with enhanced access
+ * (EVIDENCE_RECORD_ADDED_KEYS).
+ */
+export interface EvidenceAccess {
+  route: AccessRoute
+  /** The client that sent the requests: undici, impit, playwright, patchright, the person's browser, or the vendor's id; null when the result does not say. */
+  executor: string | null
+  /** The executor's version as the lane reported it; null when it reported none. */
+  executorVersion: string | null
+  /** The browser profile the HTTP transport sent (impit's); null on every other route. Its TLS fingerprint was not observed. */
+  profile: string | null
+  /** Third-party spend of the run that produced the result: 0 when no paid service was called, null when a called service stated no price. */
+  externalCostUsd: number | null
+}
+
 export interface EvidenceRedirectChain {
   /**
    * Every URL W2L requested for the page, in order: the requested URL first,
@@ -186,6 +211,8 @@ export interface EvidenceRecord {
    * the caller's ran in it, so its content may be the script's.
    */
   pageActions: EvidencePageActions | null
+  /** How the result was reached (EvidenceAccess). Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS). */
+  access: EvidenceAccess
 }
 
 /** The argument must list every key of T once: a missing or unknown key fails to compile. */
@@ -195,7 +222,7 @@ const keysOf = <T>() => <const K extends readonly (keyof T)[]>(keys: K & EveryKe
 
 /** Field order of the record and of each nested object, as in the schema file. */
 export const EVIDENCE_RECORD_KEYS = {
-  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions']),
+  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions', 'access']),
   redirectChain: keysOf<EvidenceRedirectChain>()(['urls', 'complete']),
   robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride', 'overrideBasis']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
@@ -206,6 +233,7 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
+  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd']),
 } as const
 
 /**
@@ -213,7 +241,7 @@ export const EVIDENCE_RECORD_KEYS = {
  * that records written before them stay valid, though W2L always writes them.
  */
 export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
-  record: ['contentEncoding', 'pageActions'],
+  record: ['contentEncoding', 'pageActions', 'access'],
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],

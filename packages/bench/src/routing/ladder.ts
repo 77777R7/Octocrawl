@@ -34,6 +34,11 @@ import { identityCompromised } from './identity.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One channel: a lane implementation the ladder can try. */
+/** One attempt of the run: the rung that answered, its place in the run, when it was asked and answered. */
+function attemptOf(channel: Channel, id: string, result: FetchResult, ordinal: number, startedAt: string): LadderAttempt {
+  return { channel: id, result, ordinal, startedAt, endedAt: new Date().toISOString(), ...(channel.vendorId === undefined ? {} : { vendorId: channel.vendorId }) }
+}
+
 /** The rungs of the http lane: undici's, and the browser-compatible transport's (ADR 0005 `compatible_transport`). */
 export const HTTP_CHANNELS: ReadonlySet<string> = new Set(['http', 'http_compat'])
 
@@ -461,8 +466,9 @@ export class LadderRunner {
           return finish(identityBlock, false)
         }
         channelsTried.push(channel.id)
+        const startedAt = new Date().toISOString()
         const result = await raceWithSignal(channel.fetch(url, effectiveSession, execution, options), execution.signal)
-        attempts.push({ channel: channel.id, result })
+        attempts.push(attemptOf(channel, channel.id, result, attempts.length + 1, startedAt))
       // A rung the deadline cut short ends the run: nothing after it has time.
       if (result.usage.deadlineExceeded === true || (result.failureReason === 'timeout' && deadlineReached(execution))) {
         return deadlineOutcome(url, progress, result)
@@ -826,8 +832,9 @@ export class LadderRunner {
         summary: summarize([...channelsTried, `${channel.id}(retry)`], attempts),
       }
     }
+    const retryStartedAt = new Date().toISOString()
     const retry = await raceWithSignal(channel.fetch(url, snapshot, execution, options), execution.signal)
-    attempts.push({ channel: `${channel.id}(retry)`, result: retry })
+    attempts.push(attemptOf(channel, `${channel.id}(retry)`, retry, attempts.length + 1, retryStartedAt))
     ladderTrace.push({
       at: retry.usage.wallMs,
       event: 'ladder_step',

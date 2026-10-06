@@ -168,8 +168,16 @@ export interface TraceEvent {
 }
 
 export interface LadderAttempt {
+  /** The rung's id (http, http_compat, browser_local, authed_session, provider, ...), `(retry)` after a handoff. */
   channel: string
   result: FetchResult
+  /** 1 for the run's first attempt, then in order; absent on an attempt recorded before it was added. */
+  ordinal?: number
+  /** UTC ISO 8601 times the rung was asked and answered; absent when not measured. */
+  startedAt?: string
+  endedAt?: string
+  /** The vendor of a provider rung. */
+  vendorId?: string
 }
 
 export interface LadderExecutionSummary {

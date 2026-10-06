@@ -63,7 +63,27 @@ describe('toEvidenceRecord', () => {
       proxy: null,
       identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org', device: null, requestHeaders: [] },
       pageActions: null,
+      // The run's third-party cost is unknown here (null in usage), so it stays unknown.
+      access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: null },
     })
+  })
+
+  it('states the route and the client from the lane and the events it recorded, unknown as null', () => {
+    const access = (over: Partial<FetchResult>, trace: TraceEvent[] = []) => toEvidenceRecord(result(over, trace), { mode: 'standard' }, {}, { sourceCommit: null }).access
+    const zero = { usage: { ...result().usage, externalCostUsd: 0 } }
+    expect(access(zero)).toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0 })
+    expect(access(zero, [{ at: 0, lane: 'http', event: 'transport', detail: { library: 'impit', version: '0.14.5', profile: 'chrome142' } }]))
+      .toEqual({ route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0 })
+    expect(access({ ...zero, lane: 'browser_local' })).toEqual({ route: 'browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0 })
+    expect(access({ ...zero, lane: 'browser_local' }, [{ at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'patchright', version: '1.63.0' } }]))
+      .toEqual({ route: 'enhanced_browser', executor: 'patchright', executorVersion: '1.63.0', profile: null, externalCostUsd: 0 })
+    expect(access({ ...zero, lane: 'browser_local_authed' })).toMatchObject({ route: 'authed_browser', executor: 'playwright' })
+    expect(access({ ...zero, lane: 'browser_local_authed' }, [{ at: 9, lane: 'browser_local_authed', event: 'user_browser_read', detail: { browser: 'Google Chrome' } }]))
+      .toMatchObject({ route: 'user_browser', executor: 'Google Chrome' })
+    // A provider states its vendor; a run whose provider stated no price has an unknown cost.
+    expect(access({ lane: 'provider' }, [{ at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'browserbase' } }]))
+      .toEqual({ route: 'vendor', executor: 'browserbase', executorVersion: null, profile: null, externalCostUsd: null })
+    expect(access({ ...zero, lane: 'provider' })).toMatchObject({ route: 'vendor', executor: null })
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {

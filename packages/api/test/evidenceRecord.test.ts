@@ -9,7 +9,7 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import { identityForRoute, localNetworkPolicy, modeIdentity, type EvidenceRecord, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { buildChannels, ProviderSubject, robotsFetcherVia, type Channel, type ProviderTransport } from '@w2l/bench'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
-import { sha256Utf8 } from '@w2l/http-core'
+import { accessGrantFromText, sha256Utf8 } from '@w2l/http-core'
 import { W2L } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
@@ -129,6 +129,18 @@ describe('Evidence Record: HTTP lane', () => {
     const compact = await scrape(http, { url: `${origin}/moved`, formats: ['markdown'], debug: false })
     expect(valid(compact.evidenceRecord)).toMatchObject({ finalUrl: `${origin}/article`, lane: 'http', outputSha256: { markdown: sha256Utf8(compact.markdown!) } })
     expect(compact).not.toHaveProperty('trace')
+  })
+
+  it('states the route and the client: undici on the http rung, impit on the compatible one, in the full and compact shapes', async () => {
+    expect(valid((await scrape(http, { url: `${origin}/article` })).evidenceRecord).access)
+      .toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0 })
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['compatible_transport'] }))
+    const compat = engineWith({ accessGrant: grant, compatHosts: ['127.0.0.1'], channelsFor: mode => buildChannels(mode, { networkPolicy: policy, compatTransport: true }).filter(channel => channel.id === 'http' || channel.id === 'http_compat') })
+    const full = await scrape(compat, { url: `${origin}/article` })
+    expect(full.channelsTried).toEqual(['http_compat'])
+    const expected = { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0 }
+    expect(valid(full.evidenceRecord).access).toEqual(expected)
+    expect(valid((await scrape(compat, { url: `${origin}/article`, formats: ['markdown'], debug: false })).evidenceRecord).access).toEqual(expected)
   })
 
   it('sends and records the plain standard User-Agent from the local API, without the public preview\'s token', async () => {
