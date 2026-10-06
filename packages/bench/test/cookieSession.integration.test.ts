@@ -51,7 +51,7 @@ describe('a task cookie session across the browser and HTTP rungs', () => {
       expect((await http.fetch(`${origin}/data`)).evidence.httpStatus).toBe(403)
       const cleared = await browser.fetch(`${origin}/check`, undefined, undefined, undefined, {}, undefined, session)
       expect(cleared.status).toBe('success')
-      expect(cleared.trace).toContainEqual(expect.objectContaining({ event: 'session_cookies', detail: { session: session.id, startedWith: 0, kept: 1, read: true } }))
+      expect(cleared.trace).toContainEqual(expect.objectContaining({ event: 'session_cookies', detail: { session: session.id, startedWith: 0, kept: 1, removed: 0, read: true } }))
       const data = await http.fetch(`${origin}/data`, undefined, undefined, {}, undefined, {}, undefined, session)
       expect(data).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
       expect(JSON.stringify([cleared, data])).not.toContain(GATE)

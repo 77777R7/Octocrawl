@@ -1,4 +1,4 @@
-import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type PageAction, fileByteCap, proxyFor, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -405,7 +405,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     let actionsRoute: ((route: Route) => Promise<void>) | null = null
     let popupCloser: ((opened: Page) => void) | null = null
     // The task's cookie session, for a context of this fetch's own: a saved login or the managed profile keeps its own cookies.
-    let taskCookies: { session: CookieSession; startedWith: number } | null = null
+    let taskCookies: { session: CookieSession; startedWith: ContextCookie[] } | null = null
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -681,7 +681,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (execution.cookieSession !== undefined && this.accessConfig?.session === undefined && context !== this.managedContext) {
         const cookies = await raceWithSignal(execution.cookieSession.browserCookies(url), signal)
         if (cookies.length > 0) await context.addCookies(cookies.map((c) => ({ ...c, ...(c.expires < 0 ? { expires: -1 } : {}) })))
-        taskCookies = { session: execution.cookieSession, startedWith: cookies.length }
+        taskCookies = { session: execution.cookieSession, startedWith: cookies }
       }
       throwIfExecutionStopped(execution)
       const pendingPage = context.newPage()
@@ -1316,8 +1316,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // What the page left in the context goes back to the task's session, values unrecorded; a context that does not answer in time keeps them.
       if (taskCookies !== null && context !== undefined) {
         const held = await Promise.race([context.cookies().catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), PAGE_CLOSE_MS))])
-        const kept = held === null ? 0 : await taskCookies.session.storeBrowserCookies(held.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite })))
-        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'session_cookies', detail: { session: taskCookies.session.id, startedWith: taskCookies.startedWith, kept, read: held !== null } })
+        const changes = held === null ? { kept: 0, removed: 0 } : await taskCookies.session.storeBrowserChanges(taskCookies.startedWith, held.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite })))
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'session_cookies', detail: { session: taskCookies.session.id, startedWith: taskCookies.startedWith.length, ...changes, read: held !== null } })
       }
       await session?.detach().catch(() => {})
       // The route goes before the context does: Chromium can leave a request

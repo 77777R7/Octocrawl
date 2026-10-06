@@ -1084,7 +1084,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
-        const plan = cookieSession !== undefined ? null : cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
+        const cachePlan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
+        // A page fetched with the session's cookies neither reuses an anonymous one nor is stored; a lockdown request fetches nothing, so its cache-only answer stands.
+        const plan = cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {

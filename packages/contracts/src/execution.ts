@@ -49,8 +49,12 @@ export interface CookieSession {
   store(url: string, setCookies: readonly string[]): Promise<number>
   /** The cookies a browser context loading this URL should start with. */
   browserCookies(url: string): Promise<ContextCookie[]>
-  /** Keep the cookies a browser context holds after a page; returns how many were kept. */
-  storeBrowserCookies(cookies: readonly ContextCookie[]): Promise<number>
+  /**
+   * Keep what a browser context changed: given the cookies it started with and the ones it holds
+   * after the page, store the new and changed ones and delete the ones it dropped, unless another
+   * page of the task changed that cookie meanwhile. Unchanged cookies are left as the session has them.
+   */
+  storeBrowserChanges(startedWith: readonly ContextCookie[], held: readonly ContextCookie[]): Promise<{ kept: number; removed: number }>
 }
 
 /** What a lane reports when it sets a robots.txt rule aside under a recorded override. */

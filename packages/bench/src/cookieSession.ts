@@ -50,25 +50,44 @@ export class TaskCookieSession implements CookieSession {
     }))
   }
 
-  async storeBrowserCookies(cookies: readonly ContextCookie[]): Promise<number> {
+  async storeBrowserChanges(startedWith: readonly ContextCookie[], held: readonly ContextCookie[]): Promise<{ kept: number; removed: number }> {
+    const key = (c: ContextCookie) => `${c.name}\u0000${c.domain}\u0000${c.path}`
+    const before = new Map(startedWith.map((c) => [key(c), c]))
+    const after = new Map(held.map((c) => [key(c), c]))
     let kept = 0
-    for (const c of cookies) {
-      const host = c.domain.replace(/^\./, '')
-      if (host === '') continue
-      // As the site would have set it: a host-only cookie without Domain (an IP address takes no Domain),
-      // a cookie for the domain and its subdomains (a leading dot) with it.
-      const line = [
-        `${c.name}=${c.value}`,
-        `Path=${c.path === '' ? '/' : c.path}`,
-        ...(c.domain.startsWith('.') ? [`Domain=${host}`] : []),
-        ...(c.expires > 0 ? [`Expires=${new Date(c.expires * 1000).toUTCString()}`] : []),
-        ...(c.httpOnly ? ['HttpOnly'] : []),
-        ...(c.secure ? ['Secure'] : []),
-        `SameSite=${c.sameSite}`,
-      ].join('; ')
-      const stored = await this.jar.setCookie(line, `${c.secure ? 'https' : 'http'}://${host}${c.path === '' ? '/' : c.path}`, { ignoreError: true }).catch(() => undefined)
-      if (stored !== undefined && stored.TTL() > 0) kept++
+    let removed = 0
+    // New and changed cookies: what the page itself set.
+    for (const c of held) {
+      const was = before.get(key(c))
+      if (was !== undefined && was.value === c.value && was.expires === c.expires) continue
+      if (await this.setLine(c, false)) kept++
     }
-    return kept
+    // Dropped cookies: deleted by the page, unless the session's value is no longer the one the context started with.
+    for (const c of startedWith) {
+      if (after.has(key(c))) continue
+      const current = (await this.browserCookies(`${c.secure ? 'https' : 'http'}://${c.domain.replace(/^\./, '')}${c.path}`)).find((now) => key(now) === key(c))
+      if (current === undefined || current.value !== c.value) continue
+      await this.setLine(c, true)
+      removed++
+    }
+    return { kept, removed }
+  }
+
+  /** The cookie as the site would have set it (or deleted it): a host-only one without Domain, which an IP address cannot take. */
+  private async setLine(c: ContextCookie, remove: boolean): Promise<boolean> {
+    const host = c.domain.replace(/^\./, '')
+    if (host === '') return false
+    const path = c.path === '' ? '/' : c.path
+    const line = [
+      `${c.name}=${remove ? '' : c.value}`,
+      `Path=${path}`,
+      ...(c.domain.startsWith('.') ? [`Domain=${host}`] : []),
+      ...(remove ? ['Expires=Thu, 01 Jan 1970 00:00:00 GMT'] : c.expires > 0 ? [`Expires=${new Date(c.expires * 1000).toUTCString()}`] : []),
+      ...(c.httpOnly ? ['HttpOnly'] : []),
+      ...(c.secure ? ['Secure'] : []),
+      `SameSite=${c.sameSite}`,
+    ].join('; ')
+    const stored = await this.jar.setCookie(line, `${c.secure ? 'https' : 'http'}://${host}${path}`, { ignoreError: true }).catch(() => undefined)
+    return stored !== undefined && stored.TTL() > 0
   }
 }

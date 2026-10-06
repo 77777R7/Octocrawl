@@ -52,18 +52,34 @@ describe('TaskCookieSession', () => {
     expect(await new TaskCookieSession().cookieHeader('https://shop.example/a/next')).toBe('')
   })
 
-  it('hands a browser context the cookies it holds, and keeps what the context set, host-only or domain-wide', async () => {
+  it('hands a browser context the cookies it holds, and keeps what the context changed, host-only or domain-wide', async () => {
     const session = new TaskCookieSession()
     await session.store('https://shop.example/', ['sid=1; Path=/; HttpOnly; SameSite=Strict'])
-    expect(await session.browserCookies('https://shop.example/')).toEqual([{ name: 'sid', value: '1', domain: 'shop.example', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Strict' }])
-    const kept = await session.storeBrowserCookies([
+    const startedWith = await session.browserCookies('https://shop.example/')
+    expect(startedWith).toEqual([{ name: 'sid', value: '1', domain: 'shop.example', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Strict' }])
+    const changes = await session.storeBrowserChanges(startedWith, [
+      ...startedWith,
       { name: 'cf', value: 'cleared', domain: '.shop.example', path: '/', expires: Math.floor(Date.now() / 1000) + 3600, httpOnly: true, secure: true, sameSite: 'None' },
       { name: 'host', value: 'h', domain: 'shop.example', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' },
     ])
-    expect(kept).toBe(2)
+    // The unchanged sid is not counted or rewritten.
+    expect(changes).toEqual({ kept: 2, removed: 0 })
     expect(await session.cookieHeader('https://www.shop.example/')).toBe('cf=cleared')
     expect(await session.cookieHeader('https://shop.example/')).toBe('sid=1; cf=cleared; host=h')
   })
+
+  it('never writes a stale copy over a newer value, and deletes what the page dropped unless another page changed it', async () => {
+    const session = new TaskCookieSession()
+    await session.store('https://shop.example/', ['sid=OLD; Path=/', 'gone=1; Path=/', 'raced=1; Path=/'])
+    const startedWith = await session.browserCookies('https://shop.example/')
+    // Meanwhile an HTTP page of the same task rotated sid and raced.
+    await session.store('https://shop.example/', ['sid=NEW; Path=/', 'raced=2; Path=/'])
+    // The context changed nothing but dropped gone and raced.
+    const held = startedWith.filter((c) => c.name === 'sid')
+    expect(await session.storeBrowserChanges(startedWith, held)).toEqual({ kept: 0, removed: 1 })
+    expect(await session.cookieHeader('https://shop.example/')).toBe('sid=NEW; raced=2')
+  })
+
 })
 
 describe('the HTTP rungs with a task cookie session', () => {

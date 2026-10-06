@@ -20,11 +20,13 @@ const PAGE = `<!doctype html><html><head><title>Tides</title></head><body><artic
 const TOKEN = 'batch-token-5d1e'
 let server: Server
 let origin: string
+const hits: string[] = []
 let root: string
 let engine: ApiEngine | null = null
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    hits.push(req.url ?? '')
     if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
     if (req.url === '/start') return void res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': `token=${TOKEN}; Path=/` }).end(PAGE)
     if (req.url === '/needs') {
@@ -48,7 +50,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-async function batch(capabilities: string[]) {
+async function batch(capabilities: string[], extra: Record<string, unknown> = {}) {
   root = await mkdtemp(join(tmpdir(), 'w2l-egress-'))
   const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
   engine = createApiEngine({
@@ -58,7 +60,7 @@ async function batch(capabilities: string[]) {
     channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy }).filter((channel) => channel.id === 'http'),
   })
   // maxAge asks the cache to keep pages: a page read with the session's cookies must not be kept.
-  const { taskId } = await engine.startBatch({ urls: [`${origin}/start`, `${origin}/needs`], maxConcurrency: 1, maxAge: 3_600_000 } as Parameters<ApiEngine['startBatch']>[0])
+  const { taskId } = await engine.startBatch({ urls: [`${origin}/start`, `${origin}/needs`], maxConcurrency: 1, maxAge: 3_600_000, ...extra } as Parameters<ApiEngine['startBatch']>[0])
   let report = await engine.getBatch(taskId)
   for (let i = 0; i < 200 && (report === null || ['pending', 'running'].includes(report.status)); i++) {
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -86,5 +88,12 @@ describe('egress_sessions: a batch keeps its cookies for its site', () => {
     expect(JSON.stringify(items)).not.toContain(TOKEN)
     // No page read with the session was cached.
     expect(JSON.stringify(items)).not.toContain('cache_stored')
+  })
+
+  it('keeps a lockdown batch cache-only: nothing is fetched, a page not cached is a cache miss', async () => {
+    hits.length = 0
+    const { items } = await batch(['egress_sessions'], { lockdown: true })
+    expect(hits).toEqual([])
+    expect(items['/start']).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
   })
 })
