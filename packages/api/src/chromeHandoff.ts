@@ -178,6 +178,11 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
   }
 }
 
+/** Whether a signal has fired (a function, so a later check of the same signal is not narrowed away). */
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
+}
+
 /** The page's answer: `allowed` or `revoked` once the person clicked, else empty. */
 const ANSWER = `document.documentElement.dataset.octocrawl || ''`
 
@@ -269,6 +274,8 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
       : null
   // Any other refusal from Chrome ends this page alone, not the handoff of the others.
   const ended = (error: unknown): unknown => gone(error) ?? (error instanceof ChromeLoginError ? new HandoffNotThrough(`${url} was not read: ${error.message}`, sawGate, 'chrome') : error)
+  // A read already cancelled opens no tab.
+  if (isAborted(options.signal)) throw new HandoffNotThrough(`the read of ${url} was cancelled before Octocrawl read it`, null, 'cancelled')
   let targetId: string
   try {
     // A blank tab first, so the page's own requests and responses are heard from its first one.

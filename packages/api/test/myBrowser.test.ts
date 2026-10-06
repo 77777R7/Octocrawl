@@ -21,24 +21,38 @@ const PAGE = `<html><head><title>Ledger</title></head><body><article><h1>Tide le
 /** The scope page's answer on each poll: what its buttons set, and whether the person clicked on it (their activation, which only Chrome sets); 'closed': they closed it. */
 type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
 
-function fakeChrome(answers: Answer[], page: { href: string; html: string }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
   const written: string[] = []
+  const created: string[] = []
+  // Page tabs open at once, at most.
+  let open = 0
+  let mostOpen = 0
+  // Tabs not closed, and what was sent once the connection was closed (a tab left behind in the person's Chrome).
+  const live = new Set<string>()
+  const afterClose: string[] = []
+  let connectionClosed = false
+  // Where each tab was sent: a page without a fixed address shows the URL it was sent to.
+  const navigated = new Map<string, string>()
   let polled = 0
   let targets = 0
   const kinds = new Map<string, 'scope' | 'page'>()
   const answerNow = (): Answer => answers[Math.min(polled, answers.length - 1)]!
+  const hrefOf = (target: string) => page.href ?? navigated.get(target) ?? 'about:blank'
   const connect = async (): Promise<CdpConnection> => ({
     async send(method, params, sessionId) {
       const p = (params ?? {}) as Record<string, unknown>
+      if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
-      if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, targets === 1 ? 'scope' : 'page'); return { targetId: id } }
+      if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, targets === 1 ? 'scope' : 'page'); created.push(id); live.add(id); if (targets > 1) mostOpen = Math.max(mostOpen, ++open); return { targetId: id } }
       if (method === 'Target.attachToTarget') return { sessionId: `s:${String(p.targetId)}` }
-      if (method === 'Target.activateTarget' || method === 'Target.closeTarget' || method === 'Network.enable' || method === 'Page.navigate') return {}
+      if (method === 'Page.navigate') { navigated.set(String(sessionId).replace(/^s:/, ''), String(p.url)); return {} }
+      if (method === 'Target.closeTarget') { if (kinds.get(String(p.targetId)) === 'page' && live.has(String(p.targetId))) open--; live.delete(String(p.targetId)); return {} }
+      if (method === 'Target.activateTarget' || method === 'Network.enable') return {}
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
       const kind = kinds.get(String(sessionId ?? p.targetId).replace(/^s:/, ''))
       if (method === 'Target.getTargetInfo') {
         if (kind === 'scope' && answerNow() === 'closed') throw new ChromeLoginError('Chrome refused the request: No target with given id found')
-        return { targetInfo: { url: kind === 'scope' ? 'about:blank' : page.href } }
+        return { targetInfo: { url: kind === 'scope' ? 'about:blank' : hrefOf(String(p.targetId)) } }
       }
       if (method === 'Runtime.evaluate') {
         const expression = String(p.expression)
@@ -51,13 +65,13 @@ function fakeChrome(answers: Answer[], page: { href: string; html: string }) {
         }
         // The page asked for: never clicked on, so the lane reads it without the person.
         if (p.contextId === 7) return { result: { value: false } }
-        return { result: { value: JSON.stringify({ href: page.href, ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: false }) } }
+        return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: false }) } }
       }
       throw new Error(`unexpected ${method}`)
     },
-    close() {},
+    close() { connectionClosed = true },
   })
-  return { connect, written }
+  return { connect, written, created, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed }
 }
 
 describe('the my-browser lane', () => {
@@ -145,6 +159,136 @@ describe('the my-browser lane', () => {
     expect(await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', mode: 'research' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('mode research does not apply') } })
     expect(await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', lockdown: true })).toMatchObject({ status: 400, body: { details: { parameters: ['lane', 'lockdown'] } } })
     expect(await scrape(app, { url: 'https://site.test/a', lane: 'browser' })).toMatchObject({ status: 400, body: { error: 'lane must be one of: my-browser' } })
+  })
+})
+
+describe('the my-browser lane in a batch', () => {
+  let root: string
+  let engine: ApiEngine | null = null
+  afterEach(async () => {
+    await engine?.close()
+    engine = null
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean } = {}) {
+    root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-batch-'))
+    const userDataDir = join(root, 'chrome')
+    await mkdir(userDataDir, { recursive: true })
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect } }) })
+    return createApp(engine)
+  }
+  const post = async (app: ReturnType<typeof createApp>, body: Record<string, unknown>) => {
+    const res = await app.request('/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return { status: res.status, body: await res.json() as Record<string, any> }
+  }
+  async function settled(app: ReturnType<typeof createApp>, id: string) {
+    for (let i = 0; i < 600; i++) {
+      const report = await (await app.request(`/v1/batches/${id}`)).json() as { status: string }
+      if (!['pending', 'running'].includes(report.status)) break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    const items = (await (await app.request(`/v1/batches/${id}/items?debug=true`)).json() as { items: Array<Record<string, any>> }).items
+    return { report: await (await app.request(`/v1/batches/${id}`)).json() as Record<string, any>, items: Object.fromEntries(items.map((item) => [item.url, item])) }
+  }
+
+  it('asks the person once for every site of the batch, then reads each page in their Chrome, one at a time', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE })
+    const app = await setup(chrome)
+    const started = await post(app, { urls: ['https://site.test/a', 'https://other.test:8443/b'], lane: 'my-browser' })
+    expect(started.status).toBe(202)
+    const { report, items } = await settled(app, started.body.id ?? started.body.taskId)
+    expect(report).toMatchObject({ status: 'completed', completed: 2 })
+    for (const url of ['https://site.test/a', 'https://other.test:8443/b']) {
+      expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+      expect(items[url]!.evidenceRecord.access).toMatchObject({ route: 'user_browser', completion: 'user_browser' })
+    }
+    // One page asking for both sites, host and port, then one tab per page.
+    expect(chrome.written).toHaveLength(1)
+    expect(chrome.written[0]).toContain('site.test')
+    expect(chrome.written[0]).toContain('other.test:8443')
+    expect(chrome.created).toHaveLength(3)
+    expect(chrome.mostOpen()).toBe(1)
+    // A page read in the person's Chrome is never stored: a later cache-only request finds nothing.
+    const later = await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://site.test/a', lockdown: true }) })
+    expect(await later.json()).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
+  }, 30_000)
+
+  it('reads none of its pages when the person does not allow the sites, and says why on each', async () => {
+    const chrome = fakeChrome([{ answer: 'revoked', active: true }], { html: PAGE })
+    const app = await setup(chrome)
+    const started = await post(app, { urls: ['https://site.test/a', 'https://site.test/b'], lane: 'my-browser' })
+    const { items } = await settled(app, started.body.id ?? started.body.taskId)
+    for (const item of Object.values(items)) {
+      expect(item).toMatchObject({ status: 'cancelled', lane: 'my_browser' })
+      expect(item.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'my_browser_not_read', message: expect.stringContaining('clicked Revoke') })]))
+    }
+    // Asked once for the run, not once per page.
+    expect(chrome.written).toHaveLength(1)
+  }, 30_000)
+
+  const until = async (done: () => boolean, ms = 10_000) => { for (const end = Date.now() + ms; !done() && Date.now() < end;) await new Promise((resolve) => setTimeout(resolve, 20)) }
+  const idOf = (body: Record<string, any>) => String(body.id ?? body.taskId)
+
+  it('opens no tab after the person revokes the sites: the pages left are not read, and say so', async () => {
+    // Allowed; the first page shows a captcha; the person clicks Revoke while it waits.
+    const answers: Answer[] = [...Array(4).fill({ answer: 'allowed', active: true }), { answer: 'revoked', active: true }]
+    const chrome = fakeChrome(answers, { html: GATE })
+    const app = await setup(chrome)
+    const started = await post(app, { urls: ['https://site.test/a', 'https://site.test/b', 'https://site.test/c'], lane: 'my-browser' })
+    const { items } = await settled(app, idOf(started.body))
+    expect(Object.values(items).map((item) => item.status)).toEqual(['cancelled', 'cancelled', 'cancelled'])
+    expect(items['https://site.test/c']!.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('revoked') })]))
+    // Octocrawl's page and the first page's tab, no other.
+    expect(chrome.created).toHaveLength(2)
+  }, 30_000)
+
+  it('opens no tab for a URL appended on a site the person did not allow for this run', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE })
+    const app = await setup(chrome)
+    const started = await post(app, { urls: ['https://site.test/a', 'https://site.test/b'], lane: 'my-browser' })
+    await until(() => chrome.created.length >= 2)
+    expect(await post(app, { urls: ['https://elsewhere.test/x'], appendToId: idOf(started.body) })).toMatchObject({ status: 202 })
+    const { items } = await settled(app, idOf(started.body))
+    expect(items['https://elsewhere.test/x']).toMatchObject({ status: 'cancelled' })
+    expect(items['https://elsewhere.test/x']!.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('elsewhere.test is not among the sites you allowed') })]))
+    expect([...chrome.navigated.values()]).not.toContain('https://elsewhere.test/x')
+  }, 30_000)
+
+  it('leaves no tab open and sends nothing after closing the connection when the batch is cancelled, waiting or reading', async () => {
+    // Cancelled while a page waits on its captcha.
+    const reading = fakeChrome([{ answer: 'allowed', active: true }], { html: GATE })
+    let app = await setup(reading)
+    let started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
+    await until(() => reading.created.length >= 2)
+    await app.request(`/v1/batches/${idOf(started.body)}/cancel`, { method: 'POST' })
+    await until(() => reading.closed())
+    expect(reading.closed()).toBe(true)
+    expect([...reading.live]).toEqual([])
+    expect(reading.afterClose).toEqual([])
+    await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
+    // Cancelled while Octocrawl's page still waits for the person to allow the sites.
+    const asking = fakeChrome([{ answer: '', active: false }], { html: PAGE })
+    app = await setup(asking)
+    started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
+    await until(() => asking.written.length >= 1)
+    await app.request(`/v1/batches/${idOf(started.body)}/cancel`, { method: 'POST' })
+    await until(() => asking.closed(), 5_000)
+    expect(asking.closed()).toBe(true)
+    expect([...asking.live]).toEqual([])
+    expect(asking.afterClose).toEqual([])
+  }, 30_000)
+
+  it('is refused by name where it is not offered, and for what it does not give', async () => {
+    const hosted = await setup(null, { hosted: true })
+    expect(await post(hosted, { urls: ['https://site.test/a'], lane: 'my-browser' })).toMatchObject({ status: 400, body: { details: { parameters: ['lane'] } } })
+    await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
+    const app = await setup(fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE }))
+    expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', maxConcurrency: 2 })).toMatchObject({ status: 400, body: { details: { parameters: ['lane', 'maxConcurrency'] } } })
+    expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', webhook: 'https://hooks.example/x' })).toMatchObject({ status: 400, body: { details: { parameters: ['lane', 'webhook'] } } })
+    expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', actions: [{ type: 'wait', milliseconds: 10 }] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
+    expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', mode: 'authed' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('mode authed does not apply') } })
   })
 })
 
