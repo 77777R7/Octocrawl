@@ -1,32 +1,32 @@
 # Connect Octocrawl MCP
 
-Choose your MCP client below. Octocrawl currently connects through a [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) endpoint on the same computer as your client; hosted browser login is paused on the roadmap.
+Two steps on your own computer: start the Octocrawl API with `npx`, then add the MCP server to your client. Nothing is installed from a repository, nothing is sent to an Octocrawl server, and there is no daily limit. Hosted MCP is paused on the roadmap.
 
-{{MCP_CLIENT_PICKER}}
+## Step 1: Start the Octocrawl API
 
-## Start Octocrawl on your computer
-
-On macOS, from an Octocrawl repository checkout, use Node.js 22.13+ or 24+:
+With Node.js 22.13 or later, in any terminal:
 
 ```bash
-npm ci
-npm run first-use:local
-npm run local:mcp:status
+npx octocrawl serve
 ```
 
-The setup prepares Chromium and starts the managed local service. It also attempts to register Octocrawl with **Codex**. Keep the service running while you use MCP. The local endpoint is `http://127.0.0.1:8791/mcp`; it is only reachable from this computer and does not require browser login. On another system, build the repository and run `npm run local:mcp` in a terminal; the managed macOS receiver setup is unavailable there.
+Keep it running while you use MCP. It listens on `http://127.0.0.1:8787`, on this computer only. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
 
-Registration alone does not prove a task works. After adding the server, check that `w2l-local` is connected, that `preview_monitor` appears, and then send the sample task below. If the server is missing, check `npm run local:mcp:status` and restart or reload the client. The Codex path has been verified locally; the other client snippets follow their documented configuration formats and still need an Octocrawl task-level check.
+{{MCP_CLIENT_PICKER}}
 
 ## Send your first task
 
 ```text
-Use Octocrawl's preview_monitor with preset firecrawl-introduction. Show the sample quality, source URL, field evidence, and any missing reasons. Do not create a persistent Monitor yet.
+Use Octocrawl's scrape tool on https://docs.firecrawl.dev/introduction with formats ["markdown"]. Show the final URL, the HTTP status and the robots.txt decision from its evidenceRecord, then the first heading of the Markdown.
 ```
 
-Expected output is a **nonpersistent** sample assessment. It does not create a baseline, scheduled run, or webhook delivery. If the connection is absent, check `npm run local:mcp:status`, the saved entry with `codex mcp list`, and then open a new Codex task. If the sample is blocked or incomplete, inspect the reported reason before creating a Monitor.
+The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. If the client reports no tools, check that step 1 is still running; if the call fails to connect, the API is not on `127.0.0.1:8787` (pass `--base-url` to the server command).
 
-Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or [Amazon.sg product JSON](/docs/guides/amazon-product/).
+The same server offers `map`, `crawl`, `batch_scrape`, `scrape_product` for an Amazon.sg product, and the Monitor tools; the [advanced reference](/docs/reference/) lists them. Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or [Amazon.sg product JSON](/docs/guides/amazon-product/).
+
+## From a repository checkout
+
+The [repository](https://github.com/77777R7/w2l) also has a managed local service for macOS (`npm run first-use:local`, then `npm run local:mcp:status`) that runs the API, the Monitor scheduler and the delivery worker as one background service with a Streamable HTTP endpoint at `http://127.0.0.1:8791/mcp`. The first-use walkthrough and the Monitor guides use it; the `npx` path above is enough for scrape, map, crawl and batch.
 
 ## Hosted connection
 

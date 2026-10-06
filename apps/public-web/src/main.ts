@@ -5,7 +5,7 @@ import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
-import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
+import { API_SERVER, fieldsSchema, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -1274,9 +1274,9 @@ let codeTexts: Record<CodeTab, string> = { curl: '', mcp: '', prompt: '' }
 
 /** What to start before the listing, as a prompt line: plain words with the commands in code. */
 function codeStepFor(tab: CodeTab): Array<string | [string]> {
-  if (tab === 'curl') return ['Start the local API with ', ['npm run api'], ', then run this in another terminal:']
-  if (tab === 'mcp') return ['Start ', ['npm run local:mcp'], ', then call the tool from a client connected to ', [LOCAL_MCP], ':']
-  return ['Ask a client connected to ', [LOCAL_MCP], ':']
+  if (tab === 'curl') return ['Start the local API with ', [API_SERVER], ', then run this in another terminal:']
+  if (tab === 'mcp') return ['Start ', [API_SERVER], ', add ', [MCP_SERVER], ' to your client, then call the tool:']
+  return ['Start ', [API_SERVER], ', add ', [MCP_SERVER], ' to your client, then ask:']
 }
 
 /** Show one listing. Each line is printed in turn (the styles stagger them by --i), so a tab reads as typed. */
