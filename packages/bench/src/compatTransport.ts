@@ -175,6 +175,8 @@ export interface CompatFetchOptions {
   ignoreTlsErrors?: boolean
   /** The caller's deadline (epoch ms), which sets impit's own limit for the request (impitTimeoutMs). */
   deadlineAt?: number
+  /** The task's cookies (ADR 0005 `egress_sessions`): the header for this request, and the response's `Set-Cookie` lines kept. */
+  cookies?: { header(url: string): Promise<string>; keep(url: string, setCookies: readonly string[]): Promise<void> }
   /** Called when impit decoded a Content-Encoding the lane will not see. */
   onDecoded?: (contentEncoding: string) => void
   onBodyRead?: (ms: number) => void
@@ -203,6 +205,9 @@ export class CompatTransport {
   async fetch(url: string, options: CompatFetchOptions): Promise<ResilientResponseLike> {
     let response: Awaited<ReturnType<Impit['fetch']>>
     const client = await this.clientFor(url, options.ignoreTlsErrors === true)
+    // The session's cookies go with the validators: impit sends a caller's headers before the profile's.
+    const cookie = options.cookies === undefined ? '' : await options.cookies.header(url)
+    const extraHeaders = { ...(options.extraHeaders ?? {}), ...(cookie === '' ? {} : { cookie }) }
     // The caller's signal, and the headers deadline until the headers arrive; the body has its own per-chunk timer.
     const controller = new AbortController()
     const abort = () => controller.abort(options.signal?.reason)
@@ -215,7 +220,7 @@ export class CompatTransport {
         redirect: 'manual',
         timeout: impitTimeoutMs(options.deadlineAt),
         signal: controller.signal,
-        ...(options.extraHeaders === undefined || Object.keys(options.extraHeaders).length === 0 ? {} : { headers: { ...options.extraHeaders } }),
+        ...(Object.keys(extraHeaders).length === 0 ? {} : { headers: extraHeaders }),
       })
     } catch (error) {
       options.signal?.removeEventListener('abort', abort)
@@ -223,6 +228,10 @@ export class CompatTransport {
       throw normalized(error)
     } finally {
       clearTimeout(headersTimer)
+    }
+    if (options.cookies !== undefined) {
+      const headers = response.headers as { getSetCookie?: () => string[]; get(name: string): string | null }
+      await options.cookies.keep(url, headers.getSetCookie?.() ?? (headers.get('set-cookie') === null ? [] : [headers.get('set-cookie')!]))
     }
     const coding = response.headers.get('content-encoding')?.trim() ?? null
     // A response without a body has nothing decoded, whatever its headers say.
