@@ -56,6 +56,18 @@ const ELEMENTS_AT_MOST = 400
 const TEXT_AT_MOST = 120
 /** An element narrower or shorter than this is not something a reader sees. */
 const ELEMENT_SMALLEST_PX = 8
+/** As many redirect hops as the HTTP lane follows. */
+const REDIRECTS_AT_MOST = 3
+
+const isRedirect = (status: number): boolean => status >= 300 && status < 400
+
+/** A browser call that takes no timeout of its own, held to the budget. */
+async function within<T>(step: string, deadline: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new ScreenshotBudgetError(step)), Math.max(1, deadline - performance.now())) })
+  try { return await Promise.race([work, late]) }
+  finally { clearTimeout(timer) }
+}
 
 export class ScreenshotBudgetError extends Error {
   constructor(step: string) { super(`The screenshot's budget ran out while ${step}.`); this.name = 'ScreenshotBudgetError' }
@@ -96,24 +108,40 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
   const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
   const engine = await browserEngineFor('playwright')
   const launchStarted = performance.now()
-  const browser = await engine.launch({ headless: true, timeout: remaining('launching the browser'), ...(proxy ? { proxy: { server: proxy } } : {}) })
+  // The environment's proxy when there is one, otherwise direct: never the operating system's proxy settings.
+  const browser = await engine.launch({ headless: true, timeout: remaining('launching the browser'), ...(proxy ? { proxy: { server: proxy } } : { args: ['--proxy-server=direct://'] }) })
   const launchMs = Math.round(performance.now() - launchStarted)
   const close = (): void => { void browser.close().catch(() => {}) }
   options.signal.addEventListener('abort', close, { once: true })
   try {
     // Aborted while the browser started: nothing is loaded.
     options.signal.throwIfAborted()
-    const context = await browser.newContext({
+    const context = await within('opening the page', deadline, browser.newContext({
       viewport, deviceScaleFactor: 1, userAgent: previewBrowserUserAgent(),
       acceptDownloads: false, serviceWorkers: 'block',
-    })
+    }))
+    // Every request is made here, not by Chromium, with redirects followed one hop at a time: Chromium would follow a
+    // redirect to any address on its own, after the only check it had passed. Each hop's address is judged before it
+    // is fetched, and the final response is handed to the page.
     await context.route('**/*', async route => {
-      if (await allowed(route.request().url())) await route.continue().catch(() => {})
-      else { blocked++; await route.abort('blockedbyclient').catch(() => {}) }
+      try {
+        let url = route.request().url()
+        if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
+        let response = await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
+        for (let hop = 0; isRedirect(response.status()) && response.headers().location !== undefined; hop++) {
+          if (hop >= REDIRECTS_AT_MOST) { blocked++; await route.abort('blockedbyclient'); return }
+          url = new URL(response.headers().location!, url).href
+          if (!(await allowed(url))) { blocked++; await route.abort('blockedbyclient'); return }
+          response = await route.fetch({ url, maxRedirects: 0, timeout: remaining('loading the page') })
+        }
+        await route.fulfill({ response })
+      } catch {
+        await route.abort('failed').catch(() => {})
+      }
     })
     // A routed WebSocket that is never connected to its server stays silent.
     await context.routeWebSocket('**/*', ws => { blocked++; ws.close() })
-    const page = await context.newPage()
+    const page = await within('opening the page', deadline, context.newPage())
     const navigateStarted = performance.now()
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: remaining('loading the page') })
     const navigateMs = Math.round(performance.now() - navigateStarted)
@@ -121,14 +149,14 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
     await page.waitForLoadState('load', { timeout: Math.min(LOAD_WAIT_MS, remaining('loading the page')) }).catch(() => { loadCapped = true })
     const loadMs = Math.round(performance.now() - navigateStarted)
     const screenshotStarted = performance.now()
-    const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight)
+    const pageHeight = await within('measuring the page', deadline, page.evaluate(() => document.documentElement.scrollHeight))
     const height = Math.min(viewport.height * (options.viewports ?? VIEWPORTS), Math.max(viewport.height, pageHeight))
     const jpeg = await page.screenshot({
       type: 'jpeg', quality: options.quality ?? QUALITY, fullPage: true, animations: 'disabled',
       clip: { x: 0, y: 0, width: viewport.width, height }, timeout: remaining('taking the picture'),
     })
     const screenshotMs = Math.round(performance.now() - screenshotStarted)
-    const elements = await page.evaluate(({ selector, limit, atMost, textAtMost, smallest }) => {
+    const elements = await within('finding the elements', deadline, page.evaluate(({ selector, limit, atMost, textAtMost, smallest }) => {
       const found: CaptureElement[] = []
       for (const element of Array.from(document.querySelectorAll(selector))) {
         const box = element.getBoundingClientRect()
@@ -140,8 +168,8 @@ export const captureScreenshot: ScreenshotCapturer = async (url, options) => {
         if (found.length >= atMost) break
       }
       return found.sort((a, b) => a.y - b.y || a.x - b.x)
-    }, { selector: ELEMENTS_SELECTOR, limit: height, atMost: ELEMENTS_AT_MOST, textAtMost: TEXT_AT_MOST, smallest: ELEMENT_SMALLEST_PX })
-    await context.close()
+    }, { selector: ELEMENTS_SELECTOR, limit: height, atMost: ELEMENTS_AT_MOST, textAtMost: TEXT_AT_MOST, smallest: ELEMENT_SMALLEST_PX }))
+    await within('closing the page', deadline, context.close())
     return { jpeg, width: viewport.width, height, elements, blocked, timings: { launchMs, navigateMs, loadMs, loadCapped, screenshotMs, totalMs: Math.round(performance.now() - started) } }
   } finally {
     options.signal.removeEventListener('abort', close)
