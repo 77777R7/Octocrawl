@@ -100,9 +100,19 @@ const SPRITE_W = MANTLE[0]!.length
 const SPRITE_H = MANTLE.length + ARMS[0]!.length
 /** The thud's flying bits: column speed, upward row speed and glyph, fixed so every landing looks alike. */
 const DEBRIS: ReadonlyArray<readonly [number, number, string]> = [
-  [-15, 11, '.'], [-11, 15, "'"], [-7, 18, '*'], [-4, 13, ','], [-2, 20, '.'], [1, 16, "'"],
-  [3, 19, '*'], [5, 12, '.'], [8, 17, ','], [11, 14, "'"], [14, 10, '.'], [17, 13, '*'],
+  [-22, 14, '.'], [-17, 20, "'"], [-13, 26, '*'], [-9, 17, ','], [-6, 29, '.'], [-3, 22, "'"], [-1, 31, '*'],
+  [2, 24, "'"], [4, 30, '*'], [7, 19, '.'], [10, 27, ','], [14, 21, "'"], [18, 16, '.'], [23, 13, '*'],
 ]
+/** The dust rolling away along the ground: starting speed (columns a second), row above the ground and glyph. */
+const DUST: ReadonlyArray<readonly [number, number, string]> = [
+  [34, 0, '~'], [27, 0, '.'], [22, 1, '~'], [17, 1, ','], [12, 0, '~'], [9, 2, '.'],
+]
+/** How long the landing's shock, dome and dust run, and how fast the dome spreads (px a ms). */
+const THUD_MS = 900
+const WAVE_SPEED = 0.85
+/** The window's content jumps by whole rows after the landing: one step every SHAKE_STEP_MS. */
+const SHAKE = [1, -1, 1, 0, -1, 0]
+const SHAKE_STEP_MS = 45
 
 type Phase = 'idle' | 'crawling' | 'finishing' | 'settled' | 'failed' | 'closing'
 type Letter = { char: string; x: number; y: number; tx: number; ty: number; land: number; gone: boolean }
@@ -540,7 +550,10 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     const head = headRow(now)
-    const top = Math.max(0, Math.min(rows - visibleRows, head - Math.floor(visibleRows * 0.35)))
+    // After the landing the page jumps a row up and down a few times: the cells stay put, what they show shifts.
+    const shakeStep = Math.floor((now - slamAt) / SHAKE_STEP_MS)
+    const shake = now >= slamAt && shakeStep < SHAKE.length ? SHAKE[shakeStep]! : 0
+    const top = Math.max(0, Math.min(rows - visibleRows, head - Math.floor(visibleRows * 0.35))) - shake
     const ending = phase === 'settled' ? Math.min(1, (now - phaseAt) / 300) : 0
     const failing = phase === 'failed' ? Math.min(1, (now - phaseAt) / 300) : 0
     const chromeAlpha = 0.32 - 0.2 * ending - 0.14 * failing
@@ -615,46 +628,78 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     drawBar(now)
   }
 
-  /** The landing: a shock runs out along the ground both ways, and bits fly up and fall back. */
+  /** The landing: the ground row takes the shock both ways, a dome-shaped wave runs out from where it hit, dust rolls
+   * away along the ground, bits fly up and fall back, and the ground keeps a dent. */
   function drawThud(now: number, head: number, top: number): void {
+    // Nothing before it has landed (slamAt stays -Infinity until then).
+    if (!Number.isFinite(slamAt) || now < slamAt) return
     const since = now - slamAt
-    if (since < 0 || since > 900) return
     const ctx = context!
     const ground = head + SPRITE_H
     const centre = octoX + SPRITE_W / 2
+    const cellAt = (col: number, row: number, char: string, colour: string, alpha: number, glow = 0): void => {
+      const x = col * pitchX + pitchX / 2
+      const y = rowY(row, top)
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
+      ctx.fillStyle = NAVY
+      ctx.fillRect(x - pitchX / 2, y - pitchY / 2, pitchX, pitchY)
+      ctx.shadowBlur = glow
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = colour
+      ctx.fillText(char, x, y)
+    }
     ctx.save()
     ctx.shadowColor = 'rgba(251, 123, 76, .9)'
-    for (let col = 0; col < layout!.cols; col++) {
-      const distance = Math.abs(col + 0.5 - centre)
-      const age = since - distance * 10
-      if (age < 0 || age >= 380) continue
-      const step = Math.min(RAMP.length - 1, Math.floor(age / 380 * RAMP.length))
-      const x = col * pitchX + pitchX / 2
-      // The ground row takes the shock; near the octopus it kicks up a row of dust above it too.
-      const rows: Array<readonly [number, number]> = [[ground, 1], [ground + 1, 0.45]]
-      if (distance < SPRITE_W) rows.push([ground - 1, 0.7 * (1 - distance / SPRITE_W)])
-      for (const [row, alpha] of rows) {
-        const y = rowY(row, top)
-        ctx.shadowBlur = row === ground && step < 2 ? 10 : 0
-        ctx.fillStyle = NAVY
-        ctx.fillRect(x - pitchX / 2, y - pitchY / 2, pitchX, pitchY)
-        ctx.globalAlpha = alpha
-        ctx.fillStyle = HOT[step]!
-        ctx.fillText(row === ground ? RAMP[step]! : RAMP[Math.min(RAMP.length - 1, step + 1)]!, x, y)
-        ctx.globalAlpha = 1
+    if (since < THUD_MS) {
+      // The ground row: the shock runs out both ways, each cell flaring then cooling.
+      for (let col = 0; col < layout!.cols; col++) {
+        const age = since - Math.abs(col + 0.5 - centre) * 9
+        if (age < 0 || age >= 380) continue
+        const step = Math.min(RAMP.length - 1, Math.floor(age / 380 * RAMP.length))
+        cellAt(col, ground, RAMP[step]!, HOT[step]!, 1, step < 2 ? 12 : 0)
+        cellAt(col, ground + 1, RAMP[Math.min(RAMP.length - 1, step + 1)]!, HOT[step]!, 0.45)
+      }
+      // The dome: a ring, two cells thick, spreading from the point of impact, heavy at its crest and fading as it
+      // grows. Distance is measured in pixels, so the ring is round on the page's tall cells.
+      const radius = since * WAVE_SPEED
+      const reach = Math.max(width, height)
+      const strength = 1 - radius / reach
+      if (strength > 0) {
+        const span = Math.ceil((radius + pitchX * 2) / pitchY)
+        for (let row = ground - span; row < ground; row++) {
+          for (let col = 0; col < layout!.cols; col++) {
+            const d = Math.hypot((col + 0.5 - centre) * pitchX, (row - ground) * pitchY) - radius
+            if (d > pitchX * 1.2 || d < -pitchX * 2.6) continue
+            const crest = d > -pitchX * 0.8
+            cellAt(col, row, crest ? 'X' : (col + row) % 2 ? 'x' : '+', crest ? HOT[0]! : HOT[2]!, strength * (crest ? 1 : 0.6), crest ? 10 : 0)
+          }
+        }
+      }
+      // Dust rolls away along the ground, slowing as it goes.
+      const s = since / 1000
+      for (const [speed, row, char] of DUST) {
+        const travel = speed * s - 0.5 * speed * 1.6 * s * s
+        if (s > 0.6) break
+        for (const side of [-1, 1]) cellAt(Math.round(centre + side * travel), ground - row, char, '#c9d8f2', 1 - s / 0.6)
+      }
+      // Bits fly up and fall back.
+      for (const [speed, lift, char] of DEBRIS) {
+        const rise = lift * s - 0.5 * 55 * s * s
+        if (rise < 0 || s > 0.8) continue
+        ctx.shadowBlur = 0
+        ctx.globalAlpha = 1 - s / 0.8
+        ctx.fillStyle = '#ffc59a'
+        ctx.fillText(char, Math.round(centre + speed * s) * pitchX + pitchX / 2, rowY(ground - 1 - Math.round(rise), top))
       }
     }
-    ctx.restore()
-    const s = since / 1000
-    for (const [speed, lift, char] of DEBRIS) {
-      const rise = lift * s - 0.5 * 60 * s * s
-      if (rise < 0 || s > 0.7) continue
-      const col = Math.round(centre + speed * s)
-      ctx.globalAlpha = 1 - s / 0.7
-      ctx.fillStyle = '#ffc59a'
-      ctx.fillText(char, col * pitchX + pitchX / 2, rowY(ground - 1 - Math.round(rise), top))
+    // The dent stays in the ground where it hit, once the shock has passed it.
+    if (since > 120) {
+      const half = Math.floor(SPRITE_W / 2) + 2
+      const from = Math.round(centre) - half
+      for (let i = 0; i <= half * 2; i++) cellAt(from + i, ground, i === 0 ? '\\' : i === half * 2 ? '/' : '_', '#8fb3ee', 0.9)
     }
-    ctx.globalAlpha = 1
+    ctx.restore()
   }
 
   /** The bar along the window's foot: a segment per step, lit only once the server reported it. */
@@ -675,6 +720,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     // The awaited step: the first not yet reported, while the run goes on.
     const awaited = done ? -1 : stepAt.findIndex(at => at === Infinity)
     const all = stepAt.every(at => at !== Infinity) && result?.read === true
+    // The landing flashes the whole lit bar white for a moment.
+    const flash = now >= slamAt ? clamp01(1 - (now - slamAt) / 260) : 0
     for (let c = 0; c < cells; c++) {
       const s = Math.min(steps - 1, Math.floor(c / per))
       const local = c - s * per
@@ -708,9 +755,10 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
         }
       }
       // Lit and red cells glow; the rest stay flat.
+      if (flash > 0 && lit >= local) { colour = flash > 0.4 ? '#ffffff' : '#fff1e0'; char = 'X' }
       const glows = colour.startsWith('#') || s === failedAt
       ctx.shadowColor = s === failedAt ? 'rgba(255, 112, 88, .9)' : 'rgba(251, 123, 76, .85)'
-      ctx.shadowBlur = glows ? 9 : 0
+      ctx.shadowBlur = glows ? 9 + 16 * flash : 0
       ctx.fillStyle = colour
       ctx.fillText(char, x, y)
     }
@@ -758,9 +806,23 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     const squint = since >= 0 && since < 400
     const stride = Math.floor(now / (phase === 'failed' ? 520 : 240)) % 2
     const blink = !squint && (phase === 'failed' ? Math.floor(now / 700) % 3 === 0 : (now % 2600) < 140)
-    const lines = squashed ? SQUASH : [...MANTLE, ...ARMS[stride]!]
-    const row0 = head + (squashed ? SPRITE_H - SQUASH.length : -hop)
+    // Dropping fast, it stretches a row taller and leaves streaks above it.
+    const drop = phase === 'finishing' ? clamp01((now - phaseAt) / finishMs) : 0
+    const stretched = drop > 0.6
+    const lines = squashed ? SQUASH : stretched ? [...MANTLE.slice(0, 4), MANTLE[3]!, MANTLE[4]!, ...ARMS[stride]!] : [...MANTLE, ...ARMS[stride]!]
+    const row0 = head + (squashed ? SPRITE_H - SQUASH.length : stretched ? -1 : -hop)
     const left = octoX - (squashed ? 1 : 0)
+    if (drop > 0.35) {
+      const length = Math.round(1 + 4 * (drop - 0.35) / 0.65)
+      for (let k = 1; k <= length; k++) {
+        const y = rowY(row0 - k, top)
+        if (y < GRID_TOP - pitchY) break
+        ctx.globalAlpha = 0.85 * (1 - k / (length + 1))
+        ctx.fillStyle = '#a8c9fa'
+        for (let dx = 3; dx < SPRITE_W - 3; dx += 2) ctx.fillText(k === 1 ? '|' : k === 2 ? ':' : '.', (left + dx) * pitchX + pitchX / 2, y)
+      }
+      ctx.globalAlpha = 1
+    }
     lines.forEach((line, dy) => {
       const y = rowY(row0 + dy, top)
       if (y < GRID_TOP - pitchY || y > height - GRID_FOOT + pitchY) return
