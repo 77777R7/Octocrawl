@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,6 +22,10 @@ const TOKEN = 'batch-token-5d1e'
 let server: Server
 let origin: string
 const hits: string[] = []
+// The resumed page's request waits here until the test lets it answer.
+let holdSlow = false
+let slowStarted: (() => void) | null = null
+const held: (() => void)[] = []
 let root: string
 let engine: ApiEngine | null = null
 
@@ -29,6 +34,16 @@ beforeAll(async () => {
     hits.push(req.url ?? '')
     if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
     if (req.url === '/start') return void res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': `token=${TOKEN}; Path=/` }).end(PAGE)
+    if (req.url === '/needs-slow') {
+      const answer = () => {
+        const ok = (req.headers.cookie ?? '').includes(`token=${TOKEN}`)
+        res.writeHead(ok ? 200 : 403, { 'content-type': 'text/html' }).end(ok ? PAGE : '<h1>Forbidden</h1>')
+      }
+      if (!holdSlow) return void answer()
+      slowStarted?.()
+      held.push(answer)
+      return
+    }
     if (req.url === '/needs') {
       const ok = (req.headers.cookie ?? '').includes(`token=${TOKEN}`)
       return void res.writeHead(ok ? 200 : 403, { 'content-type': 'text/html' }).end(ok ? PAGE : '<h1>Forbidden</h1>')
@@ -95,5 +110,45 @@ describe('egress_sessions: a batch keeps its cookies for its site', () => {
     const { items } = await batch(['egress_sessions'], { lockdown: true })
     expect(hits).toEqual([])
     expect(items['/start']).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
+  })
+})
+
+describe('egress_sessions: a resumed task goes on with its session', () => {
+  it('keeps the cookies and the id across a restart, in a file only its owner reads, removed when the task ends', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-egress-'))
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const make = () => createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      networkPolicy: policy,
+      accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })),
+      channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy }).filter((channel) => channel.id === 'http'),
+    })
+    holdSlow = true
+    const started = new Promise<void>((resolve) => { slowStarted = resolve })
+    const first = make()
+    const { taskId } = await first.startBatch({ urls: [`${origin}/start`, `${origin}/needs-slow`], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
+    await started
+    const file = join(root, 'tasks', taskId, 'cookie-session.json')
+    expect(existsSync(file)).toBe(true)
+    if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600)
+    await first.close({ cancelActive: true })
+    expect((await first.getBatch(taskId))?.status).toBe('paused')
+    holdSlow = false
+    for (const answer of held.splice(0)) answer()
+
+    engine = make()
+    let report = await engine.getBatch(taskId)
+    for (let i = 0; i < 200 && (report === null || ['pending', 'running', 'paused'].includes(report.status)); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      report = await engine.getBatch(taskId)
+    }
+    expect(report).toMatchObject({ status: 'completed', completed: 2 })
+    const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items as unknown as { url: string; status: string; trace?: { event: string; detail?: Record<string, unknown> }[] }[]
+    const page = (path: string) => items.find((item) => new URL(item.url).pathname === path)!
+    expect(page('/needs-slow').status).toBe('success')
+    const sessionOf = (path: string) => page(path).trace?.find((event) => event.event === 'session_cookies')?.detail?.session
+    expect(sessionOf('/needs-slow')).toBe(sessionOf('/start'))
+    // The task has ended: its cookies are gone from the disk.
+    expect(existsSync(file)).toBe(false)
   })
 })

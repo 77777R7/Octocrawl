@@ -402,6 +402,8 @@ const NO_SITEMAP: MapSources['sitemap'] = {
 }
 
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
+/** A task's cookie session file, in its own directory (egress_sessions). */
+const COOKIE_SESSION_FILE = 'cookie-session.json'
 const DEFAULT_WORKER_COUNT = 4
 
 /**
@@ -1059,9 +1061,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
     const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false)
-    // The task's cookie session (egress_sessions): one per run of the task, in memory, so a resumed task starts a new one.
-    // A saved login is mode authed's own session, and pages read with a session's cookies are never cached.
-    const cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession() : undefined
+    // The task's cookie session (egress_sessions), kept in its directory so a resumed task goes on with it, and
+    // removed when the task ends. A saved login is mode authed's own session; pages read with a session are never cached.
+    const cookieSessionFile = join(task.taskDir, COOKIE_SESSION_FILE)
+    const cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession(cookieSessionFile) : undefined
+    /** The session file goes once the task has ended; a run paused by shutdown keeps it for its resume. */
+    const endCookieSession = async (ended: boolean): Promise<void> => {
+      if (cookieSession !== undefined && ended) await TaskCookieSession.remove(cookieSessionFile).catch(() => {})
+    }
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
@@ -1175,12 +1182,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
       // The terminal event follows the terminal task row the run wrote; a run paused by shutdown has none.
       await finishJob(task, store)
+      const after = await store.getTask(task.id)
+      await endCookieSession(after !== null && isTerminalStatus(after.status))
       inflight.delete(task.id)
       await store.close()
     }).catch(async (error: unknown) => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
       await finishJob(task, store, error instanceof Error ? error.message : String(error))
+      await endCookieSession(true)
       await store.close()
     })
     runningCrawls.set(task.id, orchestrator)

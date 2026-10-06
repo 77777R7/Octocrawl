@@ -1,4 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy } from '@w2l/contracts'
@@ -80,6 +83,40 @@ describe('TaskCookieSession', () => {
     expect(await session.cookieHeader('https://shop.example/')).toBe('sid=NEW; raced=2')
   })
 
+})
+
+describe('TaskCookieSession on disk', () => {
+  it('reads back its cookies and id from its file, readable by its owner alone, and is gone once removed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w2l-session-'))
+    const file = join(dir, 'cookie-session.json')
+    try {
+      const first = new TaskCookieSession(file)
+      await first.store('https://shop.example/', ['sid=1; Path=/', 'pref=dark; Path=/; Max-Age=3600'])
+      if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
+      const again = new TaskCookieSession(file)
+      expect(await again.cookieHeader('https://shop.example/')).toBe('sid=1; pref=dark')
+      expect(again.id).toBe(first.id)
+      // A deletion is written too.
+      await again.store('https://shop.example/', ['pref=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT'])
+      expect(await new TaskCookieSession(file).cookieHeader('https://shop.example/')).toBe('sid=1')
+      await TaskCookieSession.remove(file)
+      expect(existsSync(file)).toBe(false)
+      expect(await new TaskCookieSession(file).cookieHeader('https://shop.example/')).toBe('')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('starts afresh from a file that does not read, and keeps every change of writes made at once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w2l-session-'))
+    const file = join(dir, 'cookie-session.json')
+    try {
+      writeFileSync(file, '{ not json')
+      const session = new TaskCookieSession(file)
+      expect(await session.cookieHeader('https://shop.example/')).toBe('')
+      await Promise.all(Array.from({ length: 20 }, (_, i) => session.store('https://shop.example/', [`c${i}=${i}; Path=/`])))
+      expect(JSON.parse(readFileSync(file, 'utf8')).id).toBe(session.id)
+      expect((await new TaskCookieSession(file).cookieHeader('https://shop.example/')).split('; ')).toHaveLength(20)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
 })
 
 describe('the HTTP rungs with a task cookie session', () => {
