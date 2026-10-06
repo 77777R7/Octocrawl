@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
-import { browserEngineChoice, type BrowserEngineName } from '@w2l/bench'
+import { browserEngineChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
 import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
@@ -71,6 +71,11 @@ export interface ListenConfig {
    * grant names `enhanced_browser` and Patchright is asked for; a hosted server refuses Patchright.
    */
   browserEngine: BrowserEngineName
+  /**
+   * The hosts whose standard-mode pages go over the browser-compatible transport (`W2L_COMPAT_HOSTS`):
+   * only with a grant that names `compatible_transport`, never on a hosted server. Empty: none.
+   */
+  compatHosts: string[]
 }
 
 /**
@@ -117,6 +122,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const accessGrant = readAccessGrant(argv, env, hosted)
   const browserEngine = browserEngineChoice(env, accessGrant, hosted)
   const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
+  const compatHosts = compatHostsChoice(env, accessGrant, hosted)
+  const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains; a request with custom headers or mobile keeps the http rung`]
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -139,6 +146,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       jobStreams: jobStreamsEnabled(env),
       accessGrant,
       browserEngine,
+      compatHosts,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -159,12 +167,13 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...compatNotice],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
     accessGrant,
     browserEngine,
+    compatHosts,
   }
 }
 

@@ -25,7 +25,8 @@ describe('evaluateGovernance', () => {
   it('default mode permits only public channels', () => {
     const d = evaluateGovernance('https://example.com/p', PUBLIC_POLICY)
     expect(d.allowed).toBe(true)
-    expect(d.permittedChannels).toEqual(['http', 'browser_local'])
+    // http_compat is the http lane over another transport, with the same public identity.
+    expect(d.permittedChannels).toEqual(['http', 'http_compat', 'browser_local'])
   })
 
   it('mode controls which channels may run', () => {
