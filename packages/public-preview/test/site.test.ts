@@ -103,7 +103,7 @@ describe('public site routes', () => {
     const secret = 'p'.repeat(32)
     const { url } = await site({
       publicOrigin: 'https://w2l.example', proxySecret: secret,
-      quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 } }, consume: async () => 'ok' },
+      quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 5, remaining: 5 } }, consume: async () => 'ok' },
     })
     const proven = { 'x-forwarded-host': 'w2l.example', 'cf-connecting-ip': '203.0.113.7', 'x-w2l-proxy-secret': secret }
     expect((await fetch(url, { headers: proven, redirect: 'manual' })).status).toBe(200)
@@ -119,7 +119,7 @@ describe('public site routes', () => {
 
   it('never believes CF-Connecting-IP without a proxy secret', async () => {
     const keys: string[] = []
-    const { url } = await site({ quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 } }, consume: async () => 'ok' } })
+    const { url } = await site({ quota: { status: async visitor => { keys.push(visitor); return { decision: 'ok', limit: 5, remaining: 5 } }, consume: async () => 'ok' } })
     await fetch(`${url}/api/quota`, { headers: { 'cf-connecting-ip': '198.51.100.9' } })
     expect(keys[0]).not.toContain('198.51.100.9')
   })
@@ -172,17 +172,17 @@ describe('remaining previews', () => {
     const { url, lines } = await site({
       visitorCookieSecret: 's'.repeat(32),
       quota: {
-        status: async visitor => { reads.push(visitor); return { decision: 'ok', limit: 3, remaining: 3 - consumed.length } },
+        status: async visitor => { reads.push(visitor); return { decision: 'ok', limit: 5, remaining: 5 - consumed.length } },
         consume: async visitor => { consumed.push(visitor); return 'ok' },
       },
     })
     const cookie = (await fetch(url)).headers.get('set-cookie')!.split(';')[0]!
     const first = await fetch(`${url}/api/quota`, { headers: { cookie } })
     expect(first.headers.get('set-cookie')).toBeNull()
-    expect(await first.json()).toMatchObject({ enabled: true, state: 'ok', limit: 3, remaining: 3, basis: 'visitor' })
+    expect(await first.json()).toMatchObject({ enabled: true, state: 'ok', limit: 5, remaining: 5, basis: 'visitor' })
     await fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ url: 'https://docs.example' }) })
     // A count with previews left is never cached: another instance may have used one.
-    expect(await (await fetch(`${url}/api/quota`, { headers: { cookie } })).json()).toMatchObject({ remaining: 2 })
+    expect(await (await fetch(`${url}/api/quota`, { headers: { cookie } })).json()).toMatchObject({ remaining: 4 })
     expect(reads).toEqual([consumed[0], consumed[0]])
     expect(lines.filter(line => line.event !== 'w2l_preview')).toEqual([])
     expect(await (await fetch(`${url}/api/quota`)).json()).toMatchObject({ basis: 'ip' })
@@ -190,7 +190,7 @@ describe('remaining previews', () => {
 
   it('caches a used-up day until the next UTC midnight, and only that', async () => {
     let reads = 0
-    const { url } = await site({ quota: { status: async () => { reads++; return { decision: 'visitor_limited', limit: 3, remaining: 0 } }, consume: async () => 'ok' } })
+    const { url } = await site({ quota: { status: async () => { reads++; return { decision: 'visitor_limited', limit: 5, remaining: 0 } }, consume: async () => 'ok' } })
     const first = await (await fetch(`${url}/api/quota`)).json() as { resetsAt: string }
     await fetch(`${url}/api/quota`)
     expect(reads).toBe(1)
