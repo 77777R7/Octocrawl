@@ -159,6 +159,15 @@ describe('routePage', () => {
       expect(out.confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
     })
 
+    it('keeps the floor to a buy box that shows its product, not one whose description scripts draw', () => {
+      // The description is in __NEXT_DATA__ only (a component rendered on the client): the browser can still add it.
+      const drawn = page.replace(/<p class="description">[^<]*<\/p>/, '<p class="description"></p>')
+      expect(drawn).not.toContain('Seven Sages</p>')
+      const out = extractTf.extract(drawn)
+      expect(out.pageType).toBe('product')
+      expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
     it('keeps the floor to a buy box the router found, not a page routed by its declarations', () => {
       // A shop listing whose cards are microdata Products (WooCommerce on main) routes as product by them; its region is
       // no buy box, however a heading and a price sit in it.

@@ -58,6 +58,7 @@ function confidenceOf(
   mainLength: number,
   pageType: PageType,
   buyBox: boolean,
+  described: boolean,
   favorPrecision: boolean,
   favorRecall: boolean,
   product: ProductFacts | null,
@@ -91,9 +92,12 @@ function confidenceOf(
   // heading and its price, with both in the region, is the same terse shape
   // read from what the page shows rather than what it declares: a lower
   // floor, still above the low-yield escalation's ceiling, so an answer the
-  // browser cannot improve is not rendered again for its brevity. A page
-  // routed by its declarations (microdata cards) earns no such floor.
-  else if (buyBox && main !== null && product !== null && product.price !== null && showsBuyBox(main, product.price.value)) {
+  // browser cannot improve is not rendered again for its brevity. The
+  // region must describe the product too (a text block besides its
+  // headings): a buy box whose description its scripts draw is what the
+  // browser can still fill in. A page routed by its declarations
+  // (microdata cards) earns no such floor.
+  else if (buyBox && described && main !== null && product !== null && product.price !== null && showsBuyBox(main, product.price.value)) {
     conf = Math.max(conf, BUY_BOX_CONFIDENCE)
   }
   if (favorPrecision) conf = Math.min(conf, 0.85)
@@ -255,6 +259,7 @@ export class ExtractTf implements Extractor {
         mainLength,
         decision.type,
         decision.buyBox === true,
+        blocks.some((b) => main?.contains(b.el) === true && !/^h[1-6]$/.test(b.el.tagName.toLowerCase())),
         favorPrecision,
         favorRecall,
         product,
