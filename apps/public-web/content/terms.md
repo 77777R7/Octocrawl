@@ -15,6 +15,12 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 - The preview may be changed, slowed down, paused or stopped at any time, without notice.
 - It reads one public `http://` or `https://` address per request. It refuses private and reserved network addresses, pages whose robots.txt does not allow it or cannot be reached, and pages that ask for a login or show a verification challenge. Size and time limits are listed in [Limits and result states](/docs/limits/).
 
+## The hosted API and MCP
+
+- `api.octocrawl.dev` and `mcp.octocrawl.dev` are a free, limited service: a daily allowance without a key, and with a key the allowance it was issued with. There is no payment yet; keys are issued at our discretion and can be revoked.
+- It serves scrape and map only, obeys robots.txt for every page, refuses private addresses, and does not offer proxies, CAPTCHA solving or stealth. It may be changed, slowed down, paused or stopped at any time, without notice.
+- The same responsibilities below apply to what you fetch through it.
+
 ## Results
 
 - Results are provided as they are. A preview can come back blocked, incomplete or timed out, and a successful one does not guarantee that every field is correct. Amazon.sg product records are in Beta.

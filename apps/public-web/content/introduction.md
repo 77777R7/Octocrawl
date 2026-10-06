@@ -2,7 +2,7 @@
 
 Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 
-> **Availability:** Try the page preview at the URL where you are reading this. Octocrawl also runs on your own computer from the published packages (`npx octocrawl`) and connects to Claude Code, Cursor, OpenCode and Codex over MCP; see [Connect MCP](/docs/connect-mcp/). A hosted API and a remote MCP URL run by Octocrawl are being built and will be announced on this site; the preview does not include them or persistent Monitor tasks yet.
+> **Availability:** Try the page preview at the URL where you are reading this. Octocrawl also runs on your own computer from the published packages (`npx octocrawl`) and connects to Claude Code, Cursor, OpenCode and Codex over MCP; see [Connect MCP](/docs/connect-mcp/). Hosted Octocrawl serves scrape and map at `https://api.octocrawl.dev` and `https://mcp.octocrawl.dev/mcp`, keyless within a daily allowance and with a key for more; crawl, batch and Monitor run on your computer for now.
 
 ## Try Octocrawl
 

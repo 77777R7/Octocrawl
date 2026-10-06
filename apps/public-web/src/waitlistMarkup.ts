@@ -17,8 +17,8 @@ export function waitlistMarkup(): string {
         <div class="frame waitlist">
           <div class="waitlist-copy">
             <p class="section-kicker"><span class="kicker-square" aria-hidden="true"></span>HOSTED OCTOCRAWL</p>
-            <h2 id="waitlist-title">Get early access to hosted Octocrawl.</h2>
-            <p>Runs that keep going while your computer is off, and more than three previews a day. There is no date yet. Leave your email and we will write when it opens, and may ask once how you would use it.</p>
+            <h2 id="waitlist-title">Ask for a hosted Octocrawl key.</h2>
+            <p>Hosted Octocrawl is open without a key for a few pages a day. A key gives more pages a day and the browser lane; keys are issued by hand for now. Leave your email and what you would use it for, and we will write back, and may ask once how it went.</p>
           </div>
           <form class="waitlist-form">
             <label class="waitlist-field"><span>Email</span><input type="email" name="email" required maxlength="254" autocomplete="email" /></label>
@@ -26,7 +26,7 @@ export function waitlistMarkup(): string {
             <fieldset class="waitlist-field"><legend>What would you need most? <small>Optional</small></legend><div class="waitlist-checks">${needs}</div></fieldset>
             <label class="waitlist-field"><span>What would you collect with it? <small>Optional</small></span><textarea name="useCase" rows="2" maxlength="200"></textarea></label>
             <label class="waitlist-trap" aria-hidden="true">Leave this empty<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
-            <div class="waitlist-submit"><button type="submit" class="cta-primary">Join the waitlist</button><p class="waitlist-status" role="status" aria-live="polite"></p></div>
+            <div class="waitlist-submit"><button type="submit" class="cta-primary">Ask for a key</button><p class="waitlist-status" role="status" aria-live="polite"></p></div>
             <p class="waitlist-note">Your email and answers are kept in Google Cloud in Singapore, only to tell you about hosted Octocrawl. <a href="/docs/privacy/#waitlist">Privacy</a></p>
           </form>
         </div>
