@@ -9,6 +9,7 @@ import { buildChannels, type Channel } from '@w2l/bench'
 import { SqliteTaskStore } from '@w2l/runtime'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngineOptions } from '../src/engine.js'
+import { accessGrantFromText } from '@w2l/http-core'
 
 /**
  * The execution options through the API: headers refused by name before any
@@ -147,6 +148,72 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
     expect(withHeaders).toMatchObject({ status: 'success', lane: 'http' })
     expect(withHeaders.ladderTrace[0]).toEqual({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: 'headers', dropped: ['provider(fake)'] } })
     expect(vendorReached).toBe(0)
+  })
+
+  it('access standard drops the rungs that cost a third party; enhanced needs the server\'s grant of tier enhanced', async () => {
+    const vendor = (mode: 'standard' | 'research' | 'authed'): Channel[] => mode === 'research' ? [{ id: 'provider', vendorId: 'fake', identity: identityForRoute('research'), fetch: async () => { throw new Error('the vendor rung was reached') } }] : []
+    // A server without a grant of tier enhanced refuses the choice by name, for a scrape, a batch and a crawl.
+    const plain = await setup({}, vendor)
+    for (const [path, body] of [['/v1/scrape', { url: `${plain.origin}/chrome` }], ['/v1/batches', { urls: [`${plain.origin}/chrome`] }], ['/v1/crawl', { url: `${plain.origin}/chrome` }]] as const) {
+      expect(await plain.post(path, { ...body, access: 'enhanced' }), path).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', error: expect.stringContaining('access enhanced'), details: { parameters: ['access'] } } })
+    }
+    expect(await plain.post('/v1/crawl', { url: `${plain.origin}/chrome`, access: 'my-browser' })).toMatchObject({ status: 400, body: { details: { parameters: ['access'] } } })
+    expect(await plain.post('/v1/scrape', { url: `${plain.origin}/chrome`, access: 'standard', lane: 'my-browser' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('two different routes') } })
+    // Under one, standard drops the paid rung and says so; enhanced keeps it.
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    const { origin, post, storedTask } = await setup({ accessGrant: grant }, vendor)
+    const standard = (await post('/v1/scrape', { url: `${origin}/chrome`, mode: 'research', access: 'standard' })).body
+    expect(standard).toMatchObject({ status: 'success', lane: 'http' })
+    expect(standard.ladderTrace[0]).toEqual({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: 'access standard', dropped: ['provider(fake)'] } })
+    const enhanced = (await post('/v1/scrape', { url: `${origin}/chrome`, mode: 'research', access: 'enhanced' })).body
+    expect(enhanced).toMatchObject({ status: 'success', lane: 'http' })
+    expect(enhanced.ladderTrace.filter((event: { event: string }) => event.event === 'ladder_channels_filtered')).toEqual([])
+    // A batch and a crawl keep the choice with the task, so a resumed run makes the same one.
+    const batch = (await post('/v1/batches', { urls: [`${origin}/chrome`], access: 'standard' })).body
+    expect((await storedTask(batch.taskId ?? batch.id))?.batch).toMatchObject({ access: 'standard' })
+    const crawl = (await post('/v1/crawl', { url: `${origin}/chrome`, maxPages: 1, access: 'standard' })).body
+    expect((await storedTask(crawl.taskId ?? crawl.id))?.crawl).toMatchObject({ access: 'standard' })
+  })
+
+  it('access enhanced reaches the provider the grant allows in mode standard, from a scrape, /fc proxy stealth and a batch', async () => {
+    const reached: string[] = []
+    const provider: Channel = {
+      id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'),
+      fetch: async (url: string): Promise<FetchResult> => {
+        reached.push(url)
+        return {
+          requestedUrl: url, status: 'success', failureReason: null, blockReason: null, budgetExceeded: null, lane: 'provider', escalations: [],
+          markdown: '# From the provider', links: [], truncated: false, truncatedAt: null, compliance: null,
+          evidence: { finalUrl: url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] },
+          usage: { wallMs: 1, bytesWire: null, bytesDecompressed: 10, requestCount: 1, attemptCount: 1, contentTokens: 3, browserMs: 1, externalCostUsd: 0.01 },
+          trace: [{ at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'fake' } }],
+        }
+      },
+    }
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    // The enhanced set is the provider alone: only a request that chose enhanced, and a governance that permits it in mode standard, reaches it.
+    const asked: string[] = []
+    const { origin, post, engine } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => { asked.push(`${mode}${enhanced === true ? '+enhanced' : ''}`); return enhanced === true ? [provider] : buildChannels(mode, {}) } })
+    expect((await post('/v1/scrape', { url: `${origin}/chrome`, access: 'enhanced' })).body).toMatchObject({ status: 'success', lane: 'provider', channelsTried: ['provider'] })
+    expect((await post('/fc/v1/scrape', { url: `${origin}/chrome`, proxy: 'stealth' })).body).toMatchObject({ success: true })
+    const batch = (await post('/v1/batches', { urls: [`${origin}/chrome`], access: 'enhanced' })).body
+    await finished(() => engine.getBatch(batch.taskId ?? batch.id))
+    expect(reached).toEqual([`${origin}/chrome`, `${origin}/chrome`, `${origin}/chrome`])
+    // Without the choice, mode standard keeps its own rungs.
+    expect((await post('/v1/scrape', { url: `${origin}/chrome` })).body).toMatchObject({ status: 'success', lane: 'http' })
+    expect(asked).toContain('standard+enhanced')
+    expect(reached).toHaveLength(3)
+  })
+
+  it('a batch that chose enhanced counts a page whose provider call threw as of unknown cost, so the run budget stops it', async () => {
+    let calls = 0
+    const throwing: Channel = { id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'), fetch: async () => { calls++; throw new Error('the vendor session dropped after it was billed') } }
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    const { origin, post, engine } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => enhanced === true ? [throwing] : buildChannels(mode, {}) })
+    const batch = (await post('/v1/batches', { urls: ['a', 'b', 'c'].map((page) => `${origin}/chrome?${page}`), access: 'enhanced', maxConcurrency: 1 })).body
+    const report = await finished(() => engine.getBatch(batch.taskId ?? batch.id))
+    expect(report).toMatchObject({ budgetExceeded: 'cost_unknown' })
+    expect(calls).toBe(1)
   })
 
   it('fastMode keeps the http rung alone, reports its verdict, and says what it declined', async () => {

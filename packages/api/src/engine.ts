@@ -124,7 +124,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type AccessChoice, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
@@ -384,7 +384,7 @@ export interface ApiEngineOptions {
    */
   compatHosts?: readonly string[]
   /** Test seam: override local ladder channels without changing fetch. */
-  channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress) => Channel[]
+  channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => Channel[]
   /** Restrict a hosted public-document pilot to the HTTP rung. */
   httpOnly?: boolean
   /** Server-owned acquisition rule; callers cannot disable it per request. */
@@ -695,6 +695,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
   }
+  /**
+   * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
+   * budget: a server without one refuses it by name, naming the other choices. `standard` and `my-browser` need none.
+   */
+  const checkAccessChoice = (req: { access?: AccessChoice }): void => {
+    if (req.access !== 'enhanced' || accessGrant?.tier === 'enhanced') return
+    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [REFUSAL_HINTS.stealth])
+  }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
   const jobWebhooks = new JobWebhooks(deliveryStore, { hosted, allowHttpLoopback: options.webhookPolicy?.allowHttpLoopback ?? !hosted })
@@ -760,18 +768,20 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const runningCrawls = new Map<string, CrawlOrchestrator>()
   const createChannels =
     options.channelsFor ??
-    ((mode: 'standard' | 'research' | 'authed', egress?: Egress) => {
+    ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0 })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
   const historiesByMode = new Map<string, MemoryRoutingHistory>()
-  const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress): Channel[] => {
-    const key = egress === undefined ? mode : `${mode}|${egress.id}`
+  const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): Channel[] => {
+    // A request that chose access enhanced gets mode standard's rungs with the provider ones the grant allows: a set of its own.
+    const asEnhanced = enhanced && mode === 'standard'
+    const key = `${egress === undefined ? mode : `${mode}|${egress.id}`}${asEnhanced ? '|enhanced' : ''}`
     const existing = channelsByMode.get(key)
     if (existing !== undefined) return existing
-    const channels = createChannels(mode, egress)
+    const channels = asEnhanced ? createChannels(mode, egress, true) : createChannels(mode, egress)
     channelsByMode.set(key, channels)
     return channels
   }
@@ -794,8 +804,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * `compat` false leaves it out altogether: a map reads its start page with
    * the identity its response names, the one it reads robots.txt with.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
-    const channels = channelsFor(mode, egress)
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+    const channels = channelsFor(mode, egress, page.access === 'enhanced')
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
     // A host the server did not list never sees the compatible rung, in the audit either.
@@ -827,6 +837,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const dropped = selected.filter(channel => !HTTP_CHANNELS.has(channel.id)).map(name)
       if (dropped.length > 0) filtered.push({ reason: 'fastMode', dropped })
       selected = kept
+    }
+    // `access: "standard"`: no rung that costs a third party.
+    if (page.access === 'standard') {
+      const dropped = selected.filter(channel => channel.vendorId !== undefined).map(name)
+      if (dropped.length > 0) filtered.push({ reason: 'access standard', dropped })
+      selected = selected.filter(channel => channel.vendorId === undefined)
     }
     const wire = (['headers', 'mobile', 'skipTlsVerification'] as const).filter(option => option === 'headers' ? page.headers !== undefined && Object.keys(page.headers).length > 0 : page[option] === true)
     if (wire.length > 0) {
@@ -1279,7 +1295,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -1409,8 +1425,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const orchestrator = new CrawlOrchestrator({
       store, atom,
-      // A page whose scrape threw called a provider only if this mode has one: otherwise its third-party cost is a known 0.
-      scrapeErrorCostUsd: channelsFor(mode).some((channel) => channel.vendorId !== undefined) ? null : 0,
+      // A page whose scrape threw called a provider only if the task's rungs have one (its mode and its access choice, as
+      // its lane was built): otherwise its third-party cost is a known 0.
+      scrapeErrorCostUsd: current.rungs.channels.some((channel) => channel.vendorId !== undefined) ? null : 0,
       workerCount,
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,
@@ -1497,6 +1514,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkHandoff(req)
+    checkAccessChoice(req)
     checkMyBrowser(req)
     checkFileCap(req)
     checkSelectors(req)
@@ -1517,6 +1535,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
     const policy: CrawlPolicy = {
       mode,
+      // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
+      ...(req.access === 'enhanced' ? { enhanced: true } : {}),
       ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
@@ -1712,6 +1732,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkAttributeSelectors(req.formats)
       checkListSelectors(req.formats)
       checkHostedOptions(req)
+      checkAccessChoice(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
         throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
@@ -1745,6 +1766,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           maxTokens: null,
         },
         crawl: {
+          ...(req.access === undefined ? {} : { access: req.access }),
           formats: req.formats ?? ['markdown'],
           includeLinks: req.includeLinks === true,
           includePaths: req.includePaths ?? [],
@@ -1803,6 +1825,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkListSelectors(req.formats)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
+      checkAccessChoice(req)
       checkMyBrowser(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
       batchStartInProgress = true
@@ -1829,6 +1852,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
         ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
         ...(req.lane === undefined ? {} : { lane: req.lane }),
+        ...(req.access === undefined ? {} : { access: req.access }),
       }
       const task: Task = {
         id: taskId, seedUrl: urls[0]!, taskDir, mode: defaultApiMode(req.mode), status: 'pending',

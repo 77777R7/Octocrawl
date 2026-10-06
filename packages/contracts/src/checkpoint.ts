@@ -8,7 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
-import type { PageOptions, RequestAttribution, RobotsUrlOverride, WebhookEvent } from './api.js'
+import type { AccessChoice, PageOptions, RequestAttribution, RobotsUrlOverride, WebhookEvent } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 import type { CrawlDiscovery, SitemapMode } from './crawl.js'
@@ -88,12 +88,14 @@ export interface Task {
    * place, pushing to the end in order: the orchestrator seeds the tail past
    * what it has seeded, by index, and never a URL twice.
    */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook; lane?: 'my-browser' } & PageOptions
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook; lane?: 'my-browser'; access?: AccessChoice } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
    */
   crawl?: {
+    /** The plain access choice the crawl was started with (`standard` or `enhanced`); absent: the server's configuration. */
+    access?: 'standard' | 'enhanced'
     formats?: readonly ScrapeFormat[]
     includeLinks?: boolean
     includePaths?: readonly string[]

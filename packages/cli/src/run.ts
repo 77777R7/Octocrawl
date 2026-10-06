@@ -145,7 +145,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       if (urls.length === 0) throw new UsageError('octocrawl batch takes URLs as arguments or --urls-file')
       const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, urls, origin: ORIGIN }))
       io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
-      if (body.lane === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (it lists every site of the batch); close that page or click Revoke to stop')
+      if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (it lists every site of the batch); close that page or click Revoke to stop')
       return finish(engine, 'batch', accepted.taskId, cli, io)
     }
   }

@@ -133,6 +133,8 @@ export function buildChannels(
   mode: Args['mode'],
   opts: {
     onVendorConnect?: (vendorId: string) => void
+    /** The request chose access enhanced: provider rungs in mode standard too (still only under the grant and a named vendor). */
+    enhanced?: boolean
     keys?: { browserbase?: string; steel?: string }
     vendorConnector?: import('./vendors/cdp.js').CdpConnector
     /** Test seam: vendor ops per vendor id, replacing the env-key-based ops. */
@@ -342,7 +344,8 @@ export function buildChannels(
 
   // Provider rungs exist only when the vendor is named (W2L_VENDORS) with its key, or a key is passed, AND the mode permits the
   // lane, AND the access grant names vendor_remote_browser (ADR 0005). connectVendor is deferred to the first fetch.
-  if (mode === 'standard') return channels
+  // Mode standard takes them only for a request that chose access enhanced (opts.enhanced).
+  if (mode === 'standard' && opts.enhanced !== true) return channels
   if (!(opts.vendorPolicy?.authorized ?? []).includes('vendor_remote_browser')) return channels
 
   // A paid browser service is used when the person names it in W2L_VENDORS (comma-separated: browserbase, steel), not
