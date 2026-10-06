@@ -377,6 +377,16 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
   })
 
+  it('offers a thin answer of the compatible http rung to the browser too, and leaves out a rung that does not serve the URL', async () => {
+    const url = 'https://example.com/p'
+    const compat = channel('http_compat', [thinHttpSuccess(url)])
+    const plain = { ...channel('http', [contentfulResult(url, 'http')]), serves: () => false }
+    const browser = channel('browser_local', [{ ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }])
+    const run = await new LadderRunner([plain, compat, browser], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http_compat', 'browser_local'])
+    expect(run.result.lane).toBe('browser_local')
+  })
+
   function clientRenderedHttpSuccess(url: string): FetchResult {
     const r = contentfulResult(url, 'http')
     return {

@@ -305,6 +305,23 @@ describe('classifyGate — generic bot gate thresholds', () => {
     expect(classifyGate(res({ status: 200, body }))).toEqual({ reason: 'bot_detected_generic', signals: ['reddit_js_verification'] })
     expect(classifyGate(res({ status: 200, body, contentful: true }))?.reason).toBe('bot_detected_generic')
   })
+  it('recognizes the Reddit reCAPTCHA page even with HTTP 200 and its form past the head', () => {
+    // Served to a Chrome-like TLS client on 2026-10-06 (www.reddit.com/r/datascience/): 167 KB, mostly two
+    // inline images, with the form at byte 166 000. The title and the reCAPTCHA script open the page.
+    const filler = `<img src="data:image/png;base64,${'A'.repeat(80_000)}" />`
+    const body = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" />
+      <title>Reddit - Prove your humanity</title>
+      <script src="https://www.google.com/recaptcha/api.js"></script></head>
+      <body><div class="header">${filler}</div><div class="main"><h1>Prove your humanity</h1>
+      <p>We're committed to safety and security. But not for bots. Complete the challenge below and let us know you're a real person.</p>
+      <form method="POST" action="/r/datascience/?captcha=1"><div class="g-recaptcha" data-callback="submit"></div></form></div></body></html>`
+    const expected = { reason: 'captcha', signals: ['reddit_captcha_title', 'recaptcha_script'] }
+    expect(classifyGate(res({ status: 200, body }))).toEqual(expected)
+    expect(classifyGate(res({ status: 200, body, contentful: true }))).toEqual(expected)
+    // Either alone is not the page: a Reddit page that loads reCAPTCHA for a form, or a post about the phrase.
+    expect(classifyGate(res({ status: 200, body: body.replace('Reddit - Prove your humanity', 'How do you prove your humanity online? : r/AskReddit'), contentful: true }))).toBeNull()
+    expect(classifyGate(res({ status: 200, body: body.replace('https://www.google.com/recaptcha/api.js', 'https://www.redditstatic.com/app.js'), contentful: true }))).toBeNull()
+  })
   it('fires on a single strong refusal marker', () => {
     const v = classifyGate(res({ status: 403, body: '<h1>You have been blocked</h1>' }))
     expect(v?.reason).toBe('bot_detected_generic')

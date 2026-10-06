@@ -205,6 +205,52 @@ describe('PDP region selection', () => {
     expect(out.mainHtml).toContain('describes an item at length')
   })
 
+  it('keeps the description and details a product shows in tabs beside its buy box', () => {
+    // WooCommerce (scrapingcourse.com): the summary holds the title, price, a
+    // one-line excerpt and the size and colour picker, whose labels are short
+    // table cells; the description and the product's attributes are in tabs, a
+    // sibling of the summary in the product's own element.
+    const html = `<!doctype html><html><head><title>Abominable Hoodie</title>${PRODUCT_LD}</head><body>
+<header class="site-header"><a class="cart-contents" href="/cart/"><span class="amount">$0.00</span> 0 items</a></header>
+<main id="main"><div id="product-246" class="product type-product">
+<div class="woocommerce-product-gallery"><img src="/hoodie.jpg" alt=""></div>
+<div class="summary entry-summary"><h1 class="product_title">Abominable Hoodie</h1><p class="price"><span class="amount">$69.00</span></p>
+<div class="woocommerce-product-details__short-description"><p>This is a variable product called a Abominable Hoodie</p></div>
+<form class="variations_form cart"><table class="variations"><tr><th class="label"><label for="size">Size</label></th><td class="value"><select id="size"><option>XS</option><option>S</option></select></td></tr>
+<tr><th class="label"><label for="color">Color</label></th><td class="value"><select id="color"><option>Blue</option></select><a class="reset_variations" href="#">Clear</a></td></tr></table><button type="submit">Add to cart</button></form>
+<div class="product_meta">SKU: MH09</div></div>
+<div class="woocommerce-tabs wc-tabs-wrapper"><ul class="tabs"><li><a href="#tab-description">Description</a></li><li><a href="#tab-additional_information">Additional information</a></li></ul>
+<div id="tab-description" class="woocommerce-Tabs-panel"><h2>Description</h2><p>It took CoolTech weather apparel know-how and lots of wind-resistant fabric to get the Abominable Hoodie just right.</p><ul><li>Blue heather hoodie.</li><li>Relaxed fit.</li><li>Moisture-wicking.</li></ul></div>
+<div id="tab-additional_information" class="woocommerce-Tabs-panel"><h2>Additional information</h2><table><tr><th>Size</th><td>XS, S, M, L, XL</td></tr><tr><th>Color</th><td>Blue, Green, Red</td></tr></table></div></div>
+<section class="related products"><h2>Related products</h2><ul class="products">${[1, 2, 3].map((n) => `<li><a href="/p/${n}/">Other hoodie ${n}</a><span class="amount">$${50 + n}.00</span></li>`).join('')}</ul></section>
+</div></main></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.pageType).toBe('product')
+    expect(out.strategy).toBe('product')
+    expect(out.mainHtml).toContain('$69.00')
+    expect(out.mainHtml).toContain('wind-resistant fabric')
+    expect(out.mainHtml).toContain('XS, S, M, L, XL')
+    expect(out.mainHtml).not.toContain('Other hoodie')
+    expect(out.mainHtml).not.toContain('0 items')
+  })
+
+  it('keeps a buy box whose own description is short: bullets, a spec table, CJK prose', () => {
+    const page = (lang: string, buyBox: string, beside: string) => `<!doctype html><html lang="${lang}"><head><title>Product</title>${PRODUCT_LD}</head><body>
+<main><div class="product">${buyBox}</div>${beside}</main></body></html>`
+    for (const [lang, buyBox, beside, outside] of [
+      ['en', '<h1>Linen shirt</h1><span class="price">$84.00</span><ul><li>Organic linen</li><li>Machine washable</li><li>Made in Portugal</li></ul>',
+        '<div class="rich-text"><p>Since 1998 we have made every garment in small batches in our own workshop by the sea.</p></div>', 'Since 1998'],
+      ['en', '<h1>Cordless drill</h1><span class="price">$129.00</span><table><tr><th>Voltage</th><td>18 V</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>',
+        '<div class="blog-teaser"><p>Five things every homeowner should know before buying a power tool this winter.</p></div>', 'Five things'],
+      ['zh', '<h1>防风保暖连帽衫</h1><span class="price">¥199.00</span><p>采用防风面料，轻便保暖，适合秋冬户外穿着</p>',
+        '<div class="notice"><p>本店所有商品均为正品，支持七天无理由退换，请放心选购。</p></div>', '本店所有商品'],
+    ] as const) {
+      const out = extractTf.extract(page(lang, buyBox, beside))
+      expect(out.strategy).toBe('product')
+      expect(out.mainHtml).not.toContain(outside)
+    }
+  })
+
   it('widens a bare buy box to the product that holds its description', () => {
     // books.toscrape.com: title, price and stock sit in one column, the
     // description and the Product Information table two levels further up.
@@ -291,6 +337,73 @@ describe('recommendation pruning: precision guards', () => {
 </body></html>`)
     pruneRecommendations(doc.document)
     expect(doc.document.body.innerHTML).toContain('Product photography')
+    doc.close()
+  })
+
+  it('does not take the page for a grid when its header, product and sticky bar each show a link and a price', () => {
+    // WooCommerce's Storefront theme (scrapeme.live): the page wrapper's
+    // children are the header with its cart total, the breadcrumb, the
+    // product, the footer and a sticky add-to-cart bar.
+    const html = `<!doctype html><html><head><title>Bulbasaur</title>${PRODUCT_LD}</head><body>
+<div id="page" class="hfeed site">
+<header id="masthead" class="site-header"><a class="cart-contents" href="/basket/"><span class="amount">£0.00</span> 0 items</a></header>
+<div class="storefront-breadcrumb"><a href="/">Home</a> / Bulbasaur</div>
+<div id="content" class="site-content"><div class="product"><h1 class="product_title">Bulbasaur</h1><p class="price"><span class="amount">£63.00</span></p>
+<p>Bulbasaur can be seen napping in bright sunlight. There is a seed on its back that grows by soaking up the sun's rays.</p>
+<a href="#reviews">Reviews (0)</a>
+<section class="related products"><h2>Related products</h2><ul class="products">${[1, 2, 3].map((n) => `<li><a href="/shop/${n}/">Related ${n}</a><span class="amount">£${60 + n}.00</span></li>`).join('')}</ul></section></div></div>
+<footer id="colophon" class="site-footer"><p>© ScrapeMe 2026</p></footer>
+<section class="storefront-sticky-add-to-cart"><a href="#product">Bulbasaur</a><span class="amount">£63.00</span></section>
+</div></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.pageType).toBe('product')
+    expect(out.escalate).toBe(false)
+    expect(out.mainHtml).toContain('napping in bright sunlight')
+    expect(out.mainHtml).not.toContain('Related 1')
+  })
+
+  it('does not take such a page wrapper for a grid when the product title is not an h1', () => {
+    const doc = parse(`<!doctype html><html><body><div id="page" class="hfeed site">
+<header class="site-header"><a class="cart-contents" href="/basket/"><span class="amount">£0.00</span> 0 items</a></header>
+<div id="content" class="site-content"><h2 class="product_title">Bulbasaur</h2><p class="price">£63.00</p><a href="#reviews">Reviews (0)</a><p>Bulbasaur can be seen napping in bright sunlight.</p></div>
+<section class="sticky-add-to-cart"><a href="#product">Bulbasaur</a><span class="amount">£63.00</span></section>
+</div></body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('napping in bright sunlight')
+    doc.close()
+  })
+
+  it('does not cut the product for a merchandising class that names recommendations', () => {
+    const doc = parse(`<!doctype html><html><body>
+<div class="product recommended"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+</body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('reduction kiln')
+    doc.close()
+  })
+
+  it('never cuts the element that holds the page\'s h1', () => {
+    // A page laid out in alike rows: the header with its cart, the product, a sticky bar.
+    const doc = parse(`<!doctype html><html><body><div id="page">
+<div class="row"><a href="/cart">Cart</a><span class="price">$0.00</span></div>
+<div class="row"><h1>Cobalt teapot</h1><span class="price">$84.00</span><a href="#reviews">Reviews</a><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+<div class="row"><a href="#buy">Buy now</a><span class="price">$84.00</span></div>
+</div></body></html>`)
+    pruneRecommendations(doc.document)
+    expect(doc.document.body.innerHTML).toContain('reduction kiln')
+    doc.close()
+  })
+
+  it('still cuts a grid whose cards each carry an h1 of their own', () => {
+    // The guard is for the page's one h1; cards that each hold one are no product's title.
+    const doc = parse(`<!doctype html><html><body>
+<div class="product"><h1>Cobalt teapot</h1><span class="price">$84.00</span><p>Hand-thrown stoneware fired in a reduction kiln.</p></div>
+<div class="shelf">${[1, 2, 3].map((n) => `<div class="card"><h1><a href="/p/${n}">Other teapot ${n}</a></h1><span class="price">$${n}9.00</span></div>`).join('')}</div>
+</body></html>`)
+    pruneRecommendations(doc.document)
+    const html = doc.document.body.innerHTML
+    expect(html).toContain('reduction kiln')
+    expect(html).not.toContain('Other teapot')
     doc.close()
   })
 

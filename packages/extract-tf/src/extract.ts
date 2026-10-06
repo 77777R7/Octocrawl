@@ -264,7 +264,7 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document, { contentShown: showsDeclaredProduct(main, product) }),
+      render: detectRenderSignals(raw, doc.document, { contentShown: showsDeclaredProduct(main, product), listing: decision.type === 'listing' || decision.type === 'collection' }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

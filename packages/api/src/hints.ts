@@ -9,6 +9,7 @@
  */
 
 import { DEFAULT_SCRAPE_TIMEOUT_MS, isOctocrawlRobotsGroup, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
+import { HTTP_CHANNELS } from '@w2l/bench'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -97,8 +98,8 @@ function egressHint(result: HintedResult, host: string): string | null {
  */
 function laneEscalatedHint(run: HintedRun, host: string): string | null {
   const { result } = run
-  if ((result.status !== 'success' && result.status !== 'partial') || !BROWSER_LANES.has(result.lane) || !run.channelsTried.includes('http')) return null
-  const http = run.summary?.attempts.find((attempt) => attempt.channel === 'http')?.result
+  if ((result.status !== 'success' && result.status !== 'partial') || !BROWSER_LANES.has(result.lane) || !run.channelsTried.some((channel) => HTTP_CHANNELS.has(channel))) return null
+  const http = run.summary?.attempts.find((attempt) => HTTP_CHANNELS.has(attempt.channel))?.result
   if (http === undefined) return null
   const reason = http.status === 'blocked' ? http.blockReason : http.status === 'failed' && http.failureReason === 'http_error' ? 'http_error' : null
   if (reason === null) return null
@@ -188,7 +189,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   }
   // Under fastMode the one hint below says what was declined; otherwise the page's caveat says whether the browser lane had its turn.
   const fastModeDeclined = req.fastMode === true && result.lane === 'http' && httpLaneAskedForBrowser(result)
-  const browserTried = run.channelsTried.some((channel) => channel !== 'http')
+  const browserTried = run.channelsTried.some((channel) => !HTTP_CHANNELS.has(channel))
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'client_rendered_suspected')) {
     hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : 'was not tried'}`)
   }

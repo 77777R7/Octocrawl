@@ -141,22 +141,27 @@ export function isRecommendationHeading(text: string): boolean {
 }
 
 /**
- * A repeated-product grid: >= 3 sibling children that each carry a link AND a
- * price-shaped run. One priced card is a product; three in a row under one
- * parent is a shelf of other people's products.
+ * A repeated-product grid: >= 3 sibling children of one tag that each carry a
+ * link AND a price-shaped run. One priced card is a product; three alike in a
+ * row under one parent is a shelf of other people's products.
  *
  * The price requirement is what keeps this off article pages — a nav list or a
- * related-articles rail has links without prices and is left alone.
+ * related-articles rail has links without prices and is left alone. The one
+ * tag keeps it off a page wrapper whose header (a cart total), product and
+ * sticky add-to-cart bar each show a link and a price.
  */
 function isProductGrid(el: Element): boolean {
   const kids = Array.from(el.children)
   if (kids.length < 3) return false
+  const pricedByTag = new Map<string, number>()
   let priced = 0
   for (const kid of kids) {
     if (qsa(kid, 'a').length === 0) continue
-    if (looksLikePrice(textOf(kid))) priced++
+    if (!looksLikePrice(textOf(kid))) continue
+    priced++
+    pricedByTag.set(tagOf(kid), (pricedByTag.get(tagOf(kid)) ?? 0) + 1)
   }
-  return priced >= 3 && priced >= kids.length * 0.6
+  return Math.max(0, ...pricedByTag.values()) >= 3 && priced >= kids.length * 0.6
 }
 
 /**
@@ -188,6 +193,12 @@ function recommendationRegion(heading: Element): Element[] {
  * must not cause is deleting the product being described.
  */
 export function pruneRecommendations(doc: Document): void {
+  // The element that holds the page's one h1 holds the product: the grid and
+  // token triggers never cut it. A page of several h1s (cards that each carry
+  // one) has no such title to keep.
+  const h1s = qsa(doc, 'h1')
+  const holdsH1 = (el: Element) => h1s.length === 1 && el.contains(h1s[0]!)
+
   // Trigger 1: labelled sections.
   for (const heading of qsa(doc, 'h1,h2,h3,h4,h5,h6')) {
     if (!heading.isConnected) continue
@@ -201,7 +212,7 @@ export function pruneRecommendations(doc: Document): void {
   const containers = qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
-    if (isProductGrid(el)) detach(el)
+    if (!holdsH1(el) && isProductGrid(el)) detach(el)
   }
 
   // Trigger 3: id/class tokens, for carousels rendered without a heading and
@@ -209,7 +220,7 @@ export function pruneRecommendations(doc: Document): void {
   for (const el of qsa(doc, '[id],[class]')) {
     if (!el.isConnected) continue
     const attr = `${el.getAttribute('id') ?? ''} ${el.getAttribute('class') ?? ''}`
-    if (hasRecommendationToken(attr)) detach(el)
+    if (hasRecommendationToken(attr) && !holdsH1(el)) detach(el)
   }
 }
 

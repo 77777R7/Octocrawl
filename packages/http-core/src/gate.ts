@@ -311,6 +311,13 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     return { reason: 'bot_detected_generic', signals: ['reddit_js_verification'] }
   }
 
+  // Reddit's reCAPTCHA page, served with HTTP 200 (to a Chrome-like TLS client, 2026-10-06): its form sits
+  // past the head behind inline images, but the page opens with this title and Google's reCAPTCHA script.
+  // Neither alone: a post's title reads "… : r/sub", and a Reddit page may load reCAPTCHA for a form.
+  if (/<title[^>]*>\s*reddit - prove your humanity\s*<\/title>/.test(lower) && lower.includes('google.com/recaptcha/api.js')) {
+    return { reason: 'captcha', signals: ['reddit_captcha_title', 'recaptcha_script'] }
+  }
+
   // PerimeterX's press-and-hold, served with HTTP 200 (Walmart, after a 307
   // to /blocked) or 403. Its button needs a person to press and hold it: a
   // widget, not an interstitial a browser clears by running its JS.

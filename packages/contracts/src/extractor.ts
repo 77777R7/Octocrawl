@@ -262,7 +262,7 @@ export interface DocumentExtraction {
 }
 
 /** The rule that decided a page's data is most likely rendered client-side (see RenderSignals). */
-export type RenderReason = 'empty_table_with_scripts' | 'empty_app_root' | 'script_shell' | 'js_fallback' | 'hydration_shell' | 'aria_busy'
+export type RenderReason = 'empty_table_with_scripts' | 'empty_app_root' | 'script_shell' | 'js_fallback' | 'hydration_shell' | 'aria_busy' | 'hydration_list_partial'
 
 /** A client-side rendering marker found in the page as received (see RenderSignals). */
 export type RenderMarker = 'hydration_state' | 'app_root_empty' | 'noscript_notice' | 'js_fallback_marker' | 'aria_busy'
@@ -282,6 +282,13 @@ export interface RenderSignals {
   emptyTables: number
   /** Markers found in the page as received. */
   markers: readonly RenderMarker[]
+  /**
+   * On a listing page, the hydration data's list of named records that most
+   * outnumbers the ones its markup shows: how many it lists, and how many
+   * of their names are in the visible text. Present only when such a list
+   * decided `hydration_list_partial`.
+   */
+  listRecords?: { declared: number; shown: number }
   /** True when the signals say the data is most likely rendered client-side. */
   clientRendered: boolean
   /**
