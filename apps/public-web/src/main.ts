@@ -1406,7 +1406,7 @@ form.addEventListener('submit', async (event) => {
       signal: controller.signal,
       credentials: 'same-origin',
     })
-    const value = await readPreview(response, stage => crawl.stage(stage), capture => crawl.capture(capture))
+    const value = await readPreview(response, stage => crawl.stage(stage))
     if (!value || typeof value !== 'object' || !('status' in value)) throw new Error('The service returned an unrecognized result.')
     result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
