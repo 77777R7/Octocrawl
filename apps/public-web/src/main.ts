@@ -5,6 +5,8 @@ import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
+import { mountCrawlView } from './crawlView'
+import { readPreview, STAGE_STREAM } from './previewStream'
 import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -120,6 +122,7 @@ const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label'
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
+const crawl = mountCrawlView(urlCard, hero)
 const waitlist = mountWaitlist()
 /** After the daily previews run out: a link to the hosted early-access form. */
 function waitlistLink(className: string): HTMLAnchorElement {
@@ -984,7 +987,13 @@ function setResultMessage(result: PreviewResponse): void {
   message.className = `form-message${read ? '' : ' is-error'}`
 }
 
-function finishRun(run: Run, result: PreviewResponse, started: number): void {
+/** Brings the runs into view, below the hero. */
+function revealResults(): void {
+  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+}
+
+/** Shows the run's result; the page moves to it unless the crawl window is still playing (it moves there after). */
+function finishRun(run: Run, result: PreviewResponse, started: number, reveal = true): void {
   run.result = result
   run.clientMs = performance.now() - started
   renderRuns()
@@ -996,7 +1005,7 @@ function finishRun(run: Run, result: PreviewResponse, started: number): void {
     const time = runsGrid.querySelector<HTMLElement>(`[data-run="${run.id}"] .run-time`)
     if (time) time.textContent = formatDuration(run.clientMs)
   })
-  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+  if (reveal) revealResults()
 }
 
 /** A panel opens under its button on wide screens (a sheet at the foot of a phone's screen, in the styles), or
@@ -1360,6 +1369,8 @@ form.addEventListener('submit', async (event) => {
   setInvalid(false)
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
+  // Before the form turns busy, so the window can take focus from the button that sent it.
+  const crawling = crawl.begin(url)
   setBusy(true)
   const run: Run = { id: nextRunId++, url, startedAt: new Date(), clientMs: 0, result: null }
   runs = [run, ...runs].slice(0, MAX_RUNS)
@@ -1373,24 +1384,35 @@ form.addEventListener('submit', async (event) => {
   const started = performance.now()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
+  /** The window plays out its end, then the page moves to the result. */
+  const settle = async (result: PreviewResponse): Promise<void> => {
+    finishRun(run, result, started, !crawling)
+    if (!crawling) return
+    const hadFocus = await crawl.finish({
+      read: isPageRead(result), title: result.title, markdown: result.markdown, label: statusText(result.status, result.product, result.diagnostic),
+      reason: result.reason, skipScene: result.status === 'quota_exceeded' || result.status === 'invalid_url',
+    })
+    setBusy(false)
+    if (hadFocus) input.focus({ preventScroll: true })
+    if (run.id === selectedRunId) revealResults()
+  }
+  let result: PreviewResponse
   try {
     const response = await fetch('/api/preview', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The server reports its stages as they happen to a client that asks; the crawl window shows them.
+      headers: { 'Content-Type': 'application/json', Accept: `${STAGE_STREAM}, application/json` },
       body: JSON.stringify(previewBody(url)),
       signal: controller.signal,
       credentials: 'same-origin',
     })
-    const value: unknown = await response.json()
+    const value = await readPreview(response, stage => crawl.stage(stage))
     if (!value || typeof value !== 'object' || !('status' in value)) throw new Error('The service returned an unrecognized result.')
-    const result = value as PreviewResponse
+    result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
-    // Message first: an error style can grow the hero, and the smooth scroll must target the final layout.
-    setResultMessage(result)
-    finishRun(run, result, started)
-  } catch (error) {
+  } catch {
     const aborted = controller.signal.aborted
-    const result: PreviewResponse = {
+    result = {
       status: aborted ? 'timeout' : 'failed',
       requestedUrl: url,
       finalUrl: null,
@@ -1399,10 +1421,13 @@ form.addEventListener('submit', async (event) => {
       totalMs: performance.now() - started,
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
-    setResultMessage(result)
-    finishRun(run, result, started)
   } finally {
     clearTimeout(timeout)
+  }
+  // Message first: an error style can grow the hero, and the smooth scroll must target the final layout.
+  setResultMessage(result)
+  try { await settle(result) }
+  finally {
     setBusy(false)
     void refreshQuota()
   }

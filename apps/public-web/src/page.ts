@@ -78,6 +78,17 @@ export function pageMarkup(): string {
                   <button class="example-button" id="example-button" type="button">Try an example</button>
                   <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
                 </div>
+                <div class="crawl-window" id="crawl-window" hidden>
+                  <div class="crawl-stage"><canvas class="crawl-canvas" aria-hidden="true"></canvas><p class="crawl-note" id="crawl-note" hidden></p></div>
+                  <div class="crawl-foot">
+                    <span class="crawl-bar" id="crawl-bar" aria-hidden="true"></span>
+                    <span class="crawl-label" id="crawl-label"></span>
+                    <span class="crawl-time" id="crawl-time"></span>
+                    <label class="crawl-always"><input type="checkbox" id="crawl-always-skip" /> Always skip</label>
+                    <button class="crawl-skip" id="crawl-skip" type="button">Skip <span class="crawl-esc" aria-hidden="true">esc</span></button>
+                  </div>
+                  <p class="visually-hidden" id="crawl-status" role="status" aria-live="polite"></p>
+                </div>
               </div>
               <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
               <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>

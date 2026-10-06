@@ -1,5 +1,5 @@
 import { buildChannels, isLocalPreviewProxyTarget, LadderRunner, OriginScheduler } from '@w2l/bench'
-import { hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type StructuredExtractionResult } from '@w2l/contracts'
+import { hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type StructuredExtractionResult, type TraceEvent } from '@w2l/contracts'
 import { createExecutionScope } from '@w2l/http-core'
 import { extractStructured } from '@w2l/api/structured'
 import { parseHTML } from 'linkedom'
@@ -141,9 +141,27 @@ export function previewNetworkPolicy(): NetworkPolicy {
   return { ...hostedNetworkPolicy(), maxRedirects: 3, maxBodyBytes: 2 * 1024 * 1024, maxDecompressedBytes: 4 * 1024 * 1024, maxFileBytes: PREVIEW_FILE_BYTES, perHostConcurrency: 1 }
 }
 
-export type PreviewCapture = (url: NormalizedPreviewUrl, signal: AbortSignal, deadlineAt: number, amazonState: string | null, ownerEvaluation?: boolean, onRetryAfter?: (url: string, retryAt: number) => void, localPlatformProxyUrl?: string, localPlatformRobotsException?: boolean, options?: PreviewOptions) => Promise<CaptureOutcome>
+/** A step of a running preview that the page shows as it happens: robots.txt was read (whether it allows the page,
+ * and `unreachable` when it could not be read, which counts as a refusal), then the page was fetched and read. Only
+ * the HTTP lane reports them; any step may never come. */
+export type PreviewStage = { stage: 'robots'; allowed: boolean; unreachable?: true } | { stage: 'page' }
 
-export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSignal, deadlineAt: number, amazonState: string | null, ownerEvaluation = false, onRetryAfter?: (url: string, retryAt: number) => void, localPlatformProxyUrl?: string, localPlatformRobotsException = false, options: PreviewOptions = {}): Promise<CaptureOutcome> {
+export type PreviewCapture = (url: NormalizedPreviewUrl, signal: AbortSignal, deadlineAt: number, amazonState: string | null, ownerEvaluation?: boolean, onRetryAfter?: (url: string, retryAt: number) => void, localPlatformProxyUrl?: string, localPlatformRobotsException?: boolean, options?: PreviewOptions, onStage?: (stage: PreviewStage) => void) => Promise<CaptureOutcome>
+
+/** The stages a lane's trace events announce, each told once. */
+function stageListener(onStage: (stage: PreviewStage) => void): (event: TraceEvent) => void {
+  const told = new Set<PreviewStage['stage']>()
+  return (event) => {
+    const stage = event.event === 'robots_checked' ? 'robots' : event.event === 'extract' ? 'page' : null
+    if (stage === null || told.has(stage)) return
+    told.add(stage)
+    onStage(stage === 'page' ? { stage } : {
+      stage, allowed: event.detail?.decision !== 'disallowed', ...(event.detail?.unreachable === undefined ? {} : { unreachable: true as const }),
+    })
+  }
+}
+
+export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSignal, deadlineAt: number, amazonState: string | null, ownerEvaluation = false, onRetryAfter?: (url: string, retryAt: number) => void, localPlatformProxyUrl?: string, localPlatformRobotsException = false, options: PreviewOptions = {}, onStage?: (stage: PreviewStage) => void): Promise<CaptureOutcome> {
   let rendered: { html: string; sha256: string } | undefined
   const policy = previewNetworkPolicy()
   const localPlatformRequest = url.amazonAsin === null && isLocalPreviewProxyTarget(url.url)
@@ -160,7 +178,7 @@ export async function capturePreview(url: NormalizedPreviewUrl, signal: AbortSig
     // No third-party provider calls, even if environment keys happen to exist.
     keys: {},
   }).filter(channel => channel.id === resolvePreviewCapability(url).captureMode)
-  const scope = createExecutionScope({ signal, deadlineAt, onRetryAfter })
+  const scope = createExecutionScope({ signal, deadlineAt, onRetryAfter, ...(onStage === undefined ? {} : { onTrace: stageListener(onStage) }) })
   try {
     // A visitor's options apply to ordinary pages only; the server refuses them for Amazon.sg before any capture.
     const pageOptions = url.amazonAsin === null && options.onlyMainContent === false ? { onlyMainContent: false } : {}

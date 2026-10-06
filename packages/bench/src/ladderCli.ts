@@ -243,7 +243,7 @@ export function buildChannels(
       id: 'http',
       identity: declared,
       fetch: (url, _session, execution, options) =>
-        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession),
+        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace),
       close: async () => {
         await http.teardown()
         await opts.localSubjects?.http?.teardown?.()
@@ -252,7 +252,7 @@ export function buildChannels(
     ...(compat === null ? [] : [{
       id: 'http_compat',
       identity: identityBundleFrom(compatIdentity()),
-      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession),
+      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace),
       close: () => compat.teardown(),
     } satisfies Channel]),
     {

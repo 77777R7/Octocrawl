@@ -187,7 +187,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, none are. */
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession): Promise<FetchResult> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, onTrace?: ExecutionContext['onTrace']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }) })
     const start = Date.now()
@@ -207,7 +207,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride, onTrace }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
@@ -273,7 +273,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         },
       }
     }
-    const trace: TraceEvent[] = []
+    const trace = observedTrace(execution.onTrace)
     const prepared = this.preparedFor(url, options)
     const honest = recordHttpIdentity(prepared, trace, 0)
     if (!honest) {
@@ -916,6 +916,20 @@ function bodyReadFailure(error: unknown): 'timeout' | 'connection_error' | null 
   if (error.name === 'BodyTimeoutError' || code === 'UND_ERR_BODY_TIMEOUT') return 'timeout'
   if (error.name === 'SocketError' || code === 'UND_ERR_SOCKET' || code === 'ECONNRESET' || code === 'EPIPE' || code === 'UND_ERR_CLOSED') return 'connection_error'
   return null
+}
+
+/** The fetch's trace, each event also told to `onTrace` as it is recorded. A listener that throws is ignored. */
+function observedTrace(onTrace: ExecutionContext['onTrace']): TraceEvent[] {
+  const trace: TraceEvent[] = []
+  if (onTrace === undefined) return trace
+  trace.push = (...events: TraceEvent[]): number => {
+    const length = Array.prototype.push.apply(trace, events)
+    for (const event of events) {
+      try { onTrace(event) } catch { /* Progress is advisory; the record is the trace. */ }
+    }
+    return length
+  }
+  return trace
 }
 
 /** Closes a body that will not be read; the connection's own abort is not an error of the fetch. */

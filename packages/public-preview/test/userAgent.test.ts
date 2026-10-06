@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { browserClientHints, CHROME_MAJOR_FLOOR, modeIdentity, PREVIEW_PRODUCT_TOKEN } from '@w2l/contracts'
-import { capturePreview, mapPreviewResult } from '../src/preview.js'
+import { capturePreview, mapPreviewResult, type PreviewStage } from '../src/preview.js'
 
 /**
  * The preview names itself to the sites it reads. capturePreview runs as
@@ -26,12 +26,14 @@ const ARTICLE = '<!doctype html><html><head><title>Tide report</title></head><bo
 let server: Server
 let origin: string
 let robots = ''
+/** robots.txt answers 503 while `robots` holds this. */
+const UNAVAILABLE = 'unavailable'
 let requests: { path: string; userAgent: string | undefined; secChUa: string | undefined }[] = []
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     requests.push({ path: req.url ?? '', userAgent: req.headers['user-agent'], secChUa: req.headers['sec-ch-ua'] as string | undefined })
-    if (req.url === '/robots.txt') res.writeHead(200, { 'content-type': 'text/plain' }).end(robots)
+    if (req.url === '/robots.txt') res.writeHead(robots === UNAVAILABLE ? 503 : 200, { 'content-type': 'text/plain' }).end(robots)
     else if (req.url === '/page') res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(ARTICLE)
     else res.writeHead(404).end()
   })
@@ -79,5 +81,35 @@ describe('the public preview identifies itself as OctoCrawl', () => {
     const { outcome, response } = await capture('/page')
     expect(response.status).toBe('success')
     expect(outcome.result.trace.find(event => event.event === 'robots_checked')?.detail).toMatchObject({ decision: 'allowed', matchedGroup: '*' })
+  })
+})
+
+describe('the preview tells its stages while it runs', () => {
+  const stages = async (path: string) => {
+    const told: PreviewStage[] = []
+    const url = { url: `${origin}${path}`, amazonAsin: null }
+    const outcome = await capturePreview(url, new AbortController().signal, Date.now() + 20_000, null, false, undefined, undefined, false, {}, stage => told.push(stage))
+    return { told, response: mapPreviewResult(url.url, url, outcome, 0) }
+  }
+
+  it('says robots.txt allowed the page, then that the page was read', async () => {
+    robots = 'User-agent: *\nAllow: /\n'
+    const { told, response } = await stages('/page')
+    expect(response.status).toBe('success')
+    expect(told).toEqual([{ stage: 'robots', allowed: true }, { stage: 'page' }])
+  })
+
+  it('says robots.txt disallowed the page, and never that the page was read', async () => {
+    robots = 'User-agent: *\nDisallow: /\n'
+    const { told, response } = await stages('/page')
+    expect(response.status).toBe('blocked')
+    expect(told).toEqual([{ stage: 'robots', allowed: false }])
+  })
+
+  it('says when robots.txt could not be read, which stops the page as a refusal does', async () => {
+    robots = UNAVAILABLE
+    const { told, response } = await stages('/page')
+    expect(response.diagnostic?.code).toBe('robots_unreachable')
+    expect(told).toEqual([{ stage: 'robots', allowed: false, unreachable: true }])
   })
 })
