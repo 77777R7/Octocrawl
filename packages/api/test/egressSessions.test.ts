@@ -22,6 +22,11 @@ const sessionFile = (taskDir: string): string => {
   return join(taskDir, names[0] ?? 'cookie-session.none.json')
 }
 const hasSessionFile = (taskDir: string): boolean => existsSync(taskDir) && readdirSync(taskDir).some((name) => name.startsWith('cookie-session'))
+/** Whether the task's session file is still there 2 s on: the run writes its terminal status first and removes the file after its job events. */
+async function sessionFileStays(taskDir: string): Promise<boolean> {
+  for (let i = 0; i < 100 && hasSessionFile(taskDir); i++) await new Promise((resolve) => setTimeout(resolve, 20))
+  return hasSessionFile(taskDir)
+}
 
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year. '.repeat(3)
 const PAGE = `<!doctype html><html><head><title>Tides</title></head><body><article><h1>Tide ledger</h1><p>${PROSE}</p></article></body></html>`
@@ -157,7 +162,7 @@ describe('egress_sessions: a resumed task goes on with its session', () => {
     const sessionOf = (path: string) => page(path).trace?.find((event) => event.event === 'session_cookies')?.detail?.session
     expect(sessionOf('/needs-slow')).toBe(sessionOf('/start'))
     // The task has ended: its cookies are gone from the disk.
-    expect(hasSessionFile(taskDir)).toBe(false)
+    expect(await sessionFileStays(taskDir)).toBe(false)
   })
 })
 
@@ -227,6 +232,6 @@ describe('egress_sessions: the session file leaves with its task', () => {
     expect(existsSync(file)).toBe(true)
     engine = make([])
     expect(await settle(taskId, ['completed', 'failed'])).toMatchObject({ status: 'completed' })
-    expect(hasSessionFile(taskDir)).toBe(false)
+    expect(await sessionFileStays(taskDir)).toBe(false)
   })
 })
