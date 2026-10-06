@@ -90,7 +90,7 @@ interface OriginStorage {
   localStorage: { name: string; value: string }[]
 }
 
-export const ENABLE_HINT = 'open chrome://inspect/#remote-debugging in Chrome (144 or later), turn on "Allow remote debugging for this browser instance", then run this again'
+export const ENABLE_HINT = 'open chrome://inspect/#remote-debugging in Chrome (144 or later), turn on "Allow remote debugging for this browser instance", then run this again (while it is on, every page sees navigator.webdriver true: turn it off when you are done)'
 
 /** The stable Chrome's user data directory on this OS. */
 export function chromeUserDataDir(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
