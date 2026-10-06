@@ -176,6 +176,11 @@ export async function closePage(page: Pick<Page, 'close'>, timeoutMs = PAGE_CLOS
 }
 
 /** Wait for a close at most `timeoutMs`; true when it ended in time. A close that never answers is left behind, never waited for. */
+/** A context's cookie in the session's shape. */
+function contextCookie(c: { name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: ContextCookie['sameSite'] }): ContextCookie {
+  return { name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite }
+}
+
 async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   const settled = closing.then(() => true, () => true)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -681,7 +686,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (execution.cookieSession !== undefined && this.accessConfig?.session === undefined && context !== this.managedContext) {
         const cookies = await raceWithSignal(execution.cookieSession.browserCookies(url), signal)
         if (cookies.length > 0) await context.addCookies(cookies.map((c) => ({ ...c, ...(c.expires < 0 ? { expires: -1 } : {}) })))
-        taskCookies = { session: execution.cookieSession, startedWith: cookies }
+        // The baseline is what the context holds now, as Chromium stored it: a cookie it refused (SameSite=None
+        // without Secure) is not in it, and an expiry it capped (400 days) is the capped one, so neither reads as a change.
+        const startedWith = cookies.length === 0 ? [] : (await raceWithSignal(context.cookies(), signal)).map(contextCookie)
+        taskCookies = { session: execution.cookieSession, startedWith }
       }
       throwIfExecutionStopped(execution)
       const pendingPage = context.newPage()
@@ -1316,7 +1324,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // What the page left in the context goes back to the task's session, values unrecorded; a context that does not answer in time keeps them.
       if (taskCookies !== null && context !== undefined) {
         const held = await Promise.race([context.cookies().catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), PAGE_CLOSE_MS))])
-        const changes = held === null ? { kept: 0, removed: 0 } : await taskCookies.session.storeBrowserChanges(taskCookies.startedWith, held.map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite })))
+        const changes = held === null ? { kept: 0, removed: 0 } : await taskCookies.session.storeBrowserChanges(taskCookies.startedWith, held.map(contextCookie))
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'session_cookies', detail: { session: taskCookies.session.id, startedWith: taskCookies.startedWith.length, ...changes, read: held !== null } })
       }
       await session?.detach().catch(() => {})

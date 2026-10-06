@@ -56,21 +56,29 @@ export class TaskCookieSession implements CookieSession {
     const after = new Map(held.map((c) => [key(c), c]))
     let kept = 0
     let removed = 0
-    // New and changed cookies: what the page itself set.
+    // New and changed cookies: what the page itself set. A changed expiry alone is kept only while the
+    // session still has the value the context started with; another page's newer value wins.
     for (const c of held) {
       const was = before.get(key(c))
-      if (was !== undefined && was.value === c.value && was.expires === c.expires) continue
+      if (was !== undefined && was.value === c.value) {
+        if (was.expires === c.expires || (await this.currentValue(c)) !== was.value) continue
+      }
       if (await this.setLine(c, false)) kept++
     }
     // Dropped cookies: deleted by the page, unless the session's value is no longer the one the context started with.
     for (const c of startedWith) {
       if (after.has(key(c))) continue
-      const current = (await this.browserCookies(`${c.secure ? 'https' : 'http'}://${c.domain.replace(/^\./, '')}${c.path}`)).find((now) => key(now) === key(c))
-      if (current === undefined || current.value !== c.value) continue
+      if ((await this.currentValue(c)) !== c.value) continue
       await this.setLine(c, true)
       removed++
     }
     return { kept, removed }
+  }
+
+  /** The session's value now for the cookie with this name, domain and path; undefined when it holds none. */
+  private async currentValue(c: ContextCookie): Promise<string | undefined> {
+    const same = (now: ContextCookie) => now.name === c.name && now.domain === c.domain && now.path === c.path
+    return (await this.browserCookies(`${c.secure ? 'https' : 'http'}://${c.domain.replace(/^\./, '')}${c.path}`)).find(same)?.value
   }
 
   /** The cookie as the site would have set it (or deleted it): a host-only one without Domain, which an IP address cannot take. */

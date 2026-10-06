@@ -29,6 +29,7 @@ beforeAll(async () => {
       const ok = (req.headers.cookie ?? '').includes(`gate=${GATE}`)
       return void res.writeHead(ok ? 200 : 403, { 'content-type': 'text/html' }).end(ok ? page('') : '<h1>Forbidden</h1>')
     }
+    if (req.url === '/slow') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/html' }).end(page('')), 800)
     if (req.url === '/echo') return void res.writeHead(200, { 'content-type': 'text/html' }).end(page(`<p>cookie header present: ${(req.headers.cookie ?? '').includes('sid=') ? 'yes' : 'no'}</p>`))
     res.writeHead(404).end()
   })
@@ -58,6 +59,26 @@ describe('a task cookie session across the browser and HTTP rungs', () => {
     } finally {
       await browser.teardown()
       await http.teardown()
+    }
+  })
+
+  it('keeps a cookie Chromium refused, and a newer value another page set while the browser held an older, long-lived one', async () => {
+    const browser = new BrowserLocalSubject('standard', null, false, localNetworkPolicy())
+    const session = new TaskCookieSession()
+    const twoYears = new Date(Date.now() + 2 * 365 * 86_400_000).toUTCString()
+    // Chromium refuses SameSite=None without Secure; it caps an expiry two years out at 400 days.
+    await session.store(`${origin}/`, ['legacy=1; Path=/; SameSite=None', `sid=OLD; Path=/; Expires=${twoYears}`])
+    try {
+      const reading = browser.fetch(`${origin}/slow`, undefined, undefined, undefined, {}, undefined, session)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      // An HTTP page of the same task rotates sid meanwhile.
+      await session.store(`${origin}/`, [`sid=NEW; Path=/; Expires=${twoYears}`])
+      const out = await reading
+      expect(out.status).toBe('success')
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'session_cookies', detail: expect.objectContaining({ kept: 0, removed: 0 }) }))
+      expect(await session.cookieHeader(`${origin}/`)).toBe('legacy=1; sid=NEW')
+    } finally {
+      await browser.teardown()
     }
   })
 
