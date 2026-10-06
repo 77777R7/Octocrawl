@@ -1425,8 +1425,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     const orchestrator = new CrawlOrchestrator({
       store, atom,
-      // A page whose scrape threw called a provider only if this mode has one: otherwise its third-party cost is a known 0.
-      scrapeErrorCostUsd: channelsFor(mode).some((channel) => channel.vendorId !== undefined) ? null : 0,
+      // A page whose scrape threw called a provider only if the task's rungs have one (its mode and its access choice, as
+      // its lane was built): otherwise its third-party cost is a known 0.
+      scrapeErrorCostUsd: current.rungs.channels.some((channel) => channel.vendorId !== undefined) ? null : 0,
       workerCount,
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,

@@ -205,6 +205,17 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
     expect(reached).toHaveLength(3)
   })
 
+  it('a batch that chose enhanced counts a page whose provider call threw as of unknown cost, so the run budget stops it', async () => {
+    let calls = 0
+    const throwing: Channel = { id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'), fetch: async () => { calls++; throw new Error('the vendor session dropped after it was billed') } }
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    const { origin, post, engine } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => enhanced === true ? [throwing] : buildChannels(mode, {}) })
+    const batch = (await post('/v1/batches', { urls: ['a', 'b', 'c'].map((page) => `${origin}/chrome?${page}`), access: 'enhanced', maxConcurrency: 1 })).body
+    const report = await finished(() => engine.getBatch(batch.taskId ?? batch.id))
+    expect(report).toMatchObject({ budgetExceeded: 'cost_unknown' })
+    expect(calls).toBe(1)
+  })
+
   it('fastMode keeps the http rung alone, reports its verdict, and says what it declined', async () => {
     const { origin, post, engine, browser } = await setup()
     const shell = `${origin}/shell`
