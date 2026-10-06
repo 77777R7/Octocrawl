@@ -138,7 +138,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
   const compatHosts = compatHostsChoice(env, accessGrant, hosted)
   const egressList = readEgressProxies(env, accessGrant, hosted)
-  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when it fails at the connection (at most 2 times), never after a block, a challenge or a 429; a scrape takes the next healthy one`]
+  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one`]
   const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains; a request with custom headers or mobile keeps the http rung`]
   if (hosted) {
     if (tokens.length === 0) {

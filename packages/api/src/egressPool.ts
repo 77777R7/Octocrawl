@@ -2,16 +2,20 @@
  * The operator's egress proxies (`W2L_EGRESS_PROXIES`, ADR 0005 `egress_sessions`, ROADMAP PA item 3).
  *
  * A batch or crawl takes one egress for its run and keeps it: its cookie session belongs to that
- * egress. An egress that fails at the connection (no HTTP answer at all) cools down for
- * EGRESS_COOLDOWN_MS, and a task switches away from it at most MAX_EGRESS_SWITCHES times. Nothing
- * switches on what a site answered: a block, a challenge or a 429 is the site's verdict on the
- * request, and moving to another address to get past it is identity rotation, which ADR 0005 never
- * does. A switch starts a new cookie session, as a session never changes egress.
+ * egress. An egress that has failed cools down for EGRESS_COOLDOWN_MS, and a task switches away from
+ * it at most MAX_EGRESS_SWITCHES times. Failed means the proxy itself: after a page got no HTTP answer
+ * from any rung, the proxy is probed (probeEgress), and only a proxy that does not answer, or refuses
+ * its credentials (407), is one. Nothing switches on what a site did: a block, a challenge, a 429 or
+ * a connection the site reset is the site's verdict on the request, and moving to another address to
+ * get past it is identity rotation, which ADR 0005 never does. A switch starts a new cookie session,
+ * as a session never changes egress.
  *
  * Results record an egress by its `host:port` endpoint, never its credentials.
  */
 
-import { withPoolProxy, type FetchResult, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
+import { connect as netConnect, type Socket } from 'node:net'
+import { connect as tlsConnect } from 'node:tls'
+import { withPoolProxy, type FetchResult, type NetworkPolicy, type ProxyServer, type ScrapeOutcome } from '@w2l/contracts'
 
 export const EGRESS_COOLDOWN_MS = 10 * 60_000
 export const MAX_EGRESS_SWITCHES = 2
@@ -21,6 +25,8 @@ export interface Egress {
   readonly id: string
   /** The network policy whose every request leaves through this proxy. */
   readonly policy: NetworkPolicy
+  /** The proxy, credentials included (in memory only), for its probe. */
+  readonly server: ProxyServer
 }
 
 export class EgressPool {
@@ -30,7 +36,7 @@ export class EgressPool {
 
   constructor(servers: readonly ProxyServer[], policy: NetworkPolicy, private readonly now: () => number = Date.now) {
     if (servers.length === 0) throw new Error('an egress pool needs at least one proxy')
-    this.egresses = servers.map((server) => ({ id: server.endpoint, policy: withPoolProxy(policy, server) }))
+    this.egresses = servers.map((server) => ({ id: server.endpoint, policy: withPoolProxy(policy, server), server }))
   }
 
   get size(): number {
@@ -63,16 +69,52 @@ export class EgressPool {
     return [...pool].sort((a, b) => (this.cooldownUntil.get(a.id) ?? 0) - (this.cooldownUntil.get(b.id) ?? 0))[0]!
   }
 
-  /** The egress failed at the connection: it cools down. */
+  /** The egress failed its probe: it cools down. */
   fail(id: string): void {
     this.cooldownUntil.set(id, this.now() + EGRESS_COOLDOWN_MS)
   }
 }
 
 /**
- * Whether a page's result says its egress failed, not the site: a failure at the connection with no
- * HTTP answer. A block, a challenge, a 429 or any other status is the site's answer and never one.
+ * Whether a page's outcome leaves its egress in doubt, so that the egress is worth probing: the page
+ * failed and no rung got any HTTP answer. A page any rung got a status for went through its proxy, so
+ * the proxy works, whatever the site said.
  */
-export function egressFailed(result: FetchResult): boolean {
-  return result.status === 'failed' && result.failureReason === 'connection_error' && (result.evidence.httpStatus ?? null) === null
+export function egressInDoubt(outcome: Pick<ScrapeOutcome, 'result' | 'audit'>): boolean {
+  const results: FetchResult[] = [outcome.result, ...(outcome.audit?.summary.attempts ?? []).map((attempt) => attempt.result)]
+  return outcome.result.status === 'failed' && results.every((result) => (result.evidence.httpStatus ?? null) === null)
+}
+
+/**
+ * Whether the proxy itself fails: it does not accept a connection in time, or refuses its credentials
+ * (407) for a CONNECT. The CONNECT names a host that does not exist, so the probe reaches no site; any
+ * other answer, a 403 or a 502 for that name included, is a proxy at work.
+ */
+export async function probeEgress(server: ProxyServer, timeoutMs = 5_000): Promise<'works' | 'unreachable' | 'credentials_refused'> {
+  const url = new URL(server.url)
+  const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80))
+  return new Promise((resolve) => {
+    let settled = false
+    let socket: Socket | undefined
+    const done = (verdict: 'works' | 'unreachable' | 'credentials_refused') => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket?.destroy()
+      resolve(verdict)
+    }
+    const timer = setTimeout(() => done('unreachable'), timeoutMs)
+    const auth = server.username === undefined ? '' : `Proxy-Authorization: Basic ${Buffer.from(`${server.username}:${server.password ?? ''}`).toString('base64')}\r\n`
+    const onConnect = () => socket!.write(`CONNECT octocrawl-egress-probe.invalid:443 HTTP/1.1\r\nHost: octocrawl-egress-probe.invalid:443\r\n${auth}\r\n`)
+    socket = url.protocol === 'https:' ? tlsConnect({ host: url.hostname, port, servername: url.hostname }, onConnect) : netConnect({ host: url.hostname, port }, onConnect)
+    let head = ''
+    socket.on('data', (chunk: Buffer) => {
+      head += chunk.toString('latin1')
+      const status = /^HTTP\/\d(?:\.\d)? (\d{3})/.exec(head)
+      if (status !== null) done(status[1] === '407' ? 'credentials_refused' : 'works')
+      else if (head.length > 4096) done('works')
+    })
+    socket.on('error', () => done('unreachable'))
+    socket.on('close', () => done(head === '' ? 'unreachable' : 'works'))
+  })
 }

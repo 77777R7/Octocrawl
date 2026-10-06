@@ -3,6 +3,7 @@
  * One crawl is CrawlOrchestrator. No second fetcher.
  */
 
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
@@ -113,7 +114,7 @@ import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlP
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
-import { EgressPool, egressFailed, MAX_EGRESS_SWITCHES, type Egress } from './egressPool.js'
+import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
@@ -363,7 +364,7 @@ export interface ApiEngineOptions {
   browserEngine?: BrowserEngineName
   /**
    * The operator's egress proxies (`W2L_EGRESS_PROXIES`, ADR 0005 `egress_sessions`): a batch or crawl
-   * takes one for its run and switches only when it fails at the connection (EgressPool); a scrape takes
+   * takes one for its run and switches only when the proxy itself fails its probe (EgressPool); a scrape takes
    * the next healthy one. Absent or empty: the network policy's own route. Needs the grant; refused hosted.
    */
   egressProxies?: readonly ProxyServer[]
@@ -411,17 +412,31 @@ const NO_SITEMAP: MapSources['sitemap'] = {
 }
 
 /** The orchestrator's own default, which the engine passes explicitly so a crawl's `maxConcurrency` can be checked against it. */
-/** A task's cookie session file, in its own directory (egress_sessions). */
-const COOKIE_SESSION_FILE = 'cookie-session.json'
 /** A task's egress (`{ egress: "host:port" }`), in its own directory: no credentials. */
 const EGRESS_FILE = 'egress.json'
+const COOKIE_SESSION_NAME = /^cookie-session(?:\.[0-9a-f]+)?\.json(?:\..+\.tmp)?$/
+
+/**
+ * A task's cookie session file for one route (`direct`, `env:host:port` or `pool:host:port`), in its own
+ * directory: a session belongs to the route its cookies came through, so a task that resumes on another
+ * route reads none of them.
+ */
+function cookieSessionFileFor(taskDir: string, route: string): string {
+  return join(taskDir, `cookie-session.${createHash('sha256').update(route).digest('hex').slice(0, 16)}.json`)
+}
+
+/** Removes a task's cookie session files (and any a failed write left), all but `keep`. */
+function removeCookieSessions(taskDir: string, keep?: string): void {
+  let names: string[]
+  try { names = readdirSync(taskDir) } catch { return }
+  for (const name of names) if (COOKIE_SESSION_NAME.test(name) && join(taskDir, name) !== keep) rmSync(join(taskDir, name), { force: true })
+}
 
 /**
  * The egress a task's run goes through: the one it used before (its file) while that is in the pool and
- * not cooling down, else the next healthy one. A task that changes egress drops its cookie session, whose
- * cookies came through the other one.
+ * not cooling down, else the next healthy one.
  */
-function bindTaskEgress(pool: EgressPool, file: string, cookieSessionFile: string): Egress {
+function bindTaskEgress(pool: EgressPool, file: string): Egress {
   let saved: string | undefined
   try {
     const parsed = (JSON.parse(readFileSync(file, 'utf8')) as { egress?: unknown }).egress
@@ -430,7 +445,6 @@ function bindTaskEgress(pool: EgressPool, file: string, cookieSessionFile: strin
   const kept = saved === undefined ? undefined : pool.byId(saved)
   if (kept !== undefined && !pool.cooling(kept.id)) return kept
   const egress = pool.pick(saved)
-  if (saved !== undefined) rmSync(cookieSessionFile, { force: true })
   writeTaskEgress(file, egress.id)
   return egress
 }
@@ -1102,31 +1116,32 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // relaxation it refuses at submission.
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
-    // The task's egress (W2L_EGRESS_PROXIES), kept in its directory: a resumed task goes on through the one its cookies
-    // came through while it is in the pool and not cooling down, else the next healthy one with a new session.
-    const cookieSessionFile = join(task.taskDir, COOKIE_SESSION_FILE)
+    // The task's egress (W2L_EGRESS_PROXIES), kept in its directory so a resumed task goes on through it while it is in the
+    // pool and not cooling down. Mode authed's saved login keeps its own route: it never takes one.
     const egressFile = join(task.taskDir, EGRESS_FILE)
-    let egress = egressPool === null ? undefined : bindTaskEgress(egressPool, egressFile, cookieSessionFile)
+    const firstEgress = egressPool === null || mode === 'authed' ? undefined : bindTaskEgress(egressPool, egressFile)
     let switches = 0
-    // One set of rungs for every URL of the task: a screenshot format binds them all to the browser lane.
-    let rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
-    // The task's cookie session (egress_sessions), kept in its directory so a resumed task goes on with it, and
-    // removed when the task ends. A saved login is mode authed's own session; pages read with a session are never cached.
-    let cookieSession = egressSessions && mode !== 'authed' ? new TaskCookieSession(cookieSessionFile) : undefined
+    /** Everything a page goes out with, replaced as one on a switch: a page takes the lane whole when it starts. */
+    type Lane = { egress: Egress | undefined; rungs: ReturnType<typeof channelsForUrl>; ladder: LadderScrapeAtom; cookieSession: TaskCookieSession | undefined }
+    const lanes: Lane[] = []
+    const routeOf = (egress: Egress | undefined): string => {
+      const env = networkPolicy.egressProxy ?? null
+      return egress !== undefined ? `pool:${egress.id}` : env === null ? 'direct' : `env:${(env.https ?? env.http)?.endpoint ?? ''}`
+    }
     /**
-     * The session file goes once the task has ended, also when this run has no session (a server restarted
-     * without the grant resumed a task that had one); a run paused by shutdown keeps it for its resume.
+     * The session files go once the task has ended, also when this run has no session (a server restarted
+     * without the grant resumed a task that had one); a run paused by shutdown keeps them for its resume.
      */
     const endCookieSession = async (ended: boolean): Promise<void> => {
       if (!ended) return
-      await cookieSession?.close()
-      await TaskCookieSession.remove(cookieSessionFile).catch(() => {})
+      await Promise.all(lanes.map((lane) => lane.cookieSession?.close()))
+      removeCookieSessions(task.taskDir)
       rmSync(egressFile, { force: true })
     }
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: typeof rungs) => new LadderRunner(lane.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -1134,29 +1149,42 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered, and obey robots.txt unless it was started with ignoreRobotsTxt.
     const namedOverride = task.batch === undefined ? ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) : namedUrlOverride
     const robotsOverrideFor = recordedOverrideFor === null && namedOverride === undefined ? null : (url: string) => recordedOverrideFor?.(url) ?? namedOverride
-    const ladderFor = (lane: typeof rungs) => new LadderScrapeAtom(runnerFor(lane), robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
+    const ladderFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderScrapeAtom(runnerFor(lane), robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
     })
-    // The rungs of the task's current egress; a switch replaces them, and the task closes every set it used.
-    let ladder = ladderFor(rungs)
-    const ladders = [ladder]
-    const closeLadders = async (): Promise<void> => { await Promise.all(ladders.map((one) => one.close())) }
-    const pageAtom: ScrapeAtom = selection === undefined ? { scrape: (url, context) => ladder.scrape(url, cookieSession === undefined ? context : { ...context, cookieSession }), close: closeLadders } : {
+    /**
+     * A lane for an egress (or the policy's own route): one set of rungs for every URL of the task (a screenshot format
+     * binds them all to the browser lane), and the task's cookie session for that route (egress_sessions), kept in its
+     * directory so a resumed task goes on with it. A saved login is mode authed's own session; pages read with a
+     * session are never cached.
+     */
+    const laneFor = (egress: Egress | undefined): Lane => {
+      const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
+      const sessionFile = cookieSessionFileFor(task.taskDir, routeOf(egress))
+      return { egress, rungs, ladder: ladderFor(rungs), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
+    }
+    // A session file of another route (the task ran on another egress, or none) holds cookies this run must not send.
+    removeCookieSessions(task.taskDir, cookieSessionFileFor(task.taskDir, routeOf(firstEgress)))
+    let current = laneFor(firstEgress)
+    lanes.push(current)
+    const closeLadders = async (): Promise<void> => { await Promise.all(lanes.map((lane) => lane.ladder.close())) }
+    const pageAtom: ScrapeAtom = selection === undefined ? { scrape: (url, context) => { const lane = current; return lane.ladder.scrape(url, lane.cookieSession === undefined ? context : { ...context, cookieSession: lane.cookieSession }) }, close: closeLadders } : {
       async scrape(url, context) {
+        const lane = current
         // `timeout` is each page's own deadline, inside the task's.
-        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(cookieSession === undefined ? {} : { cookieSession }) })
+        const page = createExecutionScope({ ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(lane.cookieSession === undefined ? {} : { cookieSession: lane.cookieSession }) })
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
-        const cachePlan = cachePlanFor(url, mode, selection, selection.formats, rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
+        const cachePlan = cachePlanFor(url, mode, selection, selection.formats, lane.rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
         // A page fetched with the session's cookies neither reuses an anonymous one nor is stored; a lockdown request fetches nothing, so its cache-only answer stands.
-        const plan = cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
+        const plan = lane.cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
           const outcome: ScrapeOutcome = answer.kind === 'fetch'
-            ? await ladder.scrape(url, page).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+            ? await lane.ladder.scrape(url, page).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
             : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
           const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
           return { outcome, json }
@@ -1183,33 +1211,39 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       close: closeLadders,
     }
     /**
-     * With egress proxies, a page whose egress failed at the connection moves the task to the next healthy egress, at
-     * most MAX_EGRESS_SWITCHES times a run, with a new cookie session, and is read again there. A page another page's
-     * failure already moved is read again on the new egress, without a switch of its own.
+     * With egress proxies, a page no rung got an HTTP answer for has its egress probed (probeEgress). Only a proxy that
+     * does not answer, or refuses its credentials, moves the task to the next healthy egress, at most MAX_EGRESS_SWITCHES
+     * times a run, on a new lane (rungs and cookie session together), and the page is read again there. A proxy that
+     * answers leaves the page as the site answered it. A page another page's switch already moved is read again on the
+     * new lane, without a switch of its own.
      */
-    const atom: ScrapeAtom = egressPool === null ? pageAtom : {
+    const atom: ScrapeAtom = egressPool === null || firstEgress === undefined ? pageAtom : {
       async scrape(url, context) {
-        let used = egress!
+        let used = current
         let outcome = await pageAtom.scrape(url, context)
         const events: TraceEvent[] = []
-        while (egressFailed(outcome.result)) {
-          if (egress!.id === used.id) {
+        while (egressInDoubt(outcome)) {
+          let reason: string
+          if (current === used) {
             if (switches >= MAX_EGRESS_SWITCHES) break
-            egressPool.fail(used.id)
-            switches++
-            egress = egressPool.pick(used.id)
-            writeTaskEgress(egressFile, egress.id)
-            rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
-            ladder = ladderFor(rungs)
-            ladders.push(ladder)
-            // A session never changes egress: the cookies came through the failed one.
-            if (cookieSession !== undefined) {
-              await cookieSession.close()
-              cookieSession = new TaskCookieSession(cookieSessionFile)
+            const verdict = await probeEgress(used.egress!.server)
+            if (verdict === 'works') break
+            reason = verdict
+            if (current === used) {
+              egressPool.fail(used.egress!.id)
+              switches++
+              const next = egressPool.pick(used.egress!.id)
+              writeTaskEgress(egressFile, next.id)
+              // Replaced as one before any wait: no page goes out with the new egress and the old session.
+              current = laneFor(next)
+              lanes.push(current)
+              await used.cookieSession?.close()
             }
+          } else {
+            reason = 'moved_with_task'
           }
-          events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.id, to: egress!.id, reason: outcome.result.failureReason, switches } })
-          used = egress!
+          events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.egress!.id, to: current.egress!.id, reason, switches } })
+          used = current
           outcome = await pageAtom.scrape(url, context)
         }
         return events.length === 0 ? outcome : { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, ...events] } }
@@ -1221,7 +1255,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A crawl that reads a sitemap gets its own reader: the crawl mode's http identity (the mobile one when its
     // pages declare it), the engine's network policy, origin scheduler and this mode's robots.txt cache; a hosted
     // engine's policy has no proxy and no private ranges. A batch never reads one.
-    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy: egress?.policy ?? networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode, egress), ignoreRobotsTxt: ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) !== undefined })
+    const sitemapSource = req.sitemap === 'skip' ? undefined : new HttpSitemapSource({ mode, device: selection?.mobile === true ? 'mobile' : 'desktop', networkPolicy: firstEgress?.policy ?? networkPolicy, scheduler: originScheduler, robots: robotsCacheFor(mode, firstEgress), ignoreRobotsTxt: ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) !== undefined })
     // Each persisted step is one job event: a webhook delivery when the task has a receiver (a delivery error is logged, never the page's), then the hub's.
     const webhook = webhookOf(task)
     const kind = jobKindOf(task)
@@ -1309,7 +1343,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // A finished job with a receiver: anything a crash cut off between a write and its enqueue is offered again, nothing twice.
         if (task !== null && webhookOf(task) !== undefined && isTerminalStatus(task.status)) await reconcileFinished(task, store)
         // A cookie session a crash left behind a finished task goes now.
-        if (task !== null && isTerminalStatus(task.status)) await TaskCookieSession.remove(join(taskDir, COOKIE_SESSION_FILE)).catch(() => {})
+        if (task !== null && isTerminalStatus(task.status)) { removeCookieSessions(taskDir); rmSync(join(taskDir, EGRESS_FILE), { force: true }) }
         void store.close()
       }
     }).catch(() => { void store.close() })
@@ -1339,7 +1373,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, egressPool?.pick())
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
     const policy: CrawlPolicy = {
       mode,
       ...(req.allowlistedDomains !== undefined && req.allowlistedDomains.length > 0
@@ -1774,7 +1808,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           if (!inflight.has(taskId)) {
             await finishJob(task, store)
             // Its cookie session too, which only a run would otherwise remove.
-            await TaskCookieSession.remove(join(taskRoot, taskId, COOKIE_SESSION_FILE)).catch(() => {})
+            removeCookieSessions(join(taskRoot, taskId))
+            rmSync(join(taskRoot, taskId, EGRESS_FILE), { force: true })
           }
         }
       } finally {
