@@ -39,14 +39,14 @@ function fakeFirestore() {
 }
 
 describe('durable preview quota', () => {
-  it('atomically permits only three concurrent requests per visitor and never stores raw address', async () => {
+  it('atomically permits only five concurrent requests per visitor and never stores raw address', async () => {
     const store = fakeFirestore()
     const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), store.fetcher)
     const now = new Date('2026-09-24T02:00:00Z')
-    const decisions = await Promise.all(Array.from({ length: 4 }, () => quota.consume('203.0.113.10', now)))
-    expect(decisions.filter(value => value === 'ok')).toHaveLength(3)
+    const decisions = await Promise.all(Array.from({ length: 6 }, () => quota.consume('203.0.113.10', now)))
+    expect(decisions.filter(value => value === 'ok')).toHaveLength(5)
     expect(decisions.filter(value => value === 'visitor_limited')).toHaveLength(1)
-    expect([...store.docs.values()].map(value => value.count).sort((a, b) => a - b)).toEqual([3, 3])
+    expect([...store.docs.values()].map(value => value.count).sort((a, b) => a - b)).toEqual([5, 5])
     expect([...store.docs.keys()].every(name => name.startsWith('projects/sample-project/databases/(default)/documents/'))).toBe(true)
     expect(store.names.join(' ')).not.toContain('203.0.113.10')
   })
@@ -69,16 +69,16 @@ describe('durable preview quota', () => {
     const store = fakeFirestore()
     const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), store.fetcher)
     const now = new Date('2026-09-24T02:00:00Z')
-    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 3, remaining: 3 })
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 5, remaining: 5 })
     expect(store.docs.size).toBe(0)
     await quota.consume('visitor-a', now)
     await quota.consume('visitor-a', now)
-    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 3, remaining: 1 })
-    await quota.consume('visitor-a', now)
-    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'visitor_limited', limit: 3, remaining: 0 })
-    expect(await quota.status('visitor-b', now)).toEqual({ decision: 'ok', limit: 3, remaining: 3 })
-    expect(quotaStatus(98, 0)).toEqual({ decision: 'ok', limit: 3, remaining: 2 })
-    expect(quotaStatus(100, 0)).toEqual({ decision: 'global_limited', limit: 3, remaining: 0 })
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'ok', limit: 5, remaining: 3 })
+    for (let i = 0; i < 3; i++) await quota.consume('visitor-a', now)
+    expect(await quota.status('visitor-a', now)).toEqual({ decision: 'visitor_limited', limit: 5, remaining: 0 })
+    expect(await quota.status('visitor-b', now)).toEqual({ decision: 'ok', limit: 5, remaining: 5 })
+    expect(quotaStatus(148, 0)).toEqual({ decision: 'ok', limit: 5, remaining: 2 })
+    expect(quotaStatus(150, 0)).toEqual({ decision: 'global_limited', limit: 5, remaining: 0 })
   })
 
   it('checks both limits without writing and leaves consume as the atomic gate', async () => {
@@ -87,7 +87,7 @@ describe('durable preview quota', () => {
     const now = new Date('2026-09-24T02:00:00Z')
     expect(await quota.check('visitor-a', now)).toBe('ok')
     expect(store.docs.size).toBe(0)
-    for (let i = 0; i < 3; i++) expect(await quota.consume('visitor-a', now)).toBe('ok')
+    for (let i = 0; i < 5; i++) expect(await quota.consume('visitor-a', now)).toBe('ok')
     expect(await quota.check('visitor-a', now)).toBe('visitor_limited')
     expect(await quota.check('visitor-b', now)).toBe('ok')
     expect(store.docs.size).toBe(2)
@@ -98,8 +98,8 @@ describe('durable preview quota', () => {
     const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), store.fetcher)
     const now = new Date('2026-09-24T02:00:00Z')
     const decisions = []
-    for (let i = 0; i < 101; i++) decisions.push(await quota.consume(`visitor-${i}`, now))
-    expect(decisions.filter(value => value === 'ok')).toHaveLength(100)
+    for (let i = 0; i < 151; i++) decisions.push(await quota.consume(`visitor-${i}`, now))
+    expect(decisions.filter(value => value === 'ok')).toHaveLength(150)
     expect(decisions.filter(value => value === 'global_limited')).toHaveLength(1)
     expect(await quota.check('new-visitor', now)).toBe('global_limited')
   })

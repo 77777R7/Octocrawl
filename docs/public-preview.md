@@ -31,7 +31,7 @@ Below the Hero, How it works pairs three steps with a replay that shows them hap
 
 Open the public HTTPS service URL, paste a page address, and choose **Extract page**. The Firecrawl Introduction example on the page is a public documentation smoke test. A blocked, partial, or timed-out result is displayed as such. The page makes no promise to access login walls or solve challenges. The page and `POST /api/preview` are on the same HTTPS origin; no local repository, MCP connection, or service key is needed by visitors.
 
-The anonymous allowance is three attempts per browser visitor per UTC day and 100 attempts globally per UTC day. A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
+The anonymous allowance is five attempts per browser visitor per UTC day and 150 attempts globally per UTC day (three and 100 until 2026-10-07). A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
 
 Amazon.sg browser requests also use one Firestore-backed origin lease across the two Cloud Run instances. It preserves spacing and observed Retry-After cooldown, and exhausted visitors are rejected by a read-only quota check before acquiring that lease. This coordination is specific to Amazon.sg; generic public HTTP pages still use per-request scheduling, so this release does not claim shared cross-instance pacing for every domain.
 
@@ -230,7 +230,7 @@ Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day
 gcloud firestore fields ttls update expireAt --collection-group=publicPreviewQuotas --enable-ttl --project="$W2L_PROJECT_ID"
 ```
 
-Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their three previews back for the rest of the day):
+Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their day's previews back for the rest of the day):
 
 ```sh
 gcloud firestore bulk-delete --collection-ids=publicPreviewQuotas --project="$W2L_PROJECT_ID"

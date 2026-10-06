@@ -124,9 +124,10 @@ const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
 const crawl = mountCrawlView(urlCard, hero)
 const waitlist = mountWaitlist()
-/** After the daily previews run out: a link to the hosted early-access form. */
+/** After the daily previews run out: a link to the hosted early-access form, saying what a key gives (the hosted
+ * API's starting allowance, docs/hosted-api.md) and that keys are issued by hand for now. */
 function waitlistLink(className: string): HTMLAnchorElement {
-  const link = textElement('a', 'Ask for a hosted key ↓', className)
+  const link = textElement('a', 'Need more? Ask for a hosted key: 1,000 pages a day to start, issued by hand ↓', className)
   link.href = '#waitlist'
   link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
   return link
@@ -347,7 +348,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, connect your agent to mcp.octocrawl.dev or call api.octocrawl.dev (keyless within a daily allowance; a key for more), or run Octocrawl on your own computer with no limit.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, ask for a hosted key (1,000 pages a day to start, issued by hand for now) and connect your agent to mcp.octocrawl.dev or call api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
   })[result.status]
 }
 
@@ -960,7 +961,7 @@ function renderDetail(run: Run): void {
 
 /** Point to the result below; its guidance panel carries the reason. */
 /** The visitor's previews left today, as the service counted them. Anything it cannot say for sure leaves the
- * prerendered "3 free previews a day" in place: the page never guesses a number. */
+ * prerendered "5 free previews a day" in place: the page never guesses a number. */
 async function refreshQuota(): Promise<void> {
   let text = QUOTA_NOTE
   let usedUp = false
@@ -971,7 +972,7 @@ async function refreshQuota(): Promise<void> {
     else if (quota?.enabled === true && typeof quota.remaining === 'number' && typeof quota.limit === 'number') {
       usedUp = quota.state === 'global_limited' || quota.state === 'visitor_limited'
       text = quota.state === 'global_limited' ? 'Today’s public previews are used up · resets 00:00 UTC'
-        : quota.state === 'visitor_limited' ? 'No previews left today · resets 00:00 UTC'
+        : quota.state === 'visitor_limited' ? `Your ${quota.limit} free previews for today are used · resets 00:00 UTC`
           : `${quota.remaining} of ${quota.limit} free previews left today`
     }
   } catch { /* An unreadable count shows the static note, never an older number. */ }

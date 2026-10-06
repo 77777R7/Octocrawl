@@ -41,7 +41,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 ## Quick Start
 
 The no-install, single-page web preview runs at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=quick-start)
-(three previews a day; see [Public preview](docs/public-preview.md) for how it is deployed). Besides Markdown it
+(five previews a day; see [Public preview](docs/public-preview.md) for how it is deployed). Besides Markdown it
 returns a page's links and metadata, and up to 20 fields read from the page without a model. The same site serves
 the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=quick-start): MCP
 connection steps for four clients, four task guides, and limits. The pages are generated from
