@@ -103,39 +103,39 @@ export type ForbiddenCapability = (typeof REFUSED_FOREVER)[number]['capability']
 export const DEFERRED = [
   {
     capability: 'own_browser_engine',
-    source: 'ROADMAP.md:242',
+    source: 'ROADMAP.md:263',
     row: 'An own browser fork or engine, and broad custom-fingerprint research',
     restartWhen: "A maintained project stops working for a class of tasks that PA's set shows matters",
   },
   {
     capability: 'own_fingerprint_patches',
-    source: 'ROADMAP.md:242',
+    source: 'ROADMAP.md:263',
     row: 'An own browser fork or engine, and broad custom-fingerprint research',
     restartWhen: "A maintained project stops working for a class of tasks that PA's set shows matters",
   },
   {
     capability: 'own_captcha_model',
-    source: 'ROADMAP.md:243',
+    source: 'ROADMAP.md:264',
     row: 'An in-house CAPTCHA model',
     restartWhen: 'Only if solver cost or coverage blocks paying users',
   },
   {
     capability: 'own_residential_network',
-    source: 'ROADMAP.md:244',
+    source: 'ROADMAP.md:265',
     row: 'An own residential IP network',
     restartWhen: 'Not restarted; PA uses providers',
   },
   {
     capability: 'camoufox',
-    source: 'ROADMAP.md:245',
+    source: 'ROADMAP.md:266',
     row: 'A second stealth engine (Camoufox)',
     restartWhen: 'Patchright leaves a clear class of PA tasks unsolved',
   },
   {
     capability: 'hosted_browser_cluster',
-    source: 'ROADMAP.md:246',
-    row: 'Hosted API and hosted MCP at scale',
-    restartWhen: "P5's hosted-scale item, once P3 has exited; or earlier when users ask for runs while their computer is off and will pay more for it",
+    source: 'ROADMAP.md:267',
+    row: "A hosted browser cluster beyond Cloud Run's instance cap",
+    restartWhen: "PH's phase 2 shows browser-lane demand that the instance cap cannot serve, and a key holder will pay for it",
   },
 ] as const
 
