@@ -22,8 +22,11 @@ export interface RawRenderSignals {
   scriptChars: number
   /** Markers found, in a fixed order: hydration state, app root, noscript notice, js-fallback class, aria-busy. */
   markers: readonly RenderMarker[]
-  /** Each list of named records in the hydration JSON: its distinct names, collapsed and lower-cased. */
-  recordLists: readonly (readonly string[])[]
+  /**
+   * The text of the page's hydration JSON blocks, unparsed: recordLists and
+   * hydrationShown read them only for a page that can use the answer.
+   */
+  hydrationJson: readonly string[]
 }
 
 const APP_ROOT_SELECTOR = '#root, #app, #__next, #__nuxt, #___gatsby, [data-reactroot], [ng-app], [ng-version], [data-server-rendered]'
@@ -38,6 +41,11 @@ const HYDRATION_MIN_CHARS = 2_000
  * one). It counts only on a thin page or beside hydration state.
  */
 const NOTICE_MAX_TEXT = 1_500
+/** A passage of text in hydration JSON: this many characters at least, in eight or more words. */
+const HYDRATION_TEXT_MIN_CHARS = 80
+const HYDRATION_TEXT_MIN_SPACES = 8
+const HYDRATION_MAX_JSON_CHARS = 5_000_000
+const HYDRATION_MAX_PASSAGES = 200
 /**
  * A listing page whose hydration JSON lists more records than its markup
  * shows (a Walmart category page draws 9 of the 49 products in its
@@ -50,12 +58,27 @@ const NOTICE_MAX_TEXT = 1_500
 const LIST_MIN_RECORDS = 10
 const LIST_NAME_MIN_CHARS = 12
 const LIST_MIN_SHOWN = 3
-const LIST_MAX_JSON_CHARS = 5_000_000
 const LIST_MAX_NAMES = 500
 const LIST_MAX_LISTS = 50
 
 function collapsed(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+/** The passages of text in parsed hydration JSON (see hydrationShown), walked without recursion. */
+function hydrationPassages(data: unknown, out: string[]): void {
+  const stack: unknown[] = [data]
+  while (stack.length > 0 && out.length < HYDRATION_MAX_PASSAGES) {
+    const node = stack.pop()
+    if (typeof node === 'string') {
+      const text = collapsed(node)
+      if (text.length >= HYDRATION_TEXT_MIN_CHARS && (text.match(/ /g) ?? []).length >= HYDRATION_TEXT_MIN_SPACES) out.push(text)
+    } else if (Array.isArray(node)) {
+      for (const item of node) stack.push(item)
+    } else if (typeof node === 'object' && node !== null) {
+      for (const value of Object.values(node)) stack.push(value)
+    }
+  }
 }
 
 /** A record's name or title, when it is long enough to identify the record in the page's text. */
@@ -87,25 +110,59 @@ function collectRecordLists(data: unknown, out: string[][]): void {
   }
 }
 
+/**
+ * Whether the page shows every passage of text its hydration JSON holds
+ * (HYDRATION_TEXT_MIN_CHARS or more, in words): its scripts then draw
+ * nothing the HTML lacks. False when the JSON holds no such passage. `doc` is
+ * the cleaned page, before any of it is cut as recommendations; a passage
+ * only in its navigation or footer, which cleaning removed, counts as not
+ * shown. Parsing a large blob costs, so extract.ts asks only on a page whose
+ * buy box the router found.
+ */
+export function hydrationShown(raw: RawRenderSignals, doc: Document): boolean {
+  const passages: string[] = []
+  for (const text of raw.hydrationJson) {
+    try {
+      hydrationPassages(JSON.parse(text), passages)
+    } catch {
+      // Malformed JSON holds no passages to look for.
+    }
+  }
+  if (passages.length === 0 || doc.body === null) return false
+  const seen = collapsed(textOf(doc.body))
+  return passages.every((passage) => seen.includes(passage))
+}
+
+/**
+ * The lists of named records in the page's hydration JSON (see
+ * collectRecordLists). Parsing a large blob costs, so detectRenderSignals
+ * asks only on a page routed as a listing or collection.
+ */
+export function recordLists(raw: RawRenderSignals): string[][] {
+  const lists: string[][] = []
+  for (const text of raw.hydrationJson) {
+    try {
+      collectRecordLists(JSON.parse(text), lists)
+    } catch {
+      // Malformed JSON lists no records.
+    }
+  }
+  return lists
+}
+
 /** Signals that only exist before `cleanTree` removes their carriers. */
 export function rawSignals(doc: Document): RawRenderSignals {
   const markers = new Set<RenderMarker>()
   let scriptChars = 0
   let hydration = false
-  const recordLists: string[][] = []
+  const hydrationJson: string[] = []
   for (const script of qsa(doc, 'script')) {
     const text = script.textContent ?? ''
     if (script.getAttribute('src') === null) scriptChars += text.length
     const type = (script.getAttribute('type') ?? '').toLowerCase()
     if (script.id === '__NEXT_DATA__' || (type === 'application/json' && text.length >= HYDRATION_MIN_CHARS)) {
       hydration = true
-      if (text.length <= LIST_MAX_JSON_CHARS) {
-        try {
-          collectRecordLists(JSON.parse(text), recordLists)
-        } catch {
-          // Malformed JSON lists no records.
-        }
-      }
+      if (text.length <= HYDRATION_MAX_JSON_CHARS) hydrationJson.push(text)
     } else if (text.length >= 64 && HYDRATION_SCRIPT.test(text)) hydration = true
   }
   if (hydration) markers.add('hydration_state')
@@ -133,7 +190,7 @@ export function rawSignals(doc: Document): RawRenderSignals {
 
   if (qsa(doc, '[aria-busy="true"]').length > 0) markers.add('aria_busy')
 
-  return { scriptChars, markers: Array.from(markers), recordLists }
+  return { scriptChars, markers: Array.from(markers), hydrationJson }
 }
 
 /** A table whose rows carry no data cells at all. */
@@ -145,8 +202,16 @@ export function countEmptyTables(doc: Document): number {
   return empty
 }
 
-/** What the extraction knew of the page, weighed beside its signals. */
+/** What the extraction found of the page, weighed beside its signals. */
 export interface RenderContext {
+  /**
+   * The page is a product page found by its visible buy box, and its region
+   * shows the title, the price and a description (extract.ts, the same test
+   * as its confidence floor).
+   */
+  productShown?: boolean
+  /** The page shows every passage of text its hydration JSON holds (hydrationShown). */
+  hydrationShown?: boolean
   /**
    * The extracted region shows the product the page declares in its own
    * markup (see extract.ts): a page of little text beside its scripts is then
@@ -165,7 +230,7 @@ export interface RenderContext {
  * shows, when the text shows at least LIST_MIN_SHOWN of them and at most
  * half; null when no list does.
  */
-function partialRecordList(lists: RawRenderSignals['recordLists'], visible: string): { declared: number; shown: number } | null {
+function partialRecordList(lists: readonly (readonly string[])[], visible: string): { declared: number; shown: number } | null {
   let partial: { declared: number; shown: number } | null = null
   for (const names of lists) {
     const shown = names.filter((name) => visible.includes(name)).length
@@ -183,8 +248,8 @@ function partialRecordList(lists: RawRenderSignals['recordLists'], visible: stri
  * hydration list that outnumbers the shown records the page's content (an
  * article's data often lists more related posts than it shows).
  */
+
 export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, context: RenderContext = {}): RenderSignals {
-  const listing = context.listing === true
   const visible = cleaned.body ? collapsed(textOf(cleaned.body)) : ''
   const textChars = visible.length
   const emptyTables = countEmptyTables(cleaned)
@@ -197,9 +262,13 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, co
   else if (textChars < 300 && raw.scriptChars >= 2_000 && context.contentShown !== true) reason = 'script_shell'
   else if (has('js_fallback_marker') && raw.scriptChars > textChars) reason = 'js_fallback'
   else if (has('noscript_notice') && raw.scriptChars > textChars && (textChars < NOTICE_MAX_TEXT || has('hydration_state'))) reason = 'js_fallback'
-  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2) reason = 'hydration_shell'
+  // A product page that shows its buy box and description, and all its
+  // hydration data's text, is no shell however thin what its extraction kept
+  // once its recommendations were cut. Any other thin page with hydration
+  // state still is: its data may arrive by a later fetch the JSON never held.
+  else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && context.hydrationShown === true)) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
-  const listRecords = reason === null && listing ? partialRecordList(raw.recordLists, visible.toLowerCase()) : null
+  const listRecords = reason === null && context.listing === true && raw.hydrationJson.length > 0 ? partialRecordList(recordLists(raw), visible.toLowerCase()) : null
   if (listRecords !== null) reason = 'hydration_list_partial'
 
   return {

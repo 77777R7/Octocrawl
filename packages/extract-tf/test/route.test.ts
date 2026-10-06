@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { extractTf, htmlToMarkdown, routePage, selectList, selectTable } from '../src/index.js'
 import { parse } from '../src/dom.js'
+import { QUALITY_ESCALATION_MAX_CONFIDENCE } from '@w2l/contracts'
 
 const wrap = (bodyHtml: string, headExtra = '') =>
   `<!doctype html><html><head><title>Page</title>${headExtra}</head><body>${bodyHtml}</body></html>`
@@ -128,8 +129,153 @@ describe('routePage', () => {
     const doc = parse(wrap('<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li><a href="/poetry">Poetry</a></li><li>A Light in the Attic</li></ul>' +
       '<article><div class="product_main"><h1>A Light in the Attic</h1><p class="price_color">£51.77</p><p class="availability">In stock (22 available)</p></div>' +
       '<h2>Product Description</h2><p>A collection of poems and line drawings.</p></article>'))
-    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product' })
+    expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product', buyBox: true })
     doc.close()
+  })
+
+  describe('a Next.js product page titled by its one h2, beside related products it cuts', () => {
+    // sandbox.oxylabs.io as served: a Next.js page whose data blob outweighs
+    // the product's own text once the related games are cut. The blob holds
+    // the product's description and the related games' blurbs, and the page
+    // as received shows all of them.
+    const description = 'As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves. The evil human uses Link to gain access to the Sacred Realm, where he places his tainted hands on Triforce and transforms the beautiful Hyrulean landscape into a barren wasteland. Link is determined to fix the problems he helped to create, so with the help of Rauru he travels through time gathering the powers of the Seven Sages.'
+    const blurb = 'Thrown into a parallel world by the mischievous actions of a possessed Skull Kid, Link finds a land in grave danger and only seventy-two hours to save it.'
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
+    // The platforms' own entries are plain list items, short and not links.
+    const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
+    const data = JSON.stringify({ props: { pageProps: {
+      product: { id: 1, title: 'The Legend of Zelda: Ocarina of Time', description, images: Array.from({ length: 16 }, (_, i) => `/images/products/the-legend-of-zelda-ocarina-of-time-${i + 1}.jpg`) },
+      related: [1, 2].map((n) => ({ id: n, title: `Related game ${n}`, description: blurb })),
+    } } })
+    // `shown` is what the product block shows where its description would be.
+    const nextPage = (shown: string) => wrap(`<main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li><a href="/c/xbox">Xbox platform</a></li><li>Dreamcast</li><li>Stadia</li></ul></div>
+<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>${shown}
+<div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>
+<script id="__NEXT_DATA__" type="application/json">${data}</script>`)
+    const page = nextPage(`<p class="description">${description}</p>`)
+    // The description drawn by a client component: in the data only.
+    const drawn = (beside = '') => nextPage(`${beside}<p class="description"></p>`)
+
+    it('does not read a page for a shell when it shows the text its hydration data holds', () => {
+      const out = extractTf.extract(page)
+      expect(out.pageType).toBe('product')
+      expect(out.mainHtml).not.toContain('Related game 1')
+      expect(out.render).toMatchObject({ clientRendered: false, reason: null, markers: ['hydration_state'] })
+    })
+
+    it('still reads it for a shell when its description is in its hydration data only', () => {
+      for (const beside of ['', '<ul class="features"><li>Single player</li><li>Rated E</li><li>Cartridge</li></ul>']) {
+        expect(extractTf.extract(drawn(beside)).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+      }
+    })
+
+    it('still reads it for a shell when its data holds text it does not show, its description shown', () => {
+      const specs = 'Requires the Controller Pak for saving, supports the Rumble Pak, and was released in Japan on 21 November 1998 before reaching other regions.'
+      // A second data block (2 KB and more, so hydration data) holds the full specification its scripts draw.
+      const more = page.replace('</main>', `</main><script type="application/json" id="product-specs">${JSON.stringify({ specs, sku: 'NUS-CZLE-USA', images: Array.from({ length: 60 }, (_, i) => `/images/specs/zelda-ocarina-spec-${i + 1}.png`) })}</script>`)
+      expect(more).toContain(specs)
+      expect(extractTf.extract(more).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
+
+    it('is as confident in a terse buy box it found as the escalation needs', () => {
+      expect(extractTf.extract(page).confidence).toBeGreaterThan(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('keeps the floor to a buy box that shows its description, not a delivery or returns line', () => {
+      for (const beside of ['', '<p>Free delivery on orders over 50 € within 3 working days.</p>', '<p>Returns are accepted within thirty days of purchase.</p>']) {
+        const out = extractTf.extract(drawn(beside))
+        expect(out.pageType).toBe('product')
+        expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+      }
+    })
+
+    it('keeps the floor to a buy box the router found, not a page routed by its declarations', () => {
+      // The same page with its price and SKU marked up as microdata routes as product by those declarations: the region
+      // is the same, but no buy box was found, so no floor.
+      const declared = page.replace('<div class="price">91,99 €</div>', '<div class="price" itemprop="price">91,99 €</div><meta itemprop="sku" content="NUS-CZLE">')
+      const out = extractTf.extract(declared)
+      expect(out.pageType).toBe('product')
+      expect(out.confidence).toBeLessThanOrEqual(QUALITY_ESCALATION_MAX_CONFIDENCE)
+    })
+
+    it('still reads any other page that shows its hydration data\'s text for a shell when it is thin', () => {
+      // An article whose rates arrive by a later fetch: its data holds only the intro it shows.
+      const intro = 'Our savings rates are reviewed every month against the market, and every account is protected up to the statutory limit.'
+      const article = wrap(`<main><h1>Savings rates</h1><p>${intro}</p><div class="rates">Loading rates…</div></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { intro, config: { locale: 'en-GB', currency: 'GBP', flags: Array.from({ length: 40 }, (_, i) => `feature-flag-${i}`) } } } })}</script>`)
+      const out = extractTf.extract(article)
+      expect(out.pageType).not.toBe('product')
+      expect(out.render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
+
+    it('reads its hydration data\'s text only on a page whose buy box the router found', () => {
+      // A large data blob is parsed for its passages only where they can matter.
+      // An article (no buy box, no listing) is not parsed; a listing is, for its records (hydration_list_partial).
+      const items = Array.from({ length: 400 }, (_, i) => ({ id: i, description: `${blurb} (${i})` }))
+      const prose = Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1}: ${blurb}</p>`).join('')
+      const article = wrap(`<main><article><h1>The making of Ocarina of Time</h1><h2>Development</h2>${prose}</article></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { items } })}</script>`)
+      const parse = vi.spyOn(JSON, 'parse')
+      try {
+        expect(extractTf.extract(article).pageType).toBe('article')
+        expect(parse.mock.calls.filter(([text]) => typeof text === 'string' && text.length > 20_000)).toEqual([])
+        extractTf.extract(page)
+        expect(parse.mock.calls.some(([text]) => typeof text === 'string' && text.includes('the-legend-of-zelda-ocarina-of-time-1.jpg'))).toBe(true)
+      } finally {
+        parse.mockRestore()
+      }
+    })
+
+    it('still reads a Next.js page with nothing of its own server-rendered for a shell', () => {
+      const shell = wrap(`<main><h2>Our games</h2><p>${blurb} ${blurb}</p><p>Loading the catalogue for you, one moment please.</p></main><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { games: Array.from({ length: 12 }, (_, i) => ({ id: i, description: `${description} (${i})` })) } })}</script>`)
+      expect(extractTf.extract(shell).render).toMatchObject({ clientRendered: true, reason: 'hydration_shell' })
+    })
+  })
+
+  describe('a product page titled by its one h2, beside related products', () => {
+    // sandbox.oxylabs.io: no h1 and nothing declared; the game's title is the
+    // page's one h2, its price follows in the same block, and two related
+    // games show their own prices under linked h4 titles.
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>Action Adventure Fantasy, a land in grave danger and a moon crashing toward it.</p><div class="price-wrapper">8${n},99 €</div></div>`
+    const sidebar = `<div class="categories"><p>Game platforms:</p><ul>${['All', 'Nintendo', 'Xbox', 'Dreamcast', 'Playstation', 'Pc', 'Stadia', 'Wii', 'Switch', 'Gamecube'].map((c) => `<li><a href="/c/${c}">${c}</a></li>`).join('')}</ul></div>`
+    const pdp = wrap(`<main>${sidebar}<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2>
+<p><b>Developer:</b> Nintendo</p><p class="description">As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves, and travels through time gathering the powers of the Seven Sages.</p>
+<div class="price">91,99 €</div><p>In stock</p></div></div><div class="related">${related(1)}${related(2)}</div></main>`)
+
+    it('routes it to product and keeps the related games out', () => {
+      const doc = parse(pdp)
+      expect(routePage(doc.document)).toEqual({ type: 'product', strategy: 'product', buyBox: true })
+      doc.close()
+      const out = extractTf.extract(pdp)
+      expect(out.pageType).toBe('product')
+      expect(out.mainHtml).toContain('Seven Sages')
+      expect(out.mainHtml).toContain('91,99 €')
+      expect(out.mainHtml).not.toContain('Related game 1')
+    })
+
+    it('does not take a listing titled by one h2 for a product page', () => {
+      const card = (n: number) => `<div class="card"><a href="/products/${n}">Game ${n}</a><span class="price">${n}9,99 €</span></div>`
+      for (const body of [
+        // Priced cards under the listing's one h2.
+        `<main><h2>Nintendo games</h2><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+        // A featured game with its own title before the grid.
+        `<main><h2>Nintendo games</h2><div class="featured"><a href="/products/9"><h3>Featured game</h3></a><span class="price">59,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+        // A deal, a price filter or a shipping banner between the listing's h2 and its grid.
+        ...[
+          '<div class="deal"><a href="/deal">Deal of the day: kitchen scale</a><span class="price">$59.99</span></div>',
+          '<div class="filters"><span class="price-range">$0 - $500</span></div>',
+          '<p class="banner">Free shipping over <span class="price">$35</span></p>',
+        ].map((x) => `<main><h2>Kitchen widgets</h2>${x}<div class="grid">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join('')}</div></main>`),
+        // The deal shares a hero block with the h2.
+        `<main><div class="hero"><h2>Kitchen widgets</h2><div class="deal"><a href="/deal">Deal of the day</a><span class="price">$59.99</span></div></div><div class="grid">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join('')}</div></main>`,
+        // Two results, or two plans, under one h2.
+        `<main><h2>Search results</h2><div class="results">${[1, 2].map(card).join('')}</div></main>`,
+        // The page's one h2 is a promotion's linked title, with a price of its own.
+        `<main><div class="promo"><a href="/sale"><h2>Summer sale</h2></a><span class="price">From 9,99 €</span></div><div class="grid">${[1, 2, 3, 4].map(card).join('')}</div></main>`,
+      ]) {
+        const doc = parse(wrap(body))
+        expect(routePage(doc.document).type).not.toBe('product')
+        doc.close()
+      }
+    })
   })
 
   it('does not route a price that belongs to a listed item to product', () => {
