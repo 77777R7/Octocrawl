@@ -306,8 +306,9 @@ describe('W2L_COMPAT_HOSTS', () => {
   })
 
   it('takes the hosts its acceptance showed it helps when none are named, under the grant on a local server; none turns it off', () => {
-    // The list is the G1 acceptance's (research/access/benefit-hosts.v1.json), read from the repository.
-    expect(COMPAT_BENEFIT_HOSTS).toEqual(['fred.stlouisfed.org', 'www.idealo.de', 'www.investing.com', 'www.ironmountain.com', 'www.wayfair.com'])
+    // The list is the G1 acceptance's, as research/access/benefit-hosts.v1.json records it.
+    const recorded = JSON.parse(readFileSync(new URL('../../../research/access/benefit-hosts.v1.json', import.meta.url), 'utf8')) as { hosts: string[] }
+    expect([...COMPAT_BENEFIT_HOSTS]).toEqual(recorded.hosts)
     expect(compatHostsChoice({}, grant, false)).toEqual([...COMPAT_BENEFIT_HOSTS].sort())
     expect(compatHostsChoice({ W2L_COMPAT_HOSTS: ' ' }, grant, false)).toEqual([...COMPAT_BENEFIT_HOSTS].sort())
     // Without the grant, or on a hosted server, there is no default; named hosts replace it; none turns it off.

@@ -60,17 +60,6 @@ const inlineAmazonSchema = {
   },
 }
 
-/** Every bundle that takes in @w2l/bench reads the compatible transport's default hosts from research/ at run time; a bundle carries them inline. */
-const inlineBenefitHosts = {
-  name: 'inline-compat-benefit-hosts',
-  setup(builder) {
-    builder.onLoad({ filter: /packages[\\/]bench[\\/](src|dist)[\\/]compatBenefitHosts\.(ts|js)$/ }, () => ({
-      contents: `export const COMPAT_BENEFIT_HOSTS = ${JSON.stringify(JSON.parse(readFileSync(join(root, 'research', 'access', 'benefit-hosts.v1.json'), 'utf8')).hosts)}`,
-      loader: 'ts',
-    }))
-  },
-}
-
 /**
  * In one bundle every module's `import.meta.url` is the bundle's, so a
  * module that runs itself when it is the entry (`import.meta.url ===
@@ -135,13 +124,13 @@ const targets = [
   {
     name: '@octocrawl/cli', dir: 'cli', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
     description: 'Octocrawl on the command line: scrape, crawl, batch and map with an Evidence Record on every page, or serve the local API.',
-    entry: { cli: 'packages/cli/src/cli.ts' }, formats: ['esm'], plugins: [inlineBenefitHosts],
+    entry: { cli: 'packages/cli/src/cli.ts' }, formats: ['esm'],
     manifest: () => ({ bin: { octocrawl: './dist/cli.js' }, engines: { node: rootPackage.engines?.node ?? '>=22.13.0' }, dependencies: thirdPartyDependencies(['@w2l/cli']) }),
   },
   {
     name: '@octocrawl/mcp', dir: 'mcp', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
     description: 'Octocrawl as an MCP server over stdio, a client of a running Octocrawl API (octocrawl serve).',
-    entry: { stdio: 'packages/mcp/src/stdio.ts' }, formats: ['esm'], plugins: [inlineAmazonSchema, inlineBenefitHosts],
+    entry: { stdio: 'packages/mcp/src/stdio.ts' }, formats: ['esm'], plugins: [inlineAmazonSchema],
     // mcpName ties the npm package to its entry in the official MCP Registry (server.json at the repository root; the two must agree).
     manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, mcpName: MCP_REGISTRY_NAME, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
   },

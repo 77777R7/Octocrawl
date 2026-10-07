@@ -6,7 +6,7 @@
   "notListed": [
     { "host": "medium.com", "why": "regressed with the transport in both windows" },
     { "host": "www.bestbuy.com", "why": "a false success in both windows (Best Buy's country selector, now recognised as geo_restricted)" },
-    { "host": "www.zalando.de", "why": "a false success in both windows by its task's German-only check: the page was the real English listing" },
+    { "host": "www.zalando.de", "why": "a false success in both windows by its task's German-only check: the saved Markdown of window 2 (git-ignored) was the men's shoes listing in English, which the check (schuh) does not match" },
     { "host": "www.reddit.com", "why": "a false success in both windows (Reddit's challenge page, now recognised as captcha)" },
     { "host": "www.bloomberg.com", "why": "its gain did not hold in window 2: verified without the transport too" },
     { "host": "www.temu.com", "why": "unstable in window 2" },

@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
-
 /**
- * The hosts the browser-compatible transport is used for by default (research/access/benefit-hosts.v1.json, decided by
- * the G1 acceptance run it names): read from the repository at run time; a published bundle carries the list inline.
+ * The hosts the browser-compatible transport is used for by default: the list in
+ * research/access/benefit-hosts.v1.json, decided by the G1 acceptance run it names. Kept here as a constant so every
+ * build (the published bundles, the Docker images, which carry no research/ files) has it; a test holds the two equal.
  */
-export const COMPAT_BENEFIT_HOSTS: readonly string[] = (JSON.parse(readFileSync(new URL('../../../research/access/benefit-hosts.v1.json', import.meta.url), 'utf8')) as { hosts: string[] }).hosts
+export const COMPAT_BENEFIT_HOSTS: readonly string[] = ['fred.stlouisfed.org', 'www.idealo.de', 'www.investing.com', 'www.ironmountain.com', 'www.wayfair.com']
