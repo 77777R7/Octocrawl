@@ -1,0 +1,15 @@
+{
+  "schema": "octocrawl.compat-benefit-hosts/1",
+  "note": "The hosts whose pages go over the browser-compatible HTTP transport by default, on a local server whose access grant names compatible_transport and that sets no W2L_COMPAT_HOSTS (ROADMAP PA item 2). Each host's frozen task was verified with the transport and not without it in both G1 windows, with no regression and the paired latency rule met. The list stays until route memory with expiry replaces it. Changing it needs a new run that shows the same.",
+  "decidedBy": "research/access/runs/2026-10-07-g1-acceptance-5afe577.md",
+  "hosts": ["fred.stlouisfed.org", "www.idealo.de", "www.investing.com", "www.ironmountain.com", "www.wayfair.com"],
+  "notListed": [
+    { "host": "medium.com", "why": "regressed with the transport in both windows" },
+    { "host": "www.bestbuy.com", "why": "a false success in both windows (Best Buy's country selector, now recognised as geo_restricted)" },
+    { "host": "www.zalando.de", "why": "a false success in both windows by its task's German-only check: the page was the real English listing" },
+    { "host": "www.reddit.com", "why": "a false success in both windows (Reddit's challenge page, now recognised as captcha)" },
+    { "host": "www.bloomberg.com", "why": "its gain did not hold in window 2: verified without the transport too" },
+    { "host": "www.temu.com", "why": "unstable in window 2" },
+    { "host": "www.allrecipes.com", "why": "a blind task: blind tasks never seed a routing list" }
+  ]
+}
