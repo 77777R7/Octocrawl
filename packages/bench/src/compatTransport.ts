@@ -41,6 +41,7 @@
  * declares a contact in its User-Agent, which this transport cannot send unchanged.
  */
 
+import { COMPAT_BENEFIT_HOSTS } from './compatBenefitHosts.js'
 import type { Impit } from 'impit'
 import { proxyFor, type ModeIdentity, type NetworkPolicy, type SentHeadersFact } from '@w2l/contracts'
 import type { ResilientResponseLike } from '@w2l/http-core'
@@ -296,17 +297,21 @@ export class CompatTransport {
  * The hosts a server sends over the compatible transport (`W2L_COMPAT_HOSTS`, comma-separated host
  * names), checked at startup: they need an access grant that names `compatible_transport`, and a
  * hosted server refuses them, since impit resolves names outside the address check a hosted server
- * relies on. Empty when none are given.
+ * relies on. Unset, a local server whose grant names `compatible_transport` takes the hosts its
+ * acceptance showed it helps (COMPAT_BENEFIT_HOSTS); `none` turns the transport off. Empty otherwise.
  */
 export function compatHostsChoice(env: NodeJS.ProcessEnv, grant: { capabilities: readonly string[] } | null, hosted: boolean): string[] {
-  const raw = (env.W2L_COMPAT_HOSTS ?? '').split(',').map(value => value.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean)
+  const granted = (grant?.capabilities ?? []).includes('compatible_transport')
+  if (env.W2L_COMPAT_HOSTS === undefined || env.W2L_COMPAT_HOSTS.trim() === '') return granted && !hosted ? [...COMPAT_BENEFIT_HOSTS].sort() : []
+  if (env.W2L_COMPAT_HOSTS.trim().toLowerCase() === 'none') return []
+  const raw = env.W2L_COMPAT_HOSTS.split(',').map(value => value.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean)
   if (raw.length === 0) return []
   const invalid = raw.filter(host => {
     try { return new URL(`http://${host}/`).hostname !== host || host.includes('*') } catch { return true }
   })
   if (invalid.length > 0) throw new Error(`W2L_COMPAT_HOSTS takes host names, such as example.com: not ${invalid.join(', ')}`)
   if (hosted) throw new Error('W2L_COMPAT_HOSTS is refused on a hosted server (ADR 0005: the compatible transport resolves host names outside the hosted address check)')
-  if (!(grant?.capabilities ?? []).includes('compatible_transport')) {
+  if (!granted) {
     throw new Error('W2L_COMPAT_HOSTS needs an access grant that names compatible_transport (ADR 0005; --access-grant or W2L_ACCESS_GRANT)')
   }
   return [...new Set(raw)].sort()

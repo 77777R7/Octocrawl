@@ -9,6 +9,7 @@ import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { identityBundleFrom, identityBundleIssues, localNetworkPolicy, withEnvironmentProxy } from '@w2l/contracts'
 import { isTlsError } from '@w2l/http-core'
+import { COMPAT_BENEFIT_HOSTS } from '../src/compatBenefitHosts.js'
 import { COMPAT_PROFILES, COMPAT_REQUEST_CEILING_MS, CompatTransport, compatHostListed, compatHostsChoice, compatIdentity, impitTimeoutMs, prepareCompatIdentity } from '../src/compatTransport.js'
 import { BodyTooLargeError } from '../src/egress.js'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
@@ -302,6 +303,19 @@ describe('W2L_COMPAT_HOSTS', () => {
     expect(() => compatHostsChoice({ W2L_COMPAT_HOSTS: 'example.com' }, { capabilities: ['enhanced_browser'] }, false)).toThrow(/compatible_transport/)
     expect(() => compatHostsChoice({ W2L_COMPAT_HOSTS: 'example.com' }, grant, true)).toThrow(/refused on a hosted server/)
     expect(() => compatHostsChoice({ W2L_COMPAT_HOSTS: 'https://example.com/a,*.shop.test' }, grant, false)).toThrow(/not https:\/\/example.com\/a, \*.shop.test/)
+  })
+
+  it('takes the hosts its acceptance showed it helps when none are named, under the grant on a local server; none turns it off', () => {
+    // The list is the G1 acceptance's, as research/access/benefit-hosts.v1.json records it.
+    const recorded = JSON.parse(readFileSync(new URL('../../../research/access/benefit-hosts.v1.json', import.meta.url), 'utf8')) as { hosts: string[] }
+    expect([...COMPAT_BENEFIT_HOSTS]).toEqual(recorded.hosts)
+    expect(compatHostsChoice({}, grant, false)).toEqual([...COMPAT_BENEFIT_HOSTS].sort())
+    expect(compatHostsChoice({ W2L_COMPAT_HOSTS: ' ' }, grant, false)).toEqual([...COMPAT_BENEFIT_HOSTS].sort())
+    // Without the grant, or on a hosted server, there is no default; named hosts replace it; none turns it off.
+    expect(compatHostsChoice({}, { capabilities: ['egress_sessions'] }, false)).toEqual([])
+    expect(compatHostsChoice({}, grant, true)).toEqual([])
+    expect(compatHostsChoice({ W2L_COMPAT_HOSTS: 'example.com' }, grant, false)).toEqual(['example.com'])
+    expect(compatHostsChoice({ W2L_COMPAT_HOSTS: 'None' }, grant, false)).toEqual([])
   })
 
   it('matches a listed host and its subdomains, nothing else', () => {
