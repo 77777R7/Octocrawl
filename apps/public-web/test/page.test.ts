@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
 import { glyphBand } from '../src/glyphArt.js'
 import { pageMarkup, sectionBar } from '../src/page.js'
@@ -16,6 +17,16 @@ describe('Page markup', () => {
     const sections = [...page.matchAll(/<section class="[^"]*" id="([^"]+)"/g)].map(([, id]) => id)
     expect(sections).toEqual(['result-section', 'how-it-works', 'faq'])
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
+  })
+
+  it('links the brand to the home page and keeps the header octopus still', () => {
+    const page = pageMarkup()
+    expect(page.match(/<a class="brand[^"]*" href="\/" aria-label="Octocrawl home">/g)).toHaveLength(2)
+    expect(page).not.toContain('class="brand" href="#top"')
+    const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+    expect(css).not.toMatch(/octo-(drift|wiggle)/)
+    const wordmark = readFileSync(new URL('../public/assets/octocrawl-wordmark.svg', import.meta.url), 'utf8')
+    expect(wordmark).not.toContain('#ff8659')
   })
 
   it('keeps the crawl window inside the URL card, hidden until a run opens it, with a way to skip it', () => {

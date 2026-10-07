@@ -37,9 +37,9 @@ export function pageMarkup(): string {
 
       <div class="band band-dark">
         <header class="frame site-header">
-          <a class="brand" href="#top" aria-label="Octocrawl home">
+          <a class="brand" href="/" aria-label="Octocrawl home">
             <img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="50" height="50" />
-            <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="149" height="23" />
+            <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="140" height="23" />
           </a>
           <nav class="site-nav" aria-label="Main navigation">
             <a class="nav-how" href="#how-it-works">How it works</a>
@@ -244,7 +244,7 @@ export function pageMarkup(): string {
       <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">
-            <a class="brand footer-brand" href="#top" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="130" height="20" /></a>
+            <a class="brand footer-brand" href="/" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="122" height="20" /></a>
             <p class="footer-tagline">Start with one link.</p>
             <p class="footer-note">Open-source web data you can cite</p>
           </div>
