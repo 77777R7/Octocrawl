@@ -322,6 +322,23 @@ describe('classifyGate — generic bot gate thresholds', () => {
     expect(classifyGate(res({ status: 200, body: body.replace('Reddit - Prove your humanity', 'How do you prove your humanity online? : r/AskReddit'), contentful: true }))).toBeNull()
     expect(classifyGate(res({ status: 200, body: body.replace('https://www.google.com/recaptcha/api.js', 'https://www.redditstatic.com/app.js'), contentful: true }))).toBeNull()
   })
+  it('recognizes Best Buy\'s country selector, served with HTTP 200 in place of the page to an address outside the US', () => {
+    // Served to the compatible transport through a non-US exit on 2026-10-07 (www.bestbuy.com/site/searchpage.jsp?st=laptop):
+    // the URL unchanged, the page a choice between Canada and the US, with links that skip it (intl=nosplash).
+    const body = `<!doctype html><html class="no-js" lang="en"><head><meta charset="utf-8">
+      <meta name="keywords" content=" best buy international, best buy countries" />
+      <title>Best Buy International: Select your Country - Best Buy</title></head>
+      <body><div class="country-selection"><h1>Choose a country.</h1>
+      <a class="canada-link" href="#">Canada</a><a class="us-link" href="#">United States</a>
+      <p>International customers can shop on www.bestbuy.com and have orders shipped to any U.S. address or U.S. store.
+      <a href="https://www.bestbuy.com/site/help-topics/international-orders/pcmcat204400050019.c?id=pcmcat204400050019&intl=nosplash">See More Details</a></p></div></body></html>`
+    const expected = { reason: 'geo_restricted', signals: ['bestbuy_country_selector'] }
+    expect(classifyGate(res({ status: 200, body }))).toEqual(expected)
+    expect(classifyGate(res({ status: 200, body, contentful: true }))).toEqual(expected)
+    // Either alone is not the selector: Best Buy's page about international orders, or another site's country page.
+    expect(classifyGate(res({ status: 200, body: body.replace('Best Buy International: Select your Country - Best Buy', 'International Orders - Best Buy'), contentful: true }))).toBeNull()
+    expect(classifyGate(res({ status: 200, body: body.replaceAll('intl=nosplash', 'ref=help'), contentful: true }))).toBeNull()
+  })
   it('fires on a single strong refusal marker', () => {
     const v = classifyGate(res({ status: 403, body: '<h1>You have been blocked</h1>' }))
     expect(v?.reason).toBe('bot_detected_generic')
