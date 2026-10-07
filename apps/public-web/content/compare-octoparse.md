@@ -15,7 +15,7 @@ Choose **Octocrawl** if you work through an AI assistant such as Claude Code or 
 | | Octocrawl | Octoparse |
 |---|---|---|
 | What it is | Open-source scraper: a web page, a command-line tool, an API and an MCP server | Desktop app for Windows and Mac, with a cloud service |
-| Without code | Paste a link on [octocrawl.dev](/) (three pages a day), or ask an AI assistant connected over MCP. Everything else needs a terminal | Point-and-click editor with auto-detect, and ready-made templates |
+| Without code | Paste a link on [octocrawl.dev](/) (five pages a day), or ask an AI assistant connected over MCP. Everything else needs a terminal | Point-and-click editor with auto-detect, and ready-made templates |
 | Price | Free. The local version is unmetered; the hosted service gives 20 pages a day without a key and free keys on request. Nothing is for sale yet | Free plan with 10 tasks, local runs only. Paid plans from $69 a month billed annually (Standard), $249 a month billed annually (Professional) |
 | Open source | Yes, AGPL-3.0 | No; its MCP server is MIT |
 | Output | Markdown, HTML, links, screenshot, JSON, tables as CSV, lists of repeated items; the CLI's `--out` also writes `results.csv` | Excel, CSV, JSON, HTML, XML, Google Sheets and databases |

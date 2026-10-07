@@ -1,4 +1,4 @@
-import type { PageCapture, StageEvent } from './crawlModel'
+import type { StageEvent } from './crawlModel'
 
 /** The content type of a preview that reports its stages (packages/public-preview/src/server.ts). */
 export const STAGE_STREAM = 'application/x-ndjson'
@@ -9,18 +9,9 @@ function stageOf(line: Record<string, unknown>): StageEvent | null {
   return null
 }
 
-function captureOf(line: Record<string, unknown>): PageCapture | null {
-  if (typeof line.width !== 'number' || typeof line.height !== 'number' || typeof line.jpeg !== 'string' || !Array.isArray(line.elements)) return null
-  const elements = line.elements.filter((element): element is PageCapture['elements'][number] => element !== null && typeof element === 'object'
-    && typeof (element as { tag?: unknown }).tag === 'string' && typeof (element as { x?: unknown }).x === 'number' && typeof (element as { y?: unknown }).y === 'number'
-    && typeof (element as { width?: unknown }).width === 'number' && typeof (element as { height?: unknown }).height === 'number' && typeof (element as { text?: unknown }).text === 'string')
-  return { width: line.width, height: line.height, jpeg: line.jpeg, elements }
-}
-
-/** Reads /api/preview's answer. A streamed answer tells each stage to `onStage` as its line arrives, the page's
- * picture to `onCapture` when one comes, and ends with the result; any other answer is the result as plain JSON. A
- * stream that ends without a result is an error. */
-export async function readPreview(response: Response, onStage: (stage: StageEvent) => void, onCapture?: (capture: PageCapture) => void): Promise<unknown> {
+/** Reads /api/preview's answer. A streamed answer tells each stage to `onStage` as its line arrives and ends with the
+ * result; any other answer is the result as plain JSON. A stream that ends without a result is an error. */
+export async function readPreview(response: Response, onStage: (stage: StageEvent) => void): Promise<unknown> {
   if (!response.body || !(response.headers.get('content-type') ?? '').startsWith(STAGE_STREAM)) return response.json()
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
@@ -34,9 +25,6 @@ export async function readPreview(response: Response, onStage: (stage: StageEven
     else if (message.type === 'stage') {
       const stage = stageOf(message)
       if (stage) onStage(stage)
-    } else if (message.type === 'capture' && onCapture) {
-      const capture = captureOf(message)
-      if (capture) onCapture(capture)
     }
   }
   for (;;) {

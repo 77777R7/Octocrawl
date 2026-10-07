@@ -4,8 +4,8 @@ import { throwIfExecutionStopped, type ExecutionBudget } from '@w2l/http-core'
 export type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 
 /** Previews per visitor, and for the whole site, per UTC day. */
-export const VISITOR_DAILY_PREVIEWS = 3
-export const SITE_DAILY_PREVIEWS = 100
+export const VISITOR_DAILY_PREVIEWS = 5
+export const SITE_DAILY_PREVIEWS = 150
 
 /** What a visitor has left today: never more than the site has left, so the page cannot promise a preview the
  * site-wide limit would refuse. */

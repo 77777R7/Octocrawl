@@ -7,7 +7,6 @@ import { join } from 'node:path'
 import type { FetchResult, StructuredExtractionResult } from '@w2l/contracts'
 import { createPreviewServer } from '../src/server.js'
 import { mapPreviewResult, normalizePreviewUrl, type CaptureOutcome } from '../src/preview.js'
-import type { ScreenshotCapture } from '../src/screenshotCapture.js'
 import { resolvePreviewCapability } from '../src/capability.js'
 import type { PreviewQuota } from '../src/quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate } from '../src/amazonGate.js'
@@ -488,89 +487,5 @@ describe('preview stages', () => {
     expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8')
     expect(await response.json()).toMatchObject({ status: 'quota_exceeded' })
     expect(captures).toBe(0)
-  })
-})
-
-describe('the crawl window\'s screenshot', () => {
-  const lines = async (response: Response) => (await response.text()).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
-  const kinds = (told: Record<string, unknown>[]) => told.map(line => line.type === 'stage' ? line.stage : line.type)
-  /** A capture that reports robots.txt allowed the page, then answers as `outcome` says. */
-  const captureWith = (outcome: (url: string) => CaptureOutcome): NonNullable<Parameters<typeof createPreviewServer>[0]['capture']> =>
-    async (target, _signal, _deadline, _state, _evaluation, _retry, _proxy, _exception, _options, onStage) => {
-      onStage?.({ stage: 'robots', allowed: true })
-      onStage?.({ stage: 'page' })
-      return outcome(target.url)
-    }
-  const picture = (): ScreenshotCapture => ({
-    jpeg: Buffer.from('jpeg-bytes'), width: 1280, height: 2400, blocked: 2,
-    elements: [{ tag: 'h1', x: 40, y: 120, width: 600, height: 48, text: 'Example page' }],
-    timings: { launchMs: 50, navigateMs: 400, loadMs: 500, loadCapped: false, screenshotMs: 60, totalMs: 700 },
-  })
-  const post = (url: string, accept?: string) => fetch(`${url}/api/preview`, {
-    method: 'POST', headers: { 'content-type': 'application/json', ...(accept ? { accept } : {}) }, body: JSON.stringify({ url: 'https://docs.example/page' }),
-  })
-
-  it('goes on the stream before a result that read the page, with the picture and where its elements sit', async () => {
-    const asked: string[] = []
-    const url = await endpoint({ consume: async () => 'ok' }, captureWith(target => fixture(target)), { screenshot: async (target) => { asked.push(target); return picture() } })
-    const told = await lines(await post(url, 'application/x-ndjson'))
-    expect(kinds(told)).toEqual(['started', 'robots', 'page', 'capture', 'result'])
-    const capture = told[3]!
-    expect(capture).toMatchObject({ width: 1280, height: 2400, blocked: 2, elements: [{ tag: 'h1', text: 'Example page' }] })
-    expect(Buffer.from(capture.jpeg as string, 'base64').toString()).toBe('jpeg-bytes')
-    expect(typeof capture.ms).toBe('number')
-    expect(told[4]).toMatchObject({ type: 'result', body: { status: 'success' } })
-    expect(asked).toEqual(['https://docs.example/page'])
-  })
-
-  it('is never taken for a client that did not ask for the stream, nor when switched off', async () => {
-    let asked = 0
-    const screenshot = async () => { asked++; return picture() }
-    const plain = await endpoint({ consume: async () => 'ok' }, captureWith(target => fixture(target)), { screenshot })
-    expect(await (await post(plain)).json()).toMatchObject({ status: 'success' })
-    const off = await endpoint({ consume: async () => 'ok' }, captureWith(target => fixture(target)), { screenshot, screenshots: false })
-    expect(kinds(await lines(await post(off, 'application/x-ndjson')))).toEqual(['started', 'robots', 'page', 'result'])
-    expect(asked).toBe(0)
-  })
-
-  it('is dropped, and its browser stopped, when the result did not read the page', async () => {
-    let stopped = false
-    const failed = (target: string): CaptureOutcome => {
-      const outcome = fixture(target)
-      return { ...outcome, result: { ...outcome.result, status: 'failed', failureReason: 'empty_unverified', markdown: null } as typeof outcome.result }
-    }
-    const url = await endpoint({ consume: async () => 'ok' }, captureWith(failed), {
-      screenshot: (_target, options) => new Promise((_resolve, reject) => { options.signal.addEventListener('abort', () => { stopped = true; reject(options.signal.reason) }) }),
-    })
-    const told = await lines(await post(url, 'application/x-ndjson'))
-    expect(kinds(told)).toEqual(['started', 'robots', 'page', 'result'])
-    expect(told[3]).toMatchObject({ body: { status: 'failed' } })
-    expect(stopped).toBe(true)
-  })
-
-  it('does not start when robots.txt refused the page', async () => {
-    let asked = 0
-    const refusing: NonNullable<Parameters<typeof createPreviewServer>[0]['capture']> = async (target, _s, _d, _st, _e, _r, _p, _x, _o, onStage) => {
-      onStage?.({ stage: 'robots', allowed: false })
-      const outcome = fixture(target.url)
-      return { ...outcome, result: { ...outcome.result, status: 'failed', failureReason: 'policy_denied', trace: [{ at: 1, lane: 'http', event: 'robots_disallowed', detail: {} }] } as typeof outcome.result }
-    }
-    const url = await endpoint({ consume: async () => 'ok' }, refusing, { screenshot: async () => { asked++; return picture() } })
-    const told = await lines(await post(url, 'application/x-ndjson'))
-    expect(kinds(told)).toEqual(['started', 'robots', 'result'])
-    expect(told[2]).toMatchObject({ body: { status: 'blocked' } })
-    expect(asked).toBe(0)
-  })
-
-  it('lets a result that read the page go without a picture that is not in within the grace', async () => {
-    let stopped = false
-    const url = await endpoint({ consume: async () => 'ok' }, captureWith(target => fixture(target)), {
-      screenshot: (_target, options) => new Promise((_resolve, reject) => { options.signal.addEventListener('abort', () => { stopped = true; reject(options.signal.reason) }) }),
-    })
-    const told = await lines(await post(url, 'application/x-ndjson'))
-    expect(kinds(told)).toEqual(['started', 'robots', 'page', 'result'])
-    expect(told[3]).toMatchObject({ body: { status: 'success' } })
-    // The grace ended it: the result went out and the browser was stopped, not waited for.
-    expect(stopped).toBe(true)
   })
 })
