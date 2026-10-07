@@ -225,6 +225,20 @@ describe('first-party analytics', () => {
     expect(lines).toEqual([{ event: 'w2l_web_event', name: 'page_view', props: { path: '/', ref: 'news.ycombinator.com' }, vid: expect.stringMatching(/^[a-f0-9]{16}$/), automated: true }])
   })
 
+  it('flags the operator\'s own browser as internal once it opts in with ?internal=1, and clears it with ?internal=0', async () => {
+    const { url, lines } = await site({ visitorCookieSecret: 's'.repeat(32) })
+    const on = (await fetch(`${url}/?internal=1`)).headers.getSetCookie()
+    expect(on.map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor', 'w2l_internal'])
+    expect(on[1]).toMatch(/^w2l_internal=1; Max-Age=31536000; Path=\/; HttpOnly; SameSite=Lax$/)
+    expect((await fetch(`${url}/?internal=0`)).headers.getSetCookie()[1]).toMatch(/^w2l_internal=; Max-Age=0;/)
+    expect((await fetch(`${url}/?internal=yes`)).headers.getSetCookie().map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor'])
+    const event = (cookie?: string) => fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ name: 'page_view', props: { path: '/' } }) })
+    await event('w2l_internal=1')
+    await event('w2l_internal=0')
+    await fetch(`${url}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'other=1; w2l_internal=1' }, body: JSON.stringify({ url: 'https://docs.example' }) })
+    expect(lines.map(line => [line.event, line.internal])).toEqual([['w2l_web_event', true], ['w2l_web_event', undefined], ['w2l_preview', true]])
+  })
+
   it('flags self-named tools, monitors and stale browser strings as automated, and current browsers as not', () => {
     const automated = (agent: string | undefined) => looksAutomated({ headers: agent === undefined ? {} : { 'user-agent': agent } } as Parameters<typeof looksAutomated>[0])
     const current = [
@@ -251,8 +265,15 @@ describe('first-party analytics', () => {
       'Mozilla/5.0 (iPad; CPU OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36',
+      // Forged strings seen on /api/events: a truncated Safari token, EdgeHTML beside Chrome 125, old Firefox, frozen Chrome 117.
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.60 Safari/537.36 Edge/12.246',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/109.0',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.5938.132 Safari/537.36',
     ]
     for (const agent of stale) expect(automated(agent), String(agent)).toBe(true)
+    // Only the one frozen Chrome 117 build is refused, not every Chrome 117.
+    expect(automated('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.5938.149 Safari/537.36')).toBe(false)
   })
 
   it('logs each anonymous preview outcome with the target host only', async () => {
