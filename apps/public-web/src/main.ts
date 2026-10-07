@@ -5,7 +5,9 @@ import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
-import { fieldsSchema, isAmazonProduct, LOCAL_MCP, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
+import { mountCrawlView } from './crawlView'
+import { readPreview, STAGE_STREAM } from './previewStream'
+import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -120,10 +122,12 @@ const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label'
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
+const crawl = mountCrawlView(urlCard, hero)
 const waitlist = mountWaitlist()
-/** After the daily previews run out: a link to the hosted early-access form. */
+/** After the daily previews run out: a link to the hosted early-access form, saying what a key gives (the hosted
+ * API's starting allowance, docs/hosted-api.md) and that keys are issued by hand for now. */
 function waitlistLink(className: string): HTMLAnchorElement {
-  const link = textElement('a', 'Get early access to hosted ↓', className)
+  const link = textElement('a', 'Need more? Ask for a hosted key: 1,000 pages a day to start, issued by hand ↓', className)
   link.href = '#waitlist'
   link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
   return link
@@ -344,7 +348,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance resets.', 'For regular use, run Octocrawl on your own computer: it has no daily limit, and works through MCP, REST or the SDK.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, ask for a hosted key (1,000 pages a day to start, issued by hand for now) and connect your agent to mcp.octocrawl.dev or call api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
   })[result.status]
 }
 
@@ -957,7 +961,7 @@ function renderDetail(run: Run): void {
 
 /** Point to the result below; its guidance panel carries the reason. */
 /** The visitor's previews left today, as the service counted them. Anything it cannot say for sure leaves the
- * prerendered "3 free previews a day" in place: the page never guesses a number. */
+ * prerendered "5 free previews a day" in place: the page never guesses a number. */
 async function refreshQuota(): Promise<void> {
   let text = QUOTA_NOTE
   let usedUp = false
@@ -968,7 +972,7 @@ async function refreshQuota(): Promise<void> {
     else if (quota?.enabled === true && typeof quota.remaining === 'number' && typeof quota.limit === 'number') {
       usedUp = quota.state === 'global_limited' || quota.state === 'visitor_limited'
       text = quota.state === 'global_limited' ? 'Today’s public previews are used up · resets 00:00 UTC'
-        : quota.state === 'visitor_limited' ? 'No previews left today · resets 00:00 UTC'
+        : quota.state === 'visitor_limited' ? `Your ${quota.limit} free previews for today are used · resets 00:00 UTC`
           : `${quota.remaining} of ${quota.limit} free previews left today`
     }
   } catch { /* An unreadable count shows the static note, never an older number. */ }
@@ -984,7 +988,13 @@ function setResultMessage(result: PreviewResponse): void {
   message.className = `form-message${read ? '' : ' is-error'}`
 }
 
-function finishRun(run: Run, result: PreviewResponse, started: number): void {
+/** Brings the runs into view, below the hero. */
+function revealResults(): void {
+  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+}
+
+/** Shows the run's result; the page moves to it unless the crawl window is still playing (it moves there after). */
+function finishRun(run: Run, result: PreviewResponse, started: number, reveal = true): void {
   run.result = result
   run.clientMs = performance.now() - started
   renderRuns()
@@ -996,7 +1006,7 @@ function finishRun(run: Run, result: PreviewResponse, started: number): void {
     const time = runsGrid.querySelector<HTMLElement>(`[data-run="${run.id}"] .run-time`)
     if (time) time.textContent = formatDuration(run.clientMs)
   })
-  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+  if (reveal) revealResults()
 }
 
 /** A panel opens under its button on wide screens (a sheet at the foot of a phone's screen, in the styles), or
@@ -1274,9 +1284,9 @@ let codeTexts: Record<CodeTab, string> = { curl: '', mcp: '', prompt: '' }
 
 /** What to start before the listing, as a prompt line: plain words with the commands in code. */
 function codeStepFor(tab: CodeTab): Array<string | [string]> {
-  if (tab === 'curl') return ['Start the local API with ', ['npm run api'], ', then run this in another terminal:']
-  if (tab === 'mcp') return ['Start ', ['npm run local:mcp'], ', then call the tool from a client connected to ', [LOCAL_MCP], ':']
-  return ['Ask a client connected to ', [LOCAL_MCP], ':']
+  if (tab === 'curl') return ['Hosted, no key needed within the daily allowance; or on your computer after ', [API_SERVER], ':']
+  if (tab === 'mcp') return ['Add ', [HOSTED_MCP], ' to your client (or ', [MCP_SERVER], ' after ', [API_SERVER], '), then call the tool:']
+  return ['Add ', [HOSTED_MCP], ' to your client (or ', [MCP_SERVER], ' after ', [API_SERVER], '), then ask:']
 }
 
 /** Show one listing. Each line is printed in turn (the styles stagger them by --i), so a tab reads as typed. */
@@ -1360,6 +1370,8 @@ form.addEventListener('submit', async (event) => {
   setInvalid(false)
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
+  // Before the form turns busy, so the window can take focus from the button that sent it.
+  const crawling = crawl.begin(url)
   setBusy(true)
   const run: Run = { id: nextRunId++, url, startedAt: new Date(), clientMs: 0, result: null }
   runs = [run, ...runs].slice(0, MAX_RUNS)
@@ -1373,24 +1385,35 @@ form.addEventListener('submit', async (event) => {
   const started = performance.now()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
+  /** The window plays out its end, then the page moves to the result. */
+  const settle = async (result: PreviewResponse): Promise<void> => {
+    finishRun(run, result, started, !crawling)
+    if (!crawling) return
+    const hadFocus = await crawl.finish({
+      read: isPageRead(result), title: result.title, markdown: result.markdown, label: statusText(result.status, result.product, result.diagnostic),
+      reason: result.reason, skipScene: result.status === 'quota_exceeded' || result.status === 'invalid_url',
+    })
+    setBusy(false)
+    if (hadFocus) input.focus({ preventScroll: true })
+    if (run.id === selectedRunId) revealResults()
+  }
+  let result: PreviewResponse
   try {
     const response = await fetch('/api/preview', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The server reports its stages as they happen to a client that asks; the crawl window shows them.
+      headers: { 'Content-Type': 'application/json', Accept: `${STAGE_STREAM}, application/json` },
       body: JSON.stringify(previewBody(url)),
       signal: controller.signal,
       credentials: 'same-origin',
     })
-    const value: unknown = await response.json()
+    const value = await readPreview(response, stage => crawl.stage(stage))
     if (!value || typeof value !== 'object' || !('status' in value)) throw new Error('The service returned an unrecognized result.')
-    const result = value as PreviewResponse
+    result = value as PreviewResponse
     if (!result.requestedUrl || !Number.isFinite(result.totalMs)) throw new Error('The service returned an incomplete result.')
-    // Message first: an error style can grow the hero, and the smooth scroll must target the final layout.
-    setResultMessage(result)
-    finishRun(run, result, started)
-  } catch (error) {
+  } catch {
     const aborted = controller.signal.aborted
-    const result: PreviewResponse = {
+    result = {
       status: aborted ? 'timeout' : 'failed',
       requestedUrl: url,
       finalUrl: null,
@@ -1399,10 +1422,13 @@ form.addEventListener('submit', async (event) => {
       totalMs: performance.now() - started,
       reason: aborted ? 'The browser timed out. The server may still be processing; try again later.' : 'The service could not return a result. Please try again later.',
     }
-    setResultMessage(result)
-    finishRun(run, result, started)
   } finally {
     clearTimeout(timeout)
+  }
+  // Message first: an error style can grow the hero, and the smooth scroll must target the final layout.
+  setResultMessage(result)
+  try { await settle(result) }
+  finally {
     setBusy(false)
     void refreshQuota()
   }

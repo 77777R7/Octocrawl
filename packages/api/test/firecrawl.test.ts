@@ -68,15 +68,18 @@ describe('Firecrawl /scrape /crawl shim', () => {
       return { status: res.status, body: await res.json() }
     }
     const url = `${server.url}/crawl/listing`
-    expect(await post('/fc/v1/scrape', { url, formats: ['markdown', 'summary'], proxy: 'auto' })).toEqual({
+    expect(await post('/fc/v1/scrape', { url, formats: ['markdown', 'summary'], location: {} })).toEqual({
       status: 400,
       body: {
         success: false,
-        error: 'unsupported parameter: proxy; unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)',
+        error: 'unsupported parameter: location; unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)',
         code: 'unsupported_parameter',
-        details: { parameters: ['proxy'], formats: ['summary'] },
+        details: { parameters: ['location'], formats: ['summary'] },
       },
     })
+    // proxy is the access choice: basic reads the page as standard; auto asks for enhanced, which this server has no grant for.
+    expect(await post('/fc/v1/scrape', { url, proxy: 'basic' })).toMatchObject({ status: 200, body: { success: true } })
+    expect(await post('/fc/v1/scrape', { url, proxy: 'auto' })).toMatchObject({ status: 400, body: { success: false, code: 'unsupported_parameter', error: expect.stringContaining('access enhanced') } })
     expect(await post('/fc/v1/crawl', { url, scrapeOptions: { actions: [{ type: 'wait', milliseconds: 500 }] } })).toMatchObject({ status: 400, body: { success: false, error: expect.stringContaining('scrapeOptions.actions') } })
     // webhook is mapped onto the native option now; a key inside it W2L does not know is still refused by name.
     expect(await post('/fc/v1/crawl', { url, webhook: { url: 'https://example.com/hook', retries: 3 } })).toMatchObject({ status: 400, body: { success: false, error: 'unknown webhook option: retries', code: 'invalid_request' } })

@@ -45,8 +45,8 @@
       "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "action_failed", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
     },
     "lane": {
-      "description": "The lane that produced the result: http (W2L's own HTTP client), browser_local (a local headless Chromium), browser_local_authed (the same with the user's session), browser_proxy (a browser through the operator's egress) or provider (a third-party browser service).",
-      "enum": ["http", "browser_local", "browser_local_authed", "browser_proxy", "provider"]
+      "description": "The lane that produced the result: http (W2L's own HTTP client), browser_local (a local headless Chromium), browser_local_authed (the same with the user's session), browser_proxy (a browser through the operator's egress), provider (a third-party browser service) or my_browser (the person's own Chrome, on a site they allowed).",
+      "enum": ["http", "browser_local", "browser_local_authed", "browser_proxy", "provider", "my_browser"]
     },
     "robotsDecision": {
       "description": "The robots.txt verdict the page was fetched, or refused, under. Null when no robots.txt decision was made for this result: it ended before the check (a DNS failure, an identity refusal, a deadline), or robots.txt was not consulted.",
@@ -99,6 +99,10 @@
         { "$ref": "#/$defs/pageActions" },
         { "type": "null" }
       ]
+    },
+    "access": {
+      "description": "How the result was reached: the route, the client that sent its requests and the third-party spend of the run, read from the result's own trace (ADR 0005). Added to v1 with enhanced access: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "$ref": "#/$defs/access"
     }
   },
   "allOf": [
@@ -332,6 +336,38 @@
         "valueSha256": {
           "description": "SHA-256 (hex) of the UTF-8 bytes of the value as sent.",
           "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route", "executor", "executorVersion", "profile", "externalCostUsd"],
+      "properties": {
+        "route": {
+          "description": "The route that produced the result: http (W2L's HTTP client), http_compat (the browser-compatible HTTP transport, compatible_transport), browser (the local headless browser), enhanced_browser (the local browser on Patchright, enhanced_browser), authed_browser (the local browser with the user's saved login), user_browser (the person's own browser: after a handoff, or on the my_browser lane) or vendor (a third-party browser service). Null when no lane produced the result: the ladder's own answer for a rung the deadline cut, that failed or whose identity was refused, or a cache-only request that found nothing; nothing then says which client ran.",
+          "enum": ["http", "http_compat", "browser", "enhanced_browser", "authed_browser", "user_browser", "vendor", null]
+        },
+        "executor": {
+          "description": "The client that sent the requests: undici, impit, playwright, patchright, the person's browser as it named itself, or the vendor's id. Null when the result does not say (a vendor result without its vendor).",
+          "type": ["string", "null"]
+        },
+        "executorVersion": {
+          "description": "The executor's version as the lane reported it; null when it reported none.",
+          "type": ["string", "null"]
+        },
+        "profile": {
+          "description": "The browser profile the HTTP transport sent (impit's, for example chrome142); null on every other route. Its header set is in identity; its TLS fingerprint was not observed.",
+          "type": ["string", "null"]
+        },
+        "externalCostUsd": {
+          "description": "Third-party spend, in USD, of the run that produced the result (for a cache hit, of the fetch it reuses): 0 when no paid service was called, null when a called service stated no price. The egress (a person's own proxy) is not counted.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "completion": {
+          "description": "How the page was read, counted apart: unattended (W2L's own lanes, no session of the person's), authorized_session (with the person's saved login), user_browser (in the person's own Chrome, on a site they allowed, without a step of theirs), handed_to_person (in their Chrome, after they got through a check). Null when no page was read. Added with the my-browser lane: optional here so that earlier records stay valid.",
+          "enum": ["unattended", "authorized_session", "user_browser", "handed_to_person", null]
         }
       }
     }

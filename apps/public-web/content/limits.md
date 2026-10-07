@@ -2,9 +2,22 @@
 
 Octocrawl reports whether it captured a page and whether a requested structured record was verified. These are different questions. Check both before using fields in an alert, export, or downstream workflow.
 
-## Availability and quotas
+## Hosted API and MCP
 
-The anonymous page allows three previews per browser visitor per UTC day and 100 previews site-wide per UTC day. A request refused before a preview starts (invalid input or options, a URL whose host is localhost or a private or reserved IP address, a used-up allowance) does not count. Once a preview starts it counts, whatever its result: that includes a host name that only turns out to resolve to a private address, a host that does not resolve, and a page stopped by robots.txt. `GET /api/quota` on the preview host reads what you have left without spending anything. On a local review address, quota and Amazon coordination live in memory and reset on process restart; do not expose that launcher publicly. On the hosted Cloud Run service, Firestore counters and Amazon coordination survive instance restarts. The local MCP service is separate and runs on loopback.
+Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) serves `POST /v1/scrape` and `POST /v1/map`, and the MCP tools `scrape`, `map` and `scrape_product`.
+
+| | Without a key | With a key |
+| --- | --- | --- |
+| Identity | Your address, hashed per day | The key, hashed |
+| Pages a day | 20 per address | The key's allowance (1,000 to start) |
+| Lane | HTTP only: no screenshot, no `scrape_product` | HTTP, then the browser when the key allows it |
+| Starts a minute | 10 | 60 |
+
+The whole service serves 1,500 pages a day. Over an allowance the answer is HTTP 429 with `Retry-After` until 00:00 UTC, and a refused request still counts as a start. Every request, of any kind, is limited to 120 a minute per address. A file (PDF, CSV) is read up to 5 MiB. Nothing is kept for reuse: records and files are deleted within ten minutes. `crawl`, `batch`, Monitors, logins, `/fc` and every other route answer 403 with a hint to run Octocrawl on your computer. Proxies, CAPTCHA solving and stealth are not offered; a blocked page is reported as blocked. These numbers may change; this page says what applies.
+
+## Availability and quotas (the page preview)
+
+The anonymous page allows five previews per browser visitor per UTC day and 150 previews site-wide per UTC day. A request refused before a preview starts (invalid input or options, a URL whose host is localhost or a private or reserved IP address, a used-up allowance) does not count. Once a preview starts it counts, whatever its result: that includes a host name that only turns out to resolve to a private address, a host that does not resolve, and a page stopped by robots.txt. `GET /api/quota` on the preview host reads what you have left without spending anything. On a local review address, quota and Amazon coordination live in memory and reset on process restart; do not expose that launcher publicly. On the hosted Cloud Run service, Firestore counters and Amazon coordination survive instance restarts. The local MCP service is separate and runs on loopback.
 
 The browser preview accepts one public HTTP(S) URL per request, a main-content switch, and up to 20 fields read without a model. It does not accept visitor-supplied model prompts, browser sessions, other capture settings, private network targets, or raw HTML downloads; any other parameter returns HTTP 400 with `invalid_options` before a preview is counted. It reads pages of up to 2 MiB and files, such as PDFs, of up to 5 MiB. Generic pages use restricted HTTP capture; the public Amazon.sg `/dp/{ASIN}` route uses a configured anonymous browser context.
 
@@ -60,8 +73,9 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 | Public HTML page → readable text | Anonymous, Cloud Run preview | Restricted HTTP | Markdown, links (up to 500), page metadata, final URL, status, elapsed time, and up to 20 requested fields read without a model; conditional | Public documentation smoke tested on `bb32cbf`; sites can block or require rendering. |
 | Amazon.sg `/dp/{ASIN}` → product JSON | Anonymous Singapore context, Cloud Run preview | Domain-limited browser | Main ASIN, region, currency, selected quote when verified; Beta | Public 200-page audit on `bb32cbf`: 171 complete, 29 incomplete, including two subject substitutions. Strict correctness gate remains open. |
 | X status / Reddit post → public post | Anonymous, Cloud Run preview | Restricted HTTP | Only a verified requested post if captured; conditional | Hosted success is not validated. Local proxy and adapter experiments are separate. |
-| Persistent Monitor or Batch | Local service and configured storage | Local MCP workflow | Durable task results; local only | Not deployed to the anonymous Cloud Run preview. |
+| Public page → Markdown or a site's URL list, from your agent or code | Hosted API and MCP, keyless or with a key | HTTP; browser with a key | `scrape` and `map` with the Evidence Record | Live since 2026-10-06; allowances above. |
+| Persistent Monitor or Batch | Your own computer, the published packages | Local MCP workflow | Durable task results; local only | Not hosted yet; a later phase of the roadmap. |
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
 
-Need runs that keep going while your computer is off, or more previews a day? [Get early access to hosted Octocrawl](/?from=limits#waitlist).
+Need more pages a day on the hosted service, or the browser lane? [Ask for a key](/?from=limits#waitlist).

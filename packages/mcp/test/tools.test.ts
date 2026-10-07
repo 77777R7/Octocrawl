@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -384,7 +385,8 @@ describe('MCP tools', () => {
     } finally {
       await mcp.close()
     }
-    expect(mcpOrigin(undefined)).toBe('mcp@0.3.0')
+    // The server's own version, as scripts/release-version.mjs sets it: a release must not have to edit this test.
+    expect(mcpOrigin(undefined)).toBe(`mcp@${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`)
     expect(mcpOrigin({ name: 'Claude Desktop', version: '1.0 beta' })).toBe('mcp-Claude_Desktop@1.0_beta')
     expect(mcpOrigin({ name: 'x'.repeat(200), version: '1' })).toHaveLength(100)
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -452,6 +454,22 @@ describe('MCP tools', () => {
     await callTool(client, 'scrape', { url: 'https://example.com/', handoff: true })
     await callTool(client, 'scrape', { url: 'https://example.com/', handoff: { waitMs: 60_000 } })
     expect(bodies.map((body) => (body as { handoff?: unknown }).handoff)).toEqual([{}, { waitMs: 60_000 }])
+  })
+
+  it('a scrape and a batch ask for the my-browser lane when the call does, and the tools name it', async () => {
+    const bodies: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => { bodies.push(JSON.parse(String(init?.body))); return String(input).endsWith('/v1/batches') ? json({ taskId: 't1' }, 202) : json({ status: 'success' }) }) as typeof fetch })
+    await callTool(client, 'scrape', { url: 'https://example.com/', lane: 'my-browser' })
+    expect(bodies).toEqual([expect.objectContaining({ lane: 'my-browser' })])
+    expect(TOOLS.find((tool) => tool.name === 'scrape')?.inputSchema.properties).toMatchObject({ lane: { type: 'string', enum: ['my-browser'] } })
+    expect(TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties).toMatchObject({ lane: { type: 'string', enum: ['my-browser'] } })
+    for (const name of ['scrape', 'batch_scrape']) expect(TOOLS.find((tool) => tool.name === name)?.inputSchema.properties).toMatchObject({ access: { type: 'string', enum: ['standard', 'enhanced', 'my-browser'] } })
+    expect(TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties).toMatchObject({ access: { type: 'string', enum: ['standard', 'enhanced'] } })
+    await callTool(client, 'scrape', { url: 'https://example.com/', access: 'standard' })
+    expect(bodies.at(-1)).toMatchObject({ access: 'standard' })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/'], lane: 'my-browser' })
+    expect(bodies.at(-1)).toMatchObject({ lane: 'my-browser' })
+    await expect(callTool(client, 'scrape', { url: 'https://example.com/', lane: 'browser' })).rejects.toThrow('lane must be one of: my-browser')
   })
 
   it('imports, lists and forgets the person\'s saved logins through the API, never a cookie', async () => {

@@ -185,7 +185,7 @@ a { color: inherit; }
 /* A short bottom padding: the hero's own padding and free space already sit below the form, and that free
    space lets a message and a hint appear under the card without pushing the cue off the first screen. */
 .hero-form-row { padding: 40px 24px 12px; }
-.url-form { width: min(760px, 100%); margin: 0 auto; text-align: left; }
+.url-form { position: relative; width: min(760px, 100%); margin: 0 auto; text-align: left; }
 .url-card { overflow: hidden; border: 1px solid rgba(255, 255, 255, .85); border-radius: 16px; background: #fff; box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 6px rgba(244, 249, 255, .13); }
 .url-card:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 159, 111, .4); }
 .url-card.is-invalid, .url-card.is-invalid:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 112, 88, .8); }
@@ -228,6 +228,40 @@ a { color: inherit; }
 .url-help-link { color: #fff; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; }
 .url-help-link:hover { color: #ffc2a4; }
 .url-help { width: fit-content; max-width: 100%; min-height: 1.4em; margin: 10px 0 0; padding: 4px 8px; color: rgba(232, 240, 255, .82); font-size: 12px; line-height: 1.5; }
+
+/* The crawl window (crawlView.ts): while a preview runs the card loses its input and toolbar, its white and its
+   ring, and grows down into a frameless navy window. The address and Skip sit on its top line, what the server said
+   and the time on its foot, both over the canvas, where the page, the octopus and the bar are drawn. */
+.url-card { transition: background-color .3s ease, border-color .3s ease, box-shadow .3s ease; }
+.crawl-window[hidden], .url-card.is-crawling .url-toolbar, .url-card.is-crawling .url-entry { display: none; }
+.url-card.is-crawling, .url-card.is-crawling:focus-within { border-color: transparent; background: var(--navy-deep); box-shadow: 0 24px 80px rgba(1, 10, 36, .55); }
+.crawl-stage { position: relative; height: clamp(320px, 56vh, 520px); color: #dce8ff; font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.crawl-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* The opening and closing are drawn on a layer over the card that reaches past it (crawlView.ts). */
+.crawl-fx { position: absolute; z-index: 2; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+/* While the window opens, its address line waits for the falling letters to land in it. */
+.crawl-window.is-arriving .crawl-url { opacity: 0; }
+.crawl-top { position: absolute; inset: 0 0 auto; display: flex; align-items: center; gap: 14px; padding: 8px 10px 0 16px; }
+.crawl-url { flex: 1; min-width: 0; overflow: hidden; color: #9db2d6; text-overflow: ellipsis; white-space: nowrap; }
+.crawl-always { display: inline-flex; flex: none; align-items: center; gap: 6px; color: #7f95bd; cursor: pointer; }
+.crawl-always input { accent-color: var(--orange); }
+.crawl-skip { display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border: 1px solid rgba(176, 200, 240, .3); border-radius: 7px; color: #e6eefc; background: rgba(255, 255, 255, .04); font: 650 12.5px/1 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.crawl-skip:hover { border-color: rgba(255, 159, 111, .7); background: rgba(255, 159, 111, .12); }
+.crawl-esc { padding: 2px 5px; border: 1px solid rgba(176, 200, 240, .3); border-radius: 4px; color: #9db2d6; font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.crawl-foot { position: absolute; inset: auto 0 0; display: flex; align-items: baseline; gap: 14px; padding: 0 16px 14px; }
+.crawl-label { flex: 1; min-width: 0; color: #e6eefc; }
+.crawl-time { color: #9db2d6; font-variant-numeric: tabular-nums; }
+.crawl-note { position: absolute; left: 50%; top: 52%; display: grid; gap: 6px; width: min(86%, 460px); margin: 0; padding: 14px 16px; translate: -50% -50%; border: 1px dashed rgba(176, 200, 240, .42); border-radius: 6px; color: #e6eefc; background: rgba(8, 27, 66, .9); font: 500 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: center; }
+.crawl-note strong { color: #ffc59a; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.crawl-note[hidden] { display: none; }
+/* The hero's octopus stays where it is and quietens while the window plays. */
+.hero.is-crawling .hero-octopus-cell { --octopus-ink: .5; }
+.hero.is-crawling .hero-ascii-layer .w2l-ascii-motif { opacity: .38; }
+@media (max-width: 600px) {
+  .crawl-stage { height: clamp(300px, 56vh, 420px); }
+  .crawl-top { gap: 10px; padding-left: 12px; }
+}
+@media (pointer: coarse) { .crawl-esc { display: none; } }
 
 /* The Format and Options panels are session sheets, drawn like the How it works replay on the hero's navy: dotted
    rules, × corners and monospace columns. They are top-layer popovers (the card clips its overflow), placed by

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.77777R7/octocrawl",
+  "description": "Web scraper for agents: blocked, empty and wrong pages reported as such, with an Evidence Record.",
+  "repository": {
+    "url": "https://github.com/77777R7/Octocrawl",
+    "source": "github"
+  },
+  "version": "0.3.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@octocrawl/mcp",
+      "version": "0.3.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "W2L_API_URL",
+          "description": "The Octocrawl API the server calls: npx octocrawl serve on this computer (default http://127.0.0.1:8787), or https://api.octocrawl.dev",
+          "isRequired": false
+        },
+        {
+          "name": "W2L_API_TOKEN",
+          "description": "A bearer token for a hosted or self-hosted API; none for a local one",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.octocrawl.dev/mcp"
+    }
+  ],
+  "websiteUrl": "https://octocrawl.dev/docs/connect-mcp/"
+}

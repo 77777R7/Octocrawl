@@ -30,6 +30,14 @@ describe('flags', () => {
     expect(usage('scrape')).toContain('--handoff')
   })
 
+  it('takes --lane my-browser on a scrape', () => {
+    expect(parseCommandLine('scrape', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
+    expect(usage('scrape')).toContain('--lane my-browser')
+    expect(parseCommandLine('batch', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
+    expect(usage('batch')).toContain('--lane my-browser')
+    expect(parseCommandLine('crawl', ['https://example.com/', '--access', 'standard']).body).toEqual({ access: 'standard' })
+  })
+
   it('reads booleans, integers, lists, repeated patterns, formats, parsers and headers into the API body', () => {
     const line = parseCommandLine('crawl', [
       'https://example.com/', '--max-pages', '5', '--no-only-main-content', '--mobile', '--fast-mode=false',

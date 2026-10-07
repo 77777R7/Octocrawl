@@ -141,7 +141,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
   it('rejects unsupported Firecrawl parameters and formats by name instead of dropping them', () => {
     const url = 'https://example.com/'
     expect(() => parseFirecrawlScrapeRequest({ url, formats: ['markdown', 'summary'] })).toThrow('unsupported format: summary (the /fc shim supports markdown, links, html, rawHtml, images, screenshot, screenshot@fullPage)')
-    expect(() => parseFirecrawlScrapeRequest({ url, location: {}, proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameters: location, proxy')
+    expect(() => parseFirecrawlScrapeRequest({ url, location: {}, proxy: 'stealth', waitFor: 500 })).toThrow('unsupported parameter: location')
     // A scrape maps actions to the native option, which checks them; a crawl's scrapeOptions.actions is refused by name (below).
     expect(parseFirecrawlScrapeRequest({ url, actions: [{ type: 'click', selector: '#more' }, { type: 'scrape' }] }).actions).toEqual([{ type: 'click', selector: '#more' }, { type: 'scrape' }])
     expect(() => parseFirecrawlScrapeRequest({ url, actions: [{ type: 'hover' }] })).toThrow('actions[0].type must be one of')
@@ -385,8 +385,13 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(parseFirecrawlCrawlRequest({ url, origin: 'py-sdk@2', integration: 'nightly' })).toMatchObject({ origin: 'py-sdk@2', integration: 'nightly' })
     expect(() => parseFirecrawlScrapeRequest({ url, integration: 'with space' })).toThrow('integration must be a string of 1 to 100 printable characters without spaces')
     const thrown = (fn: () => unknown): unknown => { try { fn() } catch (error) { return error } return undefined }
-    expect(thrown(() => parseFirecrawlScrapeRequest({ url, proxy: 'stealth' }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['proxy'] }, agentHints: [REFUSAL_HINTS.stealth] })
-    expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'enhanced', ignoreRobotsTxt: true } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.stealth, REFUSAL_HINTS.ignoreRobotsTxt] })
+    // Firecrawl's proxy is Octocrawl's access choice: basic is standard; stealth and auto are enhanced, which the server decides on.
+    expect(parseFirecrawlScrapeRequest({ url, proxy: 'basic' })).toMatchObject({ access: 'standard' })
+    expect(parseFirecrawlScrapeRequest({ url, proxy: 'stealth' })).toMatchObject({ access: 'enhanced' })
+    expect(parseFirecrawlScrapeRequest({ url, proxy: 'auto' })).toMatchObject({ access: 'enhanced' })
+    expect(parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'basic' } })).toMatchObject({ access: 'standard' })
+    expect(() => parseFirecrawlScrapeRequest({ url, proxy: 'residential' })).toThrow('proxy must be one of: basic, stealth, auto, enhanced')
+    expect(thrown(() => parseFirecrawlCrawlRequest({ url, scrapeOptions: { proxy: 'enhanced', ignoreRobotsTxt: true } }))).toMatchObject({ agentHints: [REFUSAL_HINTS.ignoreRobotsTxt] })
     expect((thrown(() => parseFirecrawlScrapeRequest({ url, location: {} })) as RequestError).agentHints).toBeUndefined()
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /scrapeId/.test(d) && /creditsUsed/.test(d))).toBe(true)
     expect(FIRECRAWL_SHIM_DIFFS.some((d) => /agent_hints/.test(d) && /rate_limited/.test(d))).toBe(true)

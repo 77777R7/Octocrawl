@@ -47,6 +47,9 @@ function thirdPartyDependencies(names) {
 }
 
 /** The mcp package reads the Amazon product schema from research/ at run time; a bundle carries it inline. */
+/** The server's name in the official MCP Registry (registry.modelcontextprotocol.io): the GitHub namespace, which `mcp-publisher login github` proves. */
+const MCP_REGISTRY_NAME = 'io.github.77777R7/octocrawl'
+
 const inlineAmazonSchema = {
   name: 'inline-amazon-schema',
   setup(builder) {
@@ -128,7 +131,8 @@ const targets = [
     name: '@octocrawl/mcp', dir: 'mcp', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
     description: 'Octocrawl as an MCP server over stdio, a client of a running Octocrawl API (octocrawl serve).',
     entry: { stdio: 'packages/mcp/src/stdio.ts' }, formats: ['esm'], plugins: [inlineAmazonSchema],
-    manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
+    // mcpName ties the npm package to its entry in the official MCP Registry (server.json at the repository root; the two must agree).
+    manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, mcpName: MCP_REGISTRY_NAME, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
   },
 ]
 

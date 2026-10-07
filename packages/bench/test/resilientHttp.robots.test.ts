@@ -169,6 +169,25 @@ describe('ResilientHttpSubject robots', () => {
     }
   })
 
+  it('tells onTrace each event as it is recorded, in the order of the trace, and ignores a listener that throws', async () => {
+    const subject = new ResilientHttpSubject()
+    try {
+      const heard: string[] = []
+      const out = await subject.fetch(`${robotsUrl}/private/ok`, undefined, undefined, {}, undefined, {}, undefined, undefined, (event) => {
+        heard.push(event.event)
+        throw new Error('a listener error never reaches the fetch')
+      })
+      expect(out.status).toBe('success')
+      expect(heard).toEqual(out.trace.map((t) => t.event))
+      // robots.txt is decided before the page is requested, and the page is extracted once its body is read.
+      expect(heard.indexOf('robots_checked')).toBeGreaterThanOrEqual(0)
+      expect(heard.indexOf('extract')).toBeGreaterThan(heard.indexOf('robots_checked'))
+      expect(structuredClone(out.trace)).toEqual(out.trace)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('fetches a URL the request named past a disallow, saying so in the warning', async () => {
     const subject = new ResilientHttpSubject()
     const before = privateHits

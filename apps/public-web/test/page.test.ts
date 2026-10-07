@@ -18,6 +18,13 @@ describe('Page markup', () => {
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
   })
 
+  it('keeps the crawl window inside the URL card, hidden until a run opens it, with a way to skip it', () => {
+    const card = /<div class="url-card">([\s\S]*?)<p class="form-message"/.exec(pageMarkup())?.[1] ?? ''
+    expect(card).toContain('<div class="crawl-window" id="crawl-window" hidden>')
+    expect(card).toContain('<button class="crawl-skip" id="crawl-skip" type="button">')
+    expect(card).toContain('<canvas class="crawl-canvas" aria-hidden="true">')
+  })
+
   it('writes the same glyph band on every build, thinning out row by row', () => {
     expect(glyphBand()).toBe(glyphBand())
     const rows = glyphBand().split('\n')

@@ -133,6 +133,8 @@ export function buildChannels(
   mode: Args['mode'],
   opts: {
     onVendorConnect?: (vendorId: string) => void
+    /** The request chose access enhanced: provider rungs in mode standard too (still only under the grant and a named vendor). */
+    enhanced?: boolean
     keys?: { browserbase?: string; steel?: string }
     vendorConnector?: import('./vendors/cdp.js').CdpConnector
     /** Test seam: vendor ops per vendor id, replacing the env-key-based ops. */
@@ -243,7 +245,7 @@ export function buildChannels(
       id: 'http',
       identity: declared,
       fetch: (url, _session, execution, options) =>
-        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride),
+        opts.localSubjects?.http !== undefined ? opts.localSubjects.http.fetch(url, execution?.deadlineAt, execution?.signal, execution, options) : http.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace),
       close: async () => {
         await http.teardown()
         await opts.localSubjects?.http?.teardown?.()
@@ -252,7 +254,7 @@ export function buildChannels(
     ...(compat === null ? [] : [{
       id: 'http_compat',
       identity: identityBundleFrom(compatIdentity()),
-      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride),
+      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) => compat.fetch(url, execution?.deadlineAt, execution?.signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace),
       close: () => compat.teardown(),
     } satisfies Channel]),
     {
@@ -263,7 +265,7 @@ export function buildChannels(
       fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
           ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride),
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -342,7 +344,8 @@ export function buildChannels(
 
   // Provider rungs exist only when the vendor is named (W2L_VENDORS) with its key, or a key is passed, AND the mode permits the
   // lane, AND the access grant names vendor_remote_browser (ADR 0005). connectVendor is deferred to the first fetch.
-  if (mode === 'standard') return channels
+  // Mode standard takes them only for a request that chose access enhanced (opts.enhanced).
+  if (mode === 'standard' && opts.enhanced !== true) return channels
   if (!(opts.vendorPolicy?.authorized ?? []).includes('vendor_remote_browser')) return channels
 
   // A paid browser service is used when the person names it in W2L_VENDORS (comma-separated: browserbase, steel), not

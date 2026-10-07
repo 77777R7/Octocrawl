@@ -36,6 +36,7 @@
     "verify:serve-smoke": "node scripts/reliability/serve-smoke.mjs",
     "mcp": "tsc --build && node --import tsx packages/mcp/src/stdio.ts",
     "hosted:mcp": "tsc --build && node packages/mcp/dist/hostCli.js",
+    "hosted:api": "tsc --build && node packages/mcp/dist/hostedApiCli.js",
     "local:mcp": "tsc --build && node packages/mcp/dist/localHostCli.js",
     "local:mcp:install": "tsc --build && node scripts/section-c/local-service.mjs install",
     "first-use:local": "node scripts/section-c/local-dual-flow.mjs",

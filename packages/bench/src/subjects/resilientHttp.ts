@@ -4,6 +4,7 @@ import {
   QUALITY_ESCALATION_MAX_CONFIDENCE,
   QUALITY_ESCALATION_MAX_TOKENS,
   type CrawlMode,
+  type CookieSession,
   type ExecutionContext,
   type FetchOptions,
   type FetchResult,
@@ -54,7 +55,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `wire.onWithheld` says so); `routes` are the request's own routes when it
    * relaxed certificate verification, else the subject's.
    */
-  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null, onResponseCoding?: (decodedFrom: string | null) => void, deadlineAt?: number) => ResilientFetcher
+  private readonly fetcherFor: (initialUrl: string, headers: Readonly<Record<string, string>>, validators: { etag?: string; lastModified?: string }, signal?: AbortSignal, onBodyRead?: (ms: number) => void, onRequestWait?: (intervalMs: number, cooldownMs: number) => void, onEnvProxy?: (url: string, proxy: string) => void, maxFileBytes?: number, wire?: { headers: Readonly<Record<string, string>>; onWithheld: (to: string, names: readonly string[]) => void }, routes?: EgressRoutes | null, onResponseCoding?: (decodedFrom: string | null) => void, deadlineAt?: number, cookies?: SessionCookies) => ResilientFetcher
   private readonly robotsCache: RobotsOriginCache
   private readonly networkPolicy: NetworkPolicy
   private readonly scheduler: OriginScheduler
@@ -83,7 +84,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     this.route = new EgressRoute(this.networkPolicy, this.egress, this.localPreviewProxy)
     this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy, url => this.dispatcherFor(url))
     const maxBodyBytes = this.networkPolicy.maxBodyBytes
-    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null, onResponseCoding, deadlineAt) => async (url, init) => {
+    this.fetcherFor = (initialUrl, headers, validators, signal, onBodyRead, onRequestWait, onEnvProxy, maxFileBytes = fileByteCap(this.networkPolicy), wire, routes = null, onResponseCoding, deadlineAt, cookies) => async (url, init) => {
       await this.scheduler.beforeRequest(new URL(url).origin, init.signal ?? signal, onRequestWait)
       const envProxy = this.envProxyFor(url)
       if (envProxy !== null) onEnvProxy?.(url, envProxy)
@@ -91,6 +92,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         // impit sends the profile's headers itself (`headers` are those); only the validators go beside them.
         onResponseCoding?.(null)
         return this.compat.fetch(url, {
+          ...(cookies === undefined ? {} : { cookies }),
           signal: init.signal ?? signal,
           headersTimeoutMs: init.headersTimeoutMs,
           bodyTimeoutMs: init.bodyTimeoutMs,
@@ -110,16 +112,22 @@ export class ResilientHttpSubject implements SubjectAdapter {
       const customNames = wire === undefined ? [] : Object.keys(wire.headers)
       const sameOrigin = new URL(url).origin === new URL(initialUrl).origin
       if (wire !== undefined && customNames.length > 0 && !sameOrigin) wire.onWithheld(url, customNames)
+      // The task's cookies for this hop, after every other header: the session's, never a caller's (`cookie` is refused as a header).
+      const cookie = cookies === undefined ? '' : await cookies.header(url)
       const response = await request(url, {
         dispatcher: this.dispatcherFor(url, routes),
         method: 'GET',
         headersTimeout: init.headersTimeoutMs,
         bodyTimeout: init.bodyTimeoutMs,
         // The identity after the custom headers, so it is never overridden. Validators are bound to one representation; never forward on redirects.
-        headers: { ...(wire !== undefined && sameOrigin ? wire.headers : {}), ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}) },
+        headers: { ...(wire !== undefined && sameOrigin ? wire.headers : {}), ...headers, ...(url === initialUrl ? validators.etag ? { 'if-none-match': validators.etag } : validators.lastModified ? { 'if-modified-since': validators.lastModified } : {} : {}), ...(cookie === '' ? {} : { cookie }) },
         signal: init.signal ?? signal,
       }).catch((error: unknown) => { throw proxyRefusal(error) ?? error })
       const responseHeaders = response.headers
+      if (cookies !== undefined) {
+        const setCookie = responseHeaders['set-cookie']
+        await cookies.keep(url, typeof setCookie === 'string' ? [setCookie] : setCookie ?? [])
+      }
       const header = (name: string) => {
         const v = responseHeaders[name.toLowerCase()]
         return typeof v === 'string' ? v : Array.isArray(v) ? (v[0] ?? null) : null
@@ -178,9 +186,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.route.viaOperatorProxy(url)
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride']): Promise<FetchResult> {
+  /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, none are. */
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, onTrace?: ExecutionContext['onTrace']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
-    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
+    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }) })
     const start = Date.now()
     const monotonicStart = performance.now()
     const origin = new URL(url).origin
@@ -198,7 +207,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     try {
       permit = await this.scheduler.acquire(origin, scope.signal)
       throwIfExecutionStopped(scope)
-      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
+      return markDeadline(await this.fetchWithinBudget(url, { ...scope, onRobotsOverride, onTrace }, validators, monotonicStart, permit.queueMs, permit.cooldownWaitMs, options, relaxed, permit.limitedByConcurrency ? permit.concurrencyWaitMs : undefined))
     } catch (error) {
       if (!scope.signal.aborted && (deadlineMs === undefined || Date.now() < deadlineMs)) throw error
       const result = this.denied(url, start, [], 'timeout')
@@ -264,14 +273,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
         },
       }
     }
-    const trace: TraceEvent[] = []
+    const trace = observedTrace(execution.onTrace)
     const prepared = this.preparedFor(url, options)
     const honest = recordHttpIdentity(prepared, trace, 0)
     if (!honest) {
       return this.denied(url, start, trace, 'identity_compromised')
     }
-    // Which client sent the request, when it is not the lane's own: what the record's identity was sent with.
-    if (this.compat !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'transport', detail: { library: COMPAT_LIBRARY.name, version: COMPAT_LIBRARY.version, profile: this.compat.profile } })
     // What the caller added is on the record, values included.
     const customHeaders = Object.entries(prepared.customHeaders).map(([name, value]) => ({ name, value }))
     if (customHeaders.length > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'request_headers_added', detail: { headers: customHeaders } })
@@ -357,20 +364,24 @@ export class ResilientHttpSubject implements SubjectAdapter {
     if (signal?.aborted) return timedDenied('timeout')
     const host = new URL(url).origin
     if (cooldownWaitMs > 0) trace.push({ at: Date.now() - start, lane: 'http', event: 'host_cooldown_wait', detail: { host, waitMs: cooldownWaitMs } })
+    // Which client sends the page's requests, when it is not the lane's own; said here, after robots.txt (which undici reads), as it goes out.
+    if (this.compat !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'transport', detail: { library: COMPAT_LIBRARY.name, version: COMPAT_LIBRARY.version, profile: this.compat.profile } })
     const transportStart = performance.now()
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     // The coding the compatible transport decoded on the latest response; the lane never sees its header.
     const transportCoding: { decoded: string | null } = { decoded: null }
+    // The task's cookie session, counted for the trace (its values are never recorded).
+    const cookies = execution.cookieSession === undefined ? undefined : new SessionCookies(execution.cookieSession)
     const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
       pacingWaitMs += intervalMs + cooldownMs
     }, (target, proxy) => {
-      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: 'environment' } })
+      trace.push({ at: Date.now() - start, lane: 'http', event: 'egress_proxy', detail: { url: target, proxy, source: this.networkPolicy.egressProxy?.source ?? 'environment' } })
     }, maxFileBytes, {
       headers: prepared.customHeaders,
       onWithheld: (to, names) => trace.push({ at: Date.now() - start, lane: 'http', event: 'custom_headers_withheld', detail: { to, names: [...names] } }),
-    }, relaxed, coding => { transportCoding.decoded = coding }, deadlineAt), {
+    }, relaxed, coding => { transportCoding.decoded = coding }, deadlineAt, cookies), {
       signal,
       deadlineAt,
       onRetryAfter: (target, retryAt) => {
@@ -391,6 +402,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       transportMs = Math.max(0, performance.now() - transportStart - pacingWaitMs)
       return null
     })
+    if (cookies !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
     if (out === null) return timedDenied('timeout', this.scheduler.retryAt(host))
     // resilientFetch returns once the final response's headers arrived.
     const fetchedAt = out.status === null ? null : new Date().toISOString()
@@ -706,6 +718,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           emptyTables: render.emptyTables,
           textChars: render.textChars,
           scriptChars: render.scriptChars,
+          ...(render.listRecords === undefined ? {} : { listRecords: render.listRecords }),
         },
       })
       return [{
@@ -905,6 +918,24 @@ function bodyReadFailure(error: unknown): 'timeout' | 'connection_error' | null 
   return null
 }
 
+/** The fetch's trace, each event also told to `onTrace` as it is recorded. A listener that throws is ignored. */
+function observedTrace(onTrace: ExecutionContext['onTrace']): TraceEvent[] {
+  const trace: TraceEvent[] = []
+  if (onTrace === undefined) return trace
+  // Not enumerable, so the trace still clones and serializes as a plain array.
+  Object.defineProperty(trace, 'push', {
+    configurable: true, writable: true, enumerable: false,
+    value: (...events: TraceEvent[]): number => {
+      const length = Array.prototype.push.apply(trace, events)
+      for (const event of events) {
+        try { onTrace(event) } catch { /* Progress is advisory; the record is the trace. */ }
+      }
+      return length
+    },
+  })
+  return trace
+}
+
 /** Closes a body that will not be read; the connection's own abort is not an error of the fetch. */
 function discard(body: { on(event: 'error', listener: () => void): unknown; destroy(): unknown }): void {
   body.on('error', () => {})
@@ -920,4 +951,22 @@ function proxyRefusal(error: unknown): Error | null {
   const refusal = new Error(error.message, { cause: error })
   refusal.name = 'ProxyConnectError'
   return refusal
+}
+
+/** A task's cookie session as one fetch uses it: what it sent and kept, counted for the trace. */
+class SessionCookies {
+  private requestsWithCookies = 0
+  private kept = 0
+  constructor(private readonly session: CookieSession) {}
+  async header(url: string): Promise<string> {
+    const header = await this.session.cookieHeader(url)
+    if (header !== '') this.requestsWithCookies++
+    return header
+  }
+  async keep(url: string, setCookies: readonly string[]): Promise<void> {
+    if (setCookies.length > 0) this.kept += await this.session.store(url, setCookies)
+  }
+  detail(): Record<string, unknown> {
+    return { session: this.session.id, requestsWithCookies: this.requestsWithCookies, kept: this.kept }
+  }
 }

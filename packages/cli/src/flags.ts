@@ -19,7 +19,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
   regexOnFullURL: 'boolean', ignoreQueryParameters: 'boolean', deduplicateSimilarURLs: 'boolean', crawlEntireDomain: 'boolean',
   allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean', handoff: 'boolean', ignoreRobotsTxt: 'boolean',
   waitFor: 'int', timeout: 'int', maxFileBytes: 'int', maxAge: 'int', minAge: 'int', maxPages: 'int', maxDepth: 'int', maxConcurrency: 'int', limit: 'int',
-  mode: 'string', sitemap: 'string', idempotencyKey: 'string', appendToId: 'string', search: 'string', integration: 'string',
+  mode: 'string', lane: 'string', access: 'string', sitemap: 'string', idempotencyKey: 'string', appendToId: 'string', search: 'string', integration: 'string',
   allowlistedDomains: 'list', includeTags: 'list', excludeTags: 'list',
   // A path pattern is a regex and may hold a comma: one per flag.
   includePaths: 'repeat', excludePaths: 'repeat',
@@ -218,8 +218,8 @@ export function usage(command: Command | null): string {
   }
   const synopsis: Record<Command, string> = {
     crawl: 'usage: octocrawl crawl <url> [options] [--out <dir>] | octocrawl crawl --resume <taskId>',
-    scrape: 'usage: octocrawl scrape <url> [options] [--markdown] [--out <dir>] [--handoff]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand Octocrawl answers with it. Octocrawl passes no check itself.',
-    batch: 'usage: octocrawl batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and Octocrawl reads the page. Octocrawl passes no check itself.',
+    scrape: 'usage: octocrawl scrape <url> [options] [--markdown] [--out <dir>] [--handoff] [--lane my-browser]\n\n--handoff: a page a captcha, a challenge or a login wall stops opens in a new tab of your own Chrome\n(remote debugging on at chrome://inspect/#remote-debugging; click Allow); get through it there and click on the page,\nand Octocrawl answers with it. Octocrawl passes no check itself.\n--lane my-browser: read the page in your own Chrome instead of fetching it: click Allow in Chrome, then\nAllow reading these sites in the page Octocrawl opens there (close it or click Revoke to stop).',
+    batch: 'usage: octocrawl batch <url>... [--urls-file <file>] [options] [--out <dir>] [--handoff] [--lane my-browser]\n\n--handoff: when the batch ends, each page a captcha, a challenge or a login wall stopped opens in a new tab\nof your own Chrome (remote debugging on at chrome://inspect/#remote-debugging; click Allow once); get through\nit there and Octocrawl reads the page. Octocrawl passes no check itself.\n--lane my-browser: read every page in your own Chrome, one at a time: click Allow in Chrome, then Allow reading\nthese sites once in the page Octocrawl opens there (close it or click Revoke to stop).',
     map: 'usage: octocrawl map <url> [options]',
   }
   const lines = optionKeys(command).map((key) => {

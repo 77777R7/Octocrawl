@@ -57,8 +57,32 @@ jobs:
           path: dist-python/*
           if-no-files-found: error
 
-  npm:
+  # The packed CLI's native modules (better-sqlite3, impit) on every platform it is published for.
+  native:
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: scripts/check-native-deps.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: npm-tarballs
+          path: tarballs
+      - name: Install the packed CLI and scrape over undici and impit
+        run: node scripts/check-native-deps.mjs tarballs
+
+  npm:
+    needs: [build, native]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -87,7 +111,8 @@ jobs:
               echo "$name@$version is already published; skipped"
               continue
             fi
-            npm publish "$file" --access public
+            # ./ in front: without it npm 11 reads tarballs/<name>.tgz as a GitHub owner/repo shorthand and runs git.
+            npm publish "./$file" --access public
           done
 
   pypi:

@@ -17,12 +17,31 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** Each place a published version is written: its file, how to read it, how to write it. */
 const PLACES = [
   ...['cli', 'mcp', 'sdk'].map((dir) => jsonVersion(`packages/${dir}/package.json`)),
+  serverJsonVersion('server.json'),
   textVersion('packages/cli/src/run.ts', /export const CLI_VERSION = '([^']+)'/, (v) => `export const CLI_VERSION = '${v}'`),
   textVersion('packages/mcp/src/server.ts', /const MCP_VERSION = '([^']+)'/, (v) => `const MCP_VERSION = '${v}'`),
   textVersion('packages/sdk/src/version.ts', /export const SDK_VERSION = '([^']+)'/, (v) => `export const SDK_VERSION = '${v}'`),
   textVersion('python/pyproject.toml', /^version = "([^"]+)"$/m, (v) => `version = "${v}"`),
   textVersion('python/src/octocrawl_client/_version.py', /^__version__ = "([^"]+)"$/m, (v) => `__version__ = "${v}"`),
 ]
+
+/** The MCP Registry entry: its own version and the npm package's, which must equal the packages' version. */
+function serverJsonVersion(file) {
+  return {
+    file,
+    read: () => {
+      const doc = JSON.parse(readFileSync(join(root, file), 'utf8'))
+      const versions = new Set([doc.version, ...doc.packages.map((p) => p.version)])
+      return versions.size === 1 ? doc.version : `${doc.version} (packages: ${doc.packages.map((p) => p.version).join(', ')})`
+    },
+    write: (version) => {
+      const doc = JSON.parse(readFileSync(join(root, file), 'utf8'))
+      doc.version = version
+      for (const p of doc.packages) p.version = version
+      writeFileSync(join(root, file), `${JSON.stringify(doc, null, 2)}\n`)
+    },
+  }
+}
 
 function jsonVersion(file) {
   return {

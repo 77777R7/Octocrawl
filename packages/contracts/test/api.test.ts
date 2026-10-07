@@ -16,6 +16,20 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(defaultApiMode('proxy')).toBe('standard')
   })
 
+  it('takes access as three plain choices: my-browser is the my-browser lane, and a crawl does not take it', () => {
+    const url = 'https://example.com/'
+    expect(parseScrapeRequest({ url, access: 'standard' })).toMatchObject({ access: 'standard' })
+    expect(parseScrapeRequest({ url, access: 'my-browser' })).toMatchObject({ access: 'my-browser', lane: 'my-browser' })
+    expect(parseBatchStartRequest({ urls: [url], access: 'my-browser' })).toMatchObject({ access: 'my-browser', lane: 'my-browser' })
+    expect(parseScrapeRequest({ url, access: 'my-browser', lane: 'my-browser' })).toMatchObject({ lane: 'my-browser' })
+    expect(parseCrawlStartRequest({ url, access: 'enhanced' })).toMatchObject({ access: 'enhanced' })
+    expect(() => parseScrapeRequest({ url, access: 'stealth' })).toThrow('access must be one of: standard, enhanced, my-browser')
+    expect(thrown(() => parseCrawlStartRequest({ url, access: 'my-browser' }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['access'] } })
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], access: 'enhanced', lane: 'my-browser' }))).toMatchObject({ details: { parameters: ['lane', 'access'] } })
+    // access my-browser is the lane, so a batch on it takes no webhook either.
+    expect(thrown(() => parseBatchStartRequest({ urls: [url], access: 'my-browser', webhook: 'https://hooks.example/x' }))).toMatchObject({ details: { parameters: ['lane', 'webhook'] } })
+  })
+
   it('scrape request is url + optional mode/allowlist', () => {
     const req: ScrapeRequest = { url: 'https://example.com/' }
     expect(req.url).toBe('https://example.com/')

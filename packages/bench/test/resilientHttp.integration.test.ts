@@ -308,6 +308,114 @@ describe('HTTP lane on a client-rendered shell', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
+
+  it('offers a listing to the browser when its own data lists more records than the markup shows', async () => {
+    const { createServer } = await import('node:http')
+    // A Walmart category page: the server draws 4 of the 16 products its
+    // __NEXT_DATA__ lists, and the scripts draw the rest.
+    const names = Array.from({ length: 16 }, (_, i) => `Cedar Ridge Garden Trowel Model ${i + 1}`)
+    const tile = (name: string, i: number) => `<li class="tile"><a href="/ip/${i + 1}">${name}</a><span class="price">$${12 + i}.99</span><span>4.${i % 10} out of 5 stars</span><div>Forged stainless steel blade with depth markings, a sealed ash handle and a hanging loop. Free shipping, arrives in 3+ days; free pickup today at your store.</div></li>`
+    const data = { props: { pageProps: { search: { items: names.map((name, i) => ({ id: `${i + 1}`, name, price: 12 + i })) } } } }
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Garden tools</title></head><body><main><h1>Garden tools (16)</h1>' +
+          '<div class="intro">Trowels, transplanters and weeders for beds, borders and containers. Prices shown are online prices and may differ in store; availability depends on your pickup store and delivery address.</div>' +
+          `<ul class="grid">${names.slice(0, 4).map(tile).join('')}</ul></main>` +
+          `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/browse/garden-tools`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Cedar Ridge Garden Trowel Model 4')
+      expect(out.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (hydration_list_partial); this HTTP capture may be a shell.' }])
+      // The quality event is what the ladder reads as an offer to the browser rung.
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'quality_client_rendered', detail: expect.objectContaining({ reason: 'hydration_list_partial', listRecords: { declared: 16, shown: 4 } }) }))
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
+describe('HTTP lane on a terse product page beside cut recommendations', () => {
+  it('answers it itself: no low-yield or shell offer to the browser', async () => {
+    const { createServer } = await import('node:http')
+    // sandbox.oxylabs.io: a Next.js product page, titled by its one h2, whose
+    // related games are cut and whose sidebar holds short platform entries.
+    const blurb = 'Thrown into a parallel world by the mischievous actions of a possessed Skull Kid, Link finds a land in grave danger and only seventy-two hours to save it.'
+    const description = 'As a young boy, Link is tricked by Ganondorf, the King of the Gerudo Thieves. The evil human uses Link to gain access to the Sacred Realm, where he places his tainted hands on Triforce and transforms the beautiful Hyrulean landscape into a barren wasteland. Link is determined to fix the problems he helped to create, so with the help of Rauru he travels through time gathering the powers of the Seven Sages.'
+    const related = (n: number) => `<div class="card"><a href="/products/${n}"><h4>Related game ${n}</h4></a><p>${blurb}</p><div class="price-wrapper">8${n},99 €</div></div>`
+    // The data blob holds what the page shows: the description and the related games' blurbs.
+    const data = JSON.stringify({ props: { pageProps: {
+      product: { id: 1, description, images: Array.from({ length: 16 }, (_, i) => `/images/products/the-legend-of-zelda-ocarina-of-time-${i + 1}.jpg`) },
+      related: [1, 2].map((n) => ({ id: n, description: blurb })),
+    } } })
+    const platforms = ['wii', 'wii-u', 'nintendo-64', 'switch', 'gamecube', 'game-boy-advance', '3ds'].map((p) => `<li>${p}</li>`).join('')
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        `<!doctype html><html><head><title>Zelda</title></head><body><main><div class="categories"><p>Game platforms:</p><ul><li><a href="/c/nintendo">Nintendo platform</a><ul>${platforms}</ul></li><li>Dreamcast</li><li>Stadia</li></ul></div>` +
+          '<div class="product"><div class="product-info-wrapper"><h2>The Legend of Zelda: Ocarina of Time</h2><p><b>Developer:</b> Nintendo</p>' +
+          `<p class="description">${description}</p>` +
+          `<div class="price">91,99 €</div><p>In stock</p></div></div><section class="related"><h3>You may also like</h3>${related(1)}${related(2)}</section></main>` +
+          `<script id="__NEXT_DATA__" type="application/json">${data}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/products/1`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('Seven Sages')
+      expect(out.markdown).not.toContain('Related game 1')
+      expect(out.warnings ?? []).toEqual([])
+      expect(out.trace.some((event) => event.event === 'quality_low_yield' || event.event === 'quality_client_rendered')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+})
+
+describe('HTTP lane on a small server-rendered product page', () => {
+  it('answers with the product and its options, with no shell warning', async () => {
+    const { createServer } = await import('node:http')
+    // webscraper.io's test shop: everything the page shows is in its HTML, beside 2 KB of widget script.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Asus VivoBook</title></head><body><main>' +
+          '<div class="card thumbnail" itemscope itemtype="https://schema.org/Product">' +
+          '<h4 class="price" itemprop="offers" itemscope itemtype="https://schema.org/Offer"><span itemprop="price">$295.99</span><meta itemprop="priceCurrency" content="USD"></h4>' +
+          '<h4 class="title" itemprop="name">Asus VivoBook X441NA-GA190</h4>' +
+          '<p class="description" itemprop="description">Asus VivoBook X441NA-GA190 Chocolate Black, 14", Celeron N3450, 4GB, 128GB SSD</p>' +
+          '<label class="memory">HDD:</label><div class="swatches"><button type="button" value="128">128</button><button type="button" value="256">256</button><button type="button" value="512">512</button></div>' +
+          `</div></main><script>${'window.dataLayer = window.dataLayer || []; '.repeat(55)}</script></body></html>`,
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no fixture address')
+    const http = new ResilientHttpSubject()
+    try {
+      const out = await http.fetch(`http://127.0.0.1:${address.port}/product/60`)
+      expect(out).toMatchObject({ status: 'success', lane: 'http', failureReason: null, escalations: [] })
+      expect(out.markdown).toContain('128, 256, 512')
+      expect(out.warnings ?? []).toEqual([])
+      expect(out.trace.some((event) => event.event === 'quality_client_rendered')).toBe(false)
+    } finally {
+      await http.teardown()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
 })
 
 describe('hosted network policy on the HTTP arm', () => {

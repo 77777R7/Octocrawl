@@ -37,15 +37,15 @@ Fields are read from the page itself: JSON-LD, microdata, meta tags, table rows,
 
 ## Run it on your computer
 
-**Get code** shows the same extraction for the local API (a cURL command for `POST /v1/scrape`) and for the local MCP service (the `scrape` tool call, or `scrape_product` for an Amazon.sg product), with the URL, format and options you chose. Both need a checkout of the Octocrawl repository and have no daily limit. A local run can also use a local browser, so its result may differ from this preview. See the [API reference](/docs/reference/) and [Connect MCP](/docs/connect-mcp/).
+**Get code** shows the same extraction for the API (a cURL command for `POST /v1/scrape`) and for the MCP server (the `scrape` tool call, or `scrape_product` for an Amazon.sg product), with the URL, format and options you chose. Both come from the published packages, `npx octocrawl serve` for the API and `npx -y @octocrawl/mcp` for the server, need no repository checkout, and have no daily limit. A local run can also use a local browser, so its result may differ from this preview. See the [API reference](/docs/reference/) and [Connect MCP](/docs/connect-mcp/).
 
 For the exact recorded success sample and its observation time, see [Introduction](/docs/). The result may differ when the source page changes.
 
 ## If extraction does not complete
 
 - **Blocked:** the site denied automated access, required login, or returned a verification page. Try another permitted public page; Octocrawl does not solve a challenge.
-- **Timed out:** the source or local outbound path did not finish within the preview deadline. Check the final URL and reason. A timeout alone does not prove that the site's parser is wrong.
+- **Timed out:** the source or the network path did not finish within the preview deadline. Check the final URL and reason. A timeout alone does not prove that the site's parser is wrong.
 - **Incomplete:** content or identity could not be fully verified. Read what is available and its missing reason; do not treat it as a complete record.
-- **Daily limit reached:** stop until the applicable quota resets. The local review server's counters reset on restart; the hosted preview uses durable counters.
+- **Daily limit reached:** stop until the applicable quota resets.
 
 See [limits and result states](/docs/limits/) before relying on an extracted field in another system.

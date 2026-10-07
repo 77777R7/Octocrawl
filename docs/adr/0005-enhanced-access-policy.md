@@ -30,18 +30,18 @@
 
 ### 2. 暂缓（`DEFERRED`）
 
-工程成本问题，不是原则问题。重启条件照搬 ROADMAP 暂缓表。行号会随 ROADMAP 前面章节的增删而移动，这里与代码里的 `source` 一起更新（最近一次：2026-10-05 PA 节修订后）；以行标题为准。
+工程成本问题，不是原则问题。重启条件照搬 ROADMAP 暂缓表。行号会随 ROADMAP 前面章节的增删而移动，这里与代码里的 `source` 一起更新（最近一次：2026-10-06 PH 节加入后）；以行标题为准。
 
 | 能力名 | 出处 | 暂缓表的行 | 重启条件 |
 | --- | --- | --- | --- |
-| `own_browser_engine` | ROADMAP.md:242 | An own browser fork or engine, and broad custom-fingerprint research | A maintained project stops working for a class of tasks that PA's set shows matters |
-| `own_fingerprint_patches` | ROADMAP.md:242 | 同上 | 同上 |
-| `own_captcha_model` | ROADMAP.md:243 | An in-house CAPTCHA model | Only if solver cost or coverage blocks paying users |
-| `own_residential_network` | ROADMAP.md:244 | An own residential IP network | Not restarted; PA uses providers |
-| `camoufox` | ROADMAP.md:245 | A second stealth engine (Camoufox) | Patchright leaves a clear class of PA tasks unsolved |
-| `hosted_browser_cluster` | ROADMAP.md:246 | Hosted API and hosted MCP at scale | P5's hosted-scale item, once P3 has exited; or earlier when users ask for runs while their computer is off and will pay more for it |
+| `own_browser_engine` | ROADMAP.md:263 | An own browser fork or engine, and broad custom-fingerprint research | A maintained project stops working for a class of tasks that PA's set shows matters |
+| `own_fingerprint_patches` | ROADMAP.md:263 | 同上 | 同上 |
+| `own_captcha_model` | ROADMAP.md:264 | An in-house CAPTCHA model | Only if solver cost or coverage blocks paying users |
+| `own_residential_network` | ROADMAP.md:265 | An own residential IP network | Not restarted; PA uses providers |
+| `camoufox` | ROADMAP.md:266 | A second stealth engine (Camoufox) | Patchright leaves a clear class of PA tasks unsolved |
+| `hosted_browser_cluster` | ROADMAP.md:267 | A hosted browser cluster beyond Cloud Run's instance cap | PH's phase 2 shows browser-lane demand that the instance cap cannot serve, and a key holder will pay for it |
 
-托管 K8s 浏览器集群归在第 246 行之下：那一行管托管服务的规模化，浏览器集群是其中一部分。
+托管的 API 和远程 MCP 本身于 2026-10-06 作为 ROADMAP 的 PH 阶段重启（有界的 Cloud Run 服务）；第 267 行只管超出该实例上限的托管浏览器集群。
 
 运行时：拒绝原因写 `deferred`，带出处和重启条件，不写 `refused`。表格测试逐字核对每一项的行标题和重启条件与 ROADMAP 暂缓表一致；行号不做测试，因为其他人编辑 ROADMAP 前面的章节时不应因此让测试失败。
 

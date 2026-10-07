@@ -12,6 +12,8 @@ import {
   declaredContact,
   type ActionsResult,
   type CrawlMode,
+  type AccessCompletion,
+  type EvidenceAccess,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
   type EvidencePageActions,
@@ -104,6 +106,57 @@ export function toEvidenceRecord(
       requestHeaders: requested ? sentCustomHeaders(result) : null,
     },
     pageActions: pageActions(result),
+    access: evidenceAccess(result),
+  }
+}
+
+/**
+ * How the result was reached, from its lane and the events its lane recorded: the HTTP lane's
+ * `transport` (the compatible transport sent the request), the browser lane's `browser_engine`
+ * (Patchright; stock Playwright records none) and `session_attached` (a saved login), the person's
+ * browser's `user_browser_read`, the provider's `provider_selected`. A result no lane produced (the
+ * ladder's own for a rung the deadline cut, that threw or whose identity was refused, a lockdown
+ * miss) records no lane identity: its route and client are null. A cache hit states the cost of the
+ * fetch it reuses, which its `cache_hit` event carries. A fact the result did not record is null.
+ */
+/** Statuses a page was read with: the result carries content, or the page verifiably has none. */
+const READ_STATUSES: ReadonlySet<string> = new Set(['success', 'partial', 'empty_verified'])
+
+function evidenceAccess(result: FetchResult): EvidenceAccess {
+  const event = (name: string) => result.trace.find((e) => e.event === name)?.detail
+  const text = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null)
+  const hit = event('cache_hit')
+  const stored = hit?.externalCostUsd
+  const externalCostUsd = hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
+  const read = READ_STATUSES.has(result.status)
+  const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
+    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null })
+  const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
+  if (!laneRan) return route(null, null)
+  // A page read in the person's Chrome: theirs alone when it showed no check, handed to them when it did.
+  const userBrowser = (detail: Record<string, unknown>) => route('user_browser', text(detail.browser), null, null, detail.sawGate === null || detail.sawGate === undefined ? 'user_browser' : 'handed_to_person')
+  switch (result.lane) {
+    case 'http': {
+      const transport = event('transport')
+      return transport === undefined ? route('http', 'undici') : route('http_compat', text(transport.library), text(transport.version), text(transport.profile))
+    }
+    case 'browser_local':
+    case 'browser_proxy': {
+      const engine = event('browser_engine')
+      if (event('session_attached') !== undefined) return route('authed_browser', 'playwright', null, null, 'authorized_session')
+      return engine !== undefined && engine.engine === 'patchright' ? route('enhanced_browser', 'patchright', text(engine.version)) : route('browser', 'playwright')
+    }
+    case 'browser_local_authed': {
+      const handed = event('user_browser_read')
+      // A handoff's page: the person got through what stopped W2L.
+      return handed === undefined ? route('authed_browser', 'playwright', null, null, 'authorized_session') : route('user_browser', text(handed.browser), null, null, 'handed_to_person')
+    }
+    case 'my_browser': {
+      const opened = event('user_browser_read')
+      return opened === undefined ? route(null, null) : userBrowser(opened)
+    }
+    case 'provider':
+      return route('vendor', text(event('provider_selected')?.provider))
   }
 }
 

@@ -14,11 +14,11 @@
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
-import { detectRenderSignals, rawSignals } from './render.js'
+import { detectRenderSignals, hydrationShown, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, selectProduct } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
@@ -43,12 +43,23 @@ function pickTitle(doc: Document, main: Element | null): string | null {
   return docTitle ? textOf(docTitle).trim() : null
 }
 
+/** The confidence floor of a product region that shows its title heading and its price (confidenceOf). */
+const BUY_BOX_CONFIDENCE = 0.45
+/** The shortest text block that is a product's description rather than a store's one-line notice. */
+const DESCRIPTION_MIN_CHARS = 150
+
+/** Whether the region holds a title heading and shows the price. */
+function showsBuyBox(main: Element, price: string): boolean {
+  return main.querySelector('h1,h2') !== null && textOf(main).replace(/\s+/g, ' ').includes(price.replace(/\s+/g, ' ').trim())
+}
+
 function confidenceOf(
   blocksLen: number,
   main: Element | null,
   totalBlocks: number,
   mainLength: number,
   pageType: PageType,
+  productShown: boolean,
   favorPrecision: boolean,
   favorRecall: boolean,
   product: ProductFacts | null,
@@ -78,9 +89,35 @@ function confidenceOf(
   ) {
     conf = Math.max(conf, 0.6)
   }
+  // A page the router found a product page by its visible buy box, a title
+  // heading and its price, with both in the region, is the same terse shape
+  // read from what the page shows rather than what it declares: a lower
+  // floor, still above the low-yield escalation's ceiling, so an answer the
+  // browser cannot improve is not rendered again for its brevity. The
+  // region must describe the product too, in a text block of description
+  // length besides its headings (a delivery or returns line is not one): a
+  // buy box whose description its scripts draw is what the browser can still
+  // fill in. A page routed by its declarations (microdata cards) earns no
+  // such floor.
+  else if (productShown) {
+    conf = Math.max(conf, BUY_BOX_CONFIDENCE)
+  }
   if (favorPrecision) conf = Math.min(conf, 0.85)
   if (favorRecall) conf = Math.max(conf, 0.3)
   return Math.round(conf * 100) / 100
+}
+
+/**
+ * Whether the region shows the product the page declares in its own markup
+ * (JSON-LD or microdata): its name and its price are in the region's text.
+ * Such a page carries its content in its HTML, however much script it has.
+ */
+function showsDeclaredProduct(main: Element | null, product: ProductFacts | null): boolean {
+  if (main === null || product === null || product.name === null || product.price === null) return false
+  if (product.name.source === 'text' || product.price.source === 'text') return false
+  const text = textOf(main).replace(/\s+/g, ' ')
+  const price = product.price.value.replace(/[^\d.,]/g, '')
+  return text.includes(product.name.value.replace(/\s+/g, ' ').trim()) && price !== '' && text.includes(price)
 }
 
 export class ExtractTf implements Extractor {
@@ -129,11 +166,19 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    // A product's options shown as controls are kept aside before cleaning
+    // removes the controls, and shown once the page is known to be a product's.
+    const optionGroups = markOptionGroups(doc.document, excluded)
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
+    settleOptionGroups(optionGroups, decision.type === 'product')
+    // Whether the page shows its hydration data's text is asked of the cleaned
+    // page before its recommendations are cut, and only on a page whose buy
+    // box the router found: the shell check reads the answer nowhere else.
+    const dataShown = decision.buyBox === true && raw.hydrationJson.length > 0 && hydrationShown(raw, doc.document)
 
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
@@ -208,6 +253,12 @@ export class ExtractTf implements Extractor {
 
     const blocks = classifyBlocks(doc.document, classifyOptions)
     const mainLength = main ? textOf(main).length : 0
+    // A product page found by its visible buy box whose region shows the
+    // title, the price and a description (a text block of description length
+    // besides its headings): the confidence floor and the shell check read it.
+    const productShown = decision.buyBox === true && main !== null && product !== null && product.price !== null &&
+      showsBuyBox(main, product.price.value) &&
+      blocks.some((b) => main.contains(b.el) && !/^h[1-6]$/.test(b.el.tagName.toLowerCase()) && b.length >= DESCRIPTION_MIN_CHARS)
 
     const adapter = amazonProduct ? adapterFor(doc.document, options.url, product) : preliminaryAdapter
     // A selection the caller made (includeSelectors) is returned whole: it
@@ -231,6 +282,7 @@ export class ExtractTf implements Extractor {
         blocks.length,
         mainLength,
         decision.type,
+        productShown,
         favorPrecision,
         favorRecall,
         product,
@@ -247,7 +299,12 @@ export class ExtractTf implements Extractor {
       adapterValidation: amazonValidation ?? adapter.validation,
       emptyTableShells,
       fetchPreloads,
-      render: detectRenderSignals(raw, doc.document),
+      render: detectRenderSignals(raw, doc.document, {
+        productShown,
+        hydrationShown: dataShown,
+        contentShown: showsDeclaredProduct(main, product),
+        listing: decision.type === 'listing' || decision.type === 'collection',
+      }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }

@@ -1042,7 +1042,7 @@ function scrapeEvidenceRecord(result: FetchResult, req: ScrapeRequest, delivered
 /** The page fields of a result that was not read as content: nothing was read, so nothing is declared. */
 const NO_PAGE_METADATA: PageMetadata = { title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null }
 
-const BROWSER_LANES: ReadonlySet<Lane> = new Set<Lane>(['browser_local', 'browser_local_authed', 'browser_proxy'])
+const BROWSER_LANES: ReadonlySet<Lane> = new Set<Lane>(['browser_local', 'browser_local_authed', 'browser_proxy', 'my_browser'])
 
 /**
  * Which egress the answering lane recorded: the caller's own, from the signed

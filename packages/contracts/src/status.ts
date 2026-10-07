@@ -82,6 +82,8 @@ export const LANE = [
   'browser_local_authed',
   'browser_proxy',
   'provider',
+  /** The person's own Chrome, over remote debugging, for the sites they allowed (`lane: "my-browser"`, ROADMAP PA item 8). */
+  'my_browser',
 ] as const
 
 export type Lane = (typeof LANE)[number]

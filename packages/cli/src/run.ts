@@ -23,7 +23,7 @@ import {
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { login } from './login.js'
 
-export const CLI_VERSION = '0.3.0'
+export const CLI_VERSION = '0.3.1'
 
 export interface CliIo {
   env: NodeJS.ProcessEnv
@@ -75,6 +75,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       accessGrant: listen.accessGrant,
       browserEngine: listen.browserEngine,
       compatHosts: listen.compatHosts,
+      egressProxies: listen.egressProxies,
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)
@@ -144,6 +145,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       if (urls.length === 0) throw new UsageError('octocrawl batch takes URLs as arguments or --urls-file')
       const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, urls, origin: ORIGIN }))
       io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
+      if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (it lists every site of the batch); close that page or click Revoke to stop')
       return finish(engine, 'batch', accepted.taskId, cli, io)
     }
   }
@@ -189,6 +191,7 @@ function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
     onWaiting: (url, check) => io.stderr(`octocrawl ${command}: ${url} shows a ${check.replace(/_/g, ' ')}: get through it in the Chrome tab that opened (click Allow if Chrome asks)`),
     onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (Octocrawl reads it only once you act in its tab)`),
     onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab Octocrawl opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
+    onAllow: (hosts) => io.stderr(`octocrawl ${command}: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (${hosts.join(', ')}); close that page or click Revoke to stop. While remote debugging is on, sites see navigator.webdriver true: turn it off at chrome://inspect/#remote-debugging when you are done`),
     ...(io.signal === undefined ? {} : { signal: io.signal }),
   }
 }
