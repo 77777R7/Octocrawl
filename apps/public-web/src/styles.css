@@ -71,11 +71,6 @@ a { color: inherit; }
 .brand-mark { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 2px 15px rgba(10, 69, 168, .55)); }
 /* The wordmark is Inter Medium drawn as outlines (assets/octocrawl-wordmark.svg), so it needs no web font. */
 .brand-name { display: block; width: auto; height: 23px; }
-/* The header octopus drifts like it is floating in water, and wiggles its arms when the logo is hovered. */
-@keyframes octo-drift { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-2px) rotate(-4deg); } }
-@keyframes octo-wiggle { 0%, 100% { transform: rotate(0deg) scale(1); } 20% { transform: rotate(-12deg) scale(1.06); } 45% { transform: rotate(9deg) scale(1.06); } 70% { transform: rotate(-5deg) scale(1.03); } }
-.site-header .brand-mark { transform-origin: 50% 42%; animation: octo-drift 5.5s ease-in-out infinite; }
-.site-header .brand:hover .brand-mark, .site-header .brand:focus-visible .brand-mark { animation: octo-wiggle .8s ease-in-out; }
 .site-nav { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
 .site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; text-decoration: none; white-space: nowrap; color: #eef6ff; }
 .site-nav a:hover { color: #ffae86; }
@@ -1112,7 +1107,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-  .site-header .brand-mark, .site-header .brand:hover .brand-mark, .site-header .brand:focus-visible .brand-mark { animation: none; }
 }
 
 /* Hosted early-access form (src/waitlistMarkup.ts): a dark band above the footer, copy beside the form. */
