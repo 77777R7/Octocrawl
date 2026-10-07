@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
+import { fileURLToPath } from 'node:url'
 import { pageMarkup } from './src/page'
+import { versionPublicAssets } from './scripts/publicAssetVersions.mjs'
 
 export default defineConfig({
   plugins: [{
@@ -8,7 +10,7 @@ export default defineConfig({
     transformIndexHtml(html) {
       const slot = '<div id="app"></div>'
       if (!html.includes(slot)) throw new Error('index.html must contain an empty #app element')
-      return html.replace(slot, `<div id="app">${pageMarkup()}</div>`)
+      return versionPublicAssets(html.replace(slot, `<div id="app">${pageMarkup()}</div>`), fileURLToPath(new URL('./public', import.meta.url)))
     },
   }],
   build: {
