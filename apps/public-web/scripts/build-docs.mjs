@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
+import { versionPublicAssets } from './publicAssetVersions.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'dist', 'docs')
@@ -235,7 +236,7 @@ for (const [index, page] of pages.entries()) {
   await mkdir(dirname(target), { recursive: true })
   const toc = []
   const content = renderPageContent(page, source, toc)
-  await writeFile(target, documentHtml(page, content, index, toc))
+  await writeFile(target, versionPublicAssets(documentHtml(page, content, index, toc), join(root, 'public')))
   // Every page is also published as its Markdown source, for LLM readers and llms.txt.
   const text = pageMarkdown(page, source)
   await writeFile(join(output, page.slug, 'index.md'), text)
@@ -261,7 +262,7 @@ const notFound = `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>Page not found | Octocrawl</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header(false)}
 <div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div></body></html>`
-await writeFile(join(root, 'dist', '404.html'), notFound)
+await writeFile(join(root, 'dist', '404.html'), versionPublicAssets(notFound, join(root, 'public')))
 
 // Crawlers may read every page; the API is not for them. The sitemap lists the home page and each docs page.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
