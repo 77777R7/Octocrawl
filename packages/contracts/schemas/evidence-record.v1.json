@@ -401,6 +401,35 @@
         "switchedFrom": {
           "description": "The pool egress the task last moved off before this page was read here (the egress_switched trace event); null when it did not move.",
           "type": ["string", "null"]
+        },
+        "exit": {
+          "description": "Where the pool egress leaves from, as the operator's echo URL (W2L_EGRESS_ECHO_URL) saw it through that proxy (the egress_exit trace event). Null when no echo URL is set, the echo did not answer, or the egress is not the pool's. Added after egress: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessEgressExit" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "accessEgressExit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ip", "country", "observedAt"],
+      "properties": {
+        "ip": {
+          "description": "The address the echo service saw the request come from.",
+          "type": "string",
+          "minLength": 1
+        },
+        "country": {
+          "description": "Its two-letter country code, when the echo service gives one; null otherwise.",
+          "type": ["string", "null"],
+          "pattern": "^[A-Z]{2}$"
+        },
+        "observedAt": {
+          "description": "When the echo was asked (UTC ISO); an exit is asked again after ten minutes.",
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
         }
       }
     },

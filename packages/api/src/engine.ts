@@ -380,6 +380,11 @@ export interface ApiEngineOptions {
    */
   egressProxies?: readonly ProxyServer[]
   /**
+   * A URL that answers with the caller's address (`W2L_EGRESS_ECHO_URL`): each pool egress is asked it through its
+   * own proxy, and a page read through that egress records where it left from (`access.egress.exit`). Absent: not asked.
+   */
+  egressEchoUrl?: string | null
+  /**
    * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
    * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
    * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
@@ -465,6 +470,19 @@ function writeTaskEgress(file: string, id: string): void {
 }
 const DEFAULT_WORKER_COUNT = 4
 
+/** `promise`'s value, or null once the context's signal aborts or its deadline passes first. */
+function settledBy<T>(promise: Promise<T | null>, context: ExecutionContext): Promise<T | null> {
+  if (context.signal?.aborted || (context.deadlineAt !== undefined && context.deadlineAt <= Date.now())) return Promise.resolve(null)
+  if (context.signal === undefined && context.deadlineAt === undefined) return promise
+  return new Promise((resolve) => {
+    const done = (value: T | null) => { clearTimeout(timer); context.signal?.removeEventListener('abort', aborted); resolve(value) }
+    const aborted = () => done(null)
+    const timer = context.deadlineAt === undefined ? undefined : setTimeout(aborted, context.deadlineAt - Date.now())
+    context.signal?.addEventListener('abort', aborted, { once: true })
+    promise.then(done, () => done(null))
+  })
+}
+
 /**
  * How the cache takes part in one page's fetch: the key of the page under
  * the options that shape its result, the age bounds of a lookup (null: none
@@ -544,7 +562,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
   }
   /** The operator's egress proxies, when any: every fetch leaves through one of them. */
-  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy)
+  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy, Date.now, options.egressEchoUrl ?? null)
+  /**
+   * The page's trace with where its pool egress leaves from, when the pool's echo said (egress_exit); unchanged otherwise.
+   * A cache hit keeps the exit its original read recorded: the echo's answer now is not where that read left from. The
+   * wait for the echo ends with the page's signal or deadline, the exit then unknown, so it never outlasts a `timeout`.
+   */
+  const withEgressExit = async (result: FetchResult, egress: Egress | undefined, context: ExecutionContext = {}): Promise<FetchResult> => {
+    if (egress === undefined || egressPool === null || result.trace.some((event) => event.event === 'cache_hit')) return result
+    const exit = await settledBy(egressPool.exitOf(egress.id), context)
+    return exit === null ? result : { ...result, trace: [...result.trace, { at: 0, lane: result.lane, event: 'egress_exit', detail: { proxy: egress.id, ...exit } }] }
+  }
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
   const fileStore = new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
@@ -1495,7 +1523,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           used = current
           outcome = await pageAtom.scrape(url, context)
         }
-        return events.length === 0 ? outcome : { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, ...events] } }
+        const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...outcome.result.trace, ...events] }, used.egress, context)
+        return result === outcome.result ? outcome : { ...outcome, result }
       },
       close: () => pageAtom.close(),
     }
@@ -1626,7 +1655,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
+    const scrapeEgress = mode === 'authed' ? undefined : egressPool?.pick()
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, scrapeEgress)
     const policy: CrawlPolicy = {
       mode,
       // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
@@ -1668,7 +1698,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
         ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
-          .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+          .then(async (fetched) => ({ ...fetched, result: afterFetch(plan, answer, await withEgressExit(fetched.result, scrapeEgress, scope)) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.
       const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null

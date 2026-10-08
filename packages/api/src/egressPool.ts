@@ -10,12 +10,16 @@
  * get past it is identity rotation, which ADR 0005 never does. A switch starts a new cookie session,
  * as a session never changes egress.
  *
- * Results record an egress by its `host:port` endpoint, never its credentials.
+ * Results record an egress by its `host:port` endpoint, never its credentials. With an echo URL
+ * (`W2L_EGRESS_ECHO_URL`), each egress is also asked once where it leaves from (exitOf): the address and
+ * country the echo service saw, so a record can tell two exits apart and say where its page was read from.
  */
 
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
-import { withPoolProxy, type FetchResult, type NetworkPolicy, type ProxyServer, type ScrapeOutcome } from '@w2l/contracts'
+import { isIP } from 'node:net'
+import { withPoolProxy, type EvidenceAccessEgressExit, type FetchResult, type NetworkPolicy, type ProxyServer, type ScrapeOutcome } from '@w2l/contracts'
+import { fetchThroughProxy } from '@w2l/bench'
 
 export const EGRESS_COOLDOWN_MS = 10 * 60_000
 export const MAX_EGRESS_SWITCHES = 2
@@ -29,12 +33,22 @@ export interface Egress {
   readonly server: ProxyServer
 }
 
+/** How one egress's exit is learned: the echo URL fetched through its proxy. A test seam replaces it. */
+export type EgressEcho = (server: ProxyServer, echoUrl: string) => Promise<{ status: number; body: string }>
+
 export class EgressPool {
   private readonly egresses: readonly Egress[]
   private readonly cooldownUntil = new Map<string, number>()
+  private readonly exits = new Map<string, { at: number; exit: Promise<EvidenceAccessEgressExit | null> }>()
   private next = 0
 
-  constructor(servers: readonly ProxyServer[], policy: NetworkPolicy, private readonly now: () => number = Date.now) {
+  constructor(
+    servers: readonly ProxyServer[],
+    policy: NetworkPolicy,
+    private readonly now: () => number = Date.now,
+    private readonly echoUrl: string | null = null,
+    private readonly echo: EgressEcho = (server, url) => fetchThroughProxy(server, url),
+  ) {
     if (servers.length === 0) throw new Error('an egress pool needs at least one proxy')
     this.egresses = servers.map((server) => ({ id: server.endpoint, policy: withPoolProxy(policy, server), server }))
   }
@@ -69,10 +83,54 @@ export class EgressPool {
     return [...pool].sort((a, b) => (this.cooldownUntil.get(a.id) ?? 0) - (this.cooldownUntil.get(b.id) ?? 0))[0]!
   }
 
-  /** The egress failed its probe: it cools down. */
+  /** The egress failed its probe: it cools down, and where it leaves from is asked again when it is next used. */
   fail(id: string): void {
     this.cooldownUntil.set(id, this.now() + EGRESS_COOLDOWN_MS)
+    this.exits.delete(id)
   }
+
+  /**
+   * Where this egress leaves from, as the echo URL saw it: asked once and kept for EGRESS_COOLDOWN_MS, since a
+   * provider's exit may change. Null without an echo URL, and when the echo did not answer or named no address:
+   * unknown stays unknown.
+   */
+  exitOf(id: string): Promise<EvidenceAccessEgressExit | null> {
+    const egress = this.byId(id)
+    if (this.echoUrl === null || egress === undefined) return Promise.resolve(null)
+    const known = this.exits.get(id)
+    if (known !== undefined && this.now() - known.at < EGRESS_COOLDOWN_MS) return known.exit
+    const echoUrl = this.echoUrl
+    const exit = this.echo(egress.server, echoUrl)
+      .then((answer) => (answer.status >= 200 && answer.status < 300 ? parseEchoExit(answer.body, new Date(this.now()).toISOString()) : null))
+      .catch(() => null)
+    this.exits.set(id, { at: this.now(), exit })
+    return exit
+  }
+}
+
+/**
+ * The address and country in an echo service's answer: JSON with `ip`, `origin` or `query` and, when it gives
+ * one, a two-letter `country`, `country_code` or `countryCode`; or a bare address as text. Null when it names no
+ * address; a country it does not give is null.
+ */
+export function parseEchoExit(body: string, observedAt: string): EvidenceAccessEgressExit | null {
+  const text = body.trim()
+  let ip: string | null = null
+  let country: string | null = null
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>
+    if (parsed !== null && typeof parsed === 'object') {
+      const address = [parsed.ip, parsed.origin, parsed.query].find((value) => typeof value === 'string')
+      // httpbin's `origin` lists every address a request passed through; the last is the one that reached it.
+      const last = typeof address === 'string' ? address.split(',').map((part) => part.trim()).at(-1) ?? '' : ''
+      ip = isIP(last) === 0 ? null : last
+      const code = [parsed.country_code, parsed.countryCode, parsed.country].find((value) => typeof value === 'string' && /^[A-Za-z]{2}$/.test(value))
+      country = typeof code === 'string' ? code.toUpperCase() : null
+    }
+  } catch {
+    ip = isIP(text) === 0 ? null : text
+  }
+  return ip === null ? null : { ip, country, observedAt }
 }
 
 /** The failures a proxy that does not answer produces: the connection, the name, the handshake or the time it took. */
