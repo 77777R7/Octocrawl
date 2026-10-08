@@ -249,7 +249,7 @@ const summary = 'Octocrawl turns a public web page into readable Markdown and, o
 const groups = [...new Set(pages.map(page => page.group))]
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
-  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/w2l.`, '',
+  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, '',
 ].join('\n')

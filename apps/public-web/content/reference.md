@@ -4,7 +4,7 @@ Use the browser preview or [Connect MCP](/docs/connect-mcp/) for a first result.
 
 ## REST and SDK
 
-The API (`npx octocrawl serve`, on `127.0.0.1:8787`) has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The TypeScript SDK is published as `@octocrawl/sdk` and the Python client as `octocrawl-client` (0.3.0, 2026-10-05); each takes the API's base URL and an optional token.
+The API (`npx octocrawl serve`, on `127.0.0.1:8787`) has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The TypeScript SDK is published as `@octocrawl/sdk` and the Python client as `octocrawl-client` (0.3.1, 2026-10-06); each takes the API's base URL and an optional token.
 
 A server started with tokens (`--token`, which can be repeated, or `W2L_API_TOKEN` and the comma-separated `W2L_API_TOKENS`) accepts a request only with `Authorization: Bearer <token>` naming one of them. Give each client its own token; restarting the server without a token revokes it. Tokens are compared as fixed-length SHA-256 digests in constant time. The SDK sends its `token` option, or `W2L_API_TOKEN` from the environment when no `token` is passed.
 
@@ -35,7 +35,7 @@ Start the API only after reviewing its network and task-store settings (`npx oct
 
 ## Evidence Record
 
-Every scrape result (full or compact, so MCP `scrape` too), batch item and crawl page carries `evidenceRecord`: the evidence for that page in one shape, whichever lane fetched it. Its JSON Schema (draft 2020-12) is [`packages/contracts/schemas/evidence-record.v1.json`](https://github.com/77777R7/w2l/blob/main/packages/contracts/schemas/evidence-record.v1.json) in the repository, which describes every field; each record names it with `schemaVersion: "w2l.evidence/1"`. Every field is always present, and a value Octocrawl did not observe is `null`, never `0` or a guess. The record sits beside the existing fields (`evidence`, `snapshot`, `compliance`, `lane`), which do not change. The Firecrawl-compatible `/fc` routes keep Firecrawl's shape and do not carry it.
+Every scrape result (full or compact, so MCP `scrape` too), batch item and crawl page carries `evidenceRecord`: the evidence for that page in one shape, whichever lane fetched it. Its JSON Schema (draft 2020-12) is [`packages/contracts/schemas/evidence-record.v1.json`](https://github.com/77777R7/Octocrawl/blob/main/packages/contracts/schemas/evidence-record.v1.json) in the repository, which describes every field; each record names it with `schemaVersion: "w2l.evidence/1"`. Every field is always present, and a value Octocrawl did not observe is `null`, never `0` or a guess. The record sits beside the existing fields (`evidence`, `snapshot`, `compliance`, `lane`), which do not change. The Firecrawl-compatible `/fc` routes keep Firecrawl's shape and do not carry it.
 
 `w2l.evidence/1` changes only additively: a later revision of the schema file accepts every record an earlier one accepted. A field added later is optional in the schema, so older records stay valid, though Octocrawl writes it on every record from then on (so far `bytes` and `contentType` on artifacts, added with file download); enums only gain values; no field changes its meaning. Anything else would get a new `schemaVersion` and schema file.
 
@@ -87,7 +87,9 @@ These codes describe the request, not the page. A page that was fetched but bloc
 The SDK throws `W2LError` for every error response. It carries `status`, `code` (when the body had one), `method`, `path` and the parsed `body`; its message is still `<METHOD> <path> failed: <status> <body>`, or `crawl not found: <id>` and `batch not found: <id>` for those lookups. A request that never reached the API throws the underlying `fetch` error. `scrape` waits for the answer until the request's `timeout` (default 300 000 ms) plus 30 s; on Node this replaces fetch's own 300 s wait for the response headers, so the API's `failed`/`timeout` answer at the deadline arrives instead of a `TypeError`. `waitBatch` / `waitCrawl` (and `batchAndWait` / `crawlAndWait`) retry a status request that fails with a network error, 408, 429 or 5xx, up to `maxRetries` (default 5) in a row, before throwing its error; they throw other errors at once, and `WaitTimeoutError` (`taskId`, `timeoutMs`, `last`: the last status read or null) when `timeoutMs` runs out.
 
 ```ts
-import { W2LError } from '@w2l/sdk'
+import { W2L, W2LError } from '@octocrawl/sdk'
+
+const w2l = new W2L({ baseUrl: 'http://127.0.0.1:8787' })
 
 try {
   await w2l.getCrawl(taskId)

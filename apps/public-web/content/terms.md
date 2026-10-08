@@ -1,8 +1,8 @@
 # Terms of use
 
-These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/w2l/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
+These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-Last updated 3 October 2026.
+Last updated 9 October 2026.
 
 ## Who runs the preview
 
