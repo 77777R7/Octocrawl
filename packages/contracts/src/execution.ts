@@ -27,6 +27,38 @@ export interface ExecutionContext {
    * a listener's error never changes the fetch. Absent: nothing is told early.
    */
   onTrace?: (event: TraceEvent) => void
+  /**
+   * Hear of each page a paginate step reads the moment it is read (ROADMAP PA item 3), for a caller that keeps
+   * them in the task's checkpoint: a run cut at page N then resumes from them through `listResume`. A listener's
+   * error never changes the fetch. Absent: nothing is told.
+   */
+  onListPage?: (page: ListPageRead) => void
+  /**
+   * The pages a paginate step of this URL read before an earlier run was cut, from the task's checkpoint. The
+   * browser lane counts them as read: it passes over them on its way along the site's own Next links (the only way
+   * to page N+1 when pages have no address of their own), tells and reads the pages after them, and merges every
+   * page once. Absent: the list starts from its first page.
+   */
+  listResume?: { pages: readonly ListPageRead[] }
+}
+
+/** One page a paginate step read: what `onListPage` tells and `listResume` gives back. */
+export interface ListPageRead {
+  /** Index of the paginate step among the request's actions. */
+  step: number
+  /** 1-based position among the pages the step read, the resumed ones included. */
+  page: number
+  /** The URL the browser showed when the page was read. */
+  url: string
+  html: string
+  /** The page's state key as the lane computed it (its URL and its items or words), to know the page again on a resume. */
+  state: string
+  /** The hash of the elements `itemSelector` matched, or null without one. */
+  items: string | null
+  /** The hash of the links and sources inside those elements alone, which a changed price or date leaves as it was; null without `itemSelector` or when no item has one. */
+  itemRefs: string | null
+  /** How many elements `itemSelector` matched on the page; null without one. */
+  count: number | null
 }
 
 /** A cookie as a browser context takes and gives it (Playwright's shape). */
