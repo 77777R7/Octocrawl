@@ -111,6 +111,8 @@ export interface ListRun {
   items: number | null
   /** paginate: elements matching `itemSelector` over every page read; null without one. */
   itemsRead?: number | null
+  /** paginate: pages taken from the task's checkpoint after a run cut at page N (ExecutionContext.listResume), counted in `rounds`; absent when none. */
+  resumed?: number
 }
 
 /** What the steps produced, each list in the order of its steps. */

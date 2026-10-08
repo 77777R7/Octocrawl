@@ -6,7 +6,7 @@
  * A repeated put of the same id does not create a second row.
  */
 
-import type { Attempt, StepRecord, StepStatus, Task } from '@w2l/contracts'
+import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
 
 export type StepPageKind = 'pages' | 'errors' | 'all'
 export interface StepPageQuery {
@@ -47,6 +47,13 @@ export interface TaskStore {
    * Resume uses this to decide refetch vs `--use-cached`.
    */
   getStepByCanonicalUrl(taskId: string, canonicalUrl: string): Promise<StepRecord | null>
+  /**
+   * The pages a URL's paginate step has read so far (ROADMAP PA item 3), kept until the URL's step is stored: a run
+   * cut at page N resumes from them. One row per (step, page); telling a page again replaces it.
+   */
+  putPageRead(taskId: string, canonicalUrl: string, page: ListPageRead): Promise<void>
+  listPagesRead(taskId: string, canonicalUrl: string): Promise<readonly ListPageRead[]>
+  clearPagesRead(taskId: string, canonicalUrl: string): Promise<void>
   close(): Promise<void>
 }
 

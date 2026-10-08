@@ -1,4 +1,4 @@
-import type { Attempt, StepRecord, StepStatus, Task } from '@w2l/contracts'
+import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
 import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore } from './taskStore.js'
 
 /**
@@ -9,6 +9,7 @@ export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, Task>()
   private readonly attempts = new Map<string, Attempt>()
   private readonly steps = new Map<string, StepRecord>()
+  private readonly pagesRead = new Map<string, Map<string, ListPageRead>>()
 
   async putTask(task: Task): Promise<void> {
     assertId('task.id', task.id)
@@ -131,6 +132,21 @@ export class MemoryTaskStore implements TaskStore {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
     const latest = matches[0]
     return latest === undefined ? null : cloneJson(latest)
+  }
+
+  async putPageRead(taskId: string, canonicalUrl: string, page: ListPageRead): Promise<void> {
+    const key = `${taskId}\0${canonicalUrl}`
+    const pages = this.pagesRead.get(key) ?? new Map<string, ListPageRead>()
+    pages.set(`${page.step}:${page.page}`, cloneJson(page))
+    this.pagesRead.set(key, pages)
+  }
+
+  async listPagesRead(taskId: string, canonicalUrl: string): Promise<readonly ListPageRead[]> {
+    return [...(this.pagesRead.get(`${taskId}\0${canonicalUrl}`)?.values() ?? [])].sort((a, b) => a.step - b.step || a.page - b.page).map(cloneJson)
+  }
+
+  async clearPagesRead(taskId: string, canonicalUrl: string): Promise<void> {
+    this.pagesRead.delete(`${taskId}\0${canonicalUrl}`)
   }
 
   async close(): Promise<void> {

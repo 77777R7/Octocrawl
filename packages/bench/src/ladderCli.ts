@@ -265,7 +265,7 @@ export function buildChannels(
       fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
           ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession),
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -334,7 +334,7 @@ export function buildChannels(
           }
           return skip
         }
-        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride)
+        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, undefined, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume })
       },
       close: async () => {
         for (const subject of authedSubjects.values()) await subject.teardown()
