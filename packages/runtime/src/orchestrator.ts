@@ -46,6 +46,7 @@ import {
   type SitemapLoadResult,
   type SitemapMode,
   type SitemapSource,
+  type ListPageRead,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
@@ -332,7 +333,15 @@ export class CrawlOrchestrator {
             } else {
               const scrapeStartedAt = Date.now()
               let outcome: ScrapeOutcome
-              try { outcome = await raceWithSignal(this.atom.scrape(item.url, scope), scope.signal) }
+              // A batch with a paginate step keeps each page the step reads in the checkpoint (ROADMAP PA item 3): a run cut
+              // at page N resumes from them. The whole URL is still the step; the pages are its progress until it is stored.
+              const pagesRead = listsPages(runningTask) ? await this.store.listPagesRead(runningTask.id, item.canonicalUrl) : []
+              const pageScope = !listsPages(runningTask) ? scope : {
+                ...scope,
+                onListPage: (page: ListPageRead) => { void this.store.putPageRead(runningTask.id, item.canonicalUrl, page).catch(() => {}) },
+                ...(pagesRead.length === 0 ? {} : { listResume: { pages: pagesRead } }),
+              }
+              try { outcome = await raceWithSignal(this.atom.scrape(item.url, pageScope), scope.signal) }
               catch (error) {
                 // Cancellation, shutdown and the crawl's own budget stop the run.
                 // Any other exception belongs to this URL: it becomes the URL's
@@ -387,6 +396,7 @@ export class CrawlOrchestrator {
             pagesInFlight--
             const step: StepRecord = { id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at }
             await this.store.putStep(step)
+            if (listsPages(runningTask)) await this.store.clearPagesRead(runningTask.id, item.canonicalUrl)
             taskUrls.add(item.canonicalUrl)
             if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
@@ -586,6 +596,11 @@ export class CrawlOrchestrator {
     addDiscovery(discovery, offered)
     return { ...record, sources: loaded.sources, files: loaded.files, listed: loaded.urls.length, enqueued: offered.enqueued, truncated: loaded.truncated }
   }
+}
+
+/** Whether the task's pages run a paginate step, whose pages are kept as they are read. */
+function listsPages(task: Task): boolean {
+  return (task.batch?.actions ?? []).some((action) => action.type === 'paginate')
 }
 
 /** Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a relaunch never fetches it again. */

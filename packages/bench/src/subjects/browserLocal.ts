@@ -319,8 +319,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
   }
 
   /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`): the context starts with them and leaves its own there. */
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession): Promise<FetchResult> {
-    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }) })
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, listing?: Pick<ExecutionContext, 'onListPage' | 'listResume'>): Promise<FetchResult> {
+    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }), ...(listing?.onListPage === undefined ? {} : { onListPage: listing.onListPage }), ...(listing?.listResume === undefined ? {} : { listResume: listing.listResume }) })
     const start = Date.now()
     const monotonicStart = performance.now()
     let queueMs = 0
@@ -1668,7 +1668,8 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
   if (ran === undefined) return result
   // The list format over a paginate step: the records of every page it read, in order, not of the last page alone; also when a
   // later step failed, since those pages were read. A page whose records repeat a page already merged is not counted twice.
-  const paginated = list === undefined ? [] : ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index)
+  // A paginate step that failed at page N (a click that never landed) read its pages before it: they keep their records too.
+  const paginated = list === undefined ? [] : [...ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index), ...(ran.result.failed?.type === 'paginate' ? [ran.result.failed.index] : [])]
   const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
   // A paginate step that read no page (the deadline came first) leaves the list of the page as it stands.
   if (pages.length > 0) {
