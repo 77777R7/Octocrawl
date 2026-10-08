@@ -1,6 +1,6 @@
 # Acceptable use policy
 
-This policy applies to the hosted preview on this site and to the hosted API and MCP (`api.octocrawl.dev`, `mcp.octocrawl.dev`). It does not restrict your rights under the [AGPL-3.0](https://github.com/77777R7/w2l/blob/main/LICENSE) when you run the Octocrawl software yourself; there, you are responsible for following the law and each site's rules.
+This policy applies to the hosted preview on this site and to the hosted API and MCP (`api.octocrawl.dev`, `mcp.octocrawl.dev`). It does not restrict your rights under the [AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE) when you run the Octocrawl software yourself; there, you are responsible for following the law and each site's rules.
 
 Last updated 9 October 2026.
 

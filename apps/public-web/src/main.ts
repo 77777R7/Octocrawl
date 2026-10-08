@@ -380,7 +380,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
   const docs = result.status === 'quota_exceeded'
     ? textElement('a', 'Run it yourself ↗', 'guidance-link')
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
-  docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/w2l' : '/docs/limits/'
+  docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/Octocrawl' : '/docs/limits/'
   actions.append(json, docs)
   if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
   panel.append(actions)

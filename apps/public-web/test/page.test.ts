@@ -71,6 +71,6 @@ describe('Page markup', () => {
   it('gives an email and GitHub as contacts in the footer', () => {
     const page = pageMarkup()
     expect(page).toContain('href="mailto:hello@octocrawl.dev"')
-    expect(page).toContain('href="https://github.com/77777R7/w2l/issues"')
+    expect(page).toContain('href="https://github.com/77777R7/Octocrawl/issues"')
   })
 })
