@@ -470,6 +470,33 @@ function writeTaskEgress(file: string, id: string): void {
 }
 const DEFAULT_WORKER_COUNT = 4
 
+/**
+ * A continued list's `itemsRead`: the kept pages' count plus each page the person showed, only when no page can be counted
+ * twice, else null (unknown). That needs pages with addresses of their own, told by the addresses themselves: the kept pages
+ * each at their own, the check's page at none of them, no page the person showed at a kept one, and the check's page not the
+ * list's own (a pager reopened there shows the kept pages again); and every count known.
+ */
+export function continuedItemsRead(pages: { stepUrl: string; checkUrl: string; kept: readonly string[]; keptItems: number | null | undefined; shown: readonly { url: string; items?: number | null }[] }): number | null {
+  const at = (href: string): string => {
+    try {
+      const parsed = new URL(href)
+      return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '') || '/'}${parsed.search}`
+    } catch {
+      return href
+    }
+  }
+  const kept = pages.kept.map(at)
+  const addressed = new Set(kept).size === kept.length && !kept.includes(at(pages.checkUrl)) && at(pages.checkUrl) !== at(pages.stepUrl)
+    && pages.shown.every((page) => !kept.includes(at(page.url)))
+  if (!addressed || typeof pages.keptItems !== 'number') return null
+  let sum = pages.keptItems
+  for (const page of pages.shown) {
+    if (typeof page.items !== 'number') return null
+    sum += page.items
+  }
+  return sum
+}
+
 /** `promise`'s value, or null once the context's signal aborts or its deadline passes first. */
 function settledBy<T>(promise: Promise<T | null>, context: ExecutionContext): Promise<T | null> {
   if (context.signal?.aborted || (context.deadlineAt !== undefined && context.deadlineAt <= Date.now())) return Promise.resolve(null)
@@ -1086,14 +1113,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const merged = list === undefined ? null : mergeListPages(pages, list)
       const rounds = pages.length
       const continued = { from, pages: read.pages.length, by: 'user_browser' as const }
-      // The items on the last page, as the person's tab counted them; over every page only when the pages have addresses of their own (a
-      // pager reopened at the list's own page shows the kept pages again, which a sum would count twice) and every count is known.
-      const counts = read.pages.map((page) => page.items)
-      const ownAddresses = new URL(url).pathname + new URL(url).search !== new URL(step.url).pathname + new URL(step.url).search
-      const itemsRead = ownAddresses && typeof run.itemsRead === 'number' && counts.every((count): count is number => typeof count === 'number') ? run.itemsRead + counts.reduce((sum, count) => sum + count, 0) : null
+      // The items on the last page, as the person's tab counted them, and over every page only when a sum cannot count a page twice.
+      const itemsRead = continuedItemsRead({ stepUrl: step.url, checkUrl: url, kept: kept.map((page) => page.url), keptItems: run.itemsRead, shown: read.pages })
       const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: last.items ?? null, itemsRead, continued } : item)
       // Each page says who read it: W2L's own browser before the check (the kept pages), the person's after it.
-      const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map((page) => ({ ...page, step: run.index, by: 'user_browser' as const }))], lists }
+      const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map(({ url: pageUrl, html }) => ({ url: pageUrl, html, step: run.index, by: 'user_browser' as const }))], lists }
       const valued = merged !== null && merged.valued
       const short = read.stoppedBy !== 'end'
       const at = base.usage.wallMs

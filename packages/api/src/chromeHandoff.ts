@@ -376,7 +376,8 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
   // The page read is the first of them: what it lists is known, so showing it again reads nothing twice.
   try {
     const shown = await look()
-    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key; pages[0]!.items = shown.items ?? null }
+    // Its count only from the page as read: a tab already elsewhere (a Next clicked meanwhile) leaves it unknown.
+    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key; pages[0]!.items = shown.href === first.finalUrl ? shown.items ?? null : null }
   } catch (error) {
     if (isGone(error)) throw new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, after ${pages.length} page(s) of the list were read`, null, 'gone')
   }

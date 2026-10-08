@@ -229,6 +229,8 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(item.list?.records.map((record) => record.source.page)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
       // The items as counted on each page: 3 on the last, 9 over the three (page 1's from Octocrawl's own read).
       expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, items: 3, itemsRead: 9, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      // The pages' counts stay inside: a scrape is its address, its HTML, its step and who read it.
+      expect(item.actions?.scrapes.map((scrape) => Object.keys(scrape).sort().join())).toEqual(['html,step,url', 'by,html,step,url', 'by,html,step,url'])
       expect(item.trace.map((event) => event.event)).toEqual(expect.arrayContaining(['handoff_from', 'user_browser_read', 'list_continued', 'list_extracted']))
       expect(item.handoff).toBeUndefined()
       expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 0, succeeded: 1, failed: 0 })
