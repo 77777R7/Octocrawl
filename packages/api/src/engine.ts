@@ -473,11 +473,13 @@ const DEFAULT_WORKER_COUNT = 4
 
 /**
  * Whether a page of a list shows again what an earlier one shows, as the list merge tells it (its items' whole text), or that
- * cannot be told (no list read from the first page, or the merge cut short): a page shown again at an address of its own, as a
+ * cannot be told (a selector the extractor does not take, no list read from the first page, or the merge cut short): a page shown again at an address of its own, as a
  * result set tied to the session that made it comes back in another session, would be counted twice by a sum. A page with no
  * item adds none to a sum, so it is not one.
  */
 export function listPagesRepeat(pages: readonly { url: string; html: string }[], itemSelector: string): boolean {
+  // A selector the extractor does not take (`:has()`, `:nth-child()`, `+`, `~`) finds no item here though the browser counted some: it cannot be told.
+  if (invalidSelector(itemSelector) !== null) return true
   const merged = mergeListPages(pages.map(({ url, html }) => ({ url, html })), { type: 'list', itemSelector } as ListFormatRequest)
   return merged === null || merged.spec === null || merged.list.pages !== pages.length || merged.list.truncated
 }

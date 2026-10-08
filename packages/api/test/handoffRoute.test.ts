@@ -244,6 +244,9 @@ describe('a continued list\'s itemsRead', () => {
     expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=A&p=3', 3)], 'div.card')).toBe(false)
     // Kept pages 1 and 2 under rs=A; the person's session starts a new set, rs=C, and pages through 1 and 2 again.
     expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=C&p=1', 1), at('/s?rs=C&p=2', 2), at('/s?rs=C&p=3', 3)], 'div.card')).toBe(true)
+    // A selector the extractor does not take finds no item here, though the person's browser counted some: it cannot be told.
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=C&p=1', 1)], 'div.card:has(a)')).toBe(true)
+    expect(listPagesRepeat([at('/s?p=1', 1), at('/s?p=2', 2)], 'main > div.card:nth-child(n)')).toBe(true)
     // Pages with no item: each adds none to a sum, so none can be counted twice.
     expect(listPagesRepeat([at('/s?p=1', 1), at('/s?p=2', 2)], 'div.none')).toBe(false)
   })
