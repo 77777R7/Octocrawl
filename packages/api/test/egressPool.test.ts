@@ -100,7 +100,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-type Item = { url: string; status: string; failureReason?: string | null; evidenceRecord?: { proxy: string | null } | null; trace?: { event: string; detail?: Record<string, unknown> }[] }
+type Item = { url: string; status: string; failureReason?: string | null; evidenceRecord?: { proxy: string | null; access?: { egress?: unknown; session?: unknown } } | null; trace?: { event: string; detail?: Record<string, unknown> }[] }
 
 type Channels = NonNullable<Parameters<typeof createApiEngine>[0]['channelsFor']>
 const httpOnly = (policy: ReturnType<typeof localNetworkPolicy>): Channels => (mode, egress) => buildChannels(mode, { networkPolicy: egress?.policy ?? policy }).filter((channel) => channel.id === 'http')
@@ -138,6 +138,9 @@ describe('a task on egress proxies', () => {
     expect(status).toBe('completed')
     expect(items['/start']).toMatchObject({ status: 'success' })
     expect(switched(items['/start']!)).toEqual([{ from: dead.endpoint, to: live.endpoint, reason: 'unreachable', switches: 1 }])
+    // The record itself names the egress and where the page moved from, not only the trace.
+    expect(items['/start']!.evidenceRecord?.access).toMatchObject({ egress: { proxy: live.endpoint, source: 'pool', switchedFrom: dead.endpoint } })
+    expect(items['/needs']!.evidenceRecord?.access).toMatchObject({ egress: { proxy: live.endpoint, source: 'pool', switchedFrom: null } })
     // The cookie the page set on the new egress reached the next page there.
     expect(items['/needs']).toMatchObject({ status: 'success' })
     expect(switched(items['/needs']!)).toEqual([])

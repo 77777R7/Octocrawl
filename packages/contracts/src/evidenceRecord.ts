@@ -70,6 +70,37 @@ export interface EvidenceAccess {
    * the my-browser lane: optional, so that records written before it stay valid.
    */
   completion?: AccessCompletion | null
+  /**
+   * The egress the page left through (ROADMAP PA item 3): the proxy's `host:port` and whether it came from the
+   * operator's pool (`W2L_EGRESS_PROXIES`) or the environment variables, or `direct` with no proxy when W2L's own lane
+   * recorded none and a page response shows a request was sent. `switchedFrom` names the pool egress the task last
+   * moved off before this page was read here (`egress_switched`); null otherwise. Null when nothing says where the
+   * requests left from: a vendor's service, the person's own browser, no lane at all, or a lane that stopped before
+   * a page request (robots.txt, an address check, a deadline). Added with the egress pool: optional, so that earlier
+   * records stay valid.
+   */
+  egress?: EvidenceAccessEgress | null
+  /**
+   * The task cookie session the page was read with (`egress_sessions`): its id alone, never its cookies. Null when
+   * the page was read with none. Added with the egress pool: optional, so that earlier records stay valid.
+   */
+  session?: EvidenceAccessSession | null
+}
+
+export const ACCESS_EGRESS_SOURCES = ['pool', 'environment', 'direct'] as const
+export type AccessEgressSource = (typeof ACCESS_EGRESS_SOURCES)[number]
+
+export interface EvidenceAccessEgress {
+  /** The proxy's `host:port`, never its credentials; null when the request went direct. */
+  proxy: string | null
+  source: AccessEgressSource
+  /** The pool egress the task last left before this page was read here; null when it did not move. */
+  switchedFrom: string | null
+}
+
+export interface EvidenceAccessSession {
+  /** The session's id, as `session_cookies` traces it. */
+  id: string
 }
 
 export const ACCESS_COMPLETIONS = ['unattended', 'authorized_session', 'user_browser', 'handed_to_person'] as const
@@ -245,7 +276,9 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
-  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion']),
+  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session']),
+  accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom']),
+  accessSession: keysOf<EvidenceAccessSession>()(['id']),
 } as const
 
 /**
@@ -257,5 +290,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
-  access: ['completion'],
+  access: ['completion', 'egress', 'session'],
 }

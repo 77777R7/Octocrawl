@@ -46,7 +46,7 @@ describe('Evidence Record v1 schema file', () => {
   it('has exactly the type\'s nested objects; a key added to v1 later is optional, every other one required', () => {
     const { record: _record, ...nested } = EVIDENCE_RECORD_KEYS
     expect(Object.keys(schema.$defs).filter(name => name !== 'sha256').sort()).toEqual(Object.keys(nested).sort())
-    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], access: ['completion'] })
+    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], access: ['completion', 'egress', 'session'] })
     for (const [name, keys] of Object.entries(nested)) {
       const def = schema.$defs[name]!
       const added: readonly string[] = EVIDENCE_RECORD_ADDED_KEYS[name as keyof typeof EVIDENCE_RECORD_KEYS] ?? []

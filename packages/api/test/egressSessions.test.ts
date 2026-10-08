@@ -112,6 +112,8 @@ describe('egress_sessions: a batch keeps its cookies for its site', () => {
     expect(counts).toMatchObject({ requestsWithCookies: 1 })
     // The same session served both pages of the task.
     expect(items['/start']!.trace?.find((event) => event.event === 'session_cookies')?.detail?.session).toBe(counts?.session)
+    // The record names the session by id, never its cookies.
+    expect(items['/needs']!.evidenceRecord?.access?.session).toEqual({ id: counts?.session })
     expect(JSON.stringify(items)).not.toContain(TOKEN)
     // No page read with the session was cached.
     expect(JSON.stringify(items)).not.toContain('cache_stored')
