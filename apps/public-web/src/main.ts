@@ -179,7 +179,7 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' |
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   track('example_click')
-  input.value = 'https://docs.firecrawl.dev/introduction'
+  input.value = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
   // Focus stays on the button (Extract page is the next stop), so the hero keeps moving: nothing is being typed.
   message.textContent = 'Example URL added. Select “Extract page” to begin.'
   message.className = 'form-message'
@@ -1310,7 +1310,7 @@ function renderCode(): void {
 
 codeButton.addEventListener('click', () => {
   track('get_code_open')
-  let url = 'https://docs.firecrawl.dev/introduction'
+  let url = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
   try { url = normalizeUrl(input.value) } catch { /* The example, until a valid URL is entered. */ }
   const request = { url, view: outputView, onlyMainContent: mainContent.checked, fields: readFields().fields }
   codeTexts = { curl: restSnippet(request), mcp: mcpSnippet(request), prompt: mcpPrompt(request) }

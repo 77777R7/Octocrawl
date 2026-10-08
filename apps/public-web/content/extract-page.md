@@ -4,7 +4,7 @@ Use the Octocrawl page when you want readable content, links, or a few fields fr
 
 ## Input
 
-Open [Try Octocrawl](/), paste `https://docs.firecrawl.dev/introduction`, and press **Extract page**. This public documentation URL is the first-use example. When this site is served over public HTTPS, the page and extraction API use the same address; no local installation is needed for this single-page preview.
+Open [Try Octocrawl](/), paste `https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview`, and press **Extract page**. This public documentation URL is the first-use example. When this site is served over public HTTPS, the page and extraction API use the same address; no local installation is needed for this single-page preview.
 
 ## Expected output
 
