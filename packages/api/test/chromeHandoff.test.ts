@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer as createNetServer, type AddressInfo } from 'node:net'
 import { ChromeLoginError, connectCdp, type CdpConnection } from '../src/chromeLogin.js'
-import { HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, rewrittenInPlace } from '../src/chromeHandoff.js'
 
 const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
@@ -247,6 +247,21 @@ describe('the person\'s Chrome', () => {
   it('without remote debugging on, says how to turn it on', async () => {
     await rm(join(userDataDir, 'DevToolsActivePort'))
     await expect(openUserChrome({ userDataDir, connect: fakeChrome([]).connect })).rejects.toThrow(/chrome:\/\/inspect\/#remote-debugging/)
+  })
+})
+
+describe('an address a page\'s script rewrote in place', () => {
+  it('is the page it came at when it keeps its origin, path and every parameter both name; another page of a list is not', () => {
+    // Indeed, seen 2026-10-09: its paging token dropped, the job shown named.
+    expect(rewrittenInPlace('https://www.indeed.com/jobs?q=data+analyst&l=Remote&start=10&pp=tok', 'https://www.indeed.com/jobs?q=data+analyst&l=Remote&start=10&vjk=76ded9')).toBe(true)
+    expect(rewrittenInPlace('https://site.test/list/', 'https://site.test/list#top')).toBe(true)
+    // A page parameter changed: another page of the list.
+    expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/jobs?start=20')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs?tag=a&tag=b', 'https://site.test/jobs?tag=a')).toBe(false)
+    // Another path or another origin is never the page.
+    expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/job/1?start=10')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs', 'https://other.test/jobs')).toBe(false)
+    expect(rewrittenInPlace('not a url', 'https://site.test/')).toBe(false)
   })
 })
 
