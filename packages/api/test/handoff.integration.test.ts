@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type BrowserContext, type Page } from 'playwright'
 import { buildChannels } from '@w2l/bench'
-import type { CrawlPage } from '@w2l/contracts'
+import { localNetworkPolicy, type CrawlPage } from '@w2l/contracts'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 
 /**
@@ -65,6 +65,14 @@ beforeAll(async () => {
     if (req.url === '/auto') return cookie.includes('auto=1') ? html(ARTICLE) : html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "auto=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
     if (req.url === '/meta') return cookie.includes('meta=1') ? html(ARTICLE) : html('<meta http-equiv="refresh" content="0; url=/meta2"><div class="g-recaptcha" data-sitekey="k"></div>')
     if (req.url === '/meta2') { res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'meta=1; path=/' }); res.end(`<!doctype html><html><body>${ARTICLE}</body></html>`); return }
+    // A three-page list whose second page is a captcha until the person passes it: the list's check at page 2.
+    const list = /^\/list\/(\d)$/.exec(req.url ?? '')
+    if (list !== null) {
+      const n = Number(list[1])
+      const cards = [1, 2, 3].map((i) => `<div class="card"><a class="name" href="/p/${n * 10 + i}">Item ${n * 10 + i}</a><span class="price">${n * 10 + i}.00</span></div>`).join('')
+      if (n === 2 && !cookie.includes('list=1')) return html(captcha('list'))
+      return html(`${cards}${n < 3 ? `<a class="next" href="/list/${n + 1}">Next</a>` : ''}`)
+    }
     // A bot check that only its header says (a vendor's), never passed here.
     if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
     // A sign-in, then a one-time code, then the page.
@@ -180,6 +188,38 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       await engine.close()
     }
   }, 120_000)
+
+  it('a list stopped at a check: the person gets through it and pages on in their Chrome, Octocrawl reads each page and the item is the whole list', async () => {
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const engine = createApiEngine({ taskRoot: join(root, 'tasks-list'), networkPolicy: policy, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy }).filter((channel) => channel.id === 'browser_local'), userChrome: { userDataDir: join(root, 'chrome') } })
+    const stop = person(chrome, { '/list/2': async (page) => { await page.click('#pass'); await page.waitForSelector('a.next'); await page.waitForTimeout(4_000); await page.click('a.next') } })
+    try {
+      const LIST = { type: 'list', itemSelector: 'div.card', fields: [{ name: 'name', selector: 'a.name' }, { name: 'price', selector: '.price' }] }
+      const { taskId } = await engine.startBatch({ urls: [`${base}/list/1`], formats: ['markdown', LIST], actions: [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'div.card', waitMs: 200 }] } as never)
+      for (let i = 0; i < 600; i++) { const report = await engine.getBatch(taskId); if (report !== null && ['completed', 'failed', 'cancelled'].includes(report.status)) break; await new Promise((resolve) => setTimeout(resolve, 50)) }
+      // Octocrawl's own browser read page 1, met the captcha where page 2 should be, and stopped there with page 1 kept.
+      expect(await engine.getBatch(taskId)).toMatchObject({ status: 'completed', waitingForPerson: 1 })
+      const stopped = (await itemsOf(engine, taskId))[0]!
+      expect(stopped).toMatchObject({ status: 'blocked', blockReason: 'captcha', handoff: { reason: 'captcha_required' } })
+      expect(stopped.actions?.lists[0]).toMatchObject({ stoppedBy: 'challenge', rounds: 1, challenge: { page: 2, reason: 'captcha' } })
+
+      const done = await engine.handOffBatch(taskId, {})
+      expect(done).toMatchObject({ handedOff: 1, through: 1, notThrough: 0, items: [{ id: stopped.id, through: true, status: 'success' }] })
+      const item = (await itemsOf(engine, taskId))[0]!
+      expect(item).toMatchObject({ id: stopped.id, status: 'success', lane: 'browser_local_authed', blockReason: null })
+      // Page 1 from Octocrawl's own read, pages 2 and 3 as the person showed them: every record once, each page its own.
+      expect(item.list?.records.map((record) => record.values.name)).toEqual([11, 12, 13, 21, 22, 23, 31, 32, 33].map((n) => `Item ${n}`))
+      expect(item.list?.records.map((record) => record.source.page)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
+      expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      expect(item.trace.map((event) => event.event)).toEqual(expect.arrayContaining(['handoff_from', 'user_browser_read', 'list_continued', 'list_extracted']))
+      expect(item.handoff).toBeUndefined()
+      expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 0, succeeded: 1, failed: 0 })
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0 })
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 180_000)
 
   it('a page not got through (a check its header alone says, or nothing on the page after) keeps its stopped result, and still waits', async () => {
     const engine = engineFor(join(root, 'tasks-3'))
