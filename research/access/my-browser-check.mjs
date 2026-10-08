@@ -7,10 +7,11 @@
 // Usage: node research/access/my-browser-check.mjs [--tasks T001,T048,...] [--login .w2l/access/my-browser-login.json]
 //          [--scrape-one] [--record research/access/runs/<date>-my-browser-<commit>.md]
 //   Env: W2L_API_URL (default http://127.0.0.1:8787).
-//   --tasks      public tasks from tasks.v1.json (default PUBLIC below).
-//   --login      a git-ignored JSON file, [{ "url": "...", "signedInText": "..." }, ...]: pages behind the person's
-//                login, each verified by a text only the signed-in page shows (their name, say). The record names
-//                only each page's host, never its URL, the text or the page.
+//   --tasks      public tasks from tasks.v1.json (default PUBLIC below, the set of runs 1 to 4); `none` reads none.
+//   --login      a git-ignored JSON file, [{ "url": "...", "signedInText": "..." }, ...]: pages that need the person's
+//                login or their own address (ROADMAP PA item 8's acceptance set since 2026-10-07), each verified by a
+//                text only that page shows to them (their name, a local listing). The record names only each page's
+//                host, never its URL, the text or the page.
 //   --scrape-one also reads the first public page as a single scrape (POST /v1/scrape), which asks the person again.
 //
 // Method:
@@ -36,7 +37,7 @@ const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const PUBLIC = ['T001', 'T048', 'T076', 'T053', 'T049', 'T057', 'T059', 'T062']
 
 const set = JSON.parse(await readFile(join(here, 'tasks.v1.json'), 'utf8'))
-const ids = flag('--tasks')?.split(',').map((id) => id.trim()) ?? PUBLIC
+const ids = flag('--tasks') === 'none' ? [] : flag('--tasks')?.split(',').map((id) => id.trim()) ?? PUBLIC
 const publicTasks = ids.map((id) => {
   const task = set.tasks.find((t) => t.id === id)
   if (task === undefined) throw new Error(`no task ${id} in tasks.v1.json`)
