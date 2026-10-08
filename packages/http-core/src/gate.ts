@@ -318,6 +318,12 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     return { reason: 'captcha', signals: ['reddit_captcha_title', 'recaptcha_script'] }
   }
 
+  // Best Buy's country selector, served with HTTP 200 at the URL asked for to an address outside the US (2026-10-07):
+  // a choice between Canada and the US, not the page. Its title with the links that skip it (intl=nosplash): neither alone.
+  if (/<title[^>]*>\s*best buy international: select your country/.test(lower) && lower.includes('intl=nosplash')) {
+    return { reason: 'geo_restricted', signals: ['bestbuy_country_selector'] }
+  }
+
   // PerimeterX's press-and-hold, served with HTTP 200 (Walmart, after a 307
   // to /blocked) or 403. Its button needs a person to press and hold it: a
   // widget, not an interstitial a browser clears by running its JS.

@@ -26,12 +26,8 @@ a{color:inherit}
 .doc-header:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:radial-gradient(circle,rgba(176,200,240,.42) 1px,transparent 1.45px) 0 50%/8px 3px repeat-x}
 .doc-header-inner{max-width:1320px;min-height:76px;margin:auto;padding:0 30px;display:flex;align-items:center;justify-content:space-between;gap:24px}
 .doc-brand{display:inline-flex;align-items:center;gap:7px;text-decoration:none;color:#fff}
-.doc-brand .doc-mark{width:34px;height:34px;border-radius:50%;object-fit:cover;transform-origin:50% 42%;animation:octo-drift 5.5s ease-in-out infinite}
-.doc-brand:hover .doc-mark,.doc-brand:focus-visible .doc-mark{animation:octo-wiggle .8s ease-in-out}
+.doc-brand .doc-mark{width:34px;height:34px;border-radius:50%;object-fit:cover}
 .doc-wordmark{display:block;width:auto;height:20px}
-@keyframes octo-drift{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-2px) rotate(-4deg)}}
-@keyframes octo-wiggle{0%,100%{transform:rotate(0deg) scale(1)}20%{transform:rotate(-12deg) scale(1.06)}45%{transform:rotate(9deg) scale(1.06)}70%{transform:rotate(-5deg) scale(1.03)}}
-@media (prefers-reduced-motion:reduce){.doc-brand .doc-mark,.doc-brand:hover .doc-mark,.doc-brand:focus-visible .doc-mark{animation:none}}
 .doc-header nav{display:flex;align-items:center;gap:22px;font-size:13px;font-weight:650}
 .doc-header nav>a{text-decoration:none}
 .doc-header nav>a[aria-current]{text-decoration:underline dotted;text-underline-offset:6px}

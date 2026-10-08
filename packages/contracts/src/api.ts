@@ -672,6 +672,8 @@ export interface BatchStatusResponse extends CrawlReport {
   invalidURLs?: readonly string[]
   /** Items stopped at a check a person can get through in their own Chrome (`POST /v1/batches/:id/handoff`); present on a server that offers the handoff. */
   waitingForPerson?: number
+  /** A batch on the my-browser lane waiting for the person to allow its sites in the page Octocrawl opened in their Chrome; present only while it waits. */
+  waitingForApproval?: true
 }
 
 /**

@@ -117,7 +117,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
-import { HandoffNotThrough, openUserChrome, type AllowedSites, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
@@ -923,6 +923,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         maxConcurrency: task.batch.lane === 'my-browser' ? 1 : Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
+        ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
       }
     } finally { await store.close() }
@@ -1057,7 +1058,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const hosts = [new URL(req.url).host]
       hooks.onAllow?.(hosts)
       let allowed: AllowedSites
-      try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal }) }
+      try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal, log: approvalLog('scrape', null) }) }
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
       try {
         return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started)
@@ -1098,6 +1099,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
+  /** The tasks on the my-browser lane waiting for the person to allow their sites in Chrome. */
+  const approvalsWaiting = new Set<string>()
+  /** Each step of asking the person to allow sites, on the server's log (stderr): the page's own state, never its content. */
+  const approvalLog = (kind: 'scrape' | 'batch', taskId: string | null): ApprovalLog => (step, detail) =>
+    console.error(JSON.stringify({ component: 'api', event: 'my_browser_approval', kind, ...(taskId === null ? {} : { taskId }), step, ...detail }))
+
   /**
    * A batch's pages on the my-browser lane, one at a time: one Chrome connection for the run, the person asked once,
    * in the page Octocrawl opens there, to allow every site of the batch (host and port). A page on a site not among
@@ -1118,8 +1125,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       let chrome: UserChrome
       try { chrome = await openUserChrome(userChrome, signal) }
       catch (error) { return { refused: error instanceof Error ? error.message : String(error), status: 'connection_error' } }
-      try { return { chrome, allowed: await chrome.allow({ hosts, task: `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}` }, { signal }) } }
+      // The batch says it waits for the person while it does (waitingForApproval).
+      approvalsWaiting.add(taskId)
+      try { return { chrome, allowed: await chrome.allow({ hosts, task: `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}` }, { signal, log: approvalLog('batch', taskId) }) } }
       catch (error) { chrome.close(); return { refused: error instanceof Error ? error.message : String(error), status: 'cancelled' } }
+      finally { approvalsWaiting.delete(taskId) }
     })()
     const unread = (url: string, status: 'cancelled' | 'connection_error', message: string, started: number): ScrapeOutcome =>
       ({ result: unreadInUserBrowser(url, status === 'cancelled' ? { status } : { status: 'failed', failureReason: status }, message, Date.now() - started), links: [] })

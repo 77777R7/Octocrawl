@@ -31,7 +31,7 @@ Below the Hero, How it works pairs three steps with a replay that shows them hap
 
 Open the public HTTPS service URL, paste a page address, and choose **Extract page**. The Firecrawl Introduction example on the page is a public documentation smoke test. A blocked, partial, or timed-out result is displayed as such. The page makes no promise to access login walls or solve challenges. The page and `POST /api/preview` are on the same HTTPS origin; no local repository, MCP connection, or service key is needed by visitors.
 
-The anonymous allowance is three attempts per browser visitor per UTC day and 100 attempts globally per UTC day. A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
+The anonymous allowance is five attempts per browser visitor per UTC day and 150 attempts globally per UTC day (three and 100 until 2026-10-07). A signed, HttpOnly, SameSite=Lax cookie identifies a visitor; direct clients without that cookie use a conservative address-based fallback. The Firestore counters survive service restarts. An unavailable quota store denies preview requests. The web page and `/api/health` remain available when preview is disabled. For Amazon.sg, the public readable body is a short summary built from the checked subject record, so unrelated recommendation prices in the raw page are not shown as this product's content.
 
 Amazon.sg browser requests also use one Firestore-backed origin lease across the two Cloud Run instances. It preserves spacing and observed Retry-After cooldown, and exhausted visitors are rejected by a read-only quota check before acquiring that lease. This coordination is specific to Amazon.sg; generic public HTTP pages still use per-request scheduling, so this release does not claim shared cross-instance pacing for every domain.
 
@@ -155,8 +155,8 @@ That first deploy sets every variable. For a later release, deploy the new image
 The service routes traffic to tagged revisions, so a later `gcloud run deploy` creates a revision that serves nothing until traffic moves to it. Deploy without traffic, move all of it to the new revision under a new tag, and keep the previous tag as the rollback:
 
 ```sh
-export W2L_REVISION_SUFFIX=landing   # names the revision w2l-public-preview-landing
-export W2L_TAG=r17landing            # one tag per release; the previous tag stays as the rollback
+export W2L_REVISION_SUFFIX="landing-${W2L_SOURCE_SHA}"   # names the revision w2l-public-preview-landing-<sha>
+export W2L_TAG=r17landing                                 # one tag per release; the previous tag stays as the rollback
 gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
 gcloud run services update-traffic w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
@@ -165,6 +165,16 @@ gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project
 ```
 
 Confirm that the new revision has `percent: 100`, and that `https://octocrawl.dev/` serves the new build. To roll back, run `update-traffic` with `--to-tags=<previous tag>=100`.
+
+Two things that have gone wrong at this step:
+
+- A revision name is taken for good, even after the revision is deleted. A suffix that was used once (`brand` and `brand2` both were, 2026-10-07) makes `gcloud run deploy` fail with "Found a conflicting revision name", so the suffix carries the source SHA as above.
+- The page is new at once, but `favicon.ico`, the SVG wordmark, the stylesheets and other files under `assets/` and `docs-assets/` keep serving the previous build for up to four hours (`cache-control: public, max-age=14400`, `cf-cache-status: HIT`). The Worker fetches the `run.app` address, so Cloudflare caches those files under that address, and purging the `octocrawl.dev` URLs (`cf cache purge --body '{"files": [...]}'`) reports success but changes nothing. Purge the whole zone after every deploy, then check that a file comes back as `MISS`:
+
+  ```sh
+  cf cache purge -z octocrawl.dev --force --body '{"purge_everything":true}'
+  curl -sI https://octocrawl.dev/favicon.ico | grep -i cf-cache-status
+  ```
 
 The `--allow-unauthenticated` flag is intentional for this limited, public trial. The Secret Manager grants are restricted to the dedicated runtime service account. Secret versions referenced as environment variables are resolved at instance startup; after rotating those secrets, deploy a new revision so every instance uses the new value. Verify the actual `/api/health` and preview behavior on the returned HTTPS URL before sharing it.
 
@@ -230,7 +240,7 @@ Each daily counter document in `publicPreviewQuotas` carries `expireAt`, one day
 gcloud firestore fields ttls update expireAt --collection-group=publicPreviewQuotas --enable-ttl --project="$W2L_PROJECT_ID"
 ```
 
-Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their three previews back for the rest of the day):
+Counters written before `expireAt` was added have no expiry and stay until deleted by hand. Delete them once, right after the first deploy that writes `expireAt` (this also deletes today's counters, so visitors get their day's previews back for the rest of the day):
 
 ```sh
 gcloud firestore bulk-delete --collection-ids=publicPreviewQuotas --project="$W2L_PROJECT_ID"

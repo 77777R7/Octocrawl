@@ -3,7 +3,7 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypt
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
-import type { PreviewQuota, QuotaDecision, QuotaStatus } from './quota.js'
+import { VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
@@ -446,7 +446,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
           const tomorrow = nextUtcMidnight()
           if (!res.destroyed) send(res, 429,
             empty('quota_exceeded', submitted,
-              available === 'global_limited' ? 'The public preview has reached its daily limit.' : 'You have used your three previews for today.',
+              available === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today.`,
               Math.max(0, performance.now() - started)),
             { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) })
           return
@@ -472,7 +472,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         }
         if (quota !== undefined && quota !== 'ok') {
           const tomorrow = nextUtcMidnight()
-          reply = { status: 429, body: empty('quota_exceeded', submitted, quota === 'global_limited' ? 'The public preview has reached its daily limit.' : 'You have used your three previews for today.'),
+          reply = { status: 429, body: empty('quota_exceeded', submitted, quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today.`),
             headers: { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) } }
         } else if (quota === 'ok') {
           try {
