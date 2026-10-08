@@ -624,6 +624,34 @@ describe('CrawlOrchestrator batch append', () => {
     expect((await store.listSteps('batch-1')).map((step) => step.url).sort()).toEqual([BATCH_A, BATCH_B].sort())
   })
 
+  it('keeps the pages a list step read when its URL stopped at a check the site put up, so a later run can go on from them', async () => {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'batch-1', seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: [BATCH_A, BATCH_B], formats: ['markdown'], includeLinks: false, actions: [{ type: 'paginate', nextSelector: 'a.next' }] }, createdAt: STARTED, updatedAt: STARTED })
+    const read = (page: number): ListPageRead => ({ step: 0, page, url: `${BATCH_A}?p=${page}`, html: `<p>${page}</p>`, state: `s${page}`, items: null, itemRefs: null, count: null })
+    const stoppedAt = (url: string, lists: FetchResult['actions'] extends infer A ? A extends { lists: infer L } ? L : never : never, status: FetchResult['status'] = 'blocked'): ScrapeOutcome => {
+      const result: FetchResult = { ...page(url), status, failureReason: null, blockReason: status === 'blocked' ? 'cloudflare_challenge' : null, actions: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists } }
+      return { result, links: [] }
+    }
+    class CheckedAtom implements ScrapeAtom {
+      async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+        if (url === BATCH_A) {
+          context?.onListPage?.(read(1))
+          context?.onListPage?.(read(2))
+          return stoppedAt(url, [{ index: 0, type: 'paginate', stoppedBy: 'challenge', rounds: 2, items: null, challenge: { page: 3, url: `${BATCH_A}?p=3`, reason: 'cloudflare_challenge', signals: ['cf_interstitial_text'] } }])
+        }
+        context?.onListPage?.(read(1))
+        // Blocked on its first page, with no list step stopped at a check: nothing to go on from.
+        return stoppedAt(url, [])
+      }
+      async close(): Promise<void> {}
+    }
+    const report = await new CrawlOrchestrator({ store, atom: new CheckedAtom(), clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, taskId: 'batch-1' })
+    expect(report.status).toBe('completed')
+    expect((await store.listSteps('batch-1')).map((step) => [step.url, step.status]).sort()).toEqual([[BATCH_A, 'blocked'], [BATCH_B, 'blocked']])
+    expect(await store.listPagesRead('batch-1', BATCH_A)).toEqual([read(1), read(2)])
+    expect(await store.listPagesRead('batch-1', BATCH_B)).toEqual([])
+  })
+
   it('seeds URLs appended while it runs, fetches them in the same attempt, also on a new host, and keeps the longer list at the end', async () => {
     const store = new MemoryTaskStore()
     await batchTask(store, [BATCH_A, BATCH_B])

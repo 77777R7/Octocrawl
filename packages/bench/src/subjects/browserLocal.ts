@@ -1,4 +1,4 @@
-import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
+import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
@@ -1669,6 +1669,23 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
   // The list format over a paginate step: the records of every page it read, in order, not of the last page alone; also when a
   // later step failed, since those pages were read. A page whose records repeat a page already merged is not counted twice.
   // A paginate step that failed at page N (a click that never landed) read its pages before it: they keep their records too.
+  // A paginate step that ended on a page the lane's own verdict blocked, with no record on it (a page of nothing but a CAPTCHA
+  // widget, which only the extractor tells from a page with little on it; an interstitial's decisive marks stop the step in
+  // the loop itself): the step stopped at that check, and the page is not one of the list's.
+  if (result.status === 'blocked' && result.blockReason !== null) {
+    const reason = result.blockReason
+    const signals = (result.trace.find((event) => event.event === 'gate_detected')?.detail?.signals as string[] | undefined) ?? []
+    const last = ran.result.scrapes.at(-1)
+    for (const run of ran.result.lists) {
+      if (run.type !== 'paginate' || run.stoppedBy === 'challenge' || last === undefined || last.step !== run.index || run.items !== 0) continue
+      ran.result.scrapes.pop()
+      run.rounds--
+      run.items = null
+      run.stoppedBy = 'challenge'
+      run.challenge = { page: run.rounds + 1, url: last.url, reason, signals }
+      result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_challenge', detail: { step: run.index, page: run.rounds + 1, url: last.url, reason, signals, by: 'page_verdict' } }] }
+    }
+  }
   const paginated = list === undefined ? [] : [...ran.result.lists.filter((run) => run.type === 'paginate').map((run) => run.index), ...(ran.result.failed?.type === 'paginate' ? [ran.result.failed.index] : [])]
   const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
   // A paginate step that read no page (the deadline came first) leaves the list of the page as it stands.
@@ -1701,17 +1718,22 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
     }
   }
   const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)
-  // A list step that stopped before its list's end (its round limit, or the deadline) says so: what was read is not the whole list.
-  const short = ran.result.lists.filter((list) => list.stoppedBy === 'max' || list.stoppedBy === 'deadline')
+  // A list step that stopped before its list's end (its round limit, the deadline, or a check the site put up) says so: what was read is not the whole list.
+  const short = ran.result.lists.filter((list) => list.stoppedBy === 'max' || list.stoppedBy === 'deadline' || list.stoppedBy === 'challenge')
+  const why = (list: ListRun) => list.stoppedBy === 'max' ? `its limit of ${list.rounds} ${list.type === 'paginate' ? 'pages' : 'rounds'}` : list.stoppedBy === 'challenge' ? `a check the site put up at page ${list.challenge?.page ?? list.rounds + 1} (${list.challenge?.reason ?? 'unknown'})` : 'the deadline'
   const warnings = short.length === 0 ? result.warnings : [...(result.warnings ?? []), {
     code: 'list_not_exhausted',
-    message: `The list ${short.map((list) => `of step ${list.index} (${list.type})`).join(' and ')} stopped before its end (${short.map((list) => list.stoppedBy === 'max' ? `its limit of ${list.rounds} ${list.type === 'paginate' ? 'pages' : 'rounds'}` : 'the deadline').join('; ')}): more items may follow.`,
+    message: `The list ${short.map((list) => `of step ${list.index} (${list.type})`).join(' and ')} stopped before its end (${short.map(why).join('; ')}): more items may follow.`,
   }]
+  // The check a list step stopped at is the page's verdict, whatever the page the browser stands on read as.
+  const checked = ran.result.lists.find((list) => list.challenge !== undefined)?.challenge
+  const blocked = checked !== undefined && result.status !== 'blocked'
   return {
     ...result,
     ...(warnings === undefined ? {} : { warnings }),
     actions: ran.result,
     ...(failed ? { status: 'failed' as const, failureReason: 'action_failed' as const, blockReason: null } : {}),
+    ...(blocked ? { status: 'blocked' as const, failureReason: null, blockReason: checked.reason, budgetExceeded: null } : {}),
     evidence: { ...result.evidence, artifacts: [...result.evidence.artifacts, ...ran.artifacts] },
   }
 }

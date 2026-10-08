@@ -396,7 +396,8 @@ export class CrawlOrchestrator {
             pagesInFlight--
             const step: StepRecord = { id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(result.status), lane: result.lane, contentHash: result.evidence.rawBodySha256, cached: cachedPage, result, audit, createdAt: at, updatedAt: at }
             await this.store.putStep(step)
-            if (listsPages(runningTask)) await this.store.clearPagesRead(runningTask.id, item.canonicalUrl)
+            // The pages read before a check the site put up stay for a later run to go on from; any other result ends them.
+            if (listsPages(runningTask) && !stoppedAtCheck(result)) await this.store.clearPagesRead(runningTask.id, item.canonicalUrl)
             taskUrls.add(item.canonicalUrl)
             if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
@@ -596,6 +597,11 @@ export class CrawlOrchestrator {
     addDiscovery(discovery, offered)
     return { ...record, sources: loaded.sources, files: loaded.files, listed: loaded.urls.length, enqueued: offered.enqueued, truncated: loaded.truncated }
   }
+}
+
+/** Whether a result is a list step stopped at a check the site put up (ListStop `challenge`), its pages kept for a later run. */
+function stoppedAtCheck(result: FetchResult): boolean {
+  return result.status === 'blocked' && (result.actions?.lists ?? []).some((list) => list.stoppedBy === 'challenge')
 }
 
 /** Whether the task's pages run a paginate step, whose pages are kept as they are read. */
