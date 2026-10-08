@@ -69,6 +69,7 @@ import {
   BATCH_ERRORS_MAX_LIMIT,
   RequestError,
   type FetchResult,
+  type ListFormatRequest,
   type NetworkPolicy,
   type ScrapeRequest,
   type StepRecord,
@@ -469,6 +470,17 @@ function writeTaskEgress(file: string, id: string): void {
   writeFileSync(file, `${JSON.stringify({ egress: id })}\n`, { mode: 0o600 })
 }
 const DEFAULT_WORKER_COUNT = 4
+
+/**
+ * Whether a page of a list shows again what an earlier one shows, as the list merge tells it (its items' whole text), or that
+ * cannot be told (no list read from the first page, or the merge cut short): a page shown again at an address of its own, as a
+ * result set tied to the session that made it comes back in another session, would be counted twice by a sum. A page with no
+ * item adds none to a sum, so it is not one.
+ */
+export function listPagesRepeat(pages: readonly { url: string; html: string }[], itemSelector: string): boolean {
+  const merged = mergeListPages(pages.map(({ url, html }) => ({ url, html })), { type: 'list', itemSelector } as ListFormatRequest)
+  return merged === null || merged.spec === null || merged.list.pages !== pages.length || merged.list.truncated
+}
 
 /**
  * A continued list's `itemsRead`: the kept pages' count plus each page the person showed, only when no page can be counted
@@ -1113,8 +1125,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const merged = list === undefined ? null : mergeListPages(pages, list)
       const rounds = pages.length
       const continued = { from, pages: read.pages.length, by: 'user_browser' as const }
-      // The items on the last page, as the person's tab counted them, and over every page only when a sum cannot count a page twice.
-      const itemsRead = continuedItemsRead({ stepUrl: step.url, checkUrl: url, kept: kept.map((page) => page.url), keptItems: run.itemsRead, shown: read.pages })
+      // The items on the last page, as the person's tab counted them, and over every page only when a sum cannot count a page twice:
+      // by the pages' addresses, and by their items, since a result set tied to the session that made it comes back at new ones.
+      const itemsRead = action.itemSelector === undefined || listPagesRepeat(pages, action.itemSelector) ? null
+        : continuedItemsRead({ stepUrl: step.url, checkUrl: url, kept: kept.map((page) => page.url), keptItems: run.itemsRead, shown: read.pages })
       const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: last.items ?? null, itemsRead, continued } : item)
       // Each page says who read it: W2L's own browser before the check (the kept pages), the person's after it.
       const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map(({ url: pageUrl, html }) => ({ url: pageUrl, html, step: run.index, by: 'user_browser' as const }))], lists }

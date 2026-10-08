@@ -7,7 +7,7 @@ import type { FetchResult } from '@w2l/contracts'
 import { parseBatchHandoffRequest } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
-import { continuedItemsRead, createApiEngine, type ApiEngine } from '../src/engine.js'
+import { continuedItemsRead, createApiEngine, listPagesRepeat, type ApiEngine } from '../src/engine.js'
 
 /** POST /v1/batches/:id/handoff and what a batch says of its stopped items, without a browser: the lane answers a captcha for /gate, a rate limit for /slow, content otherwise. */
 
@@ -236,6 +236,16 @@ describe('a continued list\'s itemsRead', () => {
     expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l', kept: ['https://site.test/l?p=1'], keptItems: 3, shown: [page('/l?p=2')] })).toBeNull()
     // The person paged back to a kept page.
     expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l?p=2', kept: ['https://site.test/l?p=1'], keptItems: 3, shown: [page('/l?p=2'), page('/l?p=1')] })).toBeNull()
+  })
+
+  it('tells a page shown again at an address of its own by its items: a result set tied to the session that made it', () => {
+    const cards = (n: number) => `<html><body><main>${[1, 2, 3].map((i) => `<div class="card"><a href="/item/${n * 10 + i}">Item ${n * 10 + i}</a><span class="price">${n * 10 + i}.00</span></div>`).join('')}</main></body></html>`
+    const at = (url: string, n: number) => ({ url: `https://site.test${url}`, html: cards(n) })
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=A&p=3', 3)], 'div.card')).toBe(false)
+    // Kept pages 1 and 2 under rs=A; the person's session starts a new set, rs=C, and pages through 1 and 2 again.
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=C&p=1', 1), at('/s?rs=C&p=2', 2), at('/s?rs=C&p=3', 3)], 'div.card')).toBe(true)
+    // Pages with no item: each adds none to a sum, so none can be counted twice.
+    expect(listPagesRepeat([at('/s?p=1', 1), at('/s?p=2', 2)], 'div.none')).toBe(false)
   })
 
   it('is unknown when a count is', () => {
