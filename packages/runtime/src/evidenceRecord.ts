@@ -14,6 +14,8 @@ import {
   type CrawlMode,
   type AccessCompletion,
   type EvidenceAccess,
+  type EvidenceAccessEgress,
+  type EvidenceAccessSession,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
   type EvidencePageActions,
@@ -129,8 +131,25 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   const stored = hit?.externalCostUsd
   const externalCostUsd = hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
   const read = READ_STATUSES.has(result.status)
+  // W2L's own lanes record the proxy they leave through and the task session they read with; a vendor and the person's browser do not say.
+  const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'authed_browser'
+  const laneEvent = (name: string) => [...result.trace].reverse().find((e) => e.event === name && sameLaneFamily(e.lane, result.lane))?.detail
+  const egress = (r: EvidenceAccess['route']): EvidenceAccessEgress | null => {
+    if (!own(r)) return null
+    const proxy = laneEvent('egress_proxy')
+    // No proxy event: direct only when a page response proves a request was sent; a lane that stopped before one
+    // (robots, an address check, a deadline) leaves the egress unknown.
+    if (proxy === undefined) return typeof result.evidence.httpStatus === 'number' ? { proxy: null, source: 'direct', switchedFrom: null } : null
+    // The task may have moved twice before this page was read; the last move names where it came from.
+    const moved = [...result.trace].reverse().find((e) => e.event === 'egress_switched')?.detail
+    return { proxy: text(proxy.proxy), source: proxy.source === 'environment' ? 'environment' : 'pool', switchedFrom: text(moved?.from) }
+  }
+  const session = (r: EvidenceAccess['route']): EvidenceAccessSession | null => {
+    const id = own(r) ? text(laneEvent('session_cookies')?.session) : null
+    return id === null ? null : { id }
+  }
   const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
-    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null })
+    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r) })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
   if (!laneRan) return route(null, null)
   // A page read in the person's Chrome: theirs alone when it showed no check, handed to them when it did.

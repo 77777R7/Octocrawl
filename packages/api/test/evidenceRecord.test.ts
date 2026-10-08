@@ -133,12 +133,12 @@ describe('Evidence Record: HTTP lane', () => {
 
   it('states the route and the client: undici on the http rung, impit on the compatible one, in the full and compact shapes', async () => {
     expect(valid((await scrape(http, { url: `${origin}/article` })).evidenceRecord).access)
-      .toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended' })
+      .toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null }, session: null })
     const grant = accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['compatible_transport'] }))
     const compat = engineWith({ accessGrant: grant, compatHosts: ['127.0.0.1'], channelsFor: mode => buildChannels(mode, { networkPolicy: policy, compatTransport: true }).filter(channel => channel.id === 'http' || channel.id === 'http_compat') })
     const full = await scrape(compat, { url: `${origin}/article` })
     expect(full.channelsTried).toEqual(['http_compat'])
-    const expected = { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended' }
+    const expected = { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null }, session: null }
     expect(valid(full.evidenceRecord).access).toEqual(expected)
     expect(valid((await scrape(compat, { url: `${origin}/article`, formats: ['markdown'], debug: false })).evidenceRecord).access).toEqual(expected)
   })

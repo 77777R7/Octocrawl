@@ -368,6 +368,51 @@
         "completion": {
           "description": "How the page was read, counted apart: unattended (W2L's own lanes, no session of the person's), authorized_session (with the person's saved login), user_browser (in the person's own Chrome, on a site they allowed, without a step of theirs), handed_to_person (in their Chrome, after they got through a check). Null when no page was read. Added with the my-browser lane: optional here so that earlier records stay valid.",
           "enum": ["unattended", "authorized_session", "user_browser", "handed_to_person", null]
+        },
+        "egress": {
+          "description": "The egress the page left through (ROADMAP PA item 3): the proxy's host:port, never its credentials, and its source. Null as a whole when nothing says where the requests left from: a vendor's service, the person's own browser, no lane at all, or a lane that stopped before any page request (robots.txt, an address check, a deadline). Added with the egress pool: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessEgress" },
+            { "type": "null" }
+          ]
+        },
+        "session": {
+          "description": "The task cookie session the page was read with (egress_sessions): its id alone, never its cookies. Null when the page was read with none. Added with the egress pool: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessSession" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "accessEgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proxy", "source", "switchedFrom"],
+      "properties": {
+        "proxy": {
+          "description": "The proxy's host:port, never its credentials; null when the request went direct.",
+          "type": ["string", "null"]
+        },
+        "source": {
+          "description": "Where the proxy came from: pool (the operator's W2L_EGRESS_PROXIES), environment (HTTPS_PROXY or HTTP_PROXY) or direct (no proxy on a request that got a page response; proxy is then null).",
+          "enum": ["pool", "environment", "direct"]
+        },
+        "switchedFrom": {
+          "description": "The pool egress the task last moved off before this page was read here (the egress_switched trace event); null when it did not move.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "accessSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "description": "The session's id, as the session_cookies trace event names it.",
+          "type": "string",
+          "minLength": 1
         }
       }
     }
