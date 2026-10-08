@@ -92,8 +92,8 @@ export interface UserChromeReadOptions {
 /** A page read in the person's Chrome and the pages they paged on to after it. */
 export interface UserBrowserListRead {
   first: UserBrowserRead
-  /** The first page included, in the order shown. */
-  pages: { url: string; html: string }[]
+  /** The first page included, in the order shown; `items`, the elements matching the step's `itemSelector` on it (null without one, absent when not read). */
+  pages: { url: string; html: string; items?: number | null }[]
   stoppedBy: 'end' | 'max' | 'deadline'
 }
 
@@ -329,6 +329,7 @@ const FOLLOW = (nextSelector: string, itemSelector: string | undefined) => `JSON
   html: document.documentElement ? document.documentElement.outerHTML : '',
   secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
   key: ${itemSelector === undefined ? `(document.body ? document.body.innerText : '')` : `Array.from(document.querySelectorAll(${JSON.stringify(itemSelector)})).map((el) => el.innerText).join('\\u0000')`},
+  items: ${itemSelector === undefined ? 'null' : `document.querySelectorAll(${JSON.stringify(itemSelector)}).length`},
   next: (() => { const el = document.querySelector(${JSON.stringify(nextSelector)}); if (!el) return 'gone'; const style = getComputedStyle(el); if (el.getClientRects().length === 0 || style.visibility === 'hidden' || style.display === 'none') return 'hidden'; if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true' || el.closest('.disabled, [aria-disabled="true"]') !== null) return 'disabled'; return 'usable' })(),
 })`
 
@@ -353,7 +354,7 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
   const host = new URL(url).hostname
   const started = Date.now()
   const script = FOLLOW(follow.nextSelector, follow.itemSelector)
-  type Shown = { href: string; ready: string; status: number | null; html: string; secret: boolean; key: string; next: 'gone' | 'hidden' | 'disabled' | 'usable' }
+  type Shown = { href: string; ready: string; status: number | null; html: string; secret: boolean; key: string; items?: number | null; next: 'gone' | 'hidden' | 'disabled' | 'usable' }
   const isGone = (error: unknown) => error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer/i.test(error.message)
   const look = async (): Promise<Shown | null> => {
     const info = await connection.send('Target.getTargetInfo', { targetId: tab.targetId }, undefined, READ_TIMEOUT_MS) as { targetInfo?: { url?: string } }
@@ -375,7 +376,8 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
   // The page read is the first of them: what it lists is known, so showing it again reads nothing twice.
   try {
     const shown = await look()
-    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key }
+    // Its count only from the page as read: a tab already elsewhere (a Next clicked meanwhile) leaves it unknown.
+    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key; pages[0]!.items = shown.href === first.finalUrl ? shown.items ?? null : null }
   } catch (error) {
     if (isGone(error)) throw new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, after ${pages.length} page(s) of the list were read`, null, 'gone')
   }
@@ -401,7 +403,7 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
       if (gate !== null) { lastNew = Date.now(); if (told !== shown.href) { told = shown.href; options.onWaiting?.(shown.href, gate.reason) } continue }
       keys.add(shown.key)
       lastRead = shown.key
-      pages.push({ url: shown.href, html: shown.html })
+      pages.push({ url: shown.href, html: shown.html, items: shown.items ?? null })
       lastNew = Date.now()
       follow.onPage?.(shown.href, pages.length)
       if (pages.length >= max) return done('max')
@@ -445,8 +447,30 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     // Set by the event listeners: the main document's last response; how the person acted (a navigation Chrome marks as a user's);
     // where the URL leads each time W2L takes the tab back to it once the person is through (the page it names when a site
     // redirects it; not where it led before, which for a signed-out visit may be the sign-in or the home page).
-    const heard: { document: DocumentResponse | null; act: string | null; ours: boolean; landings: Set<string>; documents: number } = { document: null, act: null, ours: false, landings: new Set(), documents: 0 }
+    // `committed`: the address the tab's document came at (its last cross-document navigation); `within`: the address set
+    // since without a new document (history.replaceState or pushState), null when none was, and `byPage` whether the page
+    // set it by itself: its document had no activation from the person yet (null until Chrome says).
+    type Within = { url: string; byPage: boolean | null }
+    const heard: { document: DocumentResponse | null; act: string | null; ours: boolean; landings: Set<string>; documents: number; committed: string | null; within: Within | null } = { document: null, act: null, ours: false, landings: new Set(), documents: 0, committed: null, within: null }
     if (connection.on !== undefined) {
+      stops.push(connection.on('Page.frameNavigated', sessionId, (params) => {
+        const frame = params.frame as { id?: string; parentId?: string; url?: string } | undefined
+        if (frame?.id !== targetId || frame.parentId !== undefined) return
+        heard.committed = String(frame.url ?? '')
+        heard.within = null
+      }))
+      stops.push(connection.on('Page.navigatedWithinDocument', sessionId, (params) => {
+        if (params.frameId !== targetId) return
+        const within: Within = { url: String(params.url ?? ''), byPage: null }
+        heard.within = within
+        // Asked at once, in a world of W2L's own: a click or key press the person gave this document before the change makes
+        // it theirs (Next, a sort, a search); one that came in between also does, which only ever sends the tab back.
+        void (async () => {
+          const made = await connection.send('Page.createIsolatedWorld', { frameId: targetId, worldName: WORLD }, sessionId) as { executionContextId: number }
+          const active = await connection.send('Runtime.evaluate', { expression: 'navigator.userActivation.hasBeenActive', contextId: made.executionContextId, returnByValue: true }, sessionId) as { result?: { value?: unknown } }
+          within.byPage = active.result?.value === false
+        })().catch(() => undefined)
+      }))
       stops.push(connection.on('Network.requestWillBeSent', sessionId, (params) => {
         if (params.type === 'Document' && params.frameId === targetId && params.hasUserGesture === true) heard.act ??= 'gesture_navigation'
       }))
@@ -462,6 +486,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         if (check !== null || CHECK_STATUSES.has(seen.status)) sawGate ??= check?.reason ?? `http_${seen.status}`
       }))
       await connection.send('Network.enable', {}, sessionId)
+      await connection.send('Page.enable', {}, sessionId)
     }
     // The tab in front, in the person's window: the one they are to act in, not one left from before.
     await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
@@ -522,8 +547,14 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         hiddenSince = null
         toldHidden = false
       }
-      // The document's own response, when it is the one shown (the address may differ by its fragment alone).
-      const response: DocumentResponse | null = heard.document !== null && sameDocument(heard.document.url, state.href) ? heard.document : null
+      // The page asked for with its address rewritten by its own script once it came (a site that drops a token and names
+      // the item it shows): the document came at that page, and the address shown is the one the page set by itself since,
+      // before the person acted on it, at the same path and agreeing on every parameter both name. An address the person's
+      // click or key moved (Next, a sort) is not it, nor is another page of a list (a page parameter changed).
+      const inPlace = heard.committed !== null && heard.within !== null && heard.within.byPage === true && sameDocument(heard.within.url, state.href)
+        && (pageOf(heard.committed) === pageOf(url) || heard.landings.has(pageOf(heard.committed))) && rewrittenInPlace(heard.committed, state.href)
+      // The document's own response, when it is the one shown (the address may differ by its fragment alone, or as its script rewrote it in place).
+      const response: DocumentResponse | null = heard.document !== null && (sameDocument(heard.document.url, state.href) || (inPlace && sameDocument(heard.document.url, heard.committed!))) ? heard.document : null
       const status = response?.status ?? state.status
       last = { state, response }
       const { full, decisive, gate } = checksOf(state, response, status, options)
@@ -533,7 +564,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const typing = state.field !== null && field !== undefined && state.field !== field
       field = state.field
       // The page asked for: the URL, or where it leads when W2L opens it; after a return, once its document has come.
-      const asked = pageOf(state.href) === pageOf(url) || heard.landings.has(pageOf(state.href))
+      const asked = pageOf(state.href) === pageOf(url) || heard.landings.has(pageOf(state.href)) || inPlace
       const arrived = returns === 0 || connection.on === undefined || heard.documents > documentsAtReturn
       // Read without the person: only on a host they allowed, exactly.
       const inScope = allowed === null || allowed.has(hostAndPort(state.href))
@@ -641,6 +672,33 @@ function pageOf(href: string): string {
 /** Two addresses of one document: the same but for the fragment. */
 function sameDocument(a: string, b: string): boolean {
   return a.split('#')[0] === b.split('#')[0]
+}
+
+/**
+ * Whether `shown` can be `came`'s own address rewritten in place by the page's script: the same origin and path, and the
+ * same value for every query parameter both name (a parameter added is allowed, and one dropped unless its value is a
+ * number, as a page or an offset is: a page that drops `start=10` may be showing its first page; one changed is another page).
+ */
+export function rewrittenInPlace(came: string, shown: string): boolean {
+  let a: URL
+  let b: URL
+  try {
+    a = new URL(came)
+    b = new URL(shown)
+  } catch {
+    return false
+  }
+  if (a.origin !== b.origin || (a.pathname.replace(/\/+$/, '') || '/') !== (b.pathname.replace(/\/+$/, '') || '/')) return false
+  for (const name of new Set(a.searchParams.keys())) {
+    if (!b.searchParams.has(name)) {
+      if (a.searchParams.getAll(name).some((value) => /^\d+$/.test(value))) return false
+      continue
+    }
+    const left = a.searchParams.getAll(name)
+    const right = b.searchParams.getAll(name)
+    if (left.length !== right.length || left.some((value, i) => value !== right[i])) return false
+  }
+  return true
 }
 
 /** The host and a port that is not the scheme's default (`site.test`, `site.test:8443`), as an allowed site is named. */

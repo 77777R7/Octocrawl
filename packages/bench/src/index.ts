@@ -33,7 +33,7 @@ export { COMPAT_LIBRARY, COMPAT_PROFILES, DEFAULT_COMPAT_PROFILE, compatHostList
 export { OriginScheduler } from './subjects/originScheduler.js'
 export { LadderScrapeAtom } from './scrapeAtom.js'
 export { FileStore } from './fileStore.js'
-export { assertSafeUrl, defaultNetworkPolicy, isLocalPreviewProxyTarget, validateLocalPreviewProxy } from './egress.js'
+export { assertSafeUrl, defaultNetworkPolicy, fetchThroughProxy, isLocalPreviewProxyTarget, validateLocalPreviewProxy } from './egress.js'
 export { EgressRoute } from './egressRoute.js'
 export { RobotsOriginCache } from './robotsLookup.js'
 export { HttpSitemapSource } from './sitemapSource.js'

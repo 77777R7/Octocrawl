@@ -96,6 +96,21 @@ export interface EvidenceAccessEgress {
   source: AccessEgressSource
   /** The pool egress the task last left before this page was read here; null when it did not move. */
   switchedFrom: string | null
+  /**
+   * Where the pool egress leaves from, as the operator's echo URL (`W2L_EGRESS_ECHO_URL`) saw it through that proxy.
+   * Null when no echo URL is set, the echo did not answer, or the egress is not the pool's. Added after `egress`:
+   * optional, so that earlier records stay valid.
+   */
+  exit?: EvidenceAccessEgressExit | null
+}
+
+export interface EvidenceAccessEgressExit {
+  /** The address the echo service saw the request come from. */
+  ip: string
+  /** Its two-letter country code, when the echo service gives one; null otherwise. */
+  country: string | null
+  /** When the echo was asked (UTC ISO); an exit is asked again after ten minutes. */
+  observedAt: string
 }
 
 export interface EvidenceAccessSession {
@@ -277,7 +292,8 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
   access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session']),
-  accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom']),
+  accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
+  accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
 } as const
 
@@ -291,4 +307,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
   access: ['completion', 'egress', 'session'],
+  accessEgress: ['exit'],
 }

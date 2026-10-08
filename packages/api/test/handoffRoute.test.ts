@@ -7,7 +7,7 @@ import type { FetchResult } from '@w2l/contracts'
 import { parseBatchHandoffRequest } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
-import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { continuedItemsRead, createApiEngine, listPagesRepeat, type ApiEngine } from '../src/engine.js'
 
 /** POST /v1/batches/:id/handoff and what a batch says of its stopped items, without a browser: the lane answers a captcha for /gate, a rate limit for /slow, content otherwise. */
 
@@ -217,6 +217,43 @@ describe('a scrape handed to the person', () => {
     expect(res.body).toMatchObject({ status: 'blocked', handoff: { reason: 'captcha_required' } })
     expect(res.body.warnings.map((warning: { code: string }) => warning.code)).toContain('handoff_not_through')
     expect(res.body.warning).toContain('chrome://inspect/#remote-debugging')
+  })
+})
+
+describe('a continued list\'s itemsRead', () => {
+  const page = (url: string, items: number | null = 3) => ({ url: `https://site.test${url}`, items })
+  it('sums the kept pages and the person\'s only when the pages have addresses of their own and every count is known', () => {
+    // Indeed, seen 2026-10-09: one kept page, the check at page 2, each page the person showed at its own offset.
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/jobs?q=x', checkUrl: 'https://site.test/jobs?q=x&start=10&pp=t', kept: ['https://site.test/jobs?q=x&vjk=1'], keptItems: 16, shown: [page('/jobs?q=x&start=10&vjk=2', 16), page('/jobs?q=x&start=20&vjk=3', 16)] })).toBe(48)
+  })
+
+  it('is unknown when a sum could count a page twice', () => {
+    // A pager that reloads its items in place, at a list address the site redirected (the review's case): the kept pages share one address.
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/a?q=x', checkUrl: 'https://site.test/a?q=x&s=1', kept: ['https://site.test/a?q=x&s=1', 'https://site.test/a?q=x&s=1'], keptItems: 6, shown: [page('/a?q=x&s=1'), page('/a?q=x&s=1'), page('/a?q=x&s=1')] })).toBeNull()
+    // One kept page, the check at its address: the pager has none of its own.
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l?v=2', kept: ['https://site.test/l?v=2'], keptItems: 3, shown: [page('/l?v=2')] })).toBeNull()
+    // The check at the list's own address: the kept pages are shown again on the way.
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l', kept: ['https://site.test/l?p=1'], keptItems: 3, shown: [page('/l?p=2')] })).toBeNull()
+    // The person paged back to a kept page.
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l?p=2', kept: ['https://site.test/l?p=1'], keptItems: 3, shown: [page('/l?p=2'), page('/l?p=1')] })).toBeNull()
+  })
+
+  it('tells a page shown again at an address of its own by its items: a result set tied to the session that made it', () => {
+    const cards = (n: number) => `<html><body><main>${[1, 2, 3].map((i) => `<div class="card"><a href="/item/${n * 10 + i}">Item ${n * 10 + i}</a><span class="price">${n * 10 + i}.00</span></div>`).join('')}</main></body></html>`
+    const at = (url: string, n: number) => ({ url: `https://site.test${url}`, html: cards(n) })
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=A&p=3', 3)], 'div.card')).toBe(false)
+    // Kept pages 1 and 2 under rs=A; the person's session starts a new set, rs=C, and pages through 1 and 2 again.
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=A&p=2', 2), at('/s?rs=C&p=1', 1), at('/s?rs=C&p=2', 2), at('/s?rs=C&p=3', 3)], 'div.card')).toBe(true)
+    // A selector the extractor does not take finds no item here, though the person's browser counted some: it cannot be told.
+    expect(listPagesRepeat([at('/s?rs=A&p=1', 1), at('/s?rs=C&p=1', 1)], 'div.card:has(a)')).toBe(true)
+    expect(listPagesRepeat([at('/s?p=1', 1), at('/s?p=2', 2)], 'main > div.card:nth-child(n)')).toBe(true)
+    // Pages with no item: each adds none to a sum, so none can be counted twice.
+    expect(listPagesRepeat([at('/s?p=1', 1), at('/s?p=2', 2)], 'div.none')).toBe(false)
+  })
+
+  it('is unknown when a count is', () => {
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l?p=2', kept: ['https://site.test/l?p=1'], keptItems: 3, shown: [page('/l?p=2', null)] })).toBeNull()
+    expect(continuedItemsRead({ stepUrl: 'https://site.test/l', checkUrl: 'https://site.test/l?p=2', kept: ['https://site.test/l?p=1'], keptItems: null, shown: [page('/l?p=2')] })).toBeNull()
   })
 })
 

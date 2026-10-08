@@ -76,6 +76,11 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(local.notices.join('\n')).not.toContain('secret')
     expect(() => parseListen([], { W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/needs an access grant that names egress_sessions/)
     expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/refused on a hosted server/)
+    // The echo URL asks those egresses where they leave from: only beside them, and only http(s).
+    expect(local.egressEchoUrl).toBeNull()
+    expect(parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080', W2L_EGRESS_ECHO_URL: 'https://ipinfo.io/json' }).egressEchoUrl).toBe('https://ipinfo.io/json')
+    expect(() => parseListen([], { W2L_EGRESS_ECHO_URL: 'https://ipinfo.io/json' })).toThrow(/needs W2L_EGRESS_PROXIES/)
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080', W2L_EGRESS_ECHO_URL: 'ftp://echo.test/' })).toThrow(/must be an http\(s\) URL/)
     expect(() => parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'socks5://proxy-a.test:1080' })).toThrow(/http:\/\/ and https:\/\/ proxies/)
   })
 
