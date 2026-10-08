@@ -1,6 +1,6 @@
 # Connect Octocrawl MCP
 
-Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It reads public pages (`scrape`) and lists a site's URLs (`map`) over HTTP, a few pages a day per address; a key gives more pages a day and the browser lane. The same packages run everything on your own computer, free and without limit: crawl, batch and Monitor too. Every answer carries an Evidence Record either way.
+Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It reads public pages (`scrape`) and lists a site's URLs (`map`) over HTTP, 20 pages a day per address; a key gives more pages a day and the browser lane. The same packages run everything on your own computer, free and without limit: crawl, batch and Monitor too. Every answer carries an Evidence Record either way.
 
 {{MCP_CLIENT_PICKER:remote}}
 
@@ -46,7 +46,7 @@ With Node.js 22.13 or later, start the API in any terminal and keep it running:
 npx octocrawl serve
 ```
 
-It listens on `http://127.0.0.1:8787`, on this computer only, with every tool: scrape, map, crawl, batch, the Amazon.sg product tool and the Monitor tools, and no daily limit. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
+It listens on `http://127.0.0.1:8787`, on this computer only, with every tool: scrape, map, crawl, batch, saved logins, handoff to your own Chrome, the Amazon.sg product tools and the Monitor and delivery tools, and no daily limit. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
 
 {{MCP_CLIENT_PICKER:local}}
 

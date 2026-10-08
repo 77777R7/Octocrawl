@@ -144,7 +144,7 @@ export function pageMarkup(): string {
                     </div>
                     <p class="option-error" id="fields-error" role="alert"></p>
                   </section>
-                  <p class="sheet-note">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason.<br />PDFs up to 5 MB · Amazon.sg product pages take no options.</p>
+                  <p class="sheet-note">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason.<br />PDFs up to 5 MiB · Amazon.sg product pages take no options.</p>
                 </div>
               </div>
               <dialog class="code-dialog" id="code-dialog" aria-labelledby="code-title" aria-describedby="code-lead">
@@ -210,7 +210,7 @@ export function pageMarkup(): string {
             <p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p>
             <h2 id="how-title">From web page<br />to usable content.</h2>
             <ol class="how-list" role="list">
-              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get 3&nbsp;previews a&nbsp;day.</p></div></li>
+              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get five&nbsp;previews a&nbsp;day.</p></div></li>
               <li class="how-step"><span class="step-number" aria-hidden="true">02</span><div><h3>Octocrawl checks, then reads</h3><p>It respects robots.txt and reads only what anyone can open, then reports the status, final URL and time.</p></div></li>
               <li class="how-step"><span class="step-number" aria-hidden="true">03</span><div><h3>Use the content</h3><p>Copy or download readable Markdown or the result JSON. Amazon.sg product pages add checked fields.</p></div></li>
             </ol>

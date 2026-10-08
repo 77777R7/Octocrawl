@@ -174,7 +174,7 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' |
     name = `${url.hostname.replace(/^www\./, '')}-${lastSegment}`
   } catch { /* An unsuccessful request may not have a parseable URL. */ }
   const safe = name.replace(/[^a-z0-9.-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 72) || 'page'
-  return `w2l-${safe}.${extension}`
+  return `octocrawl-${safe}.${extension}`
 }
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
