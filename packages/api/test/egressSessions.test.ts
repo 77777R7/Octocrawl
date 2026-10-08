@@ -179,6 +179,30 @@ describe('egress_sessions: the session file leaves with its task', () => {
     return report
   }
 
+  it('is gone before anyone hears that the task ended: the terminal event finds no session file', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-egress-'))
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      networkPolicy: policy,
+      accessGrant: grant(['egress_sessions']),
+      channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy }).filter((channel) => channel.id === 'http'),
+    })
+    const heard: { status: string; fileThere: boolean }[] = []
+    let taskDir = ''
+    const off = engine.jobEvents.on((event) => { if (event.type === 'terminal') heard.push({ status: event.status, fileThere: hasSessionFile(taskDir) }) })
+    try {
+      const { taskId } = await engine.startBatch({ urls: [`${origin}/start`, `${origin}/needs`], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
+      taskDir = join(root, 'tasks', taskId)
+      await settle(taskId, ['completed', 'failed'])
+      for (let i = 0; i < 100 && heard.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    } finally {
+      off()
+    }
+    // A webhook receiver or an events stream hears of the end only once the cookies are off the disk.
+    expect(heard).toEqual([{ status: 'completed', fileThere: false }])
+  })
+
   it('stays gone when a page cancelled with its task stores cookies afterwards', async () => {
     root = await mkdtemp(join(tmpdir(), 'w2l-egress-'))
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }

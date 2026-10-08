@@ -105,7 +105,7 @@ type Item = { url: string; status: string; failureReason?: string | null; eviden
 type Channels = NonNullable<Parameters<typeof createApiEngine>[0]['channelsFor']>
 const httpOnly = (policy: ReturnType<typeof localNetworkPolicy>): Channels => (mode, egress) => buildChannels(mode, { networkPolicy: egress?.policy ?? policy }).filter((channel) => channel.id === 'http')
 
-async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void> } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
+async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown> } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
   root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
   const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
   engine = createApiEngine({
@@ -117,7 +117,7 @@ async function batch(pool: ProxyServer[], paths: string[], options: { channels?:
   })
   // A name only the proxies resolve: a request that skipped its egress could not reach the site.
   const site = `http://site.test:${originPort}`
-  const { taskId } = await engine.startBatch({ urls: paths.map((path) => `${site}${path}`), maxConcurrency: options.maxConcurrency ?? 1 } as Parameters<ApiEngine['startBatch']>[0])
+  const { taskId } = await engine.startBatch({ urls: paths.map((path) => `${site}${path}`), maxConcurrency: options.maxConcurrency ?? 1, ...options.request } as Parameters<ApiEngine['startBatch']>[0])
   await options.during?.()
   let report = await engine.getBatch(taskId)
   for (let i = 0; i < 1000 && (report === null || ['pending', 'running'].includes(report.status)); i++) {
@@ -146,6 +146,29 @@ describe('a task on egress proxies', () => {
     expect(switched(items['/needs']!)).toEqual([])
     expect(items['/needs']!.evidenceRecord?.proxy).toBe(live.endpoint)
     expect(proxyHits.get(live.endpoint)).toBeGreaterThan(0)
+  })
+
+  it('probes nothing for a page no request was sent for: one the address check refuses, one a lockdown answers from the cache alone', async () => {
+    const live = await liveProxy()
+    // A metadata address is refused before any request, proxy or not; the batch names it in full since the site prefix does not apply.
+    root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), networkPolicy: policy, accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })), egressProxies: [live], channelsFor: httpOnly(policy) })
+    const { taskId } = await engine.startBatch({ urls: ['http://169.254.169.254/latest/meta-data/'], maxConcurrency: 1 } as Parameters<ApiEngine['startBatch']>[0])
+    let report = await engine.getBatch(taskId)
+    for (let i = 0; i < 500 && (report === null || ['pending', 'running'].includes(report.status)); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); report = await engine.getBatch(taskId) }
+    const refused = ((await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items as unknown as Item[])[0]!
+    expect(refused).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+    expect(switched(refused)).toEqual([])
+    // Nothing went through the proxy, and it was not probed for a page the address check kept from going out.
+    expect(proxyHits.get(live.endpoint) ?? 0).toBe(0)
+    await engine!.close(); engine = null; proxyHits.clear(); await rm(root, { recursive: true, force: true })
+
+    const second = await liveProxy()
+    const miss = await batch([second], ['/start'], { request: { lockdown: true } })
+    expect(miss.items['/start']).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
+    expect(switched(miss.items['/start']!)).toEqual([])
+    expect(proxyHits.get(second.endpoint) ?? 0).toBe(0)
   })
 
   it('never moves on a site\'s own answer: a 429 stays on its egress', async () => {
@@ -237,14 +260,20 @@ describe('EgressPool', () => {
   })
 
   it('doubts the egress only when no rung got an answer, and probes the proxy itself', async () => {
-    const failed = (httpStatus: number | null, attempts: (number | null)[] = []) => egressInDoubt({
-      result: { status: 'failed', failureReason: 'connection_error', evidence: { httpStatus } } as FetchResult,
+    const failed = (httpStatus: number | null, attempts: (number | null)[] = [], failureReason = 'connection_error') => egressInDoubt({
+      result: { status: 'failed', failureReason, evidence: { httpStatus } } as FetchResult,
       audit: { channelsTried: [], ladderTrace: [], summary: { attempts: attempts.map((status) => ({ channel: 'http', result: { evidence: { httpStatus: status } } as FetchResult })) } } as never,
     })
     expect(failed(null)).toBe(true)
     expect(failed(null, [403, null])).toBe(false)
     expect(failed(502)).toBe(false)
     expect(egressInDoubt({ result: { status: 'blocked', evidence: { httpStatus: null } } as FetchResult })).toBe(false)
+    // A page whose request never went out says nothing about the proxy: robots.txt or a policy refused it, or a lockdown found no cached copy.
+    expect(failed(null, [], 'policy_denied')).toBe(false)
+    expect(failed(null, [], 'cache_miss')).toBe(false)
+    expect(failed(null, [], 'timeout')).toBe(true)
+    expect(failed(null, [], 'dns_error')).toBe(true)
+    expect(failed(null, [], 'tls_error')).toBe(true)
     const live = await liveProxy()
     expect(await probeEgress(live)).toBe('works')
     expect(await probeEgress(await deadProxy())).toBe('unreachable')
