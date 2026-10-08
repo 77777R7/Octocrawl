@@ -1086,7 +1086,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const merged = list === undefined ? null : mergeListPages(pages, list)
       const rounds = pages.length
       const continued = { from, pages: read.pages.length, by: 'user_browser' as const }
-      const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: null, itemsRead: null, continued } : item)
+      // The items on the last page, as the person's tab counted them; over every page only when the pages have addresses of their own (a
+      // pager reopened at the list's own page shows the kept pages again, which a sum would count twice) and every count is known.
+      const counts = read.pages.map((page) => page.items)
+      const ownAddresses = new URL(url).pathname + new URL(url).search !== new URL(step.url).pathname + new URL(step.url).search
+      const itemsRead = ownAddresses && typeof run.itemsRead === 'number' && counts.every((count): count is number => typeof count === 'number') ? run.itemsRead + counts.reduce((sum, count) => sum + count, 0) : null
+      const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: last.items ?? null, itemsRead, continued } : item)
       // Each page says who read it: W2L's own browser before the check (the kept pages), the person's after it.
       const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map((page) => ({ ...page, step: run.index, by: 'user_browser' as const }))], lists }
       const valued = merged !== null && merged.valued

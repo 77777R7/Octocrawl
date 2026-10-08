@@ -123,7 +123,11 @@ export interface ListRun {
   rounds: number
   /** Elements matching `itemSelector` at the end (on the last page for paginate; summed over its pages in `itemsRead`); null without one. */
   items: number | null
-  /** paginate: elements matching `itemSelector` over every page read; null without one. */
+  /**
+   * paginate: elements matching `itemSelector` over every page read; null without one. After a continuation in the person's
+   * Chrome (`continued`), the kept pages' count plus each page they showed, as their tab counted it; null when the pager reopened
+   * at the list's own page (the kept pages are shown again, so a sum would count them twice).
+   */
   itemsRead?: number | null
   /** paginate: pages taken from the task's checkpoint after a run cut at page N (ExecutionContext.listResume), counted in `rounds`; absent when none. */
   resumed?: number

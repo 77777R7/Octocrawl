@@ -92,8 +92,8 @@ export interface UserChromeReadOptions {
 /** A page read in the person's Chrome and the pages they paged on to after it. */
 export interface UserBrowserListRead {
   first: UserBrowserRead
-  /** The first page included, in the order shown. */
-  pages: { url: string; html: string }[]
+  /** The first page included, in the order shown; `items`, the elements matching the step's `itemSelector` on it (null without one, absent when not read). */
+  pages: { url: string; html: string; items?: number | null }[]
   stoppedBy: 'end' | 'max' | 'deadline'
 }
 
@@ -329,6 +329,7 @@ const FOLLOW = (nextSelector: string, itemSelector: string | undefined) => `JSON
   html: document.documentElement ? document.documentElement.outerHTML : '',
   secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
   key: ${itemSelector === undefined ? `(document.body ? document.body.innerText : '')` : `Array.from(document.querySelectorAll(${JSON.stringify(itemSelector)})).map((el) => el.innerText).join('\\u0000')`},
+  items: ${itemSelector === undefined ? 'null' : `document.querySelectorAll(${JSON.stringify(itemSelector)}).length`},
   next: (() => { const el = document.querySelector(${JSON.stringify(nextSelector)}); if (!el) return 'gone'; const style = getComputedStyle(el); if (el.getClientRects().length === 0 || style.visibility === 'hidden' || style.display === 'none') return 'hidden'; if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true' || el.closest('.disabled, [aria-disabled="true"]') !== null) return 'disabled'; return 'usable' })(),
 })`
 
@@ -353,7 +354,7 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
   const host = new URL(url).hostname
   const started = Date.now()
   const script = FOLLOW(follow.nextSelector, follow.itemSelector)
-  type Shown = { href: string; ready: string; status: number | null; html: string; secret: boolean; key: string; next: 'gone' | 'hidden' | 'disabled' | 'usable' }
+  type Shown = { href: string; ready: string; status: number | null; html: string; secret: boolean; key: string; items?: number | null; next: 'gone' | 'hidden' | 'disabled' | 'usable' }
   const isGone = (error: unknown) => error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer/i.test(error.message)
   const look = async (): Promise<Shown | null> => {
     const info = await connection.send('Target.getTargetInfo', { targetId: tab.targetId }, undefined, READ_TIMEOUT_MS) as { targetInfo?: { url?: string } }
@@ -375,7 +376,7 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
   // The page read is the first of them: what it lists is known, so showing it again reads nothing twice.
   try {
     const shown = await look()
-    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key }
+    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key; pages[0]!.items = shown.items ?? null }
   } catch (error) {
     if (isGone(error)) throw new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, after ${pages.length} page(s) of the list were read`, null, 'gone')
   }
@@ -401,7 +402,7 @@ async function followPages(connection: CdpConnection, tab: OpenTab, url: string,
       if (gate !== null) { lastNew = Date.now(); if (told !== shown.href) { told = shown.href; options.onWaiting?.(shown.href, gate.reason) } continue }
       keys.add(shown.key)
       lastRead = shown.key
-      pages.push({ url: shown.href, html: shown.html })
+      pages.push({ url: shown.href, html: shown.html, items: shown.items ?? null })
       lastNew = Date.now()
       follow.onPage?.(shown.href, pages.length)
       if (pages.length >= max) return done('max')

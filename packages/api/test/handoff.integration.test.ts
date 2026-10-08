@@ -227,7 +227,8 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       // Page 1 from Octocrawl's own read, pages 2 and 3 as the person showed them: every record once, each page its own.
       expect(item.list?.records.map((record) => record.values.name)).toEqual([11, 12, 13, 21, 22, 23, 31, 32, 33].map((n) => `Item ${n}`))
       expect(item.list?.records.map((record) => record.source.page)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
-      expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      // The items as counted on each page: 3 on the last, 9 over the three (page 1's from Octocrawl's own read).
+      expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, items: 3, itemsRead: 9, continued: { from: 2, pages: 2, by: 'user_browser' } })
       expect(item.trace.map((event) => event.event)).toEqual(expect.arrayContaining(['handoff_from', 'user_browser_read', 'list_continued', 'list_extracted']))
       expect(item.handoff).toBeUndefined()
       expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 0, succeeded: 1, failed: 0 })
@@ -253,7 +254,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 1, through: 1, notThrough: 0 })
       const item = (await itemsOf(engine, taskId))[0]!
       expect(item.list?.records.map((record) => record.values.name)).toEqual([11, 12, 13, 21, 22, 23, 31, 32, 33].map((n) => `Item ${n}`))
-      expect(item.actions?.lists[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      expect(item.actions?.lists[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, items: 3, itemsRead: 9, continued: { from: 2, pages: 2, by: 'user_browser' } })
       // Each page the person showed is recorded at the address the tab had.
       expect(item.actions?.scrapes.filter((page) => page.by === 'user_browser').map((page) => page.url.replace(base, ''))).toEqual(['/rlist/2?q=x&vjk=21', '/rlist/3?q=x'])
     } finally {
