@@ -75,14 +75,18 @@ export class EgressPool {
   }
 }
 
+/** The failures a proxy that does not answer produces: the connection, the name, the handshake or the time it took. */
+const NETWORK_FAILURES: ReadonlySet<string> = new Set(['timeout', 'dns_error', 'connection_error', 'tls_error'])
+
 /**
  * Whether a page's outcome leaves its egress in doubt, so that the egress is worth probing: the page
- * failed and no rung got any HTTP answer. A page any rung got a status for went through its proxy, so
- * the proxy works, whatever the site said.
+ * failed on the network and no rung got any HTTP answer. A page any rung got a status for went through
+ * its proxy, so the proxy works, whatever the site said; a page whose request never went out (robots.txt
+ * or a policy refused it, a lockdown found no cached copy) says nothing about the proxy either way.
  */
 export function egressInDoubt(outcome: Pick<ScrapeOutcome, 'result' | 'audit'>): boolean {
   const results: FetchResult[] = [outcome.result, ...(outcome.audit?.summary.attempts ?? []).map((attempt) => attempt.result)]
-  return outcome.result.status === 'failed' && results.every((result) => (result.evidence.httpStatus ?? null) === null)
+  return outcome.result.status === 'failed' && NETWORK_FAILURES.has(outcome.result.failureReason ?? '') && results.every((result) => (result.evidence.httpStatus ?? null) === null)
 }
 
 /**

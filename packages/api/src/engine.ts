@@ -1473,18 +1473,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
       const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
       if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
-      // The terminal event follows the terminal task row the run wrote; a run paused by shutdown has none.
-      await finishJob(task, store)
-      inflight.delete(task.id)
-      // After the run is out of the in-flight set, as before: removing the session file does not hold the task as running.
+      // The session files go before anyone hears of the end: a webhook's receiver or an events stream told of the terminal
+      // row finds no cookies on the disk. A run paused by shutdown keeps them for its resume, and has no terminal event.
       const after = await store.getTask(task.id)
       await endCookieSession(after !== null && isTerminalStatus(after.status))
+      // The terminal event follows the terminal task row the run wrote.
+      await finishJob(task, store)
+      inflight.delete(task.id)
       await store.close()
     }).catch(async (error: unknown) => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
-      await finishJob(task, store, error instanceof Error ? error.message : String(error))
       await endCookieSession(true)
+      await finishJob(task, store, error instanceof Error ? error.message : String(error))
       await store.close()
     })
     runningCrawls.set(task.id, orchestrator)
