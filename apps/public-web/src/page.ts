@@ -220,7 +220,7 @@ export function pageMarkup(): string {
             <div class="how-replay" id="how-replay">
               <div class="how-replay-window" aria-hidden="true" inert>${sessionMarkup()}</div>
             </div>
-            <figcaption>A replay of two recorded runs on a local Octocrawl: the example page (24 Sep 2026) and an Amazon.sg product (23 Sep 2026). Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://docs.firecrawl.dev/introduction returned success in 2.51 seconds of server time, with Markdown that starts "Get Started" and "# Introduction". The Amazon.sg product B000NI69YA, a Fluke 116 HVAC Multimeter, was matched for Singapore 238823 at SGD 290.67, sold by Amazon US, in 4.00 seconds measured by the client.</span></figcaption>
+            <figcaption>A replay of two recorded runs: the example page on this site's preview (8 Oct 2026) and an Amazon.sg product on a local Octocrawl (23 Sep 2026). Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview returned success in 0.87 seconds of server time, with Markdown that starts "# Overview of HTTP" and then describes HTTP as a protocol for fetching resources such as HTML documents. The Amazon.sg product B000NI69YA, a Fluke 116 HVAC Multimeter, was matched for Singapore 238823 at SGD 290.67, sold by Amazon US, in 4.00 seconds measured by the client.</span></figcaption>
           </figure>
         </div>
       </div>

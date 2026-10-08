@@ -1,8 +1,10 @@
 /** The recorded Octocrawl runs that How it works replays, and the static frame it shows otherwise.
  * Each run shows one recorded capture, and nothing from any other:
- * - Run 1: apps/public-web/content/introduction.md, a local capture on 2026-09-24 at source commit 936fdf0:
- *   success, title "Introduction", final URL = requested URL, server totalMs 2509, and the recorded Markdown
- *   excerpt "Get Started\n# Introduction". Its length was not recorded, so the replay does not count characters.
+ * - Run 1: apps/public-web/content/introduction.md, a capture on the hosted preview at octocrawl.dev on 2026-10-08
+ *   (revision copy-7b9ef7f, source commit 7b9ef7f): success, title "Overview of HTTP", final URL = requested URL,
+ *   server totalMs 873, and the recorded Markdown starting "# Overview of HTTP" then "**HTTP** is a [protocol](…) for
+ *   fetching resources such as HTML documents." The second line is shown without its link target and cut short.
+ *   Its length (19,214 characters) is not replayed, so the replay does not count characters.
  * - Run 2: docs/evidence/amazon-holdout-100-2026-09-23.json record 42, a local capture on 2026-09-23 at source
  *   commit 991097f (stdio MCP → local API → browser): ASIN B000NI69YA selected as requested, title, SGD 290.67,
  *   seller Amazon US, each matched against the captured page; Singapore 238823 seen on it; clientMs 3998.5.
@@ -15,16 +17,16 @@ export type Run = { typed: string; steps: Step[]; out: Out[]; result: string; ti
 
 export const RUNS: readonly Run[] = [
   {
-    typed: 'docs.firecrawl.dev/introduction',
+    typed: 'developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview',
     steps: [
       { doing: 'Checking URL', done: 'Checked URL', detail: 'public · https', ms: 320 },
       { doing: 'Reading robots.txt', done: 'Read robots.txt', detail: 'checked', ms: 420 },
       { doing: 'Fetching page', done: 'Fetched page', detail: 'no redirect', ms: 640 },
       { doing: 'Extracting', done: 'Extracted', detail: 'Markdown', ms: 720 },
     ],
-    out: [{ text: 'Get Started' }, { text: '# Introduction' }],
+    out: [{ text: '# Overview of HTTP' }, { text: '**HTTP** is a protocol for fetching resources…' }],
     result: 'success',
-    time: 'server 2.51 s',
+    time: 'server 0.87 s',
     hold: 4200,
   },
   {
