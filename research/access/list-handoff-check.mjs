@@ -8,7 +8,9 @@
 // committed Markdown record; every candidate stays in its denominator.
 //
 // Usage: node research/access/list-handoff-check.mjs [--only T033,T051] [--handoff] [--wait-ms 600000]
-//          [--record research/access/runs/<date>-list-handoff-<commit>.md]
+//          [--batch <id>] [--record research/access/runs/<date>-list-handoff-<commit>.md]
+//   --batch      hand off a finished batch of an earlier run again instead of starting one (with --only and one task):
+//                a list a handoff left stopped goes on from the page it stopped at.
 //   Env: W2L_API_URL (default http://127.0.0.1:8787). The API must run on this machine, on loopback, for the handoff.
 //
 // Verified (the handoff's acceptance) only when all hold, read from the batch item after the handoff:
@@ -31,10 +33,12 @@ const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const handoff = args.includes('--handoff')
 const waitMs = Number(flag('--wait-ms') ?? 600_000)
 const record = flag('--record')
+const again = flag('--batch')
 
 const set = JSON.parse(await readFile(join(here, 'list-challenge-candidates.v1.json'), 'utf8'))
 const only = flag('--only')?.split(',').map((id) => id.trim())
 const candidates = only === undefined ? set.candidates : set.candidates.filter((c) => only.includes(c.id))
+if (again !== undefined && candidates.length !== 1) throw new Error('--batch hands off one earlier batch: name its task with --only')
 
 // The handoff answers only once the person is done, which may take longer than fetch's default 5-minute wait for headers.
 const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
@@ -87,8 +91,8 @@ for (const c of candidates) {
     maxConcurrency: 1,
     actions: [{ type: 'paginate', nextSelector: c.nextSelector, itemSelector: c.itemSelector, maxPages: set.maxPages }],
   }
-  const started = await call('POST', '/v1/batches', request)
-  const id = started.json?.id ?? started.json?.taskId
+  const started = again === undefined ? await call('POST', '/v1/batches', request) : null
+  const id = again ?? started.json?.id ?? started.json?.taskId
   if (id === undefined) { rows.push({ c, error: `batch refused: ${started.status} ${started.text.slice(0, 200)}` }); console.log(`${c.id} refused ${started.status}`); continue }
   await finished(id)
   const before = listOf(await item(id))
@@ -99,6 +103,7 @@ for (const c of candidates) {
     console.log(`  Handing over: the page of the check opens in your Chrome. Get through it, wait for the terminal to say the page was read, then click Next until the list ends. Do not close the tab.`)
     const done = await call('POST', `/v1/batches/${id}/handoff`, { waitMs })
     row.handed = done.json ?? { status: done.status, text: done.text.slice(0, 200) }
+    console.log(`  handoff answer: ${JSON.stringify(row.handed)}`)
     row.after = listOf(await item(id))
     const a = row.after
     row.verified = a.continued?.from === before.challenge.page && (a.continued?.pages ?? 0) >= 1 && a.continued?.by === 'user_browser'
@@ -129,6 +134,8 @@ ROADMAP PA item 3, the last clause: a list stopped at a check at page N is hande
 | Task | Host | Before: status / stop | Pages / items read | Check at page >= 2 | After the handoff | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
 ${lines.join('\n')}
+${again === undefined ? '' : `\nAn earlier run's batch handed off again (\`--batch ${again}\`): "Before" is the item as that run left it.\n`}
+Handoff answers (\`POST /v1/batches/:id/handoff\`): ${rows.filter((r) => r.handed !== null && r.handed !== undefined).map((r) => `${r.c.id} \`${JSON.stringify(r.handed)}\``).join('; ') || 'none'}.
 
 Verified only as the driver's header states; a status alone never verifies. Raw items: \`GET /v1/batches/<id>/items?debug=true\` on the API's task root (not committed): ${rows.filter((r) => r.id).map((r) => `${r.c.id} \`${r.id}\``).join(', ')}.
 `
