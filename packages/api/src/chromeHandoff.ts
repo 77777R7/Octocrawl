@@ -674,7 +674,8 @@ function sameDocument(a: string, b: string): boolean {
 
 /**
  * Whether `shown` can be `came`'s own address rewritten in place by the page's script: the same origin and path, and the
- * same value for every query parameter both name (a parameter dropped or added is allowed; one changed is another page).
+ * same value for every query parameter both name (a parameter added is allowed, and one dropped unless its value is a
+ * number, as a page or an offset is: a page that drops `start=10` may be showing its first page; one changed is another page).
  */
 export function rewrittenInPlace(came: string, shown: string): boolean {
   let a: URL
@@ -687,7 +688,10 @@ export function rewrittenInPlace(came: string, shown: string): boolean {
   }
   if (a.origin !== b.origin || (a.pathname.replace(/\/+$/, '') || '/') !== (b.pathname.replace(/\/+$/, '') || '/')) return false
   for (const name of new Set(a.searchParams.keys())) {
-    if (!b.searchParams.has(name)) continue
+    if (!b.searchParams.has(name)) {
+      if (a.searchParams.getAll(name).some((value) => /^\d+$/.test(value))) return false
+      continue
+    }
     const left = a.searchParams.getAll(name)
     const right = b.searchParams.getAll(name)
     if (left.length !== right.length || left.some((value, i) => value !== right[i])) return false

@@ -258,6 +258,9 @@ describe('an address a page\'s script rewrote in place', () => {
     // A page parameter changed: another page of the list.
     expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/jobs?start=20')).toBe(false)
     expect(rewrittenInPlace('https://site.test/jobs?tag=a&tag=b', 'https://site.test/jobs?tag=a')).toBe(false)
+    // A page or offset dropped: the page may be showing its first page. A token dropped (Indeed's pp) is not one.
+    expect(rewrittenInPlace('https://site.test/jobs?q=x&start=10', 'https://site.test/jobs?q=x')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs?q=x&page=2&pp=tok9', 'https://site.test/jobs?q=x&page=2')).toBe(true)
     // Another path or another origin is never the page.
     expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/job/1?start=10')).toBe(false)
     expect(rewrittenInPlace('https://site.test/jobs', 'https://other.test/jobs')).toBe(false)
