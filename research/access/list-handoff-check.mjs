@@ -21,6 +21,7 @@ import { execSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Agent } from 'undici'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -35,8 +36,11 @@ const set = JSON.parse(await readFile(join(here, 'list-challenge-candidates.v1.j
 const only = flag('--only')?.split(',').map((id) => id.trim())
 const candidates = only === undefined ? set.candidates : set.candidates.filter((c) => only.includes(c.id))
 
+// The handoff answers only once the person is done, which may take longer than fetch's default 5-minute wait for headers.
+const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+
 async function call(method, path, body) {
-  const res = await fetch(`${api}${path}`, { method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const res = await fetch(`${api}${path}`, { method, dispatcher: patient, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   const text = await res.text()
   let json = null
   try { json = JSON.parse(text) } catch { /* not JSON */ }
