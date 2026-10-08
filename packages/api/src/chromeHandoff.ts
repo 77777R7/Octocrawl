@@ -77,6 +77,24 @@ export interface UserChromeReadOptions {
   includeTags?: readonly string[]
   excludeTags?: readonly string[]
   blockAds?: boolean
+  /**
+   * After the page is read, keep its tab and read each page the person pages on to by clicking `nextSelector` themselves
+   * (a list's continuation after a check): a page counts once what `itemSelector` matches (or the page's text) reads the
+   * same twice, it is on the site, not on a login path, shows no password field, answered 2xx and no check is on it (a
+   * check met on the way waits for the person). The reading ends when the control is gone, hidden or disabled on the last
+   * page read for `endGraceMs` (default 5 s; `end`), at `maxPages` pages (`max`), or after `idleMs` without a new page or
+   * at the wait's end (`deadline`); a cancelled reading or a closed tab throws HandoffNotThrough. `onStart` is told as the
+   * reading begins, `onPage` each page read.
+   */
+  follow?: { nextSelector: string; itemSelector?: string; maxPages?: number; idleMs?: number; endGraceMs?: number; onStart?: (url: string) => void; onPage?: (url: string, pages: number) => void }
+}
+
+/** A page read in the person's Chrome and the pages they paged on to after it. */
+export interface UserBrowserListRead {
+  first: UserBrowserRead
+  /** The first page included, in the order shown. */
+  pages: { url: string; html: string }[]
+  stoppedBy: 'end' | 'max' | 'deadline'
 }
 
 /** Reads in a row a page must pass to count as through: about 1.5 s at the default poll. */
@@ -121,6 +139,8 @@ export interface SiteScope {
 export interface UserChrome {
   /** Open `url` in a new tab, wait for the person to get through, read the page, close the tab. */
   read(url: string, options?: UserChromeReadOptions): Promise<UserBrowserRead>
+  /** As `read`, then keep the tab and read each page the person pages on to (`options.follow`), closing it at the end. */
+  readList(url: string, options: UserChromeReadOptions & { follow: NonNullable<UserChromeReadOptions['follow']> }): Promise<UserBrowserListRead>
   /**
    * Show the person, in a page W2L opens in their Chrome, the sites and task it asks to read, and wait for them to
    * click Allow there (a click Chrome counts as theirs). Refused (HandoffNotThrough) when they close the page, click
@@ -178,6 +198,7 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
   }
   return {
     read: (url, readOptions = {}) => readPage(connection, browser, url, readOptions),
+    readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
     close: () => connection.close(),
   }
@@ -277,7 +298,124 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
   }
 }
 
+/** The tab W2L opened for a page: closed by `closeTab` once the page, and what the person pages on to, is read. */
+interface OpenTab { targetId: string; sessionId: string; stops: Array<() => void> }
+
+async function closeTab(connection: CdpConnection, tab: OpenTab): Promise<void> {
+  for (const stop of tab.stops) stop()
+  await connection.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => undefined)
+}
+
 async function readPage(connection: CdpConnection, browser: string, url: string, options: UserChromeReadOptions): Promise<UserBrowserRead> {
+  const { read, tab } = await readOpen(connection, browser, url, options)
+  await closeTab(connection, tab)
+  return read
+}
+
+async function readList(connection: CdpConnection, browser: string, url: string, options: UserChromeReadOptions & { follow: NonNullable<UserChromeReadOptions['follow']> }): Promise<UserBrowserListRead> {
+  const { read, tab } = await readOpen(connection, browser, url, options)
+  try {
+    return await followPages(connection, tab, url, read, options)
+  } finally {
+    await closeTab(connection, tab)
+  }
+}
+
+/** What the tab shows as the person pages on: the page's key (its items' text, or its text), whether the control to page on is usable, and the page. */
+const FOLLOW = (nextSelector: string, itemSelector: string | undefined) => `JSON.stringify({
+  href: location.href,
+  ready: document.readyState,
+  status: (performance.getEntriesByType('navigation')[0] || {}).responseStatus || null,
+  html: document.documentElement ? document.documentElement.outerHTML : '',
+  secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
+  key: ${itemSelector === undefined ? `(document.body ? document.body.innerText : '')` : `Array.from(document.querySelectorAll(${JSON.stringify(itemSelector)})).map((el) => el.innerText).join('\\u0000')`},
+  next: (() => { const el = document.querySelector(${JSON.stringify(nextSelector)}); if (!el) return 'gone'; const style = getComputedStyle(el); if (el.getClientRects().length === 0 || style.visibility === 'hidden' || style.display === 'none') return 'hidden'; if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true' || el.closest('.disabled, [aria-disabled="true"]') !== null) return 'disabled'; return 'usable' })(),
+})`
+
+/** How long the control to page on must stay unusable on the last page read before the list counts as ended: a pager that disables or hides Next while it loads the next page is not its end. */
+const END_GRACE_MS = 5_000
+
+/**
+ * The pages the person pages on to after the one read, in the tab W2L kept: each read once what it lists reads the same
+ * twice a poll apart, it is on the site asked for and not on a login path, shows no password field, answered 2xx, and no
+ * check is on it (one met on the way waits for the person, as the first page did). W2L only reads the tab: its address is
+ * Chrome's, not what the page's script says. Ends as `options.follow` says: `end` when the control is unusable on the
+ * last page read for END_GRACE_MS without a break; `max` at the page limit; `deadline` after `idleMs` with no new page or
+ * at the wait's end. A cancelled reading, or a tab closed or Chrome quit, throws HandoffNotThrough: what was read is not kept.
+ */
+async function followPages(connection: CdpConnection, tab: OpenTab, url: string, first: UserBrowserRead, options: UserChromeReadOptions & { follow: NonNullable<UserChromeReadOptions['follow']> }): Promise<UserBrowserListRead> {
+  const { follow } = options
+  const pollMs = options.pollMs ?? 500
+  const waitMs = options.waitMs ?? 600_000
+  const idleMs = follow.idleMs ?? 60_000
+  const max = follow.maxPages ?? Number.POSITIVE_INFINITY
+  const endGraceMs = follow.endGraceMs ?? END_GRACE_MS
+  const host = new URL(url).hostname
+  const started = Date.now()
+  const script = FOLLOW(follow.nextSelector, follow.itemSelector)
+  type Shown = { href: string; ready: string; status: number | null; html: string; secret: boolean; key: string; next: 'gone' | 'hidden' | 'disabled' | 'usable' }
+  const isGone = (error: unknown) => error instanceof ChromeLoginError && !/navigated or closed/i.test(error.message) && /Session with given id not found|No session with given id|No target with given id|closed the connection|Target closed|target not found|did not answer/i.test(error.message)
+  const look = async (): Promise<Shown | null> => {
+    const info = await connection.send('Target.getTargetInfo', { targetId: tab.targetId }, undefined, READ_TIMEOUT_MS) as { targetInfo?: { url?: string } }
+    const answer = await connection.send('Runtime.evaluate', { expression: script, returnByValue: true }, tab.sessionId) as { result?: { value?: string } }
+    if (typeof answer.result?.value !== 'string') return null
+    const shown = JSON.parse(answer.result.value) as Shown
+    if (typeof info.targetInfo?.url === 'string') shown.href = info.targetInfo.url
+    return shown
+  }
+  const pages: UserBrowserListRead['pages'] = [{ url: first.finalUrl, html: first.html }]
+  const keys = new Set<string>()
+  let lastKey: string | null = null
+  let lastRead: string | null = null
+  let unusableSince: number | null = null
+  let lastNew = Date.now()
+  let told: string | null = null
+  const done = (stoppedBy: UserBrowserListRead['stoppedBy']): UserBrowserListRead => ({ first, pages, stoppedBy })
+  follow.onStart?.(url)
+  // The page read is the first of them: what it lists is known, so showing it again reads nothing twice.
+  try {
+    const shown = await look()
+    if (shown !== null) { keys.add(shown.key); lastKey = shown.key; lastRead = shown.key }
+  } catch (error) {
+    if (isGone(error)) throw new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, after ${pages.length} page(s) of the list were read`, null, 'gone')
+  }
+  if (pages.length >= max) return done('max')
+  while (Date.now() - started < waitMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+    if (isAborted(options.signal)) throw new HandoffNotThrough(`the reading of ${url} was cancelled after ${pages.length} page(s) of the list`, null, 'cancelled')
+    if (Date.now() - lastNew > idleMs) return done('deadline')
+    let shown: Shown | null
+    try { shown = await look() } catch (error) {
+      if (isGone(error)) throw new HandoffNotThrough(`the tab for ${url} was closed, or Chrome quit, after ${pages.length} page(s) of the list were read`, null, 'gone')
+      continue
+    }
+    if (shown === null || shown.ready !== 'complete') continue
+    // A page counts once it reads the same twice.
+    if (shown.key !== lastKey) { lastKey = shown.key; unusableSince = null; continue }
+    // Off the site, on a login path, at a step of the person's own, or not answered 2xx: not a page of the list, and not its end.
+    const readable = sameSite(shown.href, host) && !onLoginPath(shown.href, url) && !shown.secret && (shown.status === null || (shown.status >= 200 && shown.status < 300))
+    if (!readable) { unusableSince = null; continue }
+    if (!keys.has(shown.key) && shown.key !== '') {
+      // A check the site put up on the way, judged as the first page was: the person gets through it (their time is theirs); the page is read once they have.
+      const gate = checksOf({ href: shown.href, ready: shown.ready, status: shown.status, html: shown.html, secret: shown.secret, field: null, hidden: false }, null, shown.status, options).gate
+      if (gate !== null) { lastNew = Date.now(); if (told !== shown.href) { told = shown.href; options.onWaiting?.(shown.href, gate.reason) } continue }
+      keys.add(shown.key)
+      lastRead = shown.key
+      pages.push({ url: shown.href, html: shown.html })
+      lastNew = Date.now()
+      follow.onPage?.(shown.href, pages.length)
+      if (pages.length >= max) return done('max')
+    }
+    // On the last page read, nothing to page on with, and not for a moment only (a pager loading its next page): the list's end.
+    if (shown.key === lastRead && shown.next !== 'usable') {
+      unusableSince ??= Date.now()
+      if (Date.now() - unusableSince >= endGraceMs) return done('end')
+    } else unusableSince = null
+  }
+  return done('deadline')
+}
+
+async function readOpen(connection: CdpConnection, browser: string, url: string, options: UserChromeReadOptions): Promise<{ read: UserBrowserRead; tab: OpenTab }> {
   const waitMs = options.waitMs ?? 600_000
   const pollMs = options.pollMs ?? 500
   const host = new URL(url).hostname
@@ -301,6 +439,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
     throw ended(error)
   }
   const stops: Array<() => void> = []
+  let kept = false
   try {
     const { sessionId } = await connection.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
     // Set by the event listeners: the main document's last response; how the person acted (a navigation Chrome marks as a user's);
@@ -416,7 +555,8 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
         open(true)
         continue
       }
-      return {
+      kept = true
+      return { read: {
         requestedUrl: url,
         finalUrl: state.href,
         status,
@@ -427,7 +567,7 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
         sawGate,
         act: heard.act,
         browser,
-      }
+      }, tab: { targetId, sessionId, stops } }
     }
     const where = last === null ? 'it never loaded'
       : allowed !== null && !allowed.has(hostAndPort(last.state.href)) ? `it was on ${hostAndPort(last.state.href)}, which you did not allow (only ${[...allowed].join(', ')})`
@@ -439,8 +579,8 @@ async function readPage(connection: CdpConnection, browser: string, url: string,
   } catch (error) {
     throw ended(error)
   } finally {
-    for (const stop of stops) stop()
-    await connection.send('Target.closeTarget', { targetId }).catch(() => undefined)
+    // The tab stays open for the caller that read the page and keeps it (readList); on every other way out it is closed here.
+    if (!kept) await closeTab(connection, { targetId, sessionId: '', stops })
   }
 }
 

@@ -89,6 +89,34 @@ describe('the handoff route', () => {
     await expect(engine.handOffBatch(taskId, {})).rejects.toThrow('asked for page actions, which a page read in your own Chrome cannot give')
   })
 
+  it('a batch whose only step is paginate offers the handoff for a list stopped at a check alone; a page stopped before its list, a scrape, or the my-browser lane with that step stay refused', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
+    engine = createApiEngine({
+      taskRoot: join(root, 'tasks'),
+      channelsFor: (mode) => [buildChannels(mode, { localSubjects: { http: { fetch: async (url: string) => laneResult(url) }, browser_local: { fetch: async (url: string) => laneResult(url) } } })[1]!],
+      userChrome: { userDataDir: join(root, 'no-chrome') },
+    })
+    const paginate = [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'div.card' }]
+    // Without an itemSelector no page of the list is told from another page the person opens: such a batch is not handed over.
+    const { taskId: untold } = await engine.startBatch({ urls: [`${server.url}/gate`], actions: [{ type: 'paginate', nextSelector: 'a.next' }] } as never)
+    for (let i = 0; i < 200 && (await engine.getBatch(untold))?.status !== 'completed'; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await engine.getBatch(untold))?.waitingForPerson).toBeUndefined()
+    await expect(engine.handOffBatch(untold, {})).rejects.toThrow('page actions')
+    // The stub lane stops /gate at a captcha before any list page: nothing for the person to page on from, so it is not handed over, and the count says so.
+    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`], actions: paginate } as never)
+    for (let i = 0; i < 200 && (await engine.getBatch(taskId))?.status !== 'completed'; i++) await new Promise((resolve) => setTimeout(resolve, 20))
+    expect((await engine.getBatch(taskId))?.waitingForPerson).toBe(0)
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect((await engine.getBatchItems(taskId, { limit: 50 }))!.items[0]!.handoff).toBeUndefined()
+    // Nothing to hand over: Chrome is not even asked for.
+    expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 0, items: [] })
+    // A single page's handoff and the my-browser lane run no steps, a paginate step included.
+    const app = createApp(engine)
+    expect(await post(app, '/v1/scrape', JSON.stringify({ url: `${server.url}/gate`, handoff: true, actions: paginate }))).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
+    expect(await post(app, '/v1/scrape', JSON.stringify({ url: `${server.url}/gate`, lane: 'my-browser', actions: paginate }))).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
+    expect(await post(app, '/v1/batches', JSON.stringify({ urls: [`${server.url}/gate`], lane: 'my-browser', actions: paginate }))).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
+  })
+
   it('a batch with a webhook offers no handoff: a page read in the person\'s Chrome is read signed in as them, and is not sent to another address', async () => {
     root = await mkdtemp(join(tmpdir(), 'w2l-handoff-route-'))
     engine = createApiEngine({

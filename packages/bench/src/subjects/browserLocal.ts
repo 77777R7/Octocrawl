@@ -1,5 +1,6 @@
+import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
-import { classifyContentType, collectLinks, detectFile, extractListRecords, extractTf, htmlToMarkdown, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, responseFileName } from '@w2l/extract-tf'
+import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
 import {
   abortableSleep,
   createExecutionScope,
@@ -1690,31 +1691,13 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
   const pages = ran.result.scrapes.filter((scrape) => scrape.step !== undefined && paginated.includes(scrape.step))
   // A paginate step that read no page (the deadline came first) leaves the list of the page as it stands.
   if (pages.length > 0) {
-    const records: ListRecord[] = []
-    const seen = new Set<string>()
-    let page = 0
-    let cut = false
-    // Items and fields left to W2L are found on the first page and read on every page the same way.
-    const { spec, detected } = resolveListSpec(pages[0]!.html, list!)
-    for (const scrape of spec === null ? [] : pages) {
-      const budget = { records: MAX_LIST_RECORDS - records.length, chars: MAX_LIST_VALUE_CHARS - records.reduce((sum, record) => sum + Object.values(record.values).reduce((n, value) => n + (value?.length ?? 0), 0), 0) }
-      const read = extractListRecords(scrape.html, scrape.url, spec!, page + 1, budget)
-      // The items' whole text, not only the fields asked for: two pages agreeing on a stock field are still two pages.
-      const key = read.itemText ?? JSON.stringify(read.map((record) => record.values))
-      if (read.length > 0 && seen.has(key)) continue
-      seen.add(key)
-      page++
-      records.push(...read)
-      if (read.cut === true) { cut = true; break }
-    }
-    const merged = listExtraction(spec, records, page, cut, detected)
-    const valued = spec !== null && records.some((record) => record.missing.length < spec.fields.length)
-    const rescued = valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
+    const merged = mergeListPages(pages, list!)!
+    const rescued = merged.valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
     result = {
       ...result,
-      list: merged,
+      list: merged.list,
       ...(rescued ? { status: 'success' as const, failureReason: null } : {}),
-      trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.records.length, incomplete: merged.incomplete, pages: merged.pages, truncated: merged.truncated } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.list.records.length, incomplete: merged.list.incomplete, pages: merged.list.pages, truncated: merged.list.truncated } }],
     }
   }
   const failed = ran.result.failed !== undefined && CONTENTFUL_STATUS.has(result.status)

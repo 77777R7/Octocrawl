@@ -129,13 +129,18 @@ export interface ListRun {
   resumed?: number
   /** paginate: the check the step stopped at, with `stoppedBy` `challenge`; absent otherwise. */
   challenge?: ListChallenge
+  /**
+   * paginate: the pages read after the check at `from`, by the person paging on in their own browser once they got through
+   * it (the batch handoff), counted in `rounds`; `stoppedBy` then says how that reading ended. Absent otherwise.
+   */
+  continued?: { from: number; pages: number; by: 'user_browser' }
 }
 
 /** What the steps produced, each list in the order of its steps. */
 export interface ActionsResult {
   screenshots: ScreenshotEvidence[]
   /** Each page's HTML, with the index of the step that read it (a scrape step, or each page of a paginate step). */
-  scrapes: { url: string; html: string; step?: number }[]
+  scrapes: { url: string; html: string; step?: number; /** Set when the person read the page in their own browser (a list's continuation after a check); absent for W2L's own browser. */ by?: 'user_browser' }[]
   /** `type` is the JavaScript `typeof` of the value (`null` for null). */
   javascriptReturns: { type: string; value: unknown }[]
   pdfs: ActionPdf[]
