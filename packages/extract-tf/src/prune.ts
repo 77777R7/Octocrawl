@@ -3,8 +3,8 @@
  *
  * Two layers, mirroring trafilatura's flow (research confirmed):
  *  - cleanTree: wholesale removal of elements that can never be main content
- *    (trafilatura's MANUALLY_CLEANED set, and the navigation a site lays out
- *    inside its content column).
+ *    (trafilatura's MANUALLY_CLEANED set, the navigation a site lays out
+ *    inside its content column, and what its stylesheet hides).
  *  - prune: selector-driven removal of noise the clean pass can't see, with a
  *    built-in CMP/garbage table stronger than trafilatura's thin token list
  *    (the research reproduction showed 15 of 20 real CMP roots surviving
@@ -53,7 +53,16 @@ const MANUALLY_CLEANED = [
  */
 const IN_CONTENT_NAVIGATION = ['[role="navigation"]', '#p-lang-btn', '.mw-portlet', '.vector-menu'] as const
 
-const CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...IN_CONTENT_NAVIGATION].join(',')
+/**
+ * What a site's own stylesheet hides from every reader, which the HTTP lane
+ * cannot see without reading CSS (a browser capture marks it hidden):
+ * MediaWiki's hidden categories, the maintenance categories a page carries
+ * and shows to no reader (`.mw-hidden-cats-hidden`). The visible categories
+ * stay.
+ */
+const SITE_HIDDEN = ['.mw-hidden-catlinks'] as const
+
+const CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...IN_CONTENT_NAVIGATION, ...SITE_HIDDEN].join(',')
 
 /**
  * CMP / ad / junk selectors, applied by id or class token. Matched nodes are

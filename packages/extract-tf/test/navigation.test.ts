@@ -48,3 +48,17 @@ describe('navigation inside the content column', () => {
     expect(wholePageBody(html)).toContain('View history')
   })
 })
+
+// Content a site's own stylesheet hides from every reader, which the HTTP lane
+// cannot see without reading CSS: MediaWiki's hidden categories (#289).
+describe('content the site hides', () => {
+  it("drops Wikipedia's hidden categories and keeps the visible ones", () => {
+    const out = extractTf.extract(WIKIPEDIA, { url: WIKIPEDIA_URL })
+    const markdown = htmlToMarkdown(out.mainHtml, { baseUrl: WIKIPEDIA_URL })
+    expect(markdown).not.toContain('Hidden categories')
+    expect(markdown).not.toContain('Category:Articles_with_short_description')
+    expect(markdown).toContain('[Web scraping](https://en.wikipedia.org/wiki/Category:Web_scraping)')
+    // The whole page keeps them, as it keeps all the page holds.
+    expect(wholePageBody(WIKIPEDIA)).toContain('Hidden categories')
+  })
+})
