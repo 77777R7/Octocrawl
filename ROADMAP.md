@@ -4,7 +4,7 @@ The product is called Octocrawl (decided 2026-10-05); identifiers that still say
 
 ## Current phase: PA enhanced access, the first priority, with P2's remaining items
 
-**From 2026-10-09: enhanced access is the first priority.** Decided by Howard: without reaching the pages that block a plain request, Octocrawl has nothing that sets it apart from the products it competes with. When [PA](#pa--enhanced-access) and other work (PH, P2's remaining items, the public site) compete for time, PA goes first. The way there is the roadmap's own: finish the PA items in hand (item 3 with #284, item 7's real-site record, item 8's final acceptance), publish them as the next release (0.4.0, by tag and the Release workflow), then go on in PA's order (items 4, 6 and 9). A route that a measured run shows to do better (more tasks verified on item 1's frozen set, no regression on the existing batches, its false successes counted) is added or tuned after that release, under [ADR 0005](docs/adr/0005-enhanced-access-policy.md), whose "never" list does not change.
+**From 2026-10-09: enhanced access is the first priority.** Decided by Howard: without reaching the pages that block a plain request, Octocrawl has nothing that sets it apart from the products it competes with. When [PA](#pa--enhanced-access) and other work (PH, P2's remaining items, the public site) compete for time, PA goes first. The way there is the roadmap's own: finish the PA items in hand (item 3 with #284, item 7's real-site record, item 8's final acceptance), publish them as the next release (0.4.0, by tag and the Release workflow), then go on in PA's order (items 4 and 6). Item 9, the competitor baseline, comes first (decided later the same day): it only measures, so it does not hold the release back, and the bar below is read from it. A route that a measured run shows to do better (more tasks verified on item 1's frozen set, no regression on the existing batches, its false successes counted) is added or tuned after that release, under [ADR 0005](docs/adr/0005-enhanced-access-policy.md), whose "never" list does not change.
 
 **The bar, decided 2026-10-09: world-class within Octocrawl's means.** Enhanced access keeps up with the leading products, and within what a small team can run (maintained open-source projects, and providers under the user's grant) it aims to be the best: measured, not claimed. The yardstick is item 9's baseline: on item 1's frozen set, Octocrawl's enhanced route reaches at least the verified completion of the best competitor measured there, with no more false successes; where it falls short, the record names the gap and what would close it, and that becomes the next PA work. What needs infrastructure Octocrawl cannot run, such as its own residential IP network, stays out (see [Paused](#paused)); a provider's pool under the user's grant is the route there.
 
@@ -163,7 +163,7 @@ Decided 2026-10-05: enhanced fetching as a product capability, built on maintain
 - 6: not started.
 - 7: built (#259); no real-site record yet.
 - 8: built (#256, #258, #264); the final acceptance, ten pages that need the person's login or address, waits for their list of pages.
-- 9: not started.
+- 9: not started; moved first on 2026-10-09, ahead of the 0.4.0 release.
 
 **Exit:** see the Phases table.
 
