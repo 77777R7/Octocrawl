@@ -139,10 +139,16 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     const proxy = laneEvent('egress_proxy')
     // No proxy event: direct only when a page response proves a request was sent; a lane that stopped before one
     // (robots, an address check, a deadline) leaves the egress unknown.
-    if (proxy === undefined) return typeof result.evidence.httpStatus === 'number' ? { proxy: null, source: 'direct', switchedFrom: null } : null
+    if (proxy === undefined) return typeof result.evidence.httpStatus === 'number' ? { proxy: null, source: 'direct', switchedFrom: null, exit: null } : null
     // The task may have moved twice before this page was read; the last move names where it came from.
     const moved = [...result.trace].reverse().find((e) => e.event === 'egress_switched')?.detail
-    return { proxy: text(proxy.proxy), source: proxy.source === 'environment' ? 'environment' : 'pool', switchedFrom: text(moved?.from) }
+    const source = proxy.source === 'environment' ? 'environment' : 'pool'
+    // Where the pool egress leaves from, when the engine asked its echo URL (egress_exit) for this very proxy.
+    const seen = source === 'pool' ? [...result.trace].reverse().find((e) => e.event === 'egress_exit' && e.detail?.proxy === proxy.proxy)?.detail : undefined
+    const ip = text(seen?.ip)
+    const observedAt = text(seen?.observedAt)
+    const exit = ip === null || observedAt === null ? null : { ip, country: text(seen?.country), observedAt }
+    return { proxy: text(proxy.proxy), source, switchedFrom: text(moved?.from), exit }
   }
   const session = (r: EvidenceAccess['route']): EvidenceAccessSession | null => {
     const id = own(r) ? text(laneEvent('session_cookies')?.session) : null

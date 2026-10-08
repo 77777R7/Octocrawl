@@ -73,6 +73,23 @@ beforeAll(async () => {
       if (n === 2 && !cookie.includes('list=1')) return html(captcha('list'))
       return html(`${cards}${n < 3 ? `<a class="next" href="/list/${n + 1}">Next</a>` : ''}`)
     }
+    // The same list on a site that rewrites the address of the page it shows, as Indeed does (it drops its paging token and
+    // names the job shown): page 2's address loses `pp` and gains `vjk` once it has come, with no new document.
+    const rewritten = /^\/rlist\/(\d)(\?.*)?$/.exec(req.url ?? '')
+    if (rewritten !== null) {
+      const n = Number(rewritten[1])
+      const cards = [1, 2, 3].map((i) => `<div class="card"><a class="name" href="/p/${n * 10 + i}">Item ${n * 10 + i}</a><span class="price">${n * 10 + i}.00</span></div>`).join('')
+      if (n === 2 && !cookie.includes('rlist=1')) return html(captcha('rlist'))
+      const next = n === 1 ? '<a class="next" href="/rlist/2?q=x&pp=tok">Next</a>' : n === 2 ? '<a class="next" href="/rlist/3?q=x">Next</a>' : ''
+      const rewrite = n === 2 ? `<script>history.replaceState(null, '', '/rlist/2?q=x&vjk=21')</script>` : ''
+      return html(`${cards}${next}${rewrite}`)
+    }
+    // A check that passes by itself, then a page whose "More" link moves it in place to its second page (pushState, new content):
+    // the person's click, not the page's own rewrite.
+    if ((req.url ?? '').startsWith('/spage')) {
+      if (!cookie.includes('spage=1')) return html('<div class="g-recaptcha" data-sitekey="k"></div><script>document.cookie = "spage=1; path=/"; setTimeout(() => location.reload(), 300)</script>')
+      return html(`${ARTICLE}<a id="more" href="#" onclick="event.preventDefault(); history.pushState(null, '', '/spage?page=2'); document.querySelector('article').innerHTML = '<h1>Page two</h1>' + '<p>The second page of the list, which the person moved to by a click in the page. </p>'.repeat(4)">More</a>`)
+    }
     // A bot check that only its header says (a vendor's), never passed here.
     if (req.url === '/dd') return html('<p>Access denied.</p>', 403, { 'x-datadome': 'protected' })
     // A sign-in, then a one-time code, then the page.
@@ -210,7 +227,10 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       // Page 1 from Octocrawl's own read, pages 2 and 3 as the person showed them: every record once, each page its own.
       expect(item.list?.records.map((record) => record.values.name)).toEqual([11, 12, 13, 21, 22, 23, 31, 32, 33].map((n) => `Item ${n}`))
       expect(item.list?.records.map((record) => record.source.page)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
-      expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      // The items as counted on each page: 3 on the last, 9 over the three (page 1's from Octocrawl's own read).
+      expect(item.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'end', rounds: 3, items: 3, itemsRead: 9, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      // The pages' counts stay inside: a scrape is its address, its HTML, its step and who read it.
+      expect(item.actions?.scrapes.map((scrape) => Object.keys(scrape).sort().join())).toEqual(['html,step,url', 'by,html,step,url', 'by,html,step,url'])
       expect(item.trace.map((event) => event.event)).toEqual(expect.arrayContaining(['handoff_from', 'user_browser_read', 'list_continued', 'list_extracted']))
       expect(item.handoff).toBeUndefined()
       expect(await engine.getBatch(taskId)).toMatchObject({ waitingForPerson: 0, succeeded: 1, failed: 0 })
@@ -220,6 +240,47 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
       await engine.close()
     }
   }, 180_000)
+
+  it('a list page whose script rewrites its address once it has come (a token dropped, the item shown named) is still the page asked for', async () => {
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const engine = createApiEngine({ taskRoot: join(root, 'tasks-rlist'), networkPolicy: policy, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy }).filter((channel) => channel.id === 'browser_local'), userChrome: { userDataDir: join(root, 'chrome') } })
+    const stop = person(chrome, { '/rlist/2': async (page) => { await page.click('#pass'); await page.waitForSelector('a.next'); await page.waitForTimeout(4_000); await page.click('a.next') } })
+    try {
+      const LIST = { type: 'list', itemSelector: 'div.card', fields: [{ name: 'name', selector: 'a.name' }, { name: 'price', selector: '.price' }] }
+      const { taskId } = await engine.startBatch({ urls: [`${base}/rlist/1`], formats: ['markdown', LIST], actions: [{ type: 'paginate', nextSelector: 'a.next', itemSelector: 'div.card', waitMs: 200 }] } as never)
+      for (let i = 0; i < 600; i++) { const report = await engine.getBatch(taskId); if (report !== null && ['completed', 'failed', 'cancelled'].includes(report.status)) break; await new Promise((resolve) => setTimeout(resolve, 50)) }
+      const stopped = (await itemsOf(engine, taskId))[0]!
+      expect(stopped.actions?.lists[0]).toMatchObject({ stoppedBy: 'challenge', rounds: 1, challenge: { page: 2, url: `${base}/rlist/2?q=x&pp=tok` } })
+
+      // Through the check, the tab shows page 2 at the address its script set, not the one asked for: still that page.
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ handedOff: 1, through: 1, notThrough: 0 })
+      const item = (await itemsOf(engine, taskId))[0]!
+      expect(item.list?.records.map((record) => record.values.name)).toEqual([11, 12, 13, 21, 22, 23, 31, 32, 33].map((n) => `Item ${n}`))
+      expect(item.actions?.lists[0]).toMatchObject({ stoppedBy: 'end', rounds: 3, items: 3, itemsRead: 9, continued: { from: 2, pages: 2, by: 'user_browser' } })
+      // Each page the person showed is recorded at the address the tab had.
+      expect(item.actions?.scrapes.filter((page) => page.by === 'user_browser').map((page) => page.url.replace(base, ''))).toEqual(['/rlist/2?q=x&vjk=21', '/rlist/3?q=x'])
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 180_000)
+
+  it('an address the person\'s own click moved in place (to the list\'s second page) is not the page asked for: the tab is taken back, and the page read', async () => {
+    const engine = engineFor(join(root, 'tasks-spage'))
+    const stop = person(chrome, { '/spage': async (page) => { await page.waitForSelector('#more'); await page.click('#more') } })
+    try {
+      const taskId = await batchOf(engine, ['/spage'])
+      expect((await itemsOf(engine, taskId))[0]).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+      expect(await engine.handOffBatch(taskId, {})).toMatchObject({ through: 1 })
+      const item = (await itemsOf(engine, taskId))[0]!
+      expect(item.markdown).toContain('What is behind the check')
+      expect(item.markdown).not.toContain('Page two')
+      expect(item.evidence?.finalUrl).toBe(`${base}/spage`)
+    } finally {
+      stop()
+      await engine.close()
+    }
+  }, 120_000)
 
   it('a page not got through (a check its header alone says, or nothing on the page after) keeps its stopped result, and still waits', async () => {
     const engine = engineFor(join(root, 'tasks-3'))
