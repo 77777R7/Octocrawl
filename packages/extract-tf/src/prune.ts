@@ -3,7 +3,8 @@
  *
  * Two layers, mirroring trafilatura's flow (research confirmed):
  *  - cleanTree: wholesale removal of elements that can never be main content
- *    (trafilatura's MANUALLY_CLEANED set).
+ *    (trafilatura's MANUALLY_CLEANED set, and the navigation a site lays out
+ *    inside its content column).
  *  - prune: selector-driven removal of noise the clean pass can't see, with a
  *    built-in CMP/garbage table stronger than trafilatura's thin token list
  *    (the research reproduction showed 15 of 20 real CMP roots surviving
@@ -41,7 +42,18 @@ const MANUALLY_CLEANED = [
   'ix\\:header',
 ] as const
 
-const CLEANED_SELECTOR = MANUALLY_CLEANED.join(',')
+/**
+ * Navigation a site lays out inside its content column, which the main-content
+ * selection cannot tell from the article around it: the ARIA form of <nav>,
+ * and MediaWiki's portlets and menus, which Wikipedia's Vector 2022 skin puts
+ * in <main> beside the heading (the language menu `#p-lang-btn`, the page
+ * tabs, the page tools). Removed with the tags above, so the Markdown of the
+ * article opens with the article; a named selection (`includeTags`) and the
+ * whole page keep them, as they keep <nav>.
+ */
+const IN_CONTENT_NAVIGATION = ['[role="navigation"]', '#p-lang-btn', '.mw-portlet', '.vector-menu'] as const
+
+const CLEANED_SELECTOR = [...MANUALLY_CLEANED, ...IN_CONTENT_NAVIGATION].join(',')
 
 /**
  * CMP / ad / junk selectors, applied by id or class token. Matched nodes are
