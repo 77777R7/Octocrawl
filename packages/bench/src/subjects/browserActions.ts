@@ -23,12 +23,13 @@ import {
   type ActionPdf,
   type ActionsResult,
   type ExecutionContext,
+  type ListChallenge,
   type ListPageRead,
   type PageAction,
   type ScreenshotViewport,
   type TraceEvent,
 } from '@w2l/contracts'
-import { abortableSleep, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { abortableSleep, classifyGate, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { captureArtifact } from '../rawArtifact.js'
 import { captureScreenshot } from './screenshot.js'
 
@@ -497,6 +498,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
   let items: number | null = null
   let stoppedBy: ListStop
+  let challenge: ListChallenge | undefined
   // The pages an earlier run of this step read before it was cut (ExecutionContext.listResume): counted as read from the
   // start. The site's own Next links are the only way to the page after them, so they are passed over on the way: a page
   // the checkpoint holds and has not shown again yet is known by its state, its items, their links alone (a price that
@@ -551,6 +553,19 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
       }
       lastState = state
       lastListed = listed
+      // A check the site put up where the next page should be, by its decisive marks alone (a Cloudflare interstitial, a
+      // PerimeterX press-and-hold, Amazon's or Reddit's verification form): the step stops here without reading it, the pages
+      // before it keep their records, and the result is blocked with the check's reason. A page of nothing but a CAPTCHA
+      // widget is told from a page with little on it only by the extractor, after the steps: the lane's own verdict then marks
+      // the step as stopped at it (withActions). A page with records on it is a page, whatever widget it also carries.
+      const onPage = action.itemSelector === undefined ? null : await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+      const gate = classifyGate({ status: 200, header: () => null, body: html, contentful: true })
+      if (gate !== null) {
+        challenge = { page: pages + 1, url, reason: gate.reason, signals: gate.signals }
+        ctx.trace.push({ at: ctx.at(), lane: 'browser_local', event: 'list_challenge', detail: { step: index, page: pages + 1, url, reason: gate.reason, signals: [...gate.signals] } })
+        stoppedBy = 'challenge'
+        break
+      }
       // A page the checkpoint holds, shown again on the way to the pages after it: passed over, not read again.
       const held = kept(read)
       if (held !== -1) {
@@ -559,7 +574,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         alreadyRead = 0
         seenStates.add(state)
         if (listed !== null) seenItems.add(listed)
-        if (action.itemSelector !== undefined) items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+        items = onPage
       } else {
       // The same URL showing what it showed before: Next led back or did nothing, and the list is over.
       if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
@@ -574,12 +589,14 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         if (listed !== null) seenItems.add(listed)
         result.scrapes.push({ url, html, step: index })
         pages++
-        if (action.itemSelector !== undefined) {
-          items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
-          itemsRead = (itemsRead ?? 0) + items
+        if (onPage !== null) {
+          items = onPage
+          itemsRead = (itemsRead ?? 0) + onPage
         }
         fresh++
-        tell({ url, html, state, items: listed, itemRefs: read.itemRefs, count: action.itemSelector === undefined ? null : items })
+        // A page with no record on it is not kept for a resume: nothing on it is lost by reading it again, and it may be the
+        // check the lane's verdict names.
+        if (onPage !== 0) tell({ url, html, state, items: listed, itemRefs: read.itemRefs, count: action.itemSelector === undefined ? null : items })
       }
       }
       // The limit counts the checkpoint's pages; while they are being passed over the browser is not yet on the last of them,
@@ -601,7 +618,7 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
     const event = ctx.trace.find((item) => item.event === 'list_resumed' && item.detail?.step === index)
     if (event?.detail !== undefined) { event.detail.replayed = replayed; event.detail.knownBy = knownBy }
   }
-  return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead, ...(resumed.length === 0 ? {} : { resumed: resumed.length }) }
+  return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead, ...(resumed.length === 0 ? {} : { resumed: resumed.length }), ...(challenge === undefined ? {} : { challenge }) }
 }
 
 /**

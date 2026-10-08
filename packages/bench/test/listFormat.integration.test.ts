@@ -46,6 +46,19 @@ beforeAll(async () => {
     if (text !== null) { loads++; const all = text[1] !== undefined; return html(`<div id="list"></div><a class="next" href="#">Next</a><script>let p = 0; const loads = ${loads}; const show = () => { p++; document.getElementById('list').innerHTML = [1, 2, 3].map((i) => '<div class=card><span class=name>Item ' + (p * 10 + i) + '</span><span class=price>' + (p * 10 + i) + '.' + ((p === 1 || ${all}) ? loads : 0) + '</span></div>').join(''); if (p === 5) document.querySelector('a.next').style.display = 'none' }; show(); document.querySelector('a.next').addEventListener('click', (event) => { event.preventDefault(); show() })</script>`) }
     // One URL, five pages of rows swapped in place whose links all point to the same place: nothing tells the pages apart by their links.
     if (url === '/generic') { const rows = Array.from({ length: 15 }, (_, i) => i + 1).filter((n) => !(dropRow4 && n === 4)); return html(`<div id="list"></div><a class="next" href="#">Next</a><script>const rows = ${JSON.stringify(rows)}; let p = 0; const show = () => { const slice = rows.slice(p * 3, p * 3 + 3); p++; document.getElementById('list').innerHTML = slice.map((n) => '<div class=card><a class=name href=#>Item ' + n + '</a><span class=price>' + n + '.00</span></div>').join(''); if (p * 3 >= rows.length) document.querySelector('a.next').style.display = 'none' }; show(); document.querySelector('a.next').addEventListener('click', (event) => { event.preventDefault(); show() })</script>`) }
+    // Three pages whose third is a Cloudflare interstitial (/checked) or a page of nothing but a CAPTCHA widget (/widget).
+    const checked = /^\/(checked|widget)\/(\d)$/.exec(url)
+    if (checked !== null) {
+      const n = Number(checked[2])
+      if (n === 3 && checked[1] === 'checked') { res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'cf-mitigated': 'challenge' }); res.end('<!doctype html><html><head><title>Just a moment...</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1"></script></head><body><h1>Checking your browser</h1><p>Enable JavaScript and cookies to continue</p></body></html>'); return }
+      if (n === 3) return html('<div class="g-recaptcha" data-sitekey="test-key"></div><button id="pass">I am human</button>')
+      return html(`${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}<a class="next" href="/${checked[1]}/${n + 1}">Next</a>`)
+    }
+    // A "0 results" page with the site's chrome and a newsletter widget in its footer: no record, but a page, not a check.
+    const NO_RESULTS = `<h1>0 results for "x"</h1><p>Nothing matched this filter; try one of the categories below.</p><ul>${Array.from({ length: 12 }, (_, i) => `<li><a href="/c/${i}">Category ${i}</a></li>`).join('')}</ul><footer><form><label>Newsletter <input type="email"></label><div class="cf-turnstile" data-sitekey="test-key"></div></form></footer>`
+    const results = /^\/results\/(\d)$/.exec(url)
+    if (results !== null) { const n = Number(results[1]); return html(n === 3 ? NO_RESULTS : `${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}<a class="next" href="/results/${n + 1}">Next</a>`) }
+    if (url === '/results0') return html(NO_RESULTS)
     // Each page under two addresses in turn: /dual/1 and /dual/2 show page 1, /dual/3 and /dual/4 page 2, /dual/5 and /dual/6 page 3.
     const dual = /^\/dual\/(\d)$/.exec(url)
     if (dual !== null) { const k = Number(dual[1]); const n = Math.ceil(k / 2); return html(`${[1, 2, 3].map((i) => card(n * 10 + i)).join('')}${k < 6 ? `<a class="next" href="/dual/${k + 1}">Next</a>` : ''}`) }
@@ -220,6 +233,37 @@ describe('list format', () => {
       } finally {
         dropRow4 = false
       }
+    }, 90_000)
+
+    it('stops at a check the site puts up at page N+1, keeping the pages before it and their records, and tells the checkpoint nothing of the check', async () => {
+      const whole = await fetchTelling('/checked/1', PAGINATE())
+      expect([whole.result.status, whole.result.blockReason]).toEqual(['blocked', 'cloudflare_challenge'])
+      expect(whole.result.actions?.lists[0]).toMatchObject({ type: 'paginate', stoppedBy: 'challenge', rounds: 2, itemsRead: 6, challenge: { page: 3, url: `${base}/checked/3`, reason: 'cloudflare_challenge' } })
+      expect(whole.result.actions?.failed).toBeUndefined()
+      expect(whole.result.list).toMatchObject({ pages: 2 })
+      expect(names(whole.result)).toEqual(['Item 11', 'Item 12', 'Item 13', 'Item 21', 'Item 22', 'Item 23'])
+      expect(whole.told.map((read) => read.page)).toEqual([1, 2])
+      expect(whole.result.warnings?.find((warning) => warning.code === 'list_not_exhausted')?.message).toContain('a check')
+      expect(whole.trace.find((event) => event.event === 'list_challenge')?.detail).toMatchObject({ step: 0, page: 3, reason: 'cloudflare_challenge' })
+      // A page of nothing but a CAPTCHA widget is a check too: the page's own verdict marks the step, after the steps.
+      const widget = await fetchTelling('/widget/1', PAGINATE())
+      expect([widget.result.status, widget.result.blockReason]).toEqual(['blocked', 'captcha'])
+      expect(widget.result.actions?.lists[0]).toMatchObject({ stoppedBy: 'challenge', rounds: 2, challenge: { page: 3, reason: 'captcha' } })
+      expect(widget.told.map((read) => read.page)).toEqual([1, 2])
+    }, 90_000)
+
+    it('does not take a page with no records for a check when there is more on it: a "0 results" page with a newsletter widget ends the list', async () => {
+      const whole = await fetchTelling('/results/1', PAGINATE())
+      expect(whole.result.status).toBe('success')
+      expect(whole.result.actions?.lists[0]).toMatchObject({ stoppedBy: 'end', rounds: 3 })
+      expect(whole.result.actions?.lists[0]?.challenge).toBeUndefined()
+      expect(names(whole.result)).toEqual(['Item 11', 'Item 12', 'Item 13', 'Item 21', 'Item 22', 'Item 23'])
+      // The empty page is not kept for a resume: nothing on it would be lost by reading it again.
+      expect(whole.told.map((read) => read.page)).toEqual([1, 2])
+      const none = await fetchTelling('/results0', PAGINATE())
+      expect(none.result.status).not.toBe('blocked')
+      expect(none.result.actions?.lists[0]?.challenge).toBeUndefined()
+      expect(none.told).toEqual([])
     }, 90_000)
 
     it('still passes a kept page\'s second address as the alias it is, not as the list\'s end', async () => {

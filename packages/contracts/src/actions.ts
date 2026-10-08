@@ -5,6 +5,7 @@
  * that fails ends the pipeline, and the result keeps the page as it stood.
  */
 
+import type { BlockReason } from './status.js'
 import type { ScreenshotEvidence } from './result.js'
 import type { ScreenshotViewport } from './structured.js'
 
@@ -97,8 +98,21 @@ export interface ActionPdf {
   base64: string
 }
 
-/** Why a scrollToEnd, loadMore or paginate step stopped. `max` and `deadline` stop short of the list's end. */
-export type ListStop = 'end' | 'no_growth' | 'repeat' | 'max' | 'deadline'
+/**
+ * Why a scrollToEnd, loadMore or paginate step stopped. `max` and `deadline` stop short of the list's end; so does
+ * `challenge`: a check the site put up on the next page (a Cloudflare interstitial, a page of nothing but a CAPTCHA),
+ * which paginate stops at without reading it, the result then `blocked` with the check's reason.
+ */
+export type ListStop = 'end' | 'no_growth' | 'repeat' | 'max' | 'deadline' | 'challenge'
+
+/** The check a paginate step stopped at (ListStop `challenge`): the page it would have been, its URL, and what the gate saw. */
+export interface ListChallenge {
+  /** 1-based position the page would have had among the pages read. */
+  page: number
+  url: string
+  reason: BlockReason
+  signals: readonly string[]
+}
 
 /** What a scrollToEnd, loadMore or paginate step did. */
 export interface ListRun {
@@ -113,6 +127,8 @@ export interface ListRun {
   itemsRead?: number | null
   /** paginate: pages taken from the task's checkpoint after a run cut at page N (ExecutionContext.listResume), counted in `rounds`; absent when none. */
   resumed?: number
+  /** paginate: the check the step stopped at, with `stoppedBy` `challenge`; absent otherwise. */
+  challenge?: ListChallenge
 }
 
 /** What the steps produced, each list in the order of its steps. */
