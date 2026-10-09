@@ -155,10 +155,11 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
 
 /**
  * A page the my-browser lane did not read: the person's Chrome did not get to it in time (`timeout`, or `blocked`
- * by the check it still showed), Chrome was not reached (`connection_error`), they closed its tab, did not allow its
- * site or revoked the sites (`cancelled`). W2L fetched nothing.
+ * by the check it still showed), Chrome was not reached (`connection_error`), the site led the tab elsewhere each time
+ * it was taken back to the page (`redirect_limit`), they closed its tab, did not allow its site or revoked the sites
+ * (`cancelled`). W2L fetched nothing.
  */
-export function unreadInUserBrowser(url: string, outcome: { status: 'failed'; failureReason: 'timeout' | 'connection_error' } | { status: 'blocked'; blockReason: BlockReason } | { status: 'cancelled' }, message: string, wallMs: number): FetchResult {
+export function unreadInUserBrowser(url: string, outcome: { status: 'failed'; failureReason: 'timeout' | 'connection_error' | 'redirect_limit' } | { status: 'blocked'; blockReason: BlockReason } | { status: 'cancelled' }, message: string, wallMs: number): FetchResult {
   return {
     requestedUrl: url,
     status: outcome.status,

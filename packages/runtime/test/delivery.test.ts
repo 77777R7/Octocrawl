@@ -283,18 +283,21 @@ describe('durable webhook store and worker', () => {
     const server = createServer({ cert: ca, key }, () => connected?.())
     const url = await listen(server)
     const store = openStore()
-    const id = seed(store, url, 8, Date.now())
+    // The store's lease runs on this clock and the request deadline on real timers, so a stalled runner that fires the
+    // deadline late cannot outlive the lease and leave the abort unrecorded.
+    let now = 1_000
+    const id = seed(store, url, 8, now)
     const controller = new AbortController()
     const start = new Promise<void>(resolve => { connected = resolve })
-    const processing = new DeliveryWorker(store, { networkPolicy: localPolicy(), ca, requestTimeoutMs: 500, leaseMs: 1_000, retryBaseMs: 1 }).processOne(controller.signal)
+    const processing = new DeliveryWorker(store, { networkPolicy: localPolicy(), ca, now: () => now, requestTimeoutMs: 60_000, leaseMs: 120_000, retryBaseMs: 1 }).processOne(controller.signal)
     await start
-    controller.abort()
+    controller.abort(new Error('operator shutdown'))
     await processing
-    expect(store.getDelivery(id)?.state).toBe('pending')
-    await delay(5)
-    await new DeliveryWorker(store, { networkPolicy: localPolicy(), ca, requestTimeoutMs: 30, leaseMs: 100 }).processOne()
+    expect(store.getDelivery(id)).toMatchObject({ state: 'pending', attemptCount: 1 })
+    now += 1
+    await new DeliveryWorker(store, { networkPolicy: localPolicy(), ca, now: () => now, requestTimeoutMs: 30, leaseMs: 100 }).processOne()
     expect(store.getDelivery(id)).toMatchObject({ state: 'pending', attemptCount: 2 })
-    expect(store.attempts(id).every(attempt => attempt.error)).toBe(true)
+    expect(store.attempts(id).map(attempt => attempt.error)).toEqual(['operator shutdown', 'webhook request deadline exceeded'])
   })
   it('registers a job destination, enqueues a job event once by its id, counts and lists them, and exposes header names only', () => {
     const store = openStore()
