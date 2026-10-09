@@ -334,7 +334,7 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // sit behind a page's worth of scripts (ROADMAP PA item 4). Decisive on a page read as content; on one that was not, a
   // captcha or a login form on it names the gate first, since a person can get through those.
   const wall = res.status >= 200 && res.status < 300 ? shortWallPage(res.body) : null
-  if (contentful) return wall === null ? null : { reason: 'bot_detected_generic', signals: wall }
+  if (contentful) return wall
 
   // --- interactive captcha widget ----------------------------------------
   // Reached only when no Cloudflare managed-challenge marker fired, so a
@@ -355,8 +355,6 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     if (bareLoginHeading) signals.push('heading_sign_in')
     return { reason: 'login_wall', signals }
   }
-
-  if (wall !== null) return { reason: 'bot_detected_generic', signals: wall }
 
   // --- geo restriction ----------------------------------------------------
   const geo = matched(lower, GEO_MARKERS)
@@ -395,7 +393,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     }
   }
 
-  return null
+  // A short wall the checks above, which read the head, did not name: its copy past the head, or its signs only together.
+  return wall
 }
 
 /** A page with no more visible text than this may be nothing but a refusal; any longer page is read for its content. */
@@ -403,6 +402,10 @@ const WALL_PAGE_MAX_TEXT = 1_500
 /** Akamai's reference to a refused request, as its pages print it: "Reference #18.2f1d3e17.1791543951.6a0b2c", "Incident Number: 18.…". */
 const AKAMAI_REFERENCE = /\b(?:reference|incident)\b\s*(?:number|id|no\.?)?\s*[:#]?\s*#?\s*\d{1,3}\.[0-9a-f]{6,8}\.\d{10}\.[0-9a-f]{6,12}\b/i
 const UNUSUAL_ACTIVITY = /\b(?:unusual|suspicious) (?:activity|traffic)\b/i
+/** A word one of the short-wall signs needs: a page without any is not read for them. */
+const WALL_TRIGGER = /\b(?:reference|incident|unusual|suspicious|blocked|interruption|automated|robot|human|humans|bot|checking|wait|moment|security|ddos|denied)\b/i
+/** The weak signs of a browser check; a page asking for JavaScript is a shell its scripts fill, not a wall, so those are left out. */
+const WALL_WEAK_MARKERS = BOT_WEAK_MARKERS.filter(([, signal]) => signal !== 'weak_enable_js_and_cookies' && signal !== 'weak_enable_javascript')
 const AUTOMATED_TRAFFIC = /\bautomated (?:traffic|access|requests|queries|browsing)\b/i
 /** Elements whose content is not the page's visible text. */
 const HIDDEN_ELEMENTS: ReadonlySet<string> = new Set(['script', 'style', 'noscript', 'template', 'svg'])
@@ -418,12 +421,26 @@ const HEADING_ELEMENTS: ReadonlySet<string> = new Set(['h1', 'h2', 'h3', 'title'
  * its 5xx and 4xx error pages, which are the page's own answer. The body is read in one linear pass that stops at the
  * bound (pageText).
  */
-function shortWallPage(body: string): string[] | null {
-  if (!/\b(?:reference|incident|unusual|suspicious)\b/i.test(body)) return null
+function shortWallPage(body: string): GateVerdict | null {
+  if (!WALL_TRIGGER.test(body)) return null
   const page = pageText(body)
   if (page === null) return null
-  if (AKAMAI_REFERENCE.test(page.text)) return ['akamai_reference', 'short_page']
-  if (page.headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(page.text)) return ['heading_unusual_activity', 'text_automated_traffic', 'short_page']
+  const bot = (signals: string[]): GateVerdict => ({ reason: 'bot_detected_generic', signals })
+  if (AKAMAI_REFERENCE.test(page.text)) return bot(['akamai_reference', 'short_page'])
+  if (page.headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(page.text)) return bot(['heading_unusual_activity', 'text_automated_traffic', 'short_page'])
+  // The short page's heading names a refusal outright ("Pardon Our Interruption"), or a browser check its text names
+  // twice over (eBay's "Checking your browser before you access eBay" … "Please wait", T021): read in what the page
+  // shows, not in its scripts, and led by a heading, since an article's prose may quote such words.
+  const shown = page.text.toLowerCase()
+  const named = page.headings.join('\n').toLowerCase()
+  const strong = matched(named, BOT_STRONG_MARKERS)
+  if (strong.length > 0) {
+    // A check a person has to do (PerimeterX's press and hold) is a captcha: the handoff, not another client, gets through.
+    const person = shown.includes('activate and hold the button') ? ['text_activate_and_hold'] : []
+    return { reason: person.length > 0 ? 'captcha' : 'bot_detected_generic', signals: [...strong, ...person, 'short_page'] }
+  }
+  const weak = matched(shown, WALL_WEAK_MARKERS)
+  if (weak.length >= 2 && matched(named, WALL_WEAK_MARKERS).length > 0) return bot([...weak, 'short_page'])
   return null
 }
 
