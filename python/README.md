@@ -23,4 +23,4 @@ result.report["succeeded"], result.report["failed"]
 
 Options take the API's names in snake_case or camelCase: `max_age=3_600_000`, `only_main_content=False`, `include_tags=["main"]`, `parsers=[{"type": "pdf", "maxPages": 5}]`. `W2L(base_url=..., token=...)` names another API (default `W2L_API_URL`, else http://127.0.0.1:8787; `W2L_API_TOKEN`). A batch takes up to 1,000 URLs; `octocrawl_client.scrape`, `octocrawl_client.map` and `octocrawl_client.crawl` work the same way. (The name `octocrawl` on PyPI belongs to another project.)
 
-Licence: MIT. Source and the API reference: https://github.com/77777R7/Octocrawl
+Licence: MIT. Website and docs: https://octocrawl.dev. Source and the API reference: https://github.com/77777R7/Octocrawl

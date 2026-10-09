@@ -107,6 +107,8 @@ export function mountHeroClick(container: HTMLElement, hero: HTMLElement): void 
 
   hero.addEventListener('pointerdown', (event) => {
     if (event.pointerType !== 'mouse' || event.button !== 0 || motion.matches || !pointer.matches || compact.matches) return
+    // The header's navigation is for getting somewhere, not for play.
+    if ((event.target as Element | null)?.closest('.site-header')) return
     fit()
     const box = container.getBoundingClientRect()
     bursts.push({ x: event.clientX - box.left, y: event.clientY - box.top, at: performance.now() })

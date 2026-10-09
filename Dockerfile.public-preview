@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages ./packages
 COPY apps ./apps
+COPY CHANGELOG.md ./CHANGELOG.md
 COPY research/amazon-product-schema.v1.json ./research/amazon-product-schema.v1.json
 
 # better-sqlite3 is in the existing workspace dependency graph. Supply a

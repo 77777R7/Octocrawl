@@ -28,6 +28,10 @@ const out = join(root, '.w2l', 'pack')
 const read = (path) => JSON.parse(readFileSync(join(root, path), 'utf8'))
 const rootPackage = read('package.json')
 const repository = { type: 'git', url: 'git+https://github.com/77777R7/Octocrawl.git' }
+// npm shows these: the site is the home page (directories and search engines follow it), issues go to GitHub.
+const homepage = 'https://octocrawl.dev'
+const bugs = { url: 'https://github.com/77777R7/Octocrawl/issues' }
+const KEYWORDS = ['octocrawl', 'web-scraping', 'web-crawler', 'scraper', 'markdown', 'html-to-markdown', 'llm', 'rag', 'ai-agents', 'evidence']
 
 /** Every third-party dependency of the workspace packages a bundle takes in, with the range they declare. */
 function thirdPartyDependencies(names) {
@@ -114,6 +118,7 @@ const targets = [
   {
     name: '@octocrawl/sdk', dir: 'sdk', license: 'MIT', licenseFile: 'packages/sdk/LICENSE',
     description: 'TypeScript client for the Octocrawl API: scrape, map, crawl and batch with an Evidence Record on every page.',
+    keywords: [...KEYWORDS, 'sdk', 'typescript'],
     entry: { index: 'packages/sdk/src/index.ts' }, formats: ['esm', 'cjs'], types: true,
     manifest: () => ({
       main: './dist/index.cjs', module: './dist/index.js', types: './dist/types/esm/index.d.ts',
@@ -124,12 +129,14 @@ const targets = [
   {
     name: '@octocrawl/cli', dir: 'cli', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
     description: 'Octocrawl on the command line: scrape, crawl, batch and map with an Evidence Record on every page, or serve the local API.',
+    keywords: [...KEYWORDS, 'cli', 'crawler'],
     entry: { cli: 'packages/cli/src/cli.ts' }, formats: ['esm'],
     manifest: () => ({ bin: { octocrawl: './dist/cli.js' }, engines: { node: rootPackage.engines?.node ?? '>=22.13.0' }, dependencies: thirdPartyDependencies(['@w2l/cli']) }),
   },
   {
     name: '@octocrawl/mcp', dir: 'mcp', license: 'AGPL-3.0-only', licenseFile: 'LICENSE',
     description: 'Octocrawl as an MCP server over stdio, a client of a running Octocrawl API (octocrawl serve).',
+    keywords: [...KEYWORDS, 'mcp', 'mcp-server', 'model-context-protocol'],
     entry: { stdio: 'packages/mcp/src/stdio.ts' }, formats: ['esm'], plugins: [inlineAmazonSchema],
     // mcpName ties the npm package to its entry in the official MCP Registry (server.json at the repository root; the two must agree).
     manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, mcpName: MCP_REGISTRY_NAME, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
@@ -174,8 +181,10 @@ for (const target of targets) {
     version: source.version,
     description: target.description,
     license: target.license,
+    keywords: target.keywords,
     repository,
-    homepage: 'https://github.com/77777R7/Octocrawl#readme',
+    homepage,
+    bugs,
     type: 'module',
     files: ['dist', 'README.md', 'LICENSE'],
     ...target.manifest(source.version),

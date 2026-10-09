@@ -1101,7 +1101,7 @@ const TEXT_MARKS: Marks = { ...CELL_MARKS, text: true }
  * the encoded bytes are noise in Markdown and point at no source, so a link
  * keeps only its text and an image only its alt text.
  */
-function linkTarget(raw: string, base: URL | null): string | null {
+export function linkTarget(raw: string, base: URL | null): string | null {
   const href = raw.replace(/[\t\n\r]/g, '').trim()
   if (href === '' || /^(?:javascript|data):/i.test(href)) return null
   if (href.startsWith('#') || base === null) return href
