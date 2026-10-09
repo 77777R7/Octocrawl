@@ -1254,6 +1254,99 @@ describe('LadderRunner — third-party cost of a run', () => {
   })
 })
 
+describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () => {
+  const url = 'https://example.com/p'
+  const failed = (failureReason: FetchResult['failureReason'], httpStatus: number | null, lane: FetchResult['lane'] = 'http'): FetchResult => {
+    const base = failedResult(url, failureReason)
+    return { ...base, lane, evidence: { ...base.evidence, httpStatus } }
+  }
+
+  it('goes on past a 403 or 405 answered without a gate it recognises, and says why', async () => {
+    for (const status of [403, 405]) {
+      const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+      const run = await new LadderRunner([channel('http', [failed('http_error', status)]), browser], { mode: 'standard' }).run(url)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      expect(run.result).toMatchObject({ status: 'success', lane: 'browser_local' })
+      expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'http', detail: expect.objectContaining({ escalate: `http_${status}` }) }))
+    }
+  })
+
+  it('stops at an error status that is the page\'s own answer, and at a rate limit', async () => {
+    for (const first of [failed('http_error', 404), failed('http_error', 410), failed('http_error', 500), { ...blockedResult(url, 'rate_limit'), evidence: { ...blockedResult(url, 'rate_limit').evidence, httpStatus: 429 } }]) {
+      const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+      const run = await new LadderRunner([channel('http', [first]), browser], { mode: 'standard' }).run(url)
+      expect(run.channelsTried).toEqual(['http'])
+      expect(browser.calls).toEqual([])
+    }
+  })
+
+  it('offers a page a browser rendered with no main content it could verify to the provider', async () => {
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('empty_unverified', 200, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider' })
+  })
+
+  it('offers an http rung\'s refused connection to the browser, never a provider, and keeps a timeout as the answer', async () => {
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [failed('connection_error', null)]), browser], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result.lane).toBe('browser_local')
+    // The browser's own network failure is not offered on to a paid provider.
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const down = await new LadderRunner([channel('http', [failed('connection_error', null)]), channel('browser_local', [failed('connection_error', null, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(down.channelsTried).toEqual(['http', 'browser_local'])
+    expect(provider.calls).toEqual([])
+    // A timeout on a slow or dead site would hold the scrape for the browser's wait too: it stays the answer.
+    const slow = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    expect((await new LadderRunner([channel('http', [failed('timeout', null)]), slow], { mode: 'standard' }).run(url)).channelsTried).toEqual(['http'])
+  })
+
+  it('leaves an http rung\'s own empty page to that rung, which asks for the browser itself when it should', async () => {
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [failed('empty_unverified', 200)]), browser], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http'])
+  })
+
+  it('answers with the page it stepped past when the stronger rungs fail with none, and says so', async () => {
+    const forbidden = { ...failed('http_error', 403), markdown: '# Forbidden' }
+    // The browser cannot connect: the site's own 403 is the answer, not the browser's network error.
+    const unreachable = await new LadderRunner([channel('http', [forbidden]), channel('browser_local', [failed('connection_error', null, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(unreachable.result).toMatchObject({ status: 'failed', failureReason: 'http_error', lane: 'http', markdown: '# Forbidden', evidence: { httpStatus: 403 } })
+    expect(unreachable.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', detail: { kept: 'http', failed: 'browser_local', reason: 'connection_error' } }))
+    // A provider's error after a page the browser rendered with no main content keeps that page.
+    const rendered = { ...failed('empty_unverified', 200, 'browser_local'), markdown: 'WHOLE PAGE' }
+    const provider = { ...channel('provider', [providerErrorResult(url, 'steel')], 'steel'), priceCeilingUsd: 0.01 }
+    const vendorDown = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [rendered]), provider], ALLOWED_ALL).run(url)
+    expect(vendorDown.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    expect(vendorDown.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'browser_local', markdown: 'WHOLE PAGE' })
+    // The deadline cuts the browser: the run ends on time, with the 403 as its evidence.
+    const hanging: Channel = { id: 'browser_local', identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner([channel('http', [forbidden]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', markdown: '# Forbidden', evidence: { httpStatus: 403 }, usage: { deadlineExceeded: true } })
+  })
+
+  it('never steps past the saved login: the rungs after it do not carry it', async () => {
+    const store = new MemorySessionStore()
+    await store.save({ domain: 'example.com', attestedBy: 'test', attestedAt: '2026-10-09T00:00:00.000Z', vendor: 'browser_local_authed', cookies: [{ name: 'sid', value: 'secret', domain: '.example.com', path: '/' }] })
+    for (const refused of [{ ...failed('empty_unverified', 200, 'browser_local_authed'), markdown: 'LOGGED-IN DASHBOARD' }, failed('http_error', 403, 'browser_local_authed')]) {
+      const http = channel('http', [{ ...contentfulResult(url, 'http'), markdown: 'PUBLIC LOGGED-OUT VARIANT' }])
+      const run = await new LadderRunner([http, channel('browser_local', [contentfulResult(url, 'browser_local')]), channel('authed_session', [refused])], { mode: 'authed' }, null, null, store).run(url)
+      expect(run.channelsTried).toEqual(['authed_session'])
+      expect(run.result).toMatchObject({ status: 'failed', lane: 'browser_local_authed' })
+      expect(http.calls).toEqual([])
+    }
+  })
+
+  it('keeps content an earlier rung found rather than going on past a later rung\'s 403', async () => {
+    const thin: FetchResult = { ...contentfulResult(url, 'http'), trace: [{ at: 5, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 20, confidence: 0.1 } }] }
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [thin]), channel('browser_local', [failed('http_error', 403, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(provider.calls).toEqual([])
+  })
+})
+
 describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', () => {
   const url = 'https://example.com/p'
   const blockedHttp = () => channel('http', [blockedResult(url, 'cloudflare_challenge')])
