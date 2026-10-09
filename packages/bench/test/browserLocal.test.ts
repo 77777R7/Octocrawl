@@ -137,6 +137,16 @@ beforeAll(async () => {
           'for the navigation rather than merely written into the compliance record.</p>' +
           '</article></body></html>',
       )
+    } else if (req.url === '/fetching' || req.url === '/still-loading') {
+      // A results list that says it is on the way, then fills in 2.5 s after load (or never does).
+      const items = Array.from({ length: 6 }, (_, i) => `<li>Result ${i + 1}: a drill with a price of $${(i + 1) * 20}</li>`).join('')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Search results</h1><p>The results for the query are listed below once they arrive.</p>' +
+          '<div id="results"><span>Fetching results...</span></div></main>' +
+          (req.url === '/fetching' ? `<script>setTimeout(function () { document.getElementById("results").innerHTML = "<ul>${items}</ul>" }, 2500)</script>` : '') +
+          '</body></html>',
+      )
     } else if (req.url === '/robots.txt') {
       robotsHits++
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
@@ -382,6 +392,27 @@ describe('BrowserLocalSubject transport', () => {
       expect(waited.status).toBe('success')
       expect(waited.markdown).toContain('The late paragraph arrives two seconds after load.')
       expect(waited.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 2_500 }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('waits longer for a page that says its data is still loading, and says so when it never arrives (ROADMAP PA item 4)', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // The list arrives 2.5 s after load: past the usual 1.5 s settle, so the wait for the loading message reaches it.
+      const loaded = await subject.fetch(`${url}/fetching`)
+      expect(loaded.status).toBe('success')
+      expect(loaded.markdown).toContain('Result 6: a drill with a price of $120')
+      expect(loaded.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      expect(loaded.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+      // A page whose message never goes is read when the wait ends, inside the caller's deadline, and the answer says so.
+      const stuck = await subject.fetch(`${url}/still-loading`, Date.now() + 5_000)
+      expect(stuck.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: false }) }))
+      if (stuck.status === 'success' || stuck.status === 'partial') expect(stuck.warnings).toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+      // A page with no loading message is not waited for any longer.
+      const plain = await subject.fetch(`${url}/delayed`)
+      expect(plain.trace.some((event) => event.event === 'loading_wait')).toBe(false)
     } finally {
       await subject.teardown()
     }

@@ -133,6 +133,8 @@ export interface NavigationOutcome {
   sentUserAgent: string | null
   /** Client hints on the same request, when CDP surfaced them. */
   sentClientHints: Record<string, string>
+  /** What the wait for the rendered page saw, a loading indicator included. */
+  settle?: SettleOutcome
 }
 
 /**
@@ -176,8 +178,10 @@ export async function navigateOnce(
     throwIfExecutionStopped(scope)
     const timeout = navigationTimeout(deadlineMs, Date.now())
     const response = await raceWithSignal(page.goto(url, { waitUntil: 'domcontentloaded', timeout }), scope.signal)
-    await raceWithSignal(waitForRenderedStability(page, {
+    // A page still showing a loading indicator is waited for longer, leaving a second to read it before the deadline.
+    const settle = await raceWithSignal(waitForRenderedStability(page, {
       maxMs: deadlineMs === undefined ? 1_500 : Math.min(1_500, Math.max(1, deadlineMs - Date.now())),
+      loadingMaxMs: deadlineMs === undefined ? LOADING_WAIT_MAX_MS : Math.min(LOADING_WAIT_MAX_MS, Math.max(1, deadlineMs - 1_000 - Date.now())),
     }), scope.signal)
     throwIfExecutionStopped(scope)
 
@@ -208,6 +212,7 @@ export async function navigateOnce(
       headers,
       sentUserAgent,
       sentClientHints,
+      settle,
     }
   } finally {
     scope.signal.removeEventListener('abort', abort)
@@ -215,4 +220,4 @@ export async function navigateOnce(
     await page?.close().catch(() => {})
   }
 }
-import { waitForRenderedStability } from '../browserSettle.js'
+import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
