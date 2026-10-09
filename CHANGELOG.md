@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-09
+
+The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.3.2: everything below since 0.3.1 on 2026-10-06, among it the `my-browser` lane (`--lane my-browser`, `"access": "my-browser"`), lists continued in the person's Chrome, and the package pages pointing at octocrawl.dev.
+
 - The docs have a Map a site guide (`/docs/guides/map-site/`): mapping without an account (REST, MCP, CLI, SDKs), a real answer from 2026-10-09 explained field by field, the options that narrow the list, and what a short or empty list means. The top navigation's Map a site entry leads to it instead of the reference. Each navigation entry's parts are separated by spaces, so its link text reads as words ("▤ Scrape a page Markdown, …") rather than run together, and an option name in a docs table's first column no longer breaks mid-word.
 - A page whose article region only names it (its headings hold fewer than 100 characters, and it has fewer than 3 characters and no image beside them (a canvas or a video leaves nothing in the Markdown, so it does not count), in-page jump links such as "Skip to Filters" set aside) has no main content: it is `failed`/`empty_unverified` with the whole page kept as evidence, on every lane, instead of `success` with a heading for its content. List, table and product regions, which are short or heading-led by design, are not judged so. In the PA 4 Steel run the Tesla inventory page, loaded with no vehicles, had answered `success` with "Don't see the Tesla you're looking for?". The extractor is now `extract-tf/16`, so pages cached under an earlier version are fetched again.
 - Hosted Octocrawl publishes an MCP server card at `/.well-known/mcp/server-card.json` (on `mcp.octocrawl.dev` and `api.octocrawl.dev`), the format Smithery reads when it lists a server: name, version, that no sign-in is needed, and the three tools `/mcp` offers, from the same definitions. Any other `/.well-known` file is 404 instead of 403 `hosted_unavailable`, so a client probing for OAuth metadata is not told it was refused.
