@@ -413,6 +413,8 @@ export function buildChannels(
       return await pending
     }
 
+    /** The request's own deadline behind an execution a tariff ended at its session's (see the fetch below). */
+    const requestDeadlines = new WeakMap<ExecutionContext, number | undefined>()
     const raw: Channel = {
       id: 'provider',
       vendorId,
@@ -481,6 +483,19 @@ export function buildChannels(
         // after that, the session the gate cleared was not the session on
         // offer.
         const start = Date.now()
+        // Under a tariff `execution` ends with the session; the request's own deadline is the ladder's.
+        const requestDeadlineAt = execution !== undefined && requestDeadlines.has(execution) ? requestDeadlines.get(execution) : execution?.deadlineAt
+        const requestEnded = () => execution?.signal?.aborted === true || (requestDeadlineAt !== undefined && Date.now() >= requestDeadlineAt)
+        const sessionEnded = () => execution?.deadlineAt !== undefined && Date.now() >= execution.deadlineAt
+        const failed = async (err: unknown): Promise<FetchResult> => {
+          const { providerFailure } = await import('./subjects/provider.js')
+          const wallMs = Date.now() - start
+          const message = ops.secrets.reduce((m, secret) => scrubSecret(m, secret), err instanceof Error ? err.message : String(err)).slice(0, 200)
+          return providerFailure(url, wallMs, [
+            { at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: vendorId } },
+            { at: wallMs, lane: 'provider', event: 'provider_failed', detail: { error: message } },
+          ], err, sessionEnded())
+        }
         let vendor: Awaited<ReturnType<typeof connectVendor>>
         try {
           if (sessionApplies && session!.resume !== undefined && session!.resume !== null) {
@@ -493,18 +508,13 @@ export function buildChannels(
           }
           vendor = tariff !== null ? await connectOwn(execution) : await ensureConnected(execution)
         } catch (err) {
-          // A cancelled or timed-out call stays the ladder's to report. Any other failure to open the vendor's
-          // session (its session API down, or hung past the vendor API's 30 s cap) is the provider's failure, as one
-          // during the fetch is: it escaped the rung before, and the API answered 500 with no record of the page or
-          // the call (ROADMAP PA item 4: the Steel runs' 500s at about 32 s).
-          if (execution?.signal?.aborted === true || (execution?.deadlineAt !== undefined && Date.now() >= execution.deadlineAt)) throw err
-          const { providerFailure } = await import('./subjects/provider.js')
-          const wallMs = Date.now() - start
-          const message = ops.secrets.reduce((m, secret) => scrubSecret(m, secret), err instanceof Error ? err.message : String(err)).slice(0, 200)
-          return providerFailure(url, wallMs, [
-            { at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: vendorId } },
-            { at: wallMs, lane: 'provider', event: 'provider_failed', detail: { error: message } },
-          ], err, false)
+          // The request's own end (its deadline or a cancel) stays the ladder's to report. Any other failure to open
+          // the vendor's session (its session API down or hung past the vendor API's 30 s cap, a CDP connect or a
+          // User-Agent probe that ran out the session's time) is the provider's failure, as one during the fetch is:
+          // it escaped the rung before, and the API answered 500 with no record of the page or the call (ROADMAP PA
+          // item 4: the Steel runs' 500s at about 32 s).
+          if (requestEnded()) throw err
+          return await failed(err)
         }
         const { declaration, transport } = vendor
         try {
@@ -520,6 +530,11 @@ export function buildChannels(
             providerRobots,
           )
           return await subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
+        } catch (err) {
+          // The session's own time running out before the request's (robots.txt, the gate) is the provider's timeout,
+          // as it is during the page's navigation; any other error is not this rung's to hide.
+          if (requestEnded() || !sessionEnded()) throw err
+          return await failed(err)
         } finally {
           if (tariff !== null) await transport.close().catch(() => {})
         }
@@ -543,7 +558,9 @@ export function buildChannels(
       priceCeilingUsd: tariff === null ? null : tariffCeilingUsd(tariff, sessionFloorMs),
       fetch: async (url, session, execution, options) => {
         if (tariff === null || tariff.maxSessionMs === null) return raw.fetch(url, session, execution, options)
-        return raw.fetch(url, session, { ...execution, deadlineAt: Math.min(execution?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + tariff.maxSessionMs) }, options)
+        const held: ExecutionContext = { ...execution, deadlineAt: Math.min(execution?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + tariff.maxSessionMs) }
+        requestDeadlines.set(held, execution?.deadlineAt)
+        return raw.fetch(url, session, held, options)
       },
     }
   }

@@ -608,6 +608,39 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(setup).toMatchObject({ status: 'failed', failureReason: 'provider_error' })
     expect(setup.trace.find((e) => e.event === 'provider_failed')?.detail).toEqual({ error: 'steel: profile setup with key <redacted> returned 503' })
     await Promise.all(unready.map((c) => c.close?.().catch(() => {})))
+    // A CDP connect, or a robots.txt fetch, that runs out the session's time before the request's own is the
+    // provider's timeout, not an error: the session's time is the tariff's, not the request's.
+    const capped = (connector: typeof vendorEnv extends () => infer E ? E extends { vendorConnector: infer C } ? C : never : never, robotsFetcher?: () => Promise<never>, maxSessionMs = 300) => buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: fakeVendorOps('steel', () => {}) },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs, minBilledMs: 0, billingIncrementMs: 1 } },
+      ...vendorEnv(),
+      vendorConnector: connector,
+      ...(robotsFetcher === undefined ? {} : { robotsFetcher }),
+    })
+    // As Playwright's connectOverCDP does: it gives up at the deadline it was handed.
+    const hangingConnect = async (_url: string, deadlineMs?: number) => await new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('browserType.connectOverCDP: Timeout exceeded')), Math.max(1, (deadlineMs ?? Date.now()) - Date.now())))
+    for (const [label, channelsFor] of [
+      ['connect', () => capped(hangingConnect)],
+      ['robots.txt', () => capped(async () => fakeBrowser(), () => new Promise<never>(() => {}))],
+    ] as const) {
+      const set = channelsFor()
+      const result = await set.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 10_000 })
+      expect(result, label).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'provider' })
+      expect(result.trace.some((e) => e.event === 'provider_failed'), label).toBe(true)
+      await Promise.all(set.map((c) => c.close?.().catch(() => {})))
+    }
+    // Any other error during the fetch is not the rung's to hide: it still throws.
+    const broken = capped(async () => fakeBrowser(), () => Promise.reject(new Error('robots fetcher bug')), 60_000)
+    await expect(broken.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 10_000 })).rejects.toThrow('robots fetcher bug')
+    await Promise.all(broken.map((c) => c.close?.().catch(() => {})))
+    // The request's own deadline ending first is the ladder's: the rung throws, and the run answers its deadline outcome.
+    const late = capped(hangingConnect, undefined, 60_000)
+    await expect(late.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 200 })).rejects.toThrow()
+    const ended = await new LadderRunner(late, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p', null, { deadlineAt: Date.now() + 300 })
+    expect(ended.result).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+    await Promise.all(late.map((c) => c.close?.().catch(() => {})))
     // A cancelled call is still the ladder's to report as such.
     const cancelled = new AbortController()
     cancelled.abort()
