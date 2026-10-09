@@ -109,6 +109,15 @@ mountFeatureSections()
 for (const band of document.querySelectorAll<HTMLElement>('.glyph-band')) mountGlyphBand(band)
 const startHead = document.querySelector<HTMLElement>('.start-head')
 if (startHead) mountOctopusSwim(startHead)
+// The octopus game: its own chunk, loaded when a visitor asks to play, from the button by the kelp or the ▶ the
+// octopus holds out when petted.
+const playButton = document.querySelector<HTMLButtonElement>('.sea-play')
+const openSeaGame = (opener: HTMLElement) => { void import('./octopusGame').then(({ openGame }) => openGame(opener)).catch(() => { /* The page goes on without it. */ }) }
+if (playButton) {
+  playButton.hidden = false
+  playButton.addEventListener('click', () => openSeaGame(playButton))
+}
+startHead?.addEventListener('octopus:play', () => openSeaGame(playButton ?? startHead))
 for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!

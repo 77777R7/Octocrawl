@@ -1,5 +1,5 @@
 import { whenVisible } from './motion'
-import { PET, petMood, rollAngle, startles } from './octopusPet'
+import { offersPlay, PET, petMood, rollAngle, startles } from './octopusPet'
 import { crabAlarmed, linkCells, readState, SHOAL, shoalSlots } from './seaLife'
 
 /* A small sea around the Get started heading, drawn in glyphs on the character grid, with an octopus living in it.
@@ -18,7 +18,8 @@ import { crabAlarmed, linkCells, readState, SHOAL, shoalSlots } from './seaLife'
  * and it squirts ink and flees; come slowly and it only watches. Touch it (a click or a tap on its body) and it is
  * glad: ^ ^, a heart, and it puffs up for a moment (busy with a page or fish, it carries on); the third touch in a row turns it a somersault, and seven in ten
  * seconds are too many: a flat look, and it fades into the water for a while. Keep a finger on it and it is tickled
- * (x x), bubbles streaming up. Click the water and it comes to look. It never swims over the words: to cross, it
+ * (x x), bubbles streaming up; the fifth touch in ten seconds and it holds out a ▶, which opens the octopus game
+ * (`octopus:play` on the head; main.ts opens it). Click the water and it comes to look. It never swims over the words: to cross, it
  * rises above them.
  *
  * Two more live in the sea when there is water beside the words (seaLife.ts). A crab (\/) walks the floor; come low
@@ -163,6 +164,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
   // Being touched: when each touch landed, when a finger came down on it and whether it is still there, how puffed
   // up it is, and when a somersault began (0 for none).
   const pet = { times: [] as number[], down: 0, held: false, puff: 0, rolledAt: 0 }
+  // The ▶ it holds out to offer a game, until when, or null.
+  let play: { x: number, y: number, until: number } | null = null
   const sea = new Map<number, Cell>()
   // The octopus's cells: how much of each it covers, over a box around it.
   let cover = new Float32Array(0)
@@ -355,6 +358,10 @@ export function mountOctopusSwim(head: HTMLElement): void {
     feel('^', now, 1600)
     say(octo.x + 1.4 * R, octo.y - 1.9 * R, '<3', now, 1.8)
     if (mood === 'roll') { pet.rolledAt = now; say(octo.x - 2 * R, octo.y - 1.9 * R, '!', now, 1.2) }
+    if (offersPlay(pet.times, now)) {
+      const s = octo.x > width / 2 ? -1 : 1
+      play = { x: octo.x + s * 2.8 * R, y: octo.y + 0.4 * R, until: now + PET.playMs }
+    }
   }
 
   function step(now: number) {
@@ -794,6 +801,9 @@ export function mountOctopusSwim(head: HTMLElement): void {
           if (read?.linking) for (const [c, r] of linkCells(armC, armR, Math.round(fx / cw), Math.round(fy / LINE))) if (!behindWords(c * cw, r * LINE)) put(c * cw, r * LINE, '·', NAVY, 0.5, 15)
         })
       }
+      // The ▶ it holds out, blinking slowly while the offer stands.
+      if (play && now < play.until) put(play.x, play.y, '▶', RUST, Math.floor((now - play.until) / 500) % 2 ? 0.95 : 0.6, 61)
+      else play = null
       // The page in front, whole, whether it floats or is held.
       if (page) ['.-,', '|=|', '\'-\''].forEach((line, r) => [...line].forEach((g, c) => put(page!.x + (c - 1) * cw, page!.y + (r - 1) * LINE, g, NAVY, 0.72, 55)))
     }
@@ -880,7 +890,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     pointer.x = x
     pointer.y = y
     pointer.at = now
-    head.style.cursor = !reduced.matches && onBody(x, y) ? 'pointer' : ''
+    head.style.cursor = !reduced.matches && (onBody(x, y) || (play && Math.hypot(x - play.x, y - play.y) < 24)) ? 'pointer' : ''
   })
   const release = () => {
     if (!pet.held) return
@@ -893,11 +903,17 @@ export function mountOctopusSwim(head: HTMLElement): void {
   // A touch on the octopus; or a click in the water, and it comes to look. Only the main button, or a finger: a
   // context menu would swallow the release.
   head.addEventListener('pointerdown', (event) => {
-    if (reduced.matches || event.button !== 0) return
+    // A button or a link in the head is not the water.
+    if (reduced.matches || event.button !== 0 || (event.target as Element | null)?.closest?.('button, a')) return
     const now = performance.now()
     const rect = head.getBoundingClientRect()
     const px = event.clientX - rect.left
     const py = event.clientY - rect.top
+    if (play && now < play.until && Math.hypot(px - play.x, py - play.y) < 24) {
+      play = null
+      head.dispatchEvent(new CustomEvent('octopus:play'))
+      return
+    }
     if (onBody(px, py)) { pet.down = now; pet.held = true; stroked(now); return }
     const [x, y] = fit(px, py - R)
     if (overText(x, y) || (sides && !canCross() && side(x) !== side(octo.x))) return

@@ -254,6 +254,7 @@ export function startMarkup(bar: string): string {
             <p class="section-kicker"><span class="kicker-square"></span> GET STARTED</p>
             <h2 id="start-title">One line in,<br />clean pages <em>out.</em></h2>
             <p class="start-lead">Use Octocrawl from your terminal, your code or your AI agent. Pick the one that fits how you work.</p>
+            <button class="sea-play" type="button" hidden><span aria-hidden="true">( </span>play with the octopus<span aria-hidden="true"> )</span></button>
           </div>
           ${clientPanels()}
         </div>
