@@ -262,7 +262,7 @@ export interface DocumentExtraction {
 }
 
 /** The rule that decided a page's data is most likely rendered client-side (see RenderSignals). */
-export type RenderReason = 'empty_table_with_scripts' | 'empty_app_root' | 'script_shell' | 'js_fallback' | 'hydration_shell' | 'aria_busy' | 'hydration_list_partial'
+export type RenderReason = 'empty_table_with_scripts' | 'empty_app_root' | 'script_shell' | 'js_fallback' | 'hydration_shell' | 'aria_busy' | 'loading_text' | 'hydration_list_partial'
 
 /** A client-side rendering marker found in the page as received (see RenderSignals). */
 export type RenderMarker = 'hydration_state' | 'app_root_empty' | 'noscript_notice' | 'js_fallback_marker' | 'aria_busy'

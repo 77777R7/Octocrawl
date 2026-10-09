@@ -606,6 +606,45 @@ ${options}
     expect(extractTf.extract(page(3)).render).toMatchObject({ clientRendered: true, reason: 'js_fallback' })
   })
 
+  it('reads a short page whose sections still say they are loading, beside its scripts, for a shell (ROADMAP PA item 4)', () => {
+    // WSJ's market data over HTTP: the table under each heading reads "Loading..." until the page's scripts fetch it (T066).
+    const intro = '<p>Market data for the major U.S. indexes, the day\'s market diary, the most active stocks and the new highs and lows, updated through the trading day. Quotes are delayed at least fifteen minutes; index levels come from their publishers, and volume figures cover every U.S. exchange and trading venue.</p>'
+    const sections = (loader: string) => ['Stock Indexes', 'Markets Diary', 'Stock Movers'].map((name) => `<section><h3>${name}</h3>${loader}</section>`).join('')
+    const page = (loader: string, scripts = `<script>${'s'.repeat(2_000)}</script>`, more = '') => `<!doctype html><html><body><main><h2>U.S. Stocks</h2>${intro}${sections(loader)}${more}</main>${scripts}</body></html>`
+    for (const loader of ['<div class="loader">Loading...</div>', '<div>Loading\u2026</div>', '<div>Fetching the quotes...</div>', '<span>Please wait</span>', '<div>Quotes loading...</div>']) {
+      const render = extractTf.extract(page(loader)).render
+      expect(render?.textChars, loader).toBeGreaterThan(300)
+      expect(render, loader).toMatchObject({ clientRendered: true, reason: 'loading_text' })
+    }
+    // Not with no script to fetch the data; not a button's, a link's or an icon's text; not a sentence about loading,
+    // nor one longer than a loader ending in it.
+    expect(extractTf.extract(page('<div>Loading...</div>', '')).render).toMatchObject({ clientRendered: false, reason: null })
+    for (const loader of ['<button>Loading...</button>', '<a href="/more">Loading...</a>', '<svg role="img"><title>Loading...</title></svg>', '<p>Loading docks open at six every morning.</p>', '<p>The quarterly report on household consumption is still loading...</p>']) {
+      expect(extractTf.extract(page(loader)).render, loader).toMatchObject({ clientRendered: false, reason: null })
+    }
+    // Not on a page with more text than the browser lane reads for a loader: one left on it is not its data.
+    const long = Array.from({ length: 40 }, (_, i) => `<p>Paragraph ${i + 1}: the index closed higher for a third day as banks and energy companies led the gains.</p>`).join('')
+    const full = extractTf.extract(page('<div>Loading...</div>', undefined, long)).render
+    expect(full?.textChars).toBeGreaterThan(4_000)
+    expect(full).toMatchObject({ clientRendered: false, reason: null })
+  })
+
+  it('reads page state named in lower or camel case as hydration state (ROADMAP PA item 4)', () => {
+    // The World Bank's indicator pages over HTTP: the figures are in window.__data, and the page shows only the headers
+    // of the list its scripts fill (T056).
+    const sources = '<p>Source: World Bank national accounts data, and OECD National Accounts data files. Country official statistics, national statistical organizations and central banks; staff estimates. License: CC BY-4.0. The figures are in current U.S. dollars, converted from domestic currencies using single-year official exchange rates.</p>'
+    const page = (state: string) => `<!doctype html><html><body><main><h1>GDP (current US$)</h1>${sources}<h2>All Countries and Economies</h2><div class="item title"><div class="th">Country</div><div class="th">Most Recent Year</div><div class="th">Most Recent Value</div></div></main><script>${state}${JSON.stringify({ rows: Array.from({ length: 80 }, (_, i) => ({ country: `Country ${i}`, year: 2025, value: 1_000 + i })) })}</script></body></html>`
+    for (const state of ['window.__data=', 'window.__initialData = ', 'window._appState=', 'window.__STATE__ = ', 'window._INITIAL_DATA=']) {
+      const render = extractTf.extract(page(state)).render
+      expect(render?.textChars, state).toBeGreaterThan(300)
+      expect(render, state).toMatchObject({ clientRendered: true, reason: 'hydration_shell', markers: ['hydration_state'] })
+    }
+    // A script that reads such a name, or sets one that names no state, holds none.
+    for (const state of ['console.log(window.__data);var rows=', 'window.__gaTracker=', 'window._dataLayerName=']) {
+      expect(extractTf.extract(page(state)).render?.markers, state).not.toContain('hydration_state')
+    }
+  })
+
   describe('a listing whose own data lists more records than its markup shows', () => {
     // A Walmart category page: the server draws the first few product tiles,
     // and __NEXT_DATA__ lists the whole page of products the scripts draw next.

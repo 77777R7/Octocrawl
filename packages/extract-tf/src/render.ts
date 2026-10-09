@@ -32,7 +32,9 @@ export interface RawRenderSignals {
 const APP_ROOT_SELECTOR = '#root, #app, #__next, #__nuxt, #___gatsby, [data-reactroot], [ng-app], [ng-version], [data-server-rendered]'
 // Not `no-js`: Modernizr puts it on <html> of every page that uses it.
 const JS_FALLBACK_CLASS = /(^|[\s_-])(hide-if-js|hide-if-js-enabled|js-disabled|js-only|requires-js|needs-js)([\s_-]|$)/i
-const HYDRATION_SCRIPT = /window\.__[A-Za-z0-9_]+__\s*=|window\._[A-Za-z0-9_]*(?:STATE|CONFIG|DATA)\s*=|__NEXT_DATA__|__NUXT__/
+// State a page's scripts render from: `window.__STATE__ =`, `window.__INITIAL_DATA =`, and the same names in lower or
+// camel case (`window.__data =`, the World Bank's data pages; `window._appState =`).
+const HYDRATION_SCRIPT = /window\.__[A-Za-z0-9_]+__\s*=|window\._[A-Za-z0-9_]*(?:STATE|CONFIG|DATA|[Ss]tate|[Cc]onfig|[Dd]ata)\s*=|__NEXT_DATA__|__NUXT__/
 const APP_ROOT_MAX_TEXT = 200
 const HYDRATION_MIN_CHARS = 2_000
 /**
@@ -193,6 +195,39 @@ export function rawSignals(doc: Document): RawRenderSignals {
   return { scriptChars, markers: Array.from(markers), hydrationJson }
 }
 
+/**
+ * The messages by which a page says its data is still on the way, read as the browser lane reads them (LOADING_PROBE
+ * in the bench's browserSettle): an element's whole text that is or ends in a loading message ("Loading...", "Fetching
+ * results…", "Please wait"), not a button's or a link's.
+ */
+const LOADING_MESSAGE = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\s+[\w-]+){0,3}\s*(?:\.{2,3}|\u2026)|loading|fetching|please wait)$/i
+const LOADING_TRAILING = /\b(?:loading|fetching)\s*(?:\.{2,3}|\u2026)$/i
+const LOADING_TEXT_MAX_CHARS = 48
+/**
+ * A page with more text than this is not read for loading messages, as in the browser lane (LOADING_PAGE_TEXT_MAX): a
+ * loader left on a full page (more comments, a feed's next page) is not its data.
+ */
+const LOADING_PAGE_MAX_TEXT = 4_000
+/**
+ * Whether the cleaned page shows a loading message (LOADING_MESSAGE) in its own text. Cleaning has already taken out
+ * scripts, styles, templates, noscript and svg (an icon's title, "Loading", is not the page's).
+ */
+function hasLoadingText(cleaned: Document): boolean {
+  if (cleaned.body === null) return false
+  const stack: Node[] = [cleaned.body]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.nodeType === 3) {
+      const text = (node.textContent ?? '').trim()
+      if (text.length === 0 || text.length > LOADING_TEXT_MAX_CHARS || !(LOADING_MESSAGE.test(text) || LOADING_TRAILING.test(text))) continue
+      if (node.parentElement?.closest('button, a') == null) return true
+    } else {
+      for (const child of Array.from(node.childNodes)) stack.push(child)
+    }
+  }
+  return false
+}
+
 /** A table whose rows carry no data cells at all. */
 export function countEmptyTables(doc: Document): number {
   let empty = 0
@@ -268,6 +303,9 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, co
   // state still is: its data may arrive by a later fetch the JSON never held.
   else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && context.hydrationShown === true)) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
+  // A short page whose sections still say "Loading..." beside its scripts: the data is theirs to fetch (WSJ's market
+  // data, every table of which reads "Loading..." over HTTP).
+  else if (textChars <= LOADING_PAGE_MAX_TEXT && raw.scriptChars >= 1_000 && hasLoadingText(cleaned)) reason = 'loading_text'
   const listRecords = reason === null && context.listing === true && raw.hydrationJson.length > 0 ? partialRecordList(recordLists(raw), visible.toLowerCase()) : null
   if (listRecords !== null) reason = 'hydration_list_partial'
 
