@@ -19,7 +19,7 @@ export const SHOAL = {
 } as const
 
 /** A crab raises its claws at an octopus this near along the floor whose arms come this close to it. */
-export const CRAB = { nearR: 4.5, lowR: 2.6 } as const
+export const CRAB = { nearR: 3.5, lowR: 1.8 } as const
 
 /** Where each fish of a shoal of `n` swims, in cells behind the leader (dc, never negative) and rows off its line
  * (dr): a chevron, the leader at its point. */

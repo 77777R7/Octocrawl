@@ -48,13 +48,13 @@ export function rippleCell(d: number, ink: number, jitter: number, t: number, ex
 const NAVY = [20, 37, 74], RUST = [184, 70, 29], ORANGE = [243, 104, 61]
 const mix = (a: number[], b: number[], t: number) => a.map((v, i) => Math.round(v + (b[i]! - v) * t))
 /** Navy to rust to the brand orange, so a mark warms through the page's own accent colours. */
-function colour(warm: number, alpha: number): string {
+function colour(warm: number, alpha: number, cap = 0.5): string {
   const [r, g, b] = warm < 0.5 ? mix(NAVY, RUST, warm * 2) : mix(RUST, ORANGE, (warm - 0.5) * 2)
-  return `rgba(${r},${g},${b},${Math.min(0.5, alpha).toFixed(3)})`
+  return `rgba(${r},${g},${b},${Math.min(cap, alpha).toFixed(3)})`
 }
 
-/** What the octopus (octopusSwim.ts) may be doing that draws the eye: while it does, the water keeps calm, so the
- * two never compete. */
+/** What the octopus (octopusSwim.ts) may be doing that draws the eye: while it does, the weather softens, so the two
+ * never compete. */
 const LOUD = new Set(['wave', 'bubbles', 'chase', 'meet', 'map', 'render'])
 
 /** Takes over a prerendered glyph cloud (`data-cols`, `data-rows`, `data-seed` name how it was drawn) with a canvas
@@ -114,8 +114,8 @@ export function mountGlyphRipple(pre: HTMLElement): void {
   /** The weather for this frame: how much current and surface light, the scan, the wake and the snow. */
   const brew = (now: number, t: number, dt: number) => {
     const quiet = !LOUD.has(host.dataset.octopus ?? 'rest')
-    // Eased, so that the weather has all but gone (or come back) within about two seconds.
-    calm += ((quiet ? 1 : 0) - calm) * Math.min(1, dt / 700)
+    // Eased, so that the weather has softened (or come back) within about two seconds; softened, not gone.
+    calm += ((quiet ? 1 : 0.4) - calm) * Math.min(1, dt / 700)
     const mix = weatherMix(t)
     if (scanRow < 0 && now > nextScan) {
       if (quiet) {
@@ -125,7 +125,7 @@ export function mountGlyphRipple(pre: HTMLElement): void {
         scanAt = now
       } else nextScan = now + 2000
     }
-    if (scanRow >= 0 && (now - scanAt) / 1000 > scanSeconds(cols)) { scanRow = -1; nextScan = now + 30000 + Math.random() * 30000 }
+    if (scanRow >= 0 && (now - scanAt) / 1000 > scanSeconds(cols)) { scanRow = -1; nextScan = now + 20000 + Math.random() * 15000 }
     wakeField.fill(0)
     wakes = wakes.filter(w => now - w.at < WEATHER.wakeMs)
     for (const w of wakes) {
@@ -155,21 +155,27 @@ export function mountGlyphRipple(pre: HTMLElement): void {
     context.textBaseline = 'middle'
     for (const cell of cells) {
       let add: CellExtra | undefined
+      // The current's own strength here, for its flowing marks.
+      let flow = 0
       if (sky) {
         const i = cell.y * cols + cell.x
         let lift = wakeField[i]! * 0.9
         let warm = wakeField[i]! * 0.25
         extra.mark = undefined
-        if (sky.current) lift += 0.9 * currentAt(cell.x / cols, cell.y / rows, t) * sky.current
-        if (sky.glints) { const g = glintAt(cell.x, cell.y, rows, t) * sky.glints; lift += 0.8 * g; warm += 0.7 * g }
+        // A current lifts and warms the marks it passes through; surface light lifts and warms them more.
+        if (sky.current) { flow = currentAt(cell.x / cols, cell.y / rows, t) * sky.current; lift += 1.8 * flow; warm += 0.55 * flow }
+        if (sky.glints) { const g = glintAt(cell.x, cell.y, rows, t) * sky.glints; lift += 1.6 * g; warm += 1 * g }
         if (snow.has(i)) lift = Math.max(lift, 0.6)
         if (cell.y === scanRow) { const s = scanCell(cell.x, sky.scanAge); if (s) { lift += s.lift; warm += s.warm; extra.mark = s.level } }
         if (lift > 0.01 || warm > 0.01) { extra.lift = lift; extra.warm = warm; add = extra }
       }
       const { level, alpha, warm } = rippleCell(cell.d, cell.ink, cell.jitter, t, add)
       if (!level) continue
-      context.fillStyle = colour(warm, alpha)
-      context.fillText(CLOUD_GLYPHS[level]!, cell.x * cellW, cell.y * cellH + cellH / 2)
+      // Where the weather is, its marks may stand out more than the cloud's own; in the heart of a current they turn
+      // to water running across (~ and -, flowing a cell at a time).
+      context.fillStyle = colour(warm, alpha, add ? 0.5 + 0.35 * Math.min(1, add.lift) : 0.5)
+      const glyph = flow > 0.45 ? ((cell.x + cell.y - Math.floor(t * 6)) % 3 ? '~' : '-') : CLOUD_GLYPHS[level]!
+      context.fillText(glyph, cell.x * cellW, cell.y * cellH + cellH / 2)
     }
   }
 
@@ -179,8 +185,8 @@ export function mountGlyphRipple(pre: HTMLElement): void {
       pre.after(canvas)
     }
     started ||= performance.now()
-    // The first scan waits until the cloud has been seen a while.
-    nextScan ||= started + 12000
+    // The first scan waits until the cloud has been seen a moment.
+    nextScan ||= started + 8000
     pre.classList.add('is-handed-off')
     canvas.classList.add('is-live')
     frame = requestAnimationFrame(draw)

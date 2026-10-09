@@ -7,11 +7,11 @@ const times = Array.from({ length: 600 }, (_, i) => i * 0.5)
 describe('Sea weather', () => {
   it('is calm at the start of each round, then a current, calm again, then surface light, never two at once', () => {
     expect(weatherMix(0)).toEqual({ current: 0, glints: 0 })
-    expect(weatherMix(50).current).toBe(1)
-    expect(weatherMix(80)).toEqual({ current: 0, glints: 0 })
-    expect(weatherMix(110).glints).toBe(1)
-    expect(weatherMix(140)).toEqual({ current: 0, glints: 0 })
-    expect(weatherMix(50 + WEATHER.cycle).current).toBe(1)
+    expect(weatherMix(26).current).toBe(1)
+    expect(weatherMix(56)).toEqual({ current: 0, glints: 0 })
+    expect(weatherMix(86).glints).toBe(1)
+    expect(weatherMix(114)).toEqual({ current: 0, glints: 0 })
+    expect(weatherMix(26 + WEATHER.cycle).current).toBe(1)
     for (const t of times) { const { current, glints } = weatherMix(t); expect(current * glints).toBe(0) }
   })
 
