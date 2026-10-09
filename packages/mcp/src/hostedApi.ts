@@ -24,7 +24,8 @@ import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
-import { createMcpServer } from './server.js'
+import { createMcpServer, MCP_VERSION } from './server.js'
+import { TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -80,6 +81,20 @@ const SWEEP_EVERY_MS = 60_000
 const REMEMBERED_CALLERS = 20_000
 /** The tools the remote endpoint offers; the rest are refused by name. */
 export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', 'scrape_product'])
+/**
+ * What directories that list MCP servers read before, or instead of, a live scan (Smithery's static server card,
+ * https://smithery.ai/docs/build/publish): the server, that it needs no sign-in, and the tools it offers, taken from
+ * the same definitions tools/list answers with, so the card cannot drift from the server.
+ */
+export function hostedServerCard() {
+  return {
+    serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev' },
+    authentication: { required: false },
+    tools: TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name)),
+    resources: [],
+    prompts: [],
+  }
+}
 const PROXY_SECRET_HEADER = 'x-w2l-proxy-secret'
 const INTERNAL_CLIENT_HEADER = 'x-w2l-hosted-client'
 const INTERNAL_SECRET_HEADER = 'x-w2l-hosted-internal'
@@ -234,6 +249,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const gate = new Hono<GateEnv>()
   // /health, not /healthz: Google's front end answers /healthz on a Cloud Run URL itself (a 404 page) and the request never reaches the container.
   gate.get('/health', (c) => c.json({ ok: true, service: 'octocrawl-hosted-api', tools: [...HOSTED_API_TOOLS] }))
+  // Discovery files are public and cheap: the server card, and a plain 404 for every other /.well-known file, so a client
+  // looking for OAuth metadata learns there is none instead of reading a refusal as a sign-in wall.
+  gate.get('/.well-known/mcp/server-card.json', (c) => c.json(hostedServerCard(), 200, { 'cache-control': 'public, max-age=3600' }))
+  gate.all('/.well-known/*', (c) => refuse(c, 404, 'not_found', `${c.req.path} is not published by hosted Octocrawl`, ['the server card is at /.well-known/mcp/server-card.json; no sign-in is needed: call POST /mcp without an Authorization header']))
   gate.use('*', async (c, next) => {
     const method = c.req.method
     const path = c.req.path
