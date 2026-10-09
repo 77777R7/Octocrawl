@@ -13,6 +13,7 @@
 
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
+import { linkTarget } from './markdown.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
 import { detectRenderSignals, hydrationShown, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
@@ -354,7 +355,8 @@ export function headingsOnly(region: Element): boolean {
       const tag = el.tagName.toLowerCase()
       if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue
       if (tag === 'a' && (el.getAttribute('href') ?? '').startsWith('#')) continue
-      if (!inHeading && tag === 'img' && (el.getAttribute('src') ?? '').trim() !== '') return false
+      // The image's target as the Markdown writes it: a `data:` or `javascript:` source (a spinner, a lazy placeholder) leaves none.
+      if (!inHeading && tag === 'img' && linkTarget(el.getAttribute('src') ?? '', null) !== null) return false
       stack.push({ node: el, inHeading: inHeading || isHeading(el) })
     }
   }
