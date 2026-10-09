@@ -91,6 +91,17 @@ describe('extractTf', () => {
     // React streams a part of the page hidden and its script moves it into place (vercel.com/templates over HTTP), with or without an identifier prefix.
     for (const id of ['S:5', 'S:1f', 'R:S:0']) expect(page((inner) => `<div id="__next"></div><div hidden id="${id}">${inner}</div>`).escalate, id).toBe(false)
     expect(page((inner) => `<div hidden id="S:x">${inner}</div>`).escalate).toBe(true)
+    // An exempt part inside a container that is hidden is still hidden.
+    expect(page((inner) => `<div hidden><div hidden id="S:2">${inner}</div></div>`).escalate).toBe(true)
+    expect(page((inner) => `<div hidden><div hidden="until-found">${inner}</div></div>`).escalate).toBe(true)
+    // Inside a table React puts the id on the part it streams and `hidden` on a bare table around it (React 19's
+    // renderToPipeableStream, a component that suspends inside <tbody>): the rows are the page's table.
+    const rows = Array.from({ length: 5 }, (_, i) => `<tr><td>Station ${i}</td><td>${40 + i}</td></tr>`).join('')
+    const streamedTable = (part: string) => extractTf.extract(`<!doctype html><html><head><title>Page</title></head><body><main><h1>Readings</h1><table><thead><tr><th>Station</th><th>Flow</th></tr></thead></table></main>${part}</body></html>`)
+    for (const part of [`<table hidden><tbody id="S:0">${rows}</tbody></table>`, `<table hidden>${rows.replace('<tr>', '<tr id="S:1">')}</table>`, `<table hidden id="S:3"><tbody>${rows}</tbody></table>`]) {
+      expect(streamedTable(part).escalate, part.slice(0, 40)).toBe(false)
+    }
+    expect(streamedTable(`<table hidden><tbody>${rows}</tbody></table>`).escalate).toBe(true)
     // A modal marks the page behind it aria-hidden (Radix, through hideOthers), which hides nothing from the eye.
     expect(page((inner) => `<div id="__next" aria-hidden="true">${inner}</div><div role="dialog"><h2>Your privacy</h2><p>We use cookies.</p><button>Accept</button></div>`).escalate).toBe(false)
     // A reader's search opens a section hidden until found.

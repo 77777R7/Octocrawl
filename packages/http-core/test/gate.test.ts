@@ -487,6 +487,14 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     }
     // Two signs of a check that share their one word.
     expect(classifyGate(res({ body: '<html><body><h1>Access denied</h1><p>Access to this page has been denied.</p></body></html>', contentful: true }))).toEqual({ reason: 'bot_detected_generic', signals: ['weak_access_denied', 'weak_access_to_page_denied', 'short_page'] })
+    // Two signs of a check, and no other word the scan is drawn to.
+    for (const [page, signs] of [
+      ['<h1>Checking your browser</h1><p>Please wait.</p>', ['weak_please_wait', 'weak_checking_your_browser']],
+      ['<h1>Just a moment...</h1><p>DDoS protection by the site.</p>', ['weak_just_a_moment', 'weak_ddos_protection']],
+      ['<h1>Security check</h1><p>Please wait.</p>', ['weak_please_wait', 'weak_security_check']],
+    ] as const) {
+      expect(classifyGate(res({ body: `<html><body>${page}</body></html>`, contentful: true })), page).toEqual({ reason: 'bot_detected_generic', signals: [...signs, 'short_page'] })
+    }
     // One weak sign is not enough; a script-built page asking for JavaScript is a shell, not a wall; a long page quoting a check is content.
     expect(classifyGate(res({ body: '<html><body><h1>Your account</h1><p>Please wait while we load your orders.</p></body></html>', contentful: true }))).toBeNull()
     expect(classifyGate(res({ body: '<html><body><div id="root"><p>Please enable JavaScript to use this app. Please wait while it loads.</p></div></body></html>', contentful: true }))).toBeNull()

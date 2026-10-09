@@ -331,13 +331,27 @@ export const extractTf = new ExtractTf()
 function hiddenRegion(region: Element): boolean {
   for (let el: Element | null = region; el !== null; el = el.parentElement) {
     const hidden = el.getAttribute('hidden')
-    if (hidden !== null && hidden.toLowerCase() !== 'until-found' && !REACT_STREAMED_SEGMENT.test(el.id)) return true
+    if (hidden !== null && hidden.toLowerCase() !== 'until-found' && !reactStreamedSegment(el)) return true
   }
   return false
 }
 
 /** The id React gives a part of the page it streams hidden and then moves into place (an optional identifier prefix, `S:`, a hex number). */
 const REACT_STREAMED_SEGMENT = /S:[0-9a-f]+$/i
+
+/**
+ * Whether a hidden element is a part React streams: `<div hidden id="S:1">`, or inside a table a bare `<table hidden>`
+ * around the part that carries the id (`<tbody id="S:1">`, `<colgroup id="S:1">`, or `<tr id="S:1">` under the tbody
+ * the parser adds).
+ */
+function reactStreamedSegment(el: Element): boolean {
+  if (REACT_STREAMED_SEGMENT.test(el.id)) return true
+  if (el.tagName.toLowerCase() !== 'table' || el.id !== '') return false
+  const part = el.firstElementChild
+  if (part === null) return false
+  if (REACT_STREAMED_SEGMENT.test(part.id)) return true
+  return part.tagName.toLowerCase() === 'tbody' && part.id === '' && REACT_STREAMED_SEGMENT.test(part.firstElementChild?.id ?? '')
+}
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100
