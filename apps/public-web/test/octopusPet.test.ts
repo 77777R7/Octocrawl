@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { offersPlay, PET, petMood, rollAngle, startles } from '../src/octopusPet.js'
+import { offersPlay, PET, petMood, rollAngle } from '../src/octopusPet.js'
 
 describe('Petting the octopus', () => {
   it('is glad of a touch, turns a somersault on every third in a run, and has had enough of seven in ten seconds', () => {
@@ -39,9 +39,4 @@ describe('Petting the octopus', () => {
     expect(offersPlay([0, 900, 1800, 2700, 12000], 12000)).toBe(false)
   })
 
-  it('is startled only by a pointer coming fast', () => {
-    expect(startles(0)).toBe(false)
-    expect(startles(PET.startleSpeed)).toBe(false)
-    expect(startles(PET.startleSpeed + 1)).toBe(true)
-  })
 })

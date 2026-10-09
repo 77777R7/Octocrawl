@@ -7,17 +7,17 @@
 
 export const WEATHER = {
   /** One round of the weather, in seconds, and the windows of it that a current and the surface light take. */
-  cycle: 150,
-  current: [30, 72] as const,
-  glints: [92, 134] as const,
+  cycle: 120,
+  current: [6, 46] as const,
+  glints: [66, 106] as const,
   /** How long a state takes to come and go. */
-  fade: 5,
+  fade: 4,
   /** Marine snow: at most this many flakes, falling this many rows a second. */
   flakes: 5,
   fall: 0.7,
   /** A scan runs along its row at this many columns a second, re-typing a trail this long behind it. */
   scanSpeed: 38,
-  scanTrail: 14,
+  scanTrail: 20,
   /** A wake reaches this many cells round the octopus and fades over this long. */
   wakeReach: 3,
   wakeMs: 1400,
@@ -75,7 +75,7 @@ export function scanCell(col: number, age: number): { lift: number, level: numbe
   const behind = head - col
   if (behind < 0 || behind > WEATHER.scanTrail) return null
   const f = 1 - behind / WEATHER.scanTrail
-  return { lift: 0.25 + 0.55 * f, level: 1 + ((col * 7 + Math.floor(age * 18)) % 4), warm: behind < 2 ? 0.85 : 0.35 * f }
+  return { lift: 0.6 + 0.8 * f, level: 1 + ((col * 7 + Math.floor(age * 18)) % 4), warm: behind < 2 ? 1 : 0.6 * f }
 }
 
 /** How long a scan takes to cross `cols` columns, in seconds. */
