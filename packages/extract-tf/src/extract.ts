@@ -150,7 +150,13 @@ export class ExtractTf implements Extractor {
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
     // Counted before cleaning, which may drop empty elements.
-    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
+    // A table with no rows, or with cells none of which holds text yet (rows drawn for a script to fill, as Nasdaq's
+    // quotes over HTTP). Rows without a cell are left to the client-rendering signal (detectRenderSignals).
+    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => {
+      if (table.querySelector('tr') === null) return true
+      const cells = Array.from(table.querySelectorAll('td, th'))
+      return cells.length > 0 && cells.every((cell) => (cell.textContent ?? '').trim() === '')
+    }).length
     // Data the page's scripts will fetch once they run: whatever they build
     // from it is not in this HTML either.
     const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
@@ -288,11 +294,11 @@ export class ExtractTf implements Extractor {
         favorRecall,
         product,
       ),
-      // Escalate when a strategy produced nothing at all, or the article
-      // cascade a region that only names the page (headingsOnly; a region the
-      // last resort found is a list's). Routing to a non-article strategy is
-      // not by itself an escalation reason.
-      escalate: main === null || (strategy === 'article' && headingsOnly(main)),
+      // Escalate when a strategy produced nothing at all, a region the page
+      // hides (hiddenRegion), or the article cascade a region that only names
+      // the page (headingsOnly; a region the last resort found is a list's).
+      // Routing to a non-article strategy is not by itself an escalation reason.
+      escalate: main === null || hiddenRegion(main) || (strategy === 'article' && headingsOnly(main)),
       ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
@@ -319,6 +325,20 @@ export class ExtractTf implements Extractor {
 
 /** Default instance. */
 export const extractTf = new ExtractTf()
+
+/**
+ * Whether the page hides the region: it, or an element around it, carries `hidden`, `aria-hidden="true"` or an inline
+ * `display: none`. What the page does not show is not its content, however much text it holds (ROADMAP PA item 4:
+ * Eurostat's data browser read in a browser, whose only prose was the EU banner's hidden dropdown, answered `success`
+ * with it). A hidden part inside a shown region, a collapsed answer for one, stays part of that region.
+ */
+function hiddenRegion(region: Element): boolean {
+  for (let el: Element | null = region; el !== null; el = el.parentElement) {
+    if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return true
+    if (/(?:^|;)\s*display\s*:\s*none\b/i.test(el.getAttribute('style') ?? '')) return true
+  }
+  return false
+}
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100

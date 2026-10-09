@@ -233,8 +233,10 @@ script.src = 'https://captcha.px-cloud.net/PX3Vk96I6i/captcha.js?a=c';</script><
     const copy = '<h1>Robot or human?</h1><p>Activate and hold the button to confirm that you’re human. Thank You!</p>'
     expect(classifyGate(res({ status: 200, body: copy }))).toEqual({ reason: 'captcha', signals: ['text_activate_and_hold'] })
     expect(classifyGate(res({ status: 200, body: '<h1>Robot or human?</h1>' }))).toEqual({ reason: 'bot_detected_generic', signals: ['text_robot_or_human'] })
-    // Copy is not decisive: a page with content ignores it.
-    expect(classifyGate(res({ status: 200, body: copy, contentful: true }))).toBeNull()
+    // Read as content, the copy is decisive only on a short page led by it (ROADMAP PA item 4); an article ignores it.
+    expect(classifyGate(res({ status: 200, body: copy, contentful: true }))).toEqual({ reason: 'captcha', signals: ['text_robot_or_human', 'text_activate_and_hold', 'short_page'] })
+    const article = `<article>${copy}${'<p>An ordinary paragraph of a long article about the web and its checks.</p>'.repeat(30)}</article>`
+    expect(classifyGate(res({ status: 200, body: article, contentful: true }))).toBeNull()
   })
 
   it('does not block an ordinary article that says "robot or human" in its prose', () => {
@@ -460,6 +462,25 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     }
     // Any 2xx answer, not only a 200.
     expect(classifyGate(res({ status: 203, body: akamai, contentful: true }))?.signals).toContain('akamai_reference')
+  })
+
+  it('names a short page whose shown text is a refusal or a browser check, read as content or not', () => {
+    // eBay's check, served with 200 and read as content in the PA 4 Steel run (T021).
+    const ebay = '<html><head><title>Security Measure</title></head><body><h1>Checking your browser before you access eBay.</h1><p>Your browser will redirect to your requested content shortly.</p><p>Please wait...</p><p><b>Reference ID:</b> c47472ca-dfd0-4932-9b1c-f9186444a034</p></body></html>'
+    expect(classifyGate(res({ body: ebay, contentful: true }))).toEqual({ reason: 'bot_detected_generic', signals: ['weak_please_wait', 'weak_checking_your_browser', 'short_page'] })
+    const pardon = '<html><body><h1>Pardon Our Interruption</h1><p>As you were browsing something about your browser made us think you were a bot.</p></body></html>'
+    expect(classifyGate(res({ body: pardon, contentful: true }))).toEqual({ reason: 'bot_detected_generic', signals: ['text_pardon_our_interruption', 'short_page'] })
+    // One weak sign is not enough; a script-built page asking for JavaScript is a shell, not a wall; a long page quoting a check is content.
+    expect(classifyGate(res({ body: '<html><body><h1>Your account</h1><p>Please wait while we load your orders.</p></body></html>', contentful: true }))).toBeNull()
+    expect(classifyGate(res({ body: '<html><body><div id="root"><p>Please enable JavaScript to use this app. Please wait while it loads.</p></div></body></html>', contentful: true }))).toBeNull()
+    expect(classifyGate(res({ body: `<html><body><article><h1>Bot walls</h1><p>Sites ask you to verify you are human.</p>${'<p>An ordinary paragraph of a long article about the web.</p>'.repeat(40)}</article></body></html>`, contentful: true }))).toBeNull()
+    // One weak sign in a heading is not enough, and a heading asking for JavaScript is a shell's, not a check's.
+    expect(classifyGate(res({ body: '<html><body><h1>Security check</h1><p>Review the devices signed in to your account.</p></body></html>', contentful: true }))).toBeNull()
+    expect(classifyGate(res({ body: '<html><body><h1>Please enable JavaScript</h1><p>Please wait while the app loads.</p></body></html>', contentful: true }))).toBeNull()
+    // A refusal quoted in a short article's prose, not in a heading, does not make it a wall.
+    expect(classifyGate(res({ body: '<html><body><h1>Field notes</h1><p>One site asked me to verify you are human, then let me in. Please wait for it, I thought, and checking your browser is what it did.</p></body></html>', contentful: true }))).toBeNull()
+    // The words in a script are not what the page shows.
+    expect(classifyGate(res({ body: '<html><body><h1>Shop</h1><p>Our new arrivals are in.</p><script>var msg = "checking your browser, please wait"</script></body></html>', contentful: true }))).toBeNull()
   })
 
   it('leaves a captcha or a login form on such a page to the gate a person can get through', () => {

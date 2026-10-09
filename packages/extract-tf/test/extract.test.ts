@@ -64,6 +64,35 @@ describe('extractTf', () => {
     expect(out.mainHtml).not.toContain('Manage your privacy')
   })
 
+  it('does not take a region the page hides for its content (ROADMAP PA item 4)', () => {
+    // Eurostat's data browser read in a browser: the only prose was the EU banner's hidden dropdown; the data is drawn by script (T055).
+    const banner = (attrs: string) => `<!doctype html><html><body><div id="globan"><div class="wt-globan--content"><div id="dropdown" class="wt-globan--dropdown"${attrs}>
+<p>All official European Union website addresses are in the <b>europa.eu</b> domain.</p><p><a href="https://european-union.europa.eu/institutions">See all EU institutions and bodies</a></p></div></div></div>
+<div id="app"><canvas width="1200" height="600"></canvas></div></body></html>`
+    for (const attrs of [' hidden', ' aria-hidden="true"', ' style="display: none"']) {
+      const out = extractTf.extract(banner(attrs))
+      expect(out.escalate, attrs).toBe(true)
+    }
+    // A region inside a hidden container is hidden too.
+    const tucked = extractTf.extract(`<!doctype html><html><body><div hidden><article><h1>Archived notice</h1><p>This notice stays in the page for the site's scripts and is never shown to a reader of it, whatever it says at length.</p></article></div><div id="app"></div></body></html>`)
+    expect(tucked.escalate).toBe(true)
+    // The same region shown is content; a hidden answer inside a shown article is part of it.
+    expect(extractTf.extract(banner('')).escalate).toBe(false)
+    const faq = extractTf.extract(`<!doctype html><html><body><article><h1>Delivery questions</h1><p>Orders leave the warehouse within two working days and arrive within a week across the country.</p><details><summary>Can I change the address?</summary><div hidden><p>Yes, until the parcel ships.</p></div></details></article></body></html>`)
+    expect(faq.escalate).toBe(false)
+  })
+
+  it('counts a table whose rows hold no text as an empty shell, as one with no rows (ROADMAP PA item 4)', () => {
+    // Nasdaq's historical quotes over HTTP: a table drawn with empty cells for its scripts to fill (T060).
+    const rows = Array.from({ length: 10 }, () => '<tr>' + '<td> </td>'.repeat(6) + '</tr>').join('')
+    const shell = `<!doctype html><html><body><main><h1>Apple Inc. Common Stock (AAPL) Historical Quotes</h1><p>Showing 1-10 of 100</p><table><thead><tr>${'<th></th>'.repeat(6)}</tr></thead><tbody>${rows}</tbody></table></main></body></html>`
+    expect(extractTf.extract(shell).emptyTableShells).toBe(1)
+    expect(extractTf.extract(shell.replace('<td> </td>', '<td>10/08/2026</td>')).emptyTableShells).toBe(0)
+    expect(extractTf.extract('<!doctype html><html><body><table></table><p>x</p></body></html>').emptyTableShells).toBe(1)
+    // Rows with no cell at all are the client-rendering signal's to read, not this count's.
+    expect(extractTf.extract('<!doctype html><html><body><table><thead><tr></tr></thead><tbody></tbody></table><p>x</p></body></html>').emptyTableShells).toBe(0)
+  })
+
   it('escalates on a page with no prose at all', () => {
     const out = extractTf.extract('<!doctype html><html><body><div id="root"></div></body></html>')
     expect(out.escalate).toBe(true)
