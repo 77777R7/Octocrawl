@@ -37,7 +37,16 @@ export interface SteelConfig {
   /** Override both for a self-hosted Steel (it is open-source). */
   baseUrl?: string
   connectBaseUrl?: string
+  /**
+   * Under a tariff (ROADMAP PA item 4): the longest a session may live. The session is created with Steel's own `timeout`
+   * (milliseconds, at least STEEL_MIN_SESSION_MS) and no proxy, so it ends on Steel's side when a release fails, and
+   * bills no bandwidth. Absent: Steel's defaults, as before.
+   */
+  sessionTimeoutMs?: number
 }
+
+/** The shortest session `timeout` Steel accepts (15 s, its sessions configuration page). */
+export const STEEL_MIN_SESSION_MS = 15_000
 
 /** Steel's capability manifest — facts, not policy. */
 export const STEEL_CAPABILITIES: readonly CapabilityOffer[] = [
@@ -54,12 +63,14 @@ export const STEEL_CAPABILITIES: readonly CapabilityOffer[] = [
 export function steelSessionBody(
   decision: PolicyDecision,
   resume?: VendorResumeContext | null,
+  sessionTimeoutMs?: number,
 ): unknown {
   const persistEnabled = decision.enabled.some((c) => c.capability === 'session_persistence')
   const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
   const stealthEnabled = decision.enabled.some((c) => c.capability === 'fingerprint_spoofing')
 
   return {
+    ...(sessionTimeoutMs === undefined ? {} : { timeout: Math.max(sessionTimeoutMs, STEEL_MIN_SESSION_MS), useProxy: false }),
     // Steel injects a synthetic fingerprint BY DEFAULT. skipFingerprintInjection
     // is the opt-out, sent unless the grant names `vendor_stealth` (ADR 0005);
     // a body without it would buy the capability by omission. Solving follows
@@ -111,7 +122,7 @@ export function steelOps(
     },
 
     async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession> {
-      const body = steelSessionBody(decision, resume ?? null)
+      const body = steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs)
       const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions`,

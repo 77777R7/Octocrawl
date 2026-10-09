@@ -69,6 +69,12 @@ export interface ResourceUsage {
    * once proxy sessions declare a price.
    */
   externalCostUsd: number | null
+  /**
+   * What the run's spend ledger charged for this fetch's paid calls (ROADMAP PA item 4): each call at the price its
+   * provider reported, or at its price ceiling when it reported none, so it is never below the cost and stands in for
+   * it in the run's cap. Absent when no paid call was made through a ledger; `externalCostUsd` stays the exact cost or null.
+   */
+  externalCostChargedUsd?: number
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
   /**
