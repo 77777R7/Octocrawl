@@ -99,6 +99,8 @@ describe('extractTf', () => {
       'prose in headings': shell('', '<h1>About us</h1><h3>We have built small kilns by hand since 1990, from a single workshop by the harbour.</h3><h3>Every kiln is fired twice before it leaves, and each one ships with its own logbook.</h3>'),
       'one-line notice': shell('', '<h1>公告</h1><p>本店今日休息，明天照常营业。</p>'),
       'score table': shell('', '<h1>Final score</h1><table><tr><th>Team</th><th>Pts</th></tr><tr><td>Home</td><td>3</td></tr><tr><td>Away</td><td>1</td></tr></table>'),
+      'chart': shell('', '<h1>Chart: US inflation rate since 2000</h1><img src="/chart.png" alt="Line chart of US CPI inflation 2000-2026">'),
+      'gallery': shell('', '<h1>Gallery: our 2026 summer collection</h1><div class="grid">' + ['dress', 'shirt', 'hat'].map((n) => `<img src="/${n}.jpg" alt="The ${n} in linen">`).join('') + '</div>'),
     }
     for (const [name, html] of Object.entries(pages)) expect(extractTf.extract(html).escalate, name).toBe(false)
   })
@@ -109,9 +111,21 @@ describe('extractTf', () => {
     // A jump link is not content, however long; a link to another page is.
     expect(headingsOnly(region('<h2>Results</h2><a href="#filters">Skip to the filters and the sort order</a>'))).toBe(true)
     expect(headingsOnly(region('<h2>Results</h2><a href="/filters">Filters</a>'))).toBe(false)
-    // A symbol beside the heading is not content; three characters are.
+    // A symbol or two beside the heading is not content; three characters are; a script's text is not counted.
     expect(headingsOnly(region('<h2>Results</h2><span>▸</span>'))).toBe(true)
+    expect(headingsOnly(region('<h2>Results</h2><span>ab</span>'))).toBe(true)
     expect(headingsOnly(region('<h2>公告</h2><p>休息日</p>'))).toBe(false)
+    expect(headingsOnly(region('<h2>Results</h2><script>window.results = "loading the results for the page"</script>'))).toBe(true)
+    // Text inside a heading's own elements is heading text, and a page's indentation between tags is not text.
+    expect(headingsOnly(region('<h3><span>Don\'t see the Tesla</span> <em>you\'re looking for?</em></h3>'))).toBe(true)
+    expect(headingsOnly(region('\n    <section>\n      <h3>Don\'t see the Tesla you\'re looking for?</h3>\n      <a href="#filters">Skip to Filters</a>\n    </section>\n  '))).toBe(true)
+    // An image beside the heading is content; one inside it is part of the heading; media the Markdown drops are not
+    // content (a table drawn on a canvas, a video, an embedded frame).
+    expect(headingsOnly(region('<h1>Chart</h1><figure><img src="/c.png" alt="chart"></figure>'))).toBe(false)
+    expect(headingsOnly(region('<h1><img src="/logo.png" alt=""> Results</h1>'))).toBe(true)
+    for (const media of ['<canvas width="1512" height="640"></canvas>', '<video src="/v.mp4"></video>', '<iframe src="https://example.com/embed"></iframe>', '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>', '<img alt="no source">']) {
+      expect(headingsOnly(region(`<h1>Sheet</h1>${media}`)), media).toBe(true)
+    }
     // Headings that hold 100 characters or more are content in themselves.
     expect(headingsOnly(region(`<h3>${'a'.repeat(99)}</h3>`))).toBe(true)
     expect(headingsOnly(region(`<h3>${'a'.repeat(100)}</h3>`))).toBe(false)

@@ -325,8 +325,10 @@ const HEADINGS_ONLY_MAX_CHARS = 100
 const MIN_PROSE_CHARS = 3
 
 /**
- * Whether an article region only names the page: its headings hold fewer than HEADINGS_ONLY_MAX_CHARS characters and it
- * has fewer than MIN_PROSE_CHARS beside them, in-page jump links ("Skip to Filters") and scripts set aside. Such a region
+ * Whether an article region only names the page: its headings hold fewer than HEADINGS_ONLY_MAX_CHARS characters, it
+ * has fewer than MIN_PROSE_CHARS beside them, in-page jump links ("Skip to Filters") and scripts set aside, and no image
+ * beside them that the Markdown carries (a chart or a gallery under its title is content; a canvas, a video or an iframe
+ * leaves nothing in the Markdown, so it is not). Such a region
  * is not the page's content, and the page escalates as one with none found (ROADMAP PA item 4: a vendor page whose list
  * had not loaded answered `success` with "Don't see the Tesla you're looking for?"). Asked only of the article cascade's
  * region: a list, table or product region is short or heading-led by design (cards named by headings, a terse buy box).
@@ -352,6 +354,7 @@ export function headingsOnly(region: Element): boolean {
       const tag = el.tagName.toLowerCase()
       if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue
       if (tag === 'a' && (el.getAttribute('href') ?? '').startsWith('#')) continue
+      if (!inHeading && tag === 'img' && (el.getAttribute('src') ?? '').trim() !== '') return false
       stack.push({ node: el, inHeading: inHeading || isHeading(el) })
     }
   }
