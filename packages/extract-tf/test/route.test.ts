@@ -374,6 +374,8 @@ describe('routePage', () => {
       expect(route(category(ownList(names, 'You may also like'))).type).toBe('product')
       expect(route(category(ownList(names.slice(0, 2)), 2)).type).toBe('product')
       expect(route(category(ownList(names.slice(0, 2)) + ownList(names.slice(2, 6), 'Customers also bought'), 6)).type).toBe('product')
+      // A page titled by an h2, with no h1 to have a price of its own under.
+      expect(route(wrap(`<main><h2>Men's shirts</h2><p>Showing 8 of 282 products</p>${grid(8)}</main>`, ownList(names)))).toEqual({ type: 'collection', strategy: 'article' })
     })
 
     it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
@@ -387,6 +389,11 @@ describe('routePage', () => {
         expect(routePage(doc.document).type, top).toBe('product')
         doc.close()
       }
+      // A listed product without a name names no card the price could be in.
+      const unnamed = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', position: 1, item: { '@type': 'Product' } }, ...itemList(names.slice(0, 3)).itemListElement] })}</script>`
+      const doc = parse(wrap(`<main><h1>Cobalt teapot</h1><div class="buy"><span class="price">$84.00</span></div><p>Hand-thrown stoneware.</p>${grid(3)}</main>`, unnamed))
+      expect(routePage(doc.document).type).toBe('product')
+      doc.close()
     })
 
     it('keeps product pages beside cards that share a class with them, or that show their price first, product pages', () => {

@@ -15,7 +15,7 @@ import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFac
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { linkTarget } from './markdown.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
-import { detectRenderSignals, hydrationShown, rawSignals } from './render.js'
+import { detectRenderSignals, hasLoadingText, hydrationShown, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { selectMain } from './main.js'
@@ -307,6 +307,7 @@ export class ExtractTf implements Extractor {
         hydrationShown: dataShown,
         contentShown: showsDeclaredProduct(main, product),
         listing: decision.type === 'listing' || decision.type === 'collection',
+        loadingShown: main !== null && hasLoadingText(main),
       }),
       labelledValues: main ? collectLabelledValues(main) : [],
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },

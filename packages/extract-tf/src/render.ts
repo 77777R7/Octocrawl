@@ -32,9 +32,11 @@ export interface RawRenderSignals {
 const APP_ROOT_SELECTOR = '#root, #app, #__next, #__nuxt, #___gatsby, [data-reactroot], [ng-app], [ng-version], [data-server-rendered]'
 // Not `no-js`: Modernizr puts it on <html> of every page that uses it.
 const JS_FALLBACK_CLASS = /(^|[\s_-])(hide-if-js|hide-if-js-enabled|js-disabled|js-only|requires-js|needs-js)([\s_-]|$)/i
-// State a page's scripts render from: `window.__STATE__ =`, `window.__INITIAL_DATA =`, and the same names in lower or
-// camel case (`window.__data =`, the World Bank's data pages; `window._appState =`).
-const HYDRATION_SCRIPT = /window\.__[A-Za-z0-9_]+__\s*=|window\._[A-Za-z0-9_]*(?:STATE|CONFIG|DATA|[Ss]tate|[Cc]onfig|[Dd]ata)\s*=|__NEXT_DATA__|__NUXT__/
+// State a page's scripts render from: `window.__STATE__ =`, `window._INITIAL_DATA =`, and a bare lower-case data or
+// state object (`window.__data =`, the World Bank's indicator pages). Longer lower- and camel-case names are not read:
+// they name a router's or an analytics tag's own data on pages whose content is all there (Substack's
+// `window.__staticRouterHydrationData`, Chartbeat's `window._sf_async_config`).
+const HYDRATION_SCRIPT = /window\.__[A-Za-z0-9_]+__\s*=|window\._[A-Za-z0-9_]*(?:STATE|CONFIG|DATA)\s*=|window\.__(?:data|state)\s*=|__NEXT_DATA__|__NUXT__/
 const APP_ROOT_MAX_TEXT = 200
 const HYDRATION_MIN_CHARS = 2_000
 /**
@@ -197,10 +199,12 @@ export function rawSignals(doc: Document): RawRenderSignals {
 
 /**
  * The messages by which a page says its data is still on the way, read as the browser lane reads them (LOADING_PROBE
- * in the bench's browserSettle): an element's whole text that is or ends in a loading message ("Loading...", "Fetching
- * results…", "Please wait"), not a button's or a link's.
+ * in the bench's browserSettle) but only in the forms that say so outright: an element's whole text that is or ends in
+ * a loading message with its ellipsis ("Loading...", "Fetching results…", "Quotes loading…"), or "Please wait". A bare
+ * "Loading" is as often a skeleton's label for screen readers, which the browser lane sees is not shown and this
+ * reading cannot.
  */
-const LOADING_MESSAGE = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\s+[\w-]+){0,3}\s*(?:\.{2,3}|\u2026)|loading|fetching|please wait)$/i
+const LOADING_MESSAGE = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\s+[\w-]+){0,3}\s*(?:\.{2,3}|\u2026)|please wait)$/i
 const LOADING_TRAILING = /\b(?:loading|fetching)\s*(?:\.{2,3}|\u2026)$/i
 const LOADING_TEXT_MAX_CHARS = 48
 /**
@@ -208,21 +212,26 @@ const LOADING_TEXT_MAX_CHARS = 48
  * loader left on a full page (more comments, a feed's next page) is not its data.
  */
 const LOADING_PAGE_MAX_TEXT = 4_000
+/** Classes that keep an element's text for screen readers only: `sr-only`, `visually-hidden`, `ScreenReaderOnly_srOnly…`. */
+const SCREEN_READER_ONLY = /(?:^|[\s_-])(?:sr-only|visually-?hidden|screen-?reader-(?:only|text))(?:$|[\s_-])|sronly|screenreaderonly/i
+
 /**
- * Whether the cleaned page shows a loading message (LOADING_MESSAGE) in its own text. Cleaning has already taken out
- * scripts, styles, templates, noscript and svg (an icon's title, "Loading", is not the page's).
+ * Whether a region of the cleaned page shows a loading message (LOADING_MESSAGE) in its own text: not a button's or a
+ * link's, and not inside an element no reader sees (`hidden`, `aria-hidden="true"`, a class for screen readers only).
+ * Cleaning has already taken out scripts, styles, templates, noscript and svg.
  */
-function hasLoadingText(cleaned: Document): boolean {
-  if (cleaned.body === null) return false
-  const stack: Node[] = [cleaned.body]
+export function hasLoadingText(region: Element): boolean {
+  const stack: Node[] = [region]
   while (stack.length > 0) {
     const node = stack.pop()!
     if (node.nodeType === 3) {
       const text = (node.textContent ?? '').trim()
       if (text.length === 0 || text.length > LOADING_TEXT_MAX_CHARS || !(LOADING_MESSAGE.test(text) || LOADING_TRAILING.test(text))) continue
       if (node.parentElement?.closest('button, a') == null) return true
-    } else {
-      for (const child of Array.from(node.childNodes)) stack.push(child)
+    } else if (node.nodeType === 1) {
+      const el = node as Element
+      if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || SCREEN_READER_ONLY.test(el.getAttribute('class') ?? '')) continue
+      for (const child of Array.from(el.childNodes)) stack.push(child)
     }
   }
   return false
@@ -258,6 +267,8 @@ export interface RenderContext {
    * hydration list that outnumbers the shown records the page's content.
    */
   listing?: boolean
+  /** The extracted region shows a loading message (hasLoadingText). */
+  loadingShown?: boolean
 }
 
 /**
@@ -303,9 +314,9 @@ export function detectRenderSignals(raw: RawRenderSignals, cleaned: Document, co
   // state still is: its data may arrive by a later fetch the JSON never held.
   else if (has('hydration_state') && textChars < 1_500 && raw.scriptChars > textChars * 2 && !(context.productShown === true && context.hydrationShown === true)) reason = 'hydration_shell'
   else if (has('aria_busy') && raw.scriptChars >= 1_000) reason = 'aria_busy'
-  // A short page whose sections still say "Loading..." beside its scripts: the data is theirs to fetch (WSJ's market
+  // A short page whose content still says "Loading..." beside its scripts: the data is theirs to fetch (WSJ's market
   // data, every table of which reads "Loading..." over HTTP).
-  else if (textChars <= LOADING_PAGE_MAX_TEXT && raw.scriptChars >= 1_000 && hasLoadingText(cleaned)) reason = 'loading_text'
+  else if (context.loadingShown === true && textChars <= LOADING_PAGE_MAX_TEXT && raw.scriptChars >= 1_000) reason = 'loading_text'
   const listRecords = reason === null && context.listing === true && raw.hydrationJson.length > 0 ? partialRecordList(recordLists(raw), visible.toLowerCase()) : null
   if (listRecords !== null) reason = 'hydration_list_partial'
 
