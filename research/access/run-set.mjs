@@ -6,7 +6,7 @@
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
 //          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--record research/access/runs/<date>-<label>-<commit>.md]
-//        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp>
+//        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
 //                maxAge 0 and storeInCache false (the same freshness as Octocrawl's maxAge 0; its default reuses pages up to
@@ -24,7 +24,14 @@
 //   --set frozen (the default) selects the frozen and the unstable tasks: PA's denominator. healthy,
 //   blind and candidate select that part alone; all selects every task.
 //   --rejudge re-evaluates a finished run's saved Markdown against the current predicates in
-//   tasks.v1.json, without fetching, and rewrites that run's attempts.jsonl and summary.json.
+//   tasks.v1.json, without fetching. The run's own attempts.jsonl and summary.json are never
+//   rewritten: the new verdicts go to attempts.rejudged-<time>.jsonl and summary.rejudged-<time>.json
+//   beside them. A task removed from tasks.v1.json, or whose URL changed, after the run stays in
+//   the denominator with the run's own verdict, marked as not rejudged.
+//   --record never replaces a file that exists: a committed record is not rewritten.
+//   Proxy settings are recorded as scheme, host and port only, never a user name, password, path or
+//   query; every file the runner writes is also cleared of the raw proxy values and of credentials in
+//   any URL (an error message that quotes one).
 //
 // Method:
 //   verified       the API answered `success` or `partial` and every predicate passed. Each task
@@ -64,11 +71,16 @@
 // Each answer's Markdown is saved under .w2l/access/runs/<timestamp>/pages/ (git-ignored), so the
 // predicates can be re-checked with --rejudge; the committed record holds only the fields above.
 
-import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises'
+import { readFile, writeFile as writeRaw, mkdir, appendFile as appendRaw } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// Every file the runner writes goes through scrub() (defined below, before the first write), except a page's own Markdown.
+const writeFile = (file, text) => writeRaw(file, scrub(text))
+const appendFile = (file, text) => appendRaw(file, scrub(text))
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -98,6 +110,48 @@ for (const t of rejudgeDir === undefined ? tasks : taskFile.tasks) {
   if (!t.predicates.some(isData)) throw new Error(`${t.id} has no data predicate; a status check alone cannot verify a task`)
 }
 
+if (recordFile !== undefined && existsSync(join(repo, recordFile))) throw new Error(`--record ${recordFile} exists: a record is not rewritten; name a new file`)
+
+/** A proxy setting as a record may show it: scheme, host and port, never a user name, password, path or query (a token). */
+function proxyShown(value) {
+  if (value === undefined || value === null || value === '') return { shown: null, credentials: false }
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`)
+    return { shown: `${url.protocol}//${url.host}`, credentials: url.username !== '' || url.password !== '' || url.search !== '' }
+  } catch { return { shown: 'set (not a URL, not shown)', credentials: true } }
+}
+const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']
+/**
+ * A credentialed proxy setting's secrets: the value, user:password, and a user name, password or query value of six
+ * characters or more, raw and decoded, each also as JSON writes it (a quote or backslash escaped).
+ */
+function proxySecrets(v) {
+  if (typeof v !== 'string' || v === '' || !proxyShown(v).credentials) return []
+  let url
+  try { url = new URL(v.includes('://') ? v : `http://${v}`) } catch { return [v] }
+  const decode = (x) => { try { return decodeURIComponent(x) } catch { return x } }
+  const secrets = [url.username, url.password, ...url.searchParams.values()].flatMap((x) => [x, decode(x)]).filter((x) => x.length >= 6)
+  const pairs = url.username === '' ? [] : [`${url.username}:${url.password}`, `${decode(url.username)}:${decode(url.password)}`]
+  return [v, url.href, url.search, ...pairs, ...secrets].filter((x) => x !== '').flatMap((x) => [x, JSON.stringify(x).slice(1, -1)])
+}
+// No file the runner writes may hold one of these, longest first (a rejudge adds the run's own).
+let RAW_PROXY = []
+const keepOut = (values) => { RAW_PROXY = [...new Set([...RAW_PROXY, ...values.flatMap(proxySecrets)])].sort((a, b) => b.length - a.length) }
+keepOut(PROXY_VARS.map((name) => process.env[name]))
+/** Text the runner writes, without a raw proxy value or the credentials of any URL in it. */
+function scrub(text) {
+  let out = text
+  for (const raw of RAW_PROXY) out = out.split(raw).join('[proxy]')
+  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@"'`]+@/gi, '$1***@')
+}
+const shownEnv = (env) => {
+  const named = Object.fromEntries(['HTTPS_PROXY', 'HTTP_PROXY'].map((name) => [name, proxyShown(env[name])]))
+  return {
+    proxyEnv: { HTTPS_PROXY: named.HTTPS_PROXY.shown, HTTP_PROXY: named.HTTP_PROXY.shown, NO_PROXY: env.NO_PROXY ?? null },
+    proxyCredentialsRemoved: Object.entries(named).filter(([, v]) => v.credentials).map(([name]) => name),
+  }
+}
+
 const sh = (cmd) => execSync(cmd, { cwd: repo }).toString().trim()
 const environment = {
   commit: sh('git rev-parse --short HEAD'),
@@ -105,7 +159,7 @@ const environment = {
   // runner and the task file must be in the commit the record names.
   dirty: sh('git status --porcelain --untracked-files=no') !== '' || sh('git status --porcelain --untracked-files=all -- research/access') !== '',
   proxied: Boolean(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy),
-  proxyEnv: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null },
+  ...shownEnv(process.env),
   api,
   exitIp: null,
   tasksSha256,
@@ -268,7 +322,8 @@ async function attempt(task, temperature) {
   } catch (e) { error = String(e) }
   // The time a plan's rate limit held the request back is the driver's pace, not the page's.
   const wallMs = Date.now() - started - waitedMs
-  if (typeof doc?.markdown === 'string') await writeFile(join(runDir, 'pages', `${task.id}-${temperature}.md`), doc.markdown)
+  // The page's own Markdown, as the API gave it (a rejudge reads it back): not scrubbed, which would change the site's text.
+  if (typeof doc?.markdown === 'string') await writeRaw(join(runDir, 'pages', `${task.id}-${temperature}.md`), doc.markdown)
   const results = doc === null ? [] : task.predicates.map((p) => ({ p, pass: (() => { try { return judge(p, doc) } catch { return false } })() }))
   const answered = doc !== null && (doc.status === 'success' || doc.status === 'partial')
   const verified = answered && results.every((r) => r.pass)
@@ -302,20 +357,27 @@ const rows = []
 let rejudged = null
 let priorRun = null
 const droppedRows = []
+// A rejudge's own files, beside the run's, which it never rewrites.
+const rejudgeStamp = environment.startedAt.replace(/[:.]/g, '-')
 if (rejudgeDir !== undefined) {
   // Re-check saved Markdown against the current predicates. Status, reason and timings stay as
-  // the run observed them; only the predicate verdicts are recomputed.
+  // the run observed them; only the predicate verdicts are recomputed, into new files.
   const byId = new Map(taskFile.tasks.map((t) => [t.id, t]))
+  // The run's own proxy settings are kept out of every file this rejudge writes, as the shell's are.
+  const prior = JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8'))
+  keepOut(Object.values(prior.environment.proxyEnv ?? {}))
   const old = (await readFile(linesFile, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((r) => { delete r.droppedAfterRun; return r })
   for (const row of old) {
     const task = byId.get(row.taskId)
     if (task === undefined || (row.url !== undefined && row.url !== task.url)) {
-      // The task was dropped from the file (or its id now names another URL) after this run:
-      // the row is kept in attempts.jsonl for the record but leaves every count.
-      row.droppedAfterRun = true
+      // The task was removed from the file (or its id now names another URL) after this run: it
+      // stays in the denominator with the run's own verdict, which the current predicates cannot redo.
+      row.notRejudged = task === undefined ? 'removed from tasks.v1.json after the run' : 'its URL in tasks.v1.json changed after the run'
       droppedRows.push(row)
+      rows.push(row)
       continue
     }
+    row.original = { verified: row.outcome.verified, falseSuccess: row.outcome.falseSuccess, failedPredicates: row.outcome.failedPredicates }
     row.url = task.url
     row.part = task.part
     let markdown = null
@@ -330,10 +392,12 @@ if (rejudgeDir !== undefined) {
     row.rejudgedAt = environment.startedAt
     rows.push(row)
   }
-  await writeFile(linesFile, [...rows, ...droppedRows].map((r) => JSON.stringify(r)).join('\n') + '\n')
-  const prior = JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8'))
+  await writeFile(join(runDir, `attempts.rejudged-${rejudgeStamp}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n')
   rejudged = { at: environment.startedAt, command: `node research/access/run-set.mjs ${args.join(' ')}`, commit: environment.commit, tasksSha256 }
   Object.assign(environment, prior.environment)
+  // A run recorded before proxy settings were shown this way keeps no more of them than a new one.
+  const shown = shownEnv(prior.environment.proxyEnv ?? {})
+  Object.assign(environment, shown, { proxyCredentialsRemoved: [...new Set([...(prior.environment.proxyCredentialsRemoved ?? []), ...shown.proxyCredentialsRemoved])] })
   environment.tasksSha256 = prior.environment.tasksSha256
   priorRun = prior
 }
@@ -342,7 +406,7 @@ for (const task of rejudgeDir === undefined ? tasks : []) {
     const row = await attempt(task, temperature)
     rows.push(row)
     await appendFile(linesFile, JSON.stringify(row) + '\n')
-    console.log(`${task.id} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}`)
+    console.log(scrub(`${task.id} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}`))
   }
 }
 
@@ -372,7 +436,7 @@ const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
 const command = priorRun?.command ?? `node research/access/run-set.mjs ${args.join(' ')}`
 const hasWarm = rows.some((r) => r.temperature === 'warm')
 const totals = { cold: summary('cold'), ...(hasWarm ? { warm: summary('warm') } : {}) }
-await writeFile(join(runDir, 'summary.json'), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, totals, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
+await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, totals, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
@@ -384,7 +448,7 @@ if (recordFile !== undefined) {
     `- Command: \`${command}\``,
     ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against tasks.v1.json with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
-    `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''})` : 'direct'}`,
+    `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''}${environment.proxyCredentialsRemoved.length === 0 ? '' : `; credentials and query of ${environment.proxyCredentialsRemoved.join(', ')} not recorded`})` : 'direct'}`,
     `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
     `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
@@ -399,7 +463,7 @@ if (recordFile !== undefined) {
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
-    ...(droppedRows.length === 0 ? [] : [`Dropped from the task file after this run, so outside every count above: ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')} (the reasons are in tasks.v1.json \`excluded\`).`, '']),
+    ...(droppedRows.length === 0 ? [] : [`Not rejudged, counted above with the run's own verdict (removed from the task file, or its URL changed, after this run; a reason, where given, is in tasks.v1.json \`excluded\`): ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')}.`, '']),
   ].join('\n')
   await mkdir(dirname(join(repo, recordFile)), { recursive: true })
   await writeFile(join(repo, recordFile), md)
