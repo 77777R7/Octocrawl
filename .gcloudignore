@@ -21,6 +21,7 @@ LICENSE
 research/*
 !research/amazon-product-schema.v1.json
 *.md
+!CHANGELOG.md
 !apps/public-web/content/*.md
 *.py
 *.tgz
