@@ -34,8 +34,12 @@ ROADMAP PA item 9 and the bar decided on 2026-10-09: on item 1's frozen set, Oct
 
 The difference sits almost wholly on sites with bot defences: on the healthy controls Octocrawl verified as many as either competitor or more. The suspected causes (the data-centre exit Octocrawl's arms used, against providers' proxy networks; the browser's fingerprint; challenges Octocrawl does not solve) are not isolated by this run: each arm changes several things at once.
 
+## A residential exit (same day)
+
+The best arm run again on the 35 tasks only Firecrawl verified, with the exit alone changed to a rotating US residential gateway ([record](2026-10-09-pa9-w1-octocrawl-best-residential-094c6d6.md)): 8 verified, 6 of them frozen, so 12 of 50 frozen tasks against Firecrawl's 35. Of the 27 still not verified, 16 were blocked with a clean residential IP (`bot_detected_generic` 8, `cloudflare_challenge` 6) and 5 answered `success` with a failing predicate.
+
 ## Owed
 
 - A second window on another day, as for every PA set.
 - ZenRows' credit total from its dashboard.
-- Isolating the gap: Octocrawl's best route through a residential exit on the 35 tasks, and with a provider route once PA item 4 exists.
+- Isolating the rest of the gap: browser fingerprint and challenge handling (a provider route once PA item 4 exists, and the enhanced browser on these tasks), and the 5 tasks read wrong.
