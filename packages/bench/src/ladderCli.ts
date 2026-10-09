@@ -52,6 +52,7 @@ import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
 import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
+import { scrubSecret } from './vendors/api.js'
 import { BROWSERBASE_MIN_SESSION_MS, browserbaseOps } from './vendors/browserbase.js'
 import { STEEL_MIN_SESSION_MS, steelOps } from './vendors/steel.js'
 import type { VendorResumeContext } from './vendors/transport.js'
@@ -479,15 +480,33 @@ export function buildChannels(
         // session; if the context is created (or the saved one restored)
         // after that, the session the gate cleared was not the session on
         // offer.
-        if (sessionApplies && session!.resume !== undefined && session!.resume !== null) {
-          // A saved resume exists: skip first-use ensurePersistence entirely
-          // and restore the saved context/profile into the FIRST session.
-          pendingResume = session!.resume as VendorResumeContext
-          persistenceAttempted = true
-        } else {
-          await preparePersistence(execution)
+        const start = Date.now()
+        let vendor: Awaited<ReturnType<typeof connectVendor>>
+        try {
+          if (sessionApplies && session!.resume !== undefined && session!.resume !== null) {
+            // A saved resume exists: skip first-use ensurePersistence entirely
+            // and restore the saved context/profile into the FIRST session.
+            pendingResume = session!.resume as VendorResumeContext
+            persistenceAttempted = true
+          } else {
+            await preparePersistence(execution)
+          }
+          vendor = tariff !== null ? await connectOwn(execution) : await ensureConnected(execution)
+        } catch (err) {
+          // A cancelled or timed-out call stays the ladder's to report. Any other failure to open the vendor's
+          // session (its session API down, or hung past the vendor API's 30 s cap) is the provider's failure, as one
+          // during the fetch is: it escaped the rung before, and the API answered 500 with no record of the page or
+          // the call (ROADMAP PA item 4: the Steel runs' 500s at about 32 s).
+          if (execution?.signal?.aborted === true || (execution?.deadlineAt !== undefined && Date.now() >= execution.deadlineAt)) throw err
+          const { providerFailure } = await import('./subjects/provider.js')
+          const wallMs = Date.now() - start
+          const message = ops.secrets.reduce((m, secret) => scrubSecret(m, secret), err instanceof Error ? err.message : String(err)).slice(0, 200)
+          return providerFailure(url, wallMs, [
+            { at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: vendorId } },
+            { at: wallMs, lane: 'provider', event: 'provider_failed', detail: { error: message } },
+          ], err, false)
         }
-        const { declaration, transport } = tariff !== null ? await connectOwn(execution) : await ensureConnected(execution)
+        const { declaration, transport } = vendor
         try {
           if (pendingResume !== null) {
             transport.useResumedSession(pendingResume)
