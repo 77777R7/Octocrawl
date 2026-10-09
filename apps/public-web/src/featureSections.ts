@@ -250,7 +250,7 @@ export function startMarkup(bar: string): string {
       <div class="band">
         <div class="frame start-wrap">
           <div class="start-head">
-            <pre class="glyph-cloud" data-cols="150" data-rows="30" data-seed="11" aria-hidden="true">${glyphCloud(150, 30, 11)}</pre>
+            <pre class="glyph-cloud" data-cols="150" data-rows="30" data-seed="11" data-weather aria-hidden="true">${glyphCloud(150, 30, 11)}</pre>
             <p class="section-kicker"><span class="kicker-square"></span> GET STARTED</p>
             <h2 id="start-title">One line in,<br />clean pages <em>out.</em></h2>
             <p class="start-lead">Use Octocrawl from your terminal, your code or your AI agent. Pick the one that fits how you work.</p>

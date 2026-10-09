@@ -25,7 +25,8 @@ import { crabAlarmed, linkCells, readState, SHOAL, shoalSlots } from './seaLife'
  * near it and it raises its claws, \(\/)/, and the octopus gives it a wide berth: it is the site's robots.txt. Now
  * and then a shoal of fish swims through in a chevron, and the octopus, if it is free, maps it: it keeps still and
  * reaches out, dotted lines run from its arm to each fish, and it reads them one by one (each flashes #), which is
- * what a crawl does; then the shoal swims on.
+ * what a crawl does; then the shoal swims on. Swimming, it leaves a wake in the glyph cloud behind (glyphRipple.ts),
+ * and the cloud's weather keeps calm while it does something that draws the eye (waving, blowing bubbles, a fish or a shoal).
  *
  * Everything sits on a grid, so everything moves a cell at a time. It runs only while on screen and the visitor
  * allows motion; otherwise one still frame shows it resting. */
@@ -155,6 +156,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
   let last = 0
   let raf = 0
   let lastStroke = -1
+  let lastWake = 0
   // Where the pointer is, when it last moved, how fast it has been moving (css px per second), and until when a
   // click or a touch has made the octopus calm rather than shy.
   const pointer = { x: -1e4, y: -1e4, at: -1e9, speed: 0, calm: 0 }
@@ -292,6 +294,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
   const stay = () => { [octo.tx, octo.ty] = fit(octo.x + octo.vx / 1.3, octo.y + octo.vy / 1.3) }
   const begin = (kind: Kind, now: number) => {
     act.kind = kind
+    // The cloud behind (glyphRipple.ts) keeps its weather calm while the octopus does something that draws the eye.
+    head.dataset.octopus = kind
     act.since = now
     act.at = 0
     octo.eager = false
@@ -627,6 +631,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     octo.x = nx
     octo.y = ny
+    // Swimming, it leaves a wake in the cloud behind (glyphRipple.ts).
+    if (Math.hypot(octo.vx, octo.vy) > 25 && now - lastWake > 110) {
+      lastWake = now
+      head.dispatchEvent(new CustomEvent('octopus:wake', { detail: { x: octo.x, y: octo.y + 0.6 * R } }))
+    }
 
     for (const list of [bubbles, ink]) {
       for (let i = list.length - 1; i >= 0; i--) {
