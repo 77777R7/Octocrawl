@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The docs have a Use your own Chrome guide (`/docs/guides/own-chrome/`): the `my-browser` lane, handoff and saved logins side by side, what to click in Chrome, a real read of a signed-in page from 2026-10-09 (and the first try that timed out), what Octocrawl never does, and what each unfinished result means. The top navigation's Your own Chrome entry leads to it instead of the home page, and the reference names 0.3.2 as the published SDK and Python client.
+
 ## 0.3.2 — 2026-10-09
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.3.2: everything below since 0.3.1 on 2026-10-06, among it the `my-browser` lane (`--lane my-browser`, `"access": "my-browser"`), lists continued in the person's Chrome, and the package pages pointing at octocrawl.dev.
