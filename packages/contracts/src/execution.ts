@@ -40,6 +40,37 @@ export interface ExecutionContext {
    * page once. Absent: the list starts from its first page.
    */
   listResume?: { pages: readonly ListPageRead[] }
+  /**
+   * The run's spend ledger (ROADMAP PA item 4): a rung that costs a third party reserves its price ceiling here before
+   * its call and settles after, so a run's concurrent pages, retries and providers share one cap and none overruns it.
+   * Absent: nothing is reserved, as before (a run with no third-party rung).
+   */
+  spend?: SpendLedger
+}
+
+/**
+ * A spend ledger: the cap a run (or one page of it) may spend on third parties, what is settled and what is reserved.
+ * A paid call reserves its price ceiling first and is not made when the ceiling does not fit.
+ */
+export interface SpendLedger {
+  /** Reserve `ceilingUsd` against this ledger's cap and every enclosing one; null when it does not fit. */
+  reserve(ceilingUsd: number): SpendReservation | null
+  /** A ledger over the same totals whose own reservations are also capped at `capUsd` (one page's `perRequestUsd`); null: no cap of its own. */
+  child(capUsd: number | null): SpendLedger
+  /** Spend settled so far, in US dollars: each call at its reported price, or at its ceiling when none was reported. */
+  readonly settledUsd: number
+  /** Ceilings reserved by calls not yet settled. */
+  readonly reservedUsd: number
+  /** The cap; null: none. */
+  readonly capUsd: number | null
+}
+
+/** One reserved call. */
+export interface SpendReservation {
+  /** The call was made: settle at the price the provider reported, or at the ceiling when it reported none. Returns what was charged. */
+  settle(reportedUsd: number | null): number
+  /** The call was not made: give the reservation back. */
+  release(): void
 }
 
 /** One page a paginate step read: what `onListPage` tells and `listResume` gives back. */

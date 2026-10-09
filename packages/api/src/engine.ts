@@ -112,7 +112,7 @@ import {
   cacheStateOf,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
+import { createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
@@ -591,8 +591,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const grantedBudget = (budget: Task['budget']): Task['budget'] => {
     const cap = accessGrant?.budget.perRunUsd ?? null
-    if (cap === null) return budget
-    return { ...budget, maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }
+    const perPage = accessGrant?.budget.perRequestUsd ?? null
+    return {
+      ...budget,
+      ...(cap === null ? {} : { maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }),
+      // One page's own cap within the run's (ROADMAP PA item 4).
+      ...(perPage === null ? {} : { maxCostPerPageUsd: perPage }),
+    }
   }
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
@@ -841,7 +846,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1742,9 +1747,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // Its JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline: the person's time is theirs.
         return deliver(full, createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }), true)
       }
+      // A scrape's paid calls are held to the grant's per-request cap, else its run cap (ROADMAP PA item 4).
+      const scrapeCap = accessGrant?.budget.perRequestUsd ?? accessGrant?.budget.perRunUsd ?? null
+      const scrapeSpend = scrapeCap === null ? undefined : createSpendLedger(scrapeCap)
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
-        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
+        ? await runner.run(req.url, undefined, scrapeSpend === undefined ? scope : { ...scope, spend: scrapeSpend }, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
           .then(async (fetched) => ({ ...fetched, result: afterFetch(plan, answer, await withEgressExit(fetched.result, scrapeEgress, scope)) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.
@@ -1762,7 +1770,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const full: ScrapeRun = {
         ...result,
         // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
-        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd },
+        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd, ...(run.result.usage.externalCostChargedUsd === undefined ? {} : { externalCostChargedUsd: run.result.usage.externalCostChargedUsd }) },
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
         summary,

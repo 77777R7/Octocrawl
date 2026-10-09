@@ -780,6 +780,46 @@ describe('CrawlOrchestrator task options, budget and politeness', () => {
     expect(new Set((await store.listSteps(first.taskId)).map((step) => step.canonicalUrl)).size).toBe(2)
   })
 
+  it('keeps the spend cap per task: a paid call of a page the shutdown cut still counts on resume (ROADMAP PA item 4)', async () => {
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]])
+    const shutdown = new AbortController()
+    // Every page makes one paid call charged at its $1 ceiling; the first run is shut down right after page A's call.
+    const paying = (cutAfter: string | null) => {
+      const paid: string[] = []
+      const atom: ScrapeAtom = {
+        async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+          const reservation = context?.spend?.reserve(1)
+          if (reservation === null || reservation === undefined) throw new Error(`no room for the paid call of ${url}`)
+          reservation.settle(null)
+          paid.push(url)
+          if (url === cutAfter) {
+            shutdown.abort(new DOMException('service shutdown', 'ShutdownError'))
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          }
+          // As the ladder answers a paid call: the ledger's charge on the page's usage.
+          const page = pages.get(url)!
+          return { ...page, result: { ...page.result, usage: { ...page.result.usage, externalCostChargedUsd: 1 } } }
+        },
+        async close(): Promise<void> {},
+      }
+      return { atom, paid }
+    }
+    const store = new MemoryTaskStore()
+    const budget = { ...DEFAULT_CRAWL_BUDGET, maxCostUsd: 3 }
+    const first = paying(ITEM_A)
+    const firstReport = await new CrawlOrchestrator({ store, atom: first.atom, clock: new FakeClock(), workerCount: 1, shutdownSignal: shutdown.signal }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', budget })
+    expect(firstReport.status).toBe('paused')
+    expect(first.paid).toEqual([SEED, ITEM_A])
+    // Page A was never written, but its call was paid: the attempt keeps both charges.
+    expect((await store.listAttempts(firstReport.taskId)).map((attempt) => attempt.chargedUsd)).toEqual([2])
+    // The resume, under the task's budget as the engine passes it, opens its ledger at $2 of the $3: the refetched seed
+    // fills it, and page A is not paid for again.
+    const resumed = paying(null)
+    const resumeReport = await new CrawlOrchestrator({ store, atom: resumed.atom, clock: new FakeClock(), workerCount: 1 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', budget, resumeFrom: firstReport.taskId })
+    expect(resumed.paid).toEqual([SEED])
+    expect(resumeReport.budgetExceeded).toBe('cost')
+  })
+
   it('resumes with the depth and host limits the task was started with', async () => {
     const OTHER = 'https://other.test/page'
     const DEEP = 'https://fixture.test/deep'

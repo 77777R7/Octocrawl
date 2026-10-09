@@ -45,6 +45,11 @@ export interface CrawlBudget {
   maxWallMs: number | null
   maxCostUsd: number | null
   maxTokens: number | null
+  /**
+   * What one page may spend on third parties (an access grant's `perRequestUsd`, ROADMAP PA item 4): its own cap
+   * within the run's, held by the run's spend ledger. Absent or null: none of its own.
+   */
+  maxCostPerPageUsd?: number | null
 }
 
 export const DEFAULT_CRAWL_BUDGET: CrawlBudget = {
@@ -155,6 +160,11 @@ export interface Attempt {
   recoveredFromAttemptId?: string | null
   /** What this attempt's pages offered the frontier and what became of it, written after every page of a crawl; absent for a batch and for an attempt stored before it was kept. */
   discovery?: CrawlDiscovery | null
+  /**
+   * What the spend ledger charged this attempt's paid calls (ROADMAP PA item 4): a resumed or appended run of the task
+   * opens its ledger with every earlier attempt's charge, so its cap is the task's, not each run's. Absent: none.
+   */
+  chargedUsd?: number | null
 }
 
 /**

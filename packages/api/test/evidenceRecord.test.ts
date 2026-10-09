@@ -329,7 +329,7 @@ describe('Evidence Record: provider lane', () => {
     }
     const subject = new ProviderSubject({ id: 'fixture', declaredUserAgent: VENDOR_UA, capabilities: ['headless_browser'], honoursCallerUserAgent: false }, transport, 'research', null, robotsFetcherVia())
     const channel: Channel = {
-      id: 'provider', vendorId: 'fixture', identity: identityForRoute('research', { resume: true }),
+      id: 'provider', vendorId: 'fixture', priceCeilingUsd: 0, identity: identityForRoute('research', { resume: true }),
       fetch: (url, _session, execution, options) => subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options),
     }
     provider = engineWith({ channelsFor: () => [channel] })

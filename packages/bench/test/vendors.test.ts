@@ -3,8 +3,8 @@ import { evaluateProviderGate, evaluateVendorPolicy, verifyLedger } from '@w2l/h
 import { ProviderSubject, type RobotsFetcher } from '../src/subjects/provider.js'
 import { scrubSecret, type VendorApi, type VendorApiRequest, type VendorApiResponse } from '../src/vendors/api.js'
 import type { CdpBrowser, CdpConnector, CdpContext, CdpPage, CdpResponse } from '../src/vendors/cdp.js'
-import { browserbaseOps } from '../src/vendors/browserbase.js'
-import { steelOps } from '../src/vendors/steel.js'
+import { browserbaseOps, browserbaseSessionBody } from '../src/vendors/browserbase.js'
+import { steelOps, steelSessionBody } from '../src/vendors/steel.js'
 import { CdpVendorTransport } from '../src/vendors/transport.js'
 import { connectVendor } from '../src/vendors/connect.js'
 
@@ -724,5 +724,21 @@ describe('vendor first-use persistence', () => {
     // And the body that created it must have asked Steel to persist.
     const body = withProfile.requests[0]!.body as Record<string, unknown>
     expect(body.persistProfile).toBe(true)
+  })
+})
+
+describe('a provider session under a tariff (ROADMAP PA item 4)', () => {
+  const decision = evaluateVendorPolicy([{ capability: 'headless_browser', vendorDefaultOn: true, enableKey: null }], {})
+  it('asks Browserbase to end the session at maxSessionMs (60 s at least), with its proxies off and no keep-alive', () => {
+    expect(browserbaseSessionBody(decision, undefined, null, 90_000)).toMatchObject({ timeout: 90, proxies: false, keepAlive: false })
+    expect(browserbaseSessionBody(decision, undefined, null, 20_000)).toMatchObject({ timeout: 60 })
+    // Without a tariff the body is what it was: the project's defaults.
+    expect(browserbaseSessionBody(decision, undefined, null)).not.toHaveProperty('timeout')
+  })
+
+  it('asks Steel to end the session at maxSessionMs (15 s at least), with no proxy', () => {
+    expect(steelSessionBody(decision, null, 120_000)).toMatchObject({ timeout: 120_000, useProxy: false })
+    expect(steelSessionBody(decision, null, 5_000)).toMatchObject({ timeout: 15_000 })
+    expect(steelSessionBody(decision, null)).not.toHaveProperty('timeout')
   })
 })

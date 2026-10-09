@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createSpendLedger } from '@w2l/http-core'
 import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
@@ -82,6 +83,8 @@ function channel(
   return {
     id,
     vendorId,
+    // A provider fixture is free: a known ceiling of 0 (ROADMAP PA item 4 calls no provider without one).
+    ...(vendorId === undefined ? {} : { priceCeilingUsd: 0 }),
     identity,
     calls,
     async fetch(url: string): Promise<FetchResult> {
@@ -380,7 +383,7 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
   it('numbers each attempt and says when its rung was asked and answered, and which vendor a provider rung was', async () => {
     const url = 'https://example.com/p'
     const browser = channel('browser_local', [{ ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }])
-    const vendor = { ...channel('provider', [contentfulResult(url, 'browser_local')]), vendorId: 'steel' }
+    const vendor = { ...channel('provider', [contentfulResult(url, 'browser_local')]), vendorId: 'steel', priceCeilingUsd: 0 }
     const run = await new LadderRunner([channel('http', [thinHttpSuccess(url)]), browser, vendor], { mode: 'research' }).run(url)
     const attempts = run.summary.attempts
     expect(attempts.map((a) => [a.channel, a.ordinal, a.vendorId])).toEqual([['http', 1, undefined], ['browser_local', 2, undefined]])
@@ -723,6 +726,7 @@ describe('LadderRunner — an answer without content', () => {
     const hanging: Channel = {
       id: 'provider',
       vendorId: 'steel',
+      priceCeilingUsd: 0,
       identity: COHERENT,
       fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
     }
@@ -1224,6 +1228,7 @@ describe('LadderRunner — third-party cost of a run', () => {
   const hanging = (id: string, vendorId?: string): Channel => ({
     id,
     vendorId,
+    ...(vendorId === undefined ? {} : { priceCeilingUsd: 0 }),
     identity: COHERENT,
     fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
   })
@@ -1246,5 +1251,81 @@ describe('LadderRunner — third-party cost of a run', () => {
     const kept = await new LadderRunner([channel('http', [free(thin())]), channel('provider', [unpriced(providerErrorResult(url, 'steel'))], 'steel')], { mode: 'authed' }).run(url)
     expect(kept.result.lane).toBe('http')
     expect(kept.result.usage.externalCostUsd).toBeNull()
+  })
+})
+
+describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', () => {
+  const url = 'https://example.com/p'
+  const blockedHttp = () => channel('http', [blockedResult(url, 'cloudflare_challenge')])
+  const priced = (ceiling: number | null, responses: FetchResult[]) => ({ ...channel('provider', responses, 'steel'), priceCeilingUsd: ceiling })
+
+  it('reserves the ceiling before the call and settles at it when the provider reported no price, and the result says so', async () => {
+    const ledger = createSpendLedger(1)
+    const run = await new LadderRunner([blockedHttp(), priced(0.3, [contentfulResult(url, 'provider')])], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider', usage: { externalCostUsd: null, externalCostChargedUsd: 0.3 } })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: { vendorId: 'steel', ceilingUsd: 0.3, chargedUsd: 0.3, basis: 'ceiling' } }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    expect(ledger.reservedUsd).toBe(0)
+  })
+
+  it('settles at the price the provider reported', async () => {
+    const ledger = createSpendLedger(1)
+    const reported = { ...contentfulResult(url, 'provider'), usage: { ...contentfulResult(url, 'provider').usage, externalCostUsd: 0.12 } }
+    const run = await new LadderRunner([blockedHttp(), priced(0.3, [reported])], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.summary.attempts.at(-1)!.result.usage).toMatchObject({ externalCostUsd: 0.12, externalCostChargedUsd: 0.12 })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: expect.objectContaining({ chargedUsd: 0.12, basis: 'reported' }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.12)
+  })
+
+  it('does not call a provider whose ceiling does not fit what is left, nor one with no ceiling, and says why', async () => {
+    const dear = priced(0.3, [contentfulResult(url, 'provider')])
+    const tight = await new LadderRunner([blockedHttp(), dear], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(0.2) })
+    expect(dear.calls).toEqual([])
+    expect(tight.result.lane).toBe('http')
+    expect(tight.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'steel', reason: expect.stringContaining('budget'), ceilingUsd: 0.3, capUsd: 0.2 }) }))
+    const unpriced = priced(null, [contentfulResult(url, 'provider')])
+    const none = await new LadderRunner([blockedHttp(), unpriced], ALLOWED_ALL).run(url)
+    expect(unpriced.calls).toEqual([])
+    expect(none.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'steel', reason: expect.stringContaining('no price ceiling') }) }))
+  })
+
+  it('puts on the answer what the ledger charged the whole run, a provider that failed before it included', async () => {
+    const ledger = createSpendLedger(1)
+    const failing = { ...channel('provider', [providerErrorResult(url, 'browserbase')], 'browserbase'), priceCeilingUsd: 0.05 }
+    const winning = priced(0.03, [contentfulResult(url, 'provider')])
+    const run = await new LadderRunner([blockedHttp(), failing, winning], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.result.lane).toBe('provider')
+    expect(run.result.usage.externalCostChargedUsd).toBeCloseTo(0.08)
+    expect(ledger.settledUsd).toBeCloseTo(0.08)
+  })
+
+  it('charges a call the deadline cut at its ceiling, and says so on the answer', async () => {
+    const ledger = createSpendLedger(1)
+    const hangingProvider: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner([blockedHttp(), hangingProvider], ALLOWED_ALL).run(url, undefined, { spend: ledger, deadlineAt: Date.now() + 150 })
+    expect(cut.result.usage).toMatchObject({ deadlineExceeded: true, externalCostChargedUsd: 0.3 })
+    expect(cut.ladderTrace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: expect.objectContaining({ vendorId: 'steel', chargedUsd: 0.3, basis: 'ceiling', ended: 'without_an_answer' }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+  })
+
+  it('does not retry after a handoff when the retry\'s ceiling does not fit the budget', async () => {
+    const ledger = createSpendLedger(0.5)
+    const handoffRequest: HandoffRequest = { reason: 'captcha_required', liveViewUrl: 'https://live.example/session', rationale: 'a captcha the provider could not clear' }
+    const vendor = priced(0.3, [{ ...blockedResult(url, 'captcha'), handoff: handoffRequest }, contentfulResult(url, 'provider')])
+    const handoff: HumanHandoff = { async takeOver() { return { domain: 'example.com', attestedBy: 'test', attestedAt: new Date().toISOString(), vendor: 'steel', cookies: [] } } }
+    const run = await new LadderRunner([vendor], ALLOWED_ALL, null, handoff).run(url, undefined, { spend: ledger })
+    // The first call took 0.3 of 0.5: the retry's 0.3 does not fit, so it is not made.
+    expect(vendor.calls).toHaveLength(1)
+    expect(run.result.status).not.toBe('success')
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_handoff_retry_failed', detail: expect.objectContaining({ reason: expect.stringContaining('not called') }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+  })
+
+    it('charges a call that threw at its ceiling: its session may have billed', async () => {
+    const ledger = createSpendLedger(1)
+    const throwing: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: async () => { throw new Error('session dropped') } }
+    await expect(new LadderRunner([blockedHttp(), throwing], ALLOWED_ALL).run(url, undefined, { spend: ledger })).rejects.toThrow('session dropped')
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    expect(ledger.reservedUsd).toBe(0)
   })
 })
