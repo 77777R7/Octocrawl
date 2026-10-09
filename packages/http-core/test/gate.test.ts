@@ -388,6 +388,49 @@ describe('classifyGate — generic bot gate thresholds', () => {
   })
 })
 
+describe('classifyGate — a short page that refuses automated visitors (ROADMAP PA item 4)', () => {
+  // Shapes of two 200 answers read as content in the PA 4 Steel runs: Autotrader's Akamai page and Nordstrom's wall,
+  // whose copy sits past 120 KB of scripts.
+  const akamai = `<!doctype html><html><head><title>Autotrader - page unavailable</title></head><body><div class="wrap">
+<img src="/akamai-block/block-images/error-message-icon.png" alt=""><h1>We're sorry for any inconvenience, but the site is currently unavailable.</h1>
+<p>Please <a href="#">contact our support team</a> for help.</p><p><b>Thank you!</b> Our engineers will investigate your issue.</p>
+<div id="incidentId"><p><span>Incident Number: 18.90ac3017.1791543951.f255f62e</span></p></div></div></body></html>`
+  const accessDenied = '<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY><H1>Access Denied</H1>You don\'t have permission to access "http&#58;&#47;&#47;www&#46;example&#46;com&#47;" on this server.<P>Reference&#32;&#35;18&#46;2f1d3e17&#46;1791543951&#46;6a0b2c</BODY></HTML>'
+  const wall = `<!doctype html><html><head><title>Nordstrom</title><script>${'window.__data = "x";'.repeat(6000)}</script></head><body>
+<header><a href="/"><svg viewBox="0 0 10 10"><path d="M0 0h10v10z"></path></svg></a></header>
+<main><h1 class="header">We've noticed some unusual activity</h1><p class="copy">If you are an individual customer, and you believe this is a mistake, contact our Customer Service.</p>
+<p>To keep our site secure, we don’t allow unidentified, automated traffic. If you’d like access to our data via automation, apply to join our affiliate network!</p></main>
+<footer>© 2026 Example, Inc.</footer></body></html>`
+
+  it('names an Akamai refusal by its reference number on a short page, read as content or not', () => {
+    for (const contentful of [true, false]) {
+      expect(classifyGate(res({ body: akamai, contentful }))).toEqual({ reason: 'bot_detected_generic', signals: ['akamai_reference', 'short_page'] })
+    }
+    expect(classifyGate(res({ body: accessDenied, contentful: true }))?.signals).toContain('akamai_reference')
+  })
+
+  it('names a wall whose heading reports unusual activity and whose copy refuses automated traffic, past the head it reads', () => {
+    expect(wall.indexOf('unusual activity')).toBeGreaterThan(65_536)
+    for (const contentful of [true, false]) {
+      expect(classifyGate(res({ body: wall, contentful }))).toEqual({ reason: 'bot_detected_generic', signals: ['heading_unusual_activity', 'text_automated_traffic', 'short_page'] })
+    }
+  })
+
+  it('leaves long pages, and short ones with half the evidence, to the rest of the classifier', () => {
+    const long = (inner: string) => `<html><body><article>${inner}${'<p>A long article goes on about traffic, security and the web at length, paragraph after paragraph.</p>'.repeat(30)}</article></body></html>`
+    // An article about bot walls quotes both the heading and the copy, and an Akamai reference.
+    expect(classifyGate(res({ body: long('<h2>We have noticed some unusual activity</h2><p>Sites refuse automated traffic.</p><p>Reference #18.2f1d3e17.1791543951.6a0b2c</p>'), contentful: true }))).toBeNull()
+    // A short notice about unusual activity on an account, with no word on automation.
+    expect(classifyGate(res({ body: '<html><body><h1>Unusual activity on your account</h1><p>We sent a code to your phone to confirm it is you.</p></body></html>', contentful: true }))).toBeNull()
+    // A short page that speaks of automated traffic without reporting unusual activity.
+    expect(classifyGate(res({ body: '<html><body><h1>Data API</h1><p>Automated traffic is welcome through our API: see the API reference and ask for a key.</p></body></html>', contentful: true }))).toBeNull()
+    // Entities past Unicode's range do not break the reading.
+    expect(classifyGate(res({ body: '<html><body><h1>Unusual activity</h1><p>&#99999999; &#x110000; no automation here</p></body></html>', contentful: true }))).toBeNull()
+    // A short page with a dotted number that is not a reference.
+    expect(classifyGate(res({ body: '<html><body><h1>Release notes</h1><p>Version 18.90ac3017.1791543951.f255f62e is out.</p></body></html>', contentful: true }))).toBeNull()
+  })
+})
+
 describe('classifyGate — negatives that must stay negative', () => {
   it('returns null for a bare 403 with no gate evidence', () => {
     // The whole honesty rule in one test: 403 alone is indistinguishable from

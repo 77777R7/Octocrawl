@@ -330,6 +330,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   const px = perimeterXChallenge(head, lower)
   if (px !== null) return { reason: 'captcha', signals: px }
 
+  // A short page that is only a refusal of automated visitors, read past the head: such walls often sit behind
+  // a page's worth of scripts (ROADMAP PA item 4).
+  const wall = shortWallPage(res.body)
+  if (wall !== null) return { reason: 'bot_detected_generic', signals: wall }
+
   if (contentful) return null
 
   // --- interactive captcha widget ----------------------------------------
@@ -390,6 +395,48 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   }
 
   return null
+}
+
+/** A page with no more visible text than this may be nothing but a refusal; any longer page is read for its content. */
+const WALL_PAGE_MAX_TEXT = 1_500
+/** Akamai's reference to a refused request, as its pages print it: "Reference #18.2f1d3e17.1791543951.6a0b2c", "Incident Number: 18.…". */
+const AKAMAI_REFERENCE = /\b(?:reference|incident)\b\s*(?:number|id|no\.?)?\s*[:#]?\s*#?\s*\d{1,3}\.[0-9a-f]{6,8}\.\d{10}\.[0-9a-f]{6,12}\b/i
+const UNUSUAL_ACTIVITY = /\b(?:unusual|suspicious) (?:activity|traffic)\b/i
+const AUTOMATED_TRAFFIC = /\bautomated (?:traffic|access|requests|queries|browsing)\b/i
+
+/**
+ * The signals of a short page that is only a refusal of automated visitors, or null. Two such pages answered HTTP 200
+ * and were read as content in the PA 4 Steel runs: Autotrader's Akamai page, whose text carries Akamai's reference to the
+ * refused request, and Nordstrom's wall, whose heading reports unusual activity and whose copy refuses automated
+ * traffic, 120 KB past the head the rest of the classifier reads. Each needs the page's visible text to be short
+ * (WALL_PAGE_MAX_TEXT): an article quoting either is long. The whole body is read, the visible text only when a
+ * trigger word is in it.
+ */
+function shortWallPage(body: string): string[] | null {
+  if (!/reference|incident|unusual|suspicious/i.test(body)) return null
+  const text = visibleText(body)
+  if (text.length > WALL_PAGE_MAX_TEXT) return null
+  if (AKAMAI_REFERENCE.test(text)) return ['akamai_reference', 'short_page']
+  const headings = [...body.matchAll(/<(h[1-3]|title)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map((m) => decodeEntities(m[2]!.replace(/<[^>]*>/g, ' ')))
+  if (headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(text)) return ['heading_unusual_activity', 'text_automated_traffic', 'short_page']
+  return null
+}
+
+/** The text a page shows, roughly: its body without scripts, styles, templates and markup, entities decoded, whitespace collapsed. */
+function visibleText(body: string): string {
+  const inBody = body.replace(/<head\b[\s\S]*?<\/head\s*>/i, ' ')
+  const bare = inBody.replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ')
+  return decodeEntities(bare).replace(/\s+/g, ' ').trim()
+}
+
+function decodeEntities(text: string): string {
+  const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+  return text.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (whole, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+    // A number past Unicode's range is left as written: fromCodePoint would throw, and the page is not ours to fail.
+    const code = dec !== undefined ? Number(dec) : hex !== undefined ? parseInt(hex, 16) : null
+    if (code !== null) return code <= 0x10ffff ? String.fromCodePoint(code) : whole
+    return named[name!.toLowerCase()] ?? whole
+  })
 }
 
 export interface GateEscalation {
