@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { ChromeLoginError, type CdpConnection } from '../src/chromeLogin.js'
@@ -24,8 +25,13 @@ const CF_BLOCK = '<!DOCTYPE html><html><head><title>Attention Required! | Cloudf
 /** The scope page's answer on each poll: what its buttons set, and whether the person clicked on it (their activation, which only Chrome sets); 'closed': they closed it. */
 type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
 
-/** `documentStatus`: the page's document answers with this status (heard as Chrome's response event); `refuseTabs`: Chrome refuses to open the page's tab. */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean }) {
+/**
+ * `documentStatus`: the page's document answers with this status (heard as Chrome's response event); `refuseTabs`: Chrome
+ * refuses to open the page's tab; `shown`: the page as it shows, without what it hides (the whole `html` without it), which
+ * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
+ * another address.
+ */
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -40,6 +46,8 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
   const navigated = new Map<string, string>()
   let polled = 0
   let targets = 0
+  let shownTries = 0
+  let shownMoves = 0
   const kinds = new Map<string, 'scope' | 'page'>()
   const answerNow = (): Answer => answers[Math.min(polled, answers.length - 1)]!
   const hrefOf = (target: string) => page.href ?? navigated.get(target) ?? 'about:blank'
@@ -78,6 +86,12 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
         }
         // The page asked for: never clicked on, so the lane reads it without the person.
         if (p.contextId === 7) return { result: { value: false } }
+        if (expression.includes('importNode')) {
+          if ((page.shownFails ?? 0) > shownTries++) throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
+          // The page as it shows, on the page's own address; `shownMoved` times another page, as one that moved on.
+          if ((page.shownMoved ?? 0) > shownMoves++) return { result: { value: JSON.stringify({ href: 'https://site.test/moved', shown: PAGE.replace('Tide ledger', 'Another page') }) } }
+          return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), shown: page.shown ?? page.html }) } }
+        }
         return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: false }) } }
       }
       throw new Error(`unexpected ${method}`)
@@ -175,6 +189,38 @@ describe('the my-browser lane', () => {
     app = await setup(refusing)
     const refused = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', debug: true })
     expect(refused.body).toMatchObject({ status: 'failed', failureReason: 'connection_error', lane: 'my_browser' })
+  }, 30_000)
+
+  it('reads the page as it shows in the person\'s Chrome, not a panel it keeps hidden', async () => {
+    // As the Lark sheet of the 2026-10-09 acceptance run: its shortcut list, hidden, was taken for the page.
+    const hidden = `<div class="hotkeys"><ul>${'<li>Insert new sheet Shift F11</li>'.repeat(40)}</ul></div>`
+    const sheet = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE.replace('<body>', `<body>${hidden}`), shown: PAGE })
+    const app = await setup(sheet)
+    const { body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', formats: ['markdown', 'rawHtml'], debug: true })
+    expect(body).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(body.markdown).not.toContain('Insert new sheet')
+    // The raw body is the whole document Chrome rendered, as on every browser lane.
+    expect(body.rawHtml).toContain('Insert new sheet')
+    expect(body.evidenceRecord.rawSha256).toBe(createHash('sha256').update(PAGE.replace('<body>', `<body>${hidden}`)).digest('hex'))
+  }, 30_000)
+
+  it('judges whether a page read as it shows has a check on its whole document, as the wait did', async () => {
+    // A FAQ whose answers it hides, with a site-wide reCAPTCHA v3 tag, is not blocked because what it shows is short.
+    const v3 = '<script src="https://www.google.com/recaptcha/api.js?render=site-key"></script>'
+    const questions = ['How long is a tide?', 'Who keeps the ledger?', 'Where is the office?'].map((q) => `<h3>${q}</h3>`).join('')
+    const answers = ['How long is a tide?', 'Who keeps the ledger?', 'Where is the office?'].map((q) => `<h3>${q}</h3><p style="display:none">${'The harbour office answers this at length, with the tide tables of the year. '.repeat(4)}</p>`).join('')
+    const faq = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: `<html><head><title>FAQ</title>${v3}</head><body><main>${answers}</main></body></html>`, shown: `<html><head><title>FAQ</title>${v3}</head><body><main>${questions}</main></body></html>` })
+    const asked = await scrape(await setup(faq), { url: 'https://site.test/a', lane: 'my-browser' })
+    expect(asked.body.status).not.toBe('blocked')
+  }, 30_000)
+
+  it('reads again a page that moved on just as it was read as it shows, and closes its tab', async () => {
+    const moving = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE, shown: PAGE, shownFails: 1, shownMoved: 1 })
+    const again = await scrape(await setup(moving), { url: 'https://site.test/a', lane: 'my-browser' })
+    expect(again.body).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(again.body.markdown).toContain('Tide ledger')
+    expect(again.body.markdown).not.toContain('Another page')
+    expect(moving.live.size).toBe(0)
   }, 30_000)
 
   it('a page that keeps leading elsewhere on the site, after Octocrawl took the tab back, is a redirect limit, not a wait that ran out', async () => {
