@@ -120,23 +120,29 @@ function proxyShown(value) {
     return { shown: `${url.protocol}//${url.host}`, credentials: url.username !== '' || url.password !== '' || url.search !== '' }
   } catch { return { shown: 'set (not a URL, not shown)', credentials: true } }
 }
-// The raw proxy values and their secrets (user:password, a password or a query value of six characters or more, raw
-// and decoded), longest first: no file the runner writes may hold one.
-const RAW_PROXY = [...new Set(['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']
-  .map((name) => process.env[name]).filter((v) => typeof v === 'string' && v !== '' && proxyShown(v).credentials)
-  .flatMap((v) => {
-    let url
-    try { url = new URL(v.includes('://') ? v : `http://${v}`) } catch { return [v] }
-    const decode = (x) => { try { return decodeURIComponent(x) } catch { return x } }
-    const secrets = [url.password, ...url.searchParams.values()].flatMap((x) => [x, decode(x)]).filter((x) => x.length >= 6)
-    const pairs = url.username === '' ? [] : [`${url.username}:${url.password}`, `${decode(url.username)}:${decode(url.password)}`]
-    return [v, url.href, url.search, ...pairs, ...secrets].filter((x) => x !== '')
-  }))].sort((a, b) => b.length - a.length)
+const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']
+/**
+ * A credentialed proxy setting's secrets: the value, user:password, and a user name, password or query value of six
+ * characters or more, raw and decoded, each also as JSON writes it (a quote or backslash escaped).
+ */
+function proxySecrets(v) {
+  if (typeof v !== 'string' || v === '' || !proxyShown(v).credentials) return []
+  let url
+  try { url = new URL(v.includes('://') ? v : `http://${v}`) } catch { return [v] }
+  const decode = (x) => { try { return decodeURIComponent(x) } catch { return x } }
+  const secrets = [url.username, url.password, ...url.searchParams.values()].flatMap((x) => [x, decode(x)]).filter((x) => x.length >= 6)
+  const pairs = url.username === '' ? [] : [`${url.username}:${url.password}`, `${decode(url.username)}:${decode(url.password)}`]
+  return [v, url.href, url.search, ...pairs, ...secrets].filter((x) => x !== '').flatMap((x) => [x, JSON.stringify(x).slice(1, -1)])
+}
+// No file the runner writes may hold one of these, longest first (a rejudge adds the run's own).
+let RAW_PROXY = []
+const keepOut = (values) => { RAW_PROXY = [...new Set([...RAW_PROXY, ...values.flatMap(proxySecrets)])].sort((a, b) => b.length - a.length) }
+keepOut(PROXY_VARS.map((name) => process.env[name]))
 /** Text the runner writes, without a raw proxy value or the credentials of any URL in it. */
 function scrub(text) {
   let out = text
   for (const raw of RAW_PROXY) out = out.split(raw).join('[proxy]')
-  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@"'`]+@/gi, '$1***@')
+  return out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@"'`]+@/gi, '$1***@')
 }
 const shownEnv = (env) => {
   const named = Object.fromEntries(['HTTPS_PROXY', 'HTTP_PROXY'].map((name) => [name, proxyShown(env[name])]))
@@ -357,6 +363,9 @@ if (rejudgeDir !== undefined) {
   // Re-check saved Markdown against the current predicates. Status, reason and timings stay as
   // the run observed them; only the predicate verdicts are recomputed, into new files.
   const byId = new Map(taskFile.tasks.map((t) => [t.id, t]))
+  // The run's own proxy settings are kept out of every file this rejudge writes, as the shell's are.
+  const prior = JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8'))
+  keepOut(Object.values(prior.environment.proxyEnv ?? {}))
   const old = (await readFile(linesFile, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((r) => { delete r.droppedAfterRun; return r })
   for (const row of old) {
     const task = byId.get(row.taskId)
@@ -384,7 +393,6 @@ if (rejudgeDir !== undefined) {
     rows.push(row)
   }
   await writeFile(join(runDir, `attempts.rejudged-${rejudgeStamp}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n')
-  const prior = JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8'))
   rejudged = { at: environment.startedAt, command: `node research/access/run-set.mjs ${args.join(' ')}`, commit: environment.commit, tasksSha256 }
   Object.assign(environment, prior.environment)
   // A run recorded before proxy settings were shown this way keeps no more of them than a new one.
