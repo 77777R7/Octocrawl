@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path'
 import { createServer, type Server } from 'node:https'
 import { createServer as createHttpServer, type IncomingHttpHeaders } from 'node:http'
 import { connect as connectTcp, type AddressInfo, type Socket } from 'node:net'
-import { setTimeout as delay } from 'node:timers/promises'
 import { hostedNetworkPolicy, type WebhookEventEnvelope } from '@w2l/contracts'
 import { DeliveryStore, validateDestinationUrl } from '../src/deliveryStore.js'
 import { createHttpsWebhookTransport, DeliveryWorker, parseWebhookRetryAfter, webhookSignature } from '../src/deliveryWorker.js'
@@ -409,14 +408,15 @@ describe('durable downstream receipt and projection', () => {
       if (acknowledge) res.writeHead(200).end(JSON.stringify(receipt))
     })
     const url = await listen(server)
-    const id = seed(store, url, 8, Date.now())
-    function child(): ChildProcess {
-      const process = spawn(globalThis.process.execPath, ['--import', 'tsx', resolve('packages/runtime/test/fixtures/delivery-process.ts')], { cwd: resolve('.'), env: { ...globalThis.process.env, DELIVERY_TEST_DB: storePath, DELIVERY_TEST_CA: caPath, TSX_TSCONFIG_PATH: resolve('packages/runtime/test/fixtures/tsconfig.json') }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const start = Date.now()
+    const id = seed(store, url, 8, start)
+    function child(now: number): ChildProcess {
+      const process = spawn(globalThis.process.execPath, ['--import', 'tsx', resolve('packages/runtime/test/fixtures/delivery-process.ts')], { cwd: resolve('.'), env: { ...globalThis.process.env, DELIVERY_TEST_DB: storePath, DELIVERY_TEST_NOW: String(now), DELIVERY_TEST_CA: caPath, TSX_TSCONFIG_PATH: resolve('packages/runtime/test/fixtures/tsconfig.json') }, stdio: ['ignore', 'pipe', 'pipe'] })
       closers.push(() => process.kill('SIGKILL'))
       return process
     }
     const received = new Promise<void>(resolve => { arrived = resolve })
-    const first = child()
+    const first = child(start)
     let stderr = ''; first.stderr?.on('data', chunk => { stderr += String(chunk) })
     await Promise.race([received, new Promise<never>((_, reject) => { first.once('exit', code => { const delivery = store.getDelivery(id); reject(new Error(`worker exited early ${code}: delivery ${JSON.stringify({ state: delivery?.state, attemptCount: delivery?.attemptCount, lastError: delivery?.lastError })}, stderr: ${stderr}`)) }) })])
     const killed = new Promise<void>(resolve => first.once('exit', () => resolve()))
@@ -424,9 +424,11 @@ describe('durable downstream receipt and projection', () => {
     expect(store.getDelivery(id)?.state).toBe('delivering')
     acknowledge = true
     arrived = undefined
-    await delay(Math.max(1, store.getDelivery(id)!.leaseUntil! - Date.now() + 25))
+    // The dead worker's lease holds until its last millisecond; a worker whose clock has reached it reclaims the delivery.
+    const leaseUntil = store.getDelivery(id)!.leaseUntil!
+    expect(store.claim(leaseUntil - 1, 1)).toBeNull()
     store.close()
-    const second = child()
+    const second = child(leaseUntil)
     let secondError = ''; second.stderr?.on('data', chunk => { secondError += String(chunk) })
     const code = await new Promise<number | null>(resolve => second.once('exit', resolve))
     expect(code, secondError).toBe(0)
