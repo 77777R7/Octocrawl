@@ -14,7 +14,7 @@ export const NAV_CAPABILITIES = [
   { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/docs/guides/map-site/' },
   { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/docs/guides/batch-results/' },
   { glyph: '◷', title: 'Watch a page', text: 'What changed, to your HTTPS webhook', href: '/docs/guides/monitor-webhook/' },
-  { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/#what-it-does' },
+  { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/docs/guides/own-chrome/' },
   { glyph: '#', title: 'Evidence Record', text: 'Where every result came from', href: '/docs/reference/#evidence-record' },
 ]
 
