@@ -201,11 +201,16 @@ export function mountOctopusSwim(head: HTMLElement): void {
     if (!octo.x && !octo.y) {
       const [x, y] = home()
       Object.assign(octo, { x, y, tx: x, ty: y })
-    } else if (overText(octo.x, octo.y) || overText(octo.tx, octo.ty)) {
-      // The words moved under it or its spot (a resize): it goes to open water and starts afresh.
-      const [x, y] = overText(octo.x, octo.y) ? pick() : [octo.x, octo.y]
-      Object.assign(octo, { x, y, vx: 0, vy: 0 })
-      begin('rest', performance.now())
+    } else {
+      // A resize: back into the water if it is now outside it, and off the words if they moved under it or its spot;
+      // then it starts afresh.
+      const [x, y] = fit(octo.x, octo.y)
+      const [tx, ty] = fit(octo.tx, octo.ty)
+      if (x !== octo.x || y !== octo.y || tx !== octo.tx || ty !== octo.ty || overText(x, y) || overText(tx, ty)) {
+        Object.assign(octo, { x, y, vx: 0, vy: 0 })
+        if (overText(x, y)) [octo.x, octo.y] = pick()
+        begin('rest', performance.now())
+      }
     }
     plankton.length = 0
     for (let i = 0; i < Math.round(width * height / 26000); i++) plankton.push({ x: Math.random() * width, y: Math.random() * height, ox: 0, oy: 0, seed: Math.random() * 10 })
