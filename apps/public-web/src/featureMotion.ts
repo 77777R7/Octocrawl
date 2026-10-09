@@ -209,6 +209,9 @@ function mountTierRail(): void {
   let active = -1
   let lights: import('./earthLights').EarthLights | null = null
 
+  // The number of steps, for the stylesheet's stage height (styles.css .is-story .tier-stage). Set here through the
+  // CSSOM: the site's Content-Security-Policy (style-src 'self') drops a style attribute written in the markup.
+  stage.style.setProperty('--tiers', String(rows.length))
   section.classList.add('is-story')
   if (hint) hint.hidden = false
   if (caption) art.append(caption)
