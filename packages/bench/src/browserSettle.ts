@@ -106,10 +106,12 @@ export async function waitForRenderedStability(
       })()`)
     } catch (error) {
       if (!isNavigationError(error)) throw error
-      // The document went away mid-sample: the next one starts a new window.
+      // The document went away mid-sample: the next one starts a new window. A page that replaces its document while it
+      // loads (a client-side redirect) is still loading, for a caller that waits for one: the next document is waited for.
       observedSince = Date.now()
       previous = ''
       stableRounds = 0
+      if (extends_) { loading = true; loadingSeen = true }
       await page.waitForTimeout(Math.min(sampleMs, Math.max(1, bound() - Date.now())))
       continue
     }

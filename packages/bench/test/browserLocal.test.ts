@@ -437,6 +437,10 @@ describe('BrowserLocalSubject transport', () => {
         expect(done.status, path).toBe('success')
         expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
       }
+      // A request that runs steps on the page keeps their time: no loading wait takes it, within a short timeout.
+      const stepped = await subject.fetch(`${url}/still-loading`, Date.now() + 6_000, undefined, undefined, { actions: [{ type: 'wait', milliseconds: 1_000 }] })
+      expect(stepped.status).toBe('success')
+      expect(stepped.trace.some((event) => event.event === 'loading_wait')).toBe(false)
       // A request that waits itself (waitFor) gets that wait, not this one, and no warning from before it.
       const waited = await subject.fetch(`${url}/fetching`, undefined, undefined, undefined, { waitFor: 3_000 })
       expect(waited.markdown).toContain('Result 6')

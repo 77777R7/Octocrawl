@@ -55,6 +55,27 @@ describe('waitForRenderedStability', () => {
     expect(samples).toBeLessThan(20)
   })
 
+  it('waits on through a document the page replaces while it loads, for a caller that waits for loading pages', async () => {
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    // The page navigates during its first samples (as a client-side redirect does), then shows its data.
+    const redirecting = () => {
+      let reads = 0
+      return {
+        page: {
+          async evaluate() { if (++reads <= 6) throw new Error('Execution context was destroyed, most likely because of a navigation'); return JSON.stringify({ size: 90, text: 'the data', loading: false }) },
+          waitForTimeout: sleep,
+        },
+        reads: () => reads,
+      }
+    }
+    const opted = redirecting()
+    expect(await waitForRenderedStability(opted.page, { minMs: 20, maxMs: 60, loadingMaxMs: 5_000, sampleMs: 20 })).toMatchObject({ loadingSeen: true, stillLoading: false })
+    expect(opted.reads()).toBeGreaterThan(6)
+    // A caller that does not wait for loading pages keeps its bound: the replaced document does not hold it.
+    const plain = redirecting()
+    expect(await waitForRenderedStability(plain.page, { minMs: 20, maxMs: 60, sampleMs: 20 })).toMatchObject({ loadingSeen: false })
+  })
+
   it('records the loading wait and warns on a page read as content while still loading', () => {
     expect(loadingWaitEvent(undefined, 5, 'provider')).toBeNull()
     expect(loadingWaitEvent({ loadingSeen: false, stillLoading: false, waitedMs: 600 }, 5, 'provider')).toBeNull()
