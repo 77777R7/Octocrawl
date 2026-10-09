@@ -3,6 +3,9 @@ import { mountHeroAscii } from './ascii'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
+import { mountFeatureSections } from './featureMotion'
+import { mountGlyphBand } from './glyphBandMotion'
+import { mountOctopusSwim } from './octopusSwim'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
@@ -102,6 +105,10 @@ try {
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
+mountFeatureSections()
+for (const band of document.querySelectorAll<HTMLElement>('.glyph-band')) mountGlyphBand(band)
+const startHead = document.querySelector<HTMLElement>('.start-head')
+if (startHead) mountOctopusSwim(startHead)
 for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
