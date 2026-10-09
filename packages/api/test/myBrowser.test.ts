@@ -177,6 +177,15 @@ describe('the my-browser lane', () => {
     expect(refused.body).toMatchObject({ status: 'failed', failureReason: 'connection_error', lane: 'my_browser' })
   }, 30_000)
 
+  it('a page that keeps leading elsewhere on the site, after Octocrawl took the tab back, is a redirect limit, not a wait that ran out', async () => {
+    // As www.linkedin.com/mynetwork/ always moved on to /mynetwork/grow in the 2026-10-09 acceptance run.
+    const moving = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/elsewhere', html: PAGE })
+    const app = await setup(moving)
+    const { body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', debug: true })
+    expect(body).toMatchObject({ status: 'failed', failureReason: 'redirect_limit', lane: 'my_browser' })
+    expect(body.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'my_browser_not_read', message: expect.stringContaining('not the page asked for') })]))
+  }, 30_000)
+
   it('is refused by name where it is not offered, and for what a page in the person\'s Chrome cannot give', async () => {
     const hosted = await setup(null, { hosted: true })
     expect(await scrape(hosted, { url: 'https://site.test/a', lane: 'my-browser' })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', error: expect.stringContaining('does not read pages in your Chrome'), details: { parameters: ['lane'] } } })
