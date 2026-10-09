@@ -2,7 +2,8 @@
  * floor that raises its claws when the octopus comes low near it (and is given a wide berth: it is the site's
  * robots.txt), a shoal of fish the octopus maps when one passes: dotted lines run from its arm to each fish, and
  * it reads them one by one, which is what a crawl does; a jellyfish, a page that needs a browser, which the octopus
- * can read only once it has rendered; and a ray, which is only scenery. */
+ * can read only once it has rendered; a ray, which is only scenery; and a sea anemone, the octopus's cache and its
+ * hiding place. */
 
 export const SHOAL = {
   /** How many fish make a shoal. */
@@ -117,4 +118,33 @@ export function rayRows(dir: number, beat: number): string[] {
   const f = ((beat % 1) + 1) % 1
   const frame = RAY_FRAMES[f < 0.25 ? 0 : f < 0.5 ? 1 : f < 0.75 ? 2 : 1]!
   return dir > 0 ? frame.map(row => [...row].reverse().map(g => MIRROR[g] ?? g).join('')) : frame
+}
+
+/** A sea anemone: fixed on the floor on the side away from the crab. It is the octopus's cache. Now and then, after
+ * reading a page, the octopus takes what it read to the anemone and tucks it in (a few # sink into it and its
+ * tentacles glow); and frightened, it hides in it, the tentacles closing over it, until the fright has passed. */
+export const ANEMONE = {
+  /** One sway of its tentacles, ms. */
+  swayMs: 2600,
+  /** The share of pages read that the octopus takes to it, and how long tucking one in takes. */
+  storeShare: 0.35,
+  storeMs: 1400,
+  /** How long it hides in it. */
+  hideMs: 3200,
+} as const
+
+/** The anemone's rows, top down, at sway phase `sway` (0 to 1), with its tentacles open or `closed` over something
+ * hiding in it. Every row is the same width, centred on the same column, so it holds its cells. */
+export function anemoneRows(sway: number, closed: boolean): string[] {
+  if (closed) return [' .^^^. ', ' )|||( ', '  (_)  ']
+  const f = ((sway % 1) + 1) % 1
+  // Its tentacles open wide, then draw in.
+  return f < 0.5 ? ['\\  |  /', ' \\ | / ', '  (_)  '] : [' \\ | / ', '  \\|/  ', '  (_)  ']
+}
+
+/** How a store is going `age` ms after the octopus reached the anemone: how far the # have sunk (0 to 1), how
+ * brightly its tentacles glow (0 to 1), and whether it is done. */
+export function storeState(age: number): { sink: number, glow: number, done: boolean } {
+  const f = Math.max(0, age) / ANEMONE.storeMs
+  return { sink: Math.min(1, f / 0.6), glow: f < 0.5 ? 0 : f < 0.7 ? (f - 0.5) / 0.2 : Math.max(0, 1 - (f - 0.7) / 0.3), done: f >= 1 }
 }
