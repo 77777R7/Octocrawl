@@ -378,6 +378,21 @@ describe('routePage', () => {
       expect(route(wrap(`<main><h2>Men's shirts</h2><p>Showing 8 of 282 products</p>${grid(8)}</main>`, ownList(names)))).toEqual({ type: 'collection', strategy: 'article' })
     })
 
+    it('counts the products a CollectionPage declares as its offers as listed, not as the page\'s own (ROADMAP PA item 4)', () => {
+      // eBay's category pages: a CollectionPage whose about.offers.itemOffered names the listings, with no ItemList (T021).
+      const offered = (type: string) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org/', '@type': type, name: 'Laptops Netbooks', about: { name: 'Laptops-Netbooks', offers: { '@type': 'AggregateOffer', itemOffered: names.map((n, i) => ({ '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${12 + i}.00`, priceCurrency: 'USD' } })) } } })}</script>`
+      const route = (html: string) => { const doc = parse(html); const decision = routePage(doc.document); doc.close(); return decision }
+      const page = (list: string) => wrap(`<main><h1>Laptops &amp; Netbooks</h1><p>Showing 8 of 290,000 results</p>${grid(8)}</main>`, list)
+      expect(route(page(offered('CollectionPage')))).toEqual({ type: 'collection', strategy: 'article' })
+      expect(route(page(offered('SearchResultsPage')))).toEqual({ type: 'collection', strategy: 'article' })
+      const out = extractTf.extract(page(offered('CollectionPage')))
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+      // A product page's own Product under its WebPage stays its own, beside a row of microdata product cards.
+      const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'WebPage', mainEntity: { '@type': 'Product', name: 'Cobalt teapot', offers: { '@type': 'Offer', price: '84.00', priceCurrency: 'USD' } } })}</script>`
+      const cards = `<ul>${Array.from({ length: 6 }, (_, i) => `<li class="product card" itemscope itemtype="https://schema.org/Product"><a href="/p/${i}">${name(i)}</a><span class="price">$${12 + i}.00</span></li>`).join('')}</ul>`
+      expect(route(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware, glazed in cobalt ash.</p>${cards}</main>`, own)).type).toBe('product')
+    })
+
     it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
       for (const top of [
         '<h1>Cobalt teapot</h1><span class="price">$84.00</span>',

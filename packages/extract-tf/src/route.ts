@@ -249,8 +249,10 @@ function typeNames(node: Record<string, unknown>): string[] {
 
 /**
  * Recursively walk parsed JSON-LD (objects, arrays, @graph) and collect
- * every normalized @type. A Product inside an ItemList is counted in
- * `listed.products` instead. Malformed JSON is caught by the caller.
+ * every normalized @type. A Product inside an ItemList, or inside a node
+ * that declares a collection (a CollectionPage or SearchResultsPage: eBay's
+ * category pages list their products as its `about.offers.itemOffered`), is
+ * counted in `listed.products` instead. Malformed JSON is caught by the caller.
  */
 function collectJsonLdTypes(node: unknown, out: string[], listed: { products: number }, inList = false): void {
   if (Array.isArray(node)) {
@@ -264,7 +266,7 @@ function collectJsonLdTypes(node: unknown, out: string[], listed: { products: nu
     if (inList && type === 'product') listed.products++
     else out.push(type)
   }
-  const list = inList || types.includes('itemlist')
+  const list = inList || types.includes('itemlist') || COLLECTION_PAGE_TYPES.some((type) => types.includes(type))
   for (const value of Object.values(node as Record<string, unknown>)) {
     if (typeof value === 'object' && value !== null) collectJsonLdTypes(value, out, listed, list)
   }
