@@ -180,6 +180,15 @@ describe('the person\'s Chrome', () => {
     expect(chrome.calls.filter((call) => call.startsWith('Page.navigate'))).toHaveLength(3)
   })
 
+  it('a page whose check cleared without the person, read unattended, does not say they got through when it stays elsewhere', async () => {
+    const home = '<html><body><article><h1>Welcome home</h1>' + '<p>The site\'s home page, long enough to be read. </p>'.repeat(4) + '</article></body></html>'
+    const chrome = fakeChrome([at('https://site.test/a', GATE), at('https://site.test/', home)])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const failure = await reader.read('https://site.test/a', { unattended: true, pollMs: 1, waitMs: 5_000 }).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ kind: 'elsewhere', check: 'captcha', message: expect.stringContaining('the site led it on to /, not the page asked for') })
+    expect((failure as Error).message).not.toContain('you got through')
+  })
+
   it('a page the person has not clicked or typed on is not read, whatever it does by itself; it is asked for once, and read once they click on it', async () => {
     const confirms: string[] = []
     const untouched = await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE)]).connect })
