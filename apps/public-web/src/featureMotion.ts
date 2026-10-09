@@ -184,83 +184,73 @@ function mountClients(): void {
   })
 }
 
-/** Half a step's hold on the last tier before the window lets go. styles.css (.is-story .tier-stage) adds the same. */
-const TAIL = 0.5
-
-/** Free tiers. On a screen wide and tall enough the window is pinned (styles.css .is-story) while the page scrolls
- * one step per tier: the step is what the stage is taller than the window, shared out over the tiers and the hold,
- * so the tier the scroll has reached is simply the nearest whole step, and it opens in the list. Elsewhere the tiers
- * pass one by one over the planet, and the one nearest the middle of the screen is lit. Either way the scroll is
- * the browser's own: nothing settles or snaps it. A tier's name turns to it, and so does focus landing in a folded
- * one. The lights load (in their own chunk, with a worker) only as the section comes near. */
+/** Free tiers. The planet stays in view behind the section (styles.css .is-story) while the words scroll past it as
+ * the browser scrolls them: nothing is pinned but the planet, nothing snaps or folds. The tier whose top has crossed
+ * the middle line of the screen is the one lit (the first until then), as a scrollytelling step is; it lights as
+ * many of the planet's marks, and the readout on the planet says which of the four it is, what it allows and how
+ * far along the four the reader is. A tier's name scrolls it into place. The lights load (in their own chunk, with a
+ * worker) only as the section comes near. */
 function mountTierRail(): void {
   const rail = document.querySelector<HTMLElement>('#tier-rail')
   const section = rail?.closest<HTMLElement>('section')
-  const stage = section?.querySelector<HTMLElement>('.tier-stage')
-  const pin = section?.querySelector<HTMLElement>('.tier-pin')
   const art = section?.querySelector<HTMLElement>('.earth-art')
-  if (!rail || !section || !stage || !pin || !art) return
+  if (!rail || !section || !art) return
   const rows = [...rail.querySelectorAll<HTMLElement>('.tier-row')]
-  const caption = document.querySelector<HTMLElement>('#earth-caption')
+  const readout = document.querySelector<HTMLElement>('#earth-readout')
+  const part = (sel: string) => readout?.querySelector<HTMLElement>(sel) ?? null
+  const stepN = part('.earth-step-n'), stepName = part('.earth-step-name'), amountN = part('.earth-amount-n')
+  const amountUnit = part('.earth-amount-unit'), lit = part('.earth-lit')
+  const ticks = readout ? [...readout.querySelectorAll<HTMLElement>('.earth-ticks i')] : []
   const hint = section.querySelector<HTMLElement>('.tier-hint')
-  // The same query pins the window in styles.css (.is-story .tier-pin); the two must agree.
-  const pinned = window.matchMedia('(min-width: 861px) and (min-height: 720px)')
   const lightsFor = (row: HTMLElement) => row.dataset.lights === 'all' ? Number.POSITIVE_INFINITY : Number(row.dataset.lights)
+  /** Where a step is triggered: the middle of the screen, a little low, so a tier's name is well in view first. */
+  const LINE = 0.55
   let active = -1
   let lights: import('./earthLights').EarthLights | null = null
 
-  // The number of steps, for the stylesheet's stage height (styles.css .is-story .tier-stage). Set here through the
-  // CSSOM: the site's Content-Security-Policy (style-src 'self') drops a style attribute written in the markup.
-  stage.style.setProperty('--tiers', String(rows.length))
   section.classList.add('is-story')
   if (hint) hint.hidden = false
-  if (caption) art.append(caption)
+  if (readout) art.append(readout)
 
   const select = (index: number) => {
     if (index === active) return
     active = index
-    rows.forEach((row, i) => {
-      row.classList.toggle('is-active', i === index)
-      if (i === index) row.setAttribute('aria-current', 'step')
-      else row.removeAttribute('aria-current')
+    const row = rows[index]!
+    rows.forEach((other, i) => {
+      other.classList.toggle('is-active', i === index)
+      if (i === index) other.setAttribute('aria-current', 'step')
+      else other.removeAttribute('aria-current')
     })
     section.classList.toggle('is-begun', index > 0)
-    lights?.show(lightsFor(rows[index]!))
-    if (caption) {
-      caption.textContent = rows[index]!.dataset.caption ?? ''
-      if (!caption.hidden && !reduced()) retyper(caption).decode()
-    }
+    lights?.show(lightsFor(row))
+    if (stepN) stepN.textContent = row.querySelector('.tier-n')?.textContent ?? ''
+    if (stepName) stepName.textContent = row.querySelector('.tier-name')?.textContent ?? ''
+    if (amountN) amountN.textContent = row.querySelector('.tier-amount b')?.textContent ?? ''
+    if (amountUnit) amountUnit.textContent = row.dataset.unit ?? ''
+    if (lit) lit.textContent = row.dataset.lit ?? ''
+    ticks.forEach((tick, i) => tick.classList.toggle('is-on', i <= index))
+    if (readout && !readout.hidden && !reduced()) { if (amountN) retyper(amountN).decode(); if (lit) retyper(lit).decode() }
   }
-  /** The page's scroll with the window pinned, in px per tier; 0 when the stylesheet has not pinned it. */
-  const step = () => pinned.matches ? Math.max(0, (stage.offsetHeight - pin.offsetHeight) / (rows.length - 1 + TAIL)) : 0
-  /** Where the page would be scrolled to show tier i: the stage's top plus i steps when pinned, otherwise the tier
-   * in the middle of the screen. */
-  const stop = (i: number) => {
-    if (step()) return stage.getBoundingClientRect().top + window.scrollY + i * step()
-    const box = rows[i]!.getBoundingClientRect()
-    return box.top + window.scrollY + box.height / 2 - window.innerHeight / 2
-  }
-  /** How far through the tiers the scroll is: 0 at the first, 1 at the second, and so on. */
-  const progress = () => {
-    const y = window.scrollY
-    if (step()) return (y - stop(0)) / step()
-    const stops = rows.map((_, i) => stop(i))
-    if (y <= stops[0]!) return (y - stops[0]!) / window.innerHeight
-    for (let i = 1; i < stops.length; i++) if (y <= stops[i]!) return i - 1 + (y - stops[i - 1]!) / (stops[i]! - stops[i - 1]!)
-    return stops.length - 1 + (y - stops.at(-1)!) / window.innerHeight
+  /** The tier whose top has crossed the trigger line, in px from the window's height (not vh, which moves with a
+   * phone's address bar). */
+  const current = () => {
+    const line = window.innerHeight * LINE
+    let index = 0
+    rows.forEach((row, i) => { if (row.getBoundingClientRect().top <= line) index = i })
+    return index
   }
   let queued = 0
-  const update = () => { queued = 0; select(Math.max(0, Math.min(rows.length - 1, Math.round(progress())))) }
+  const update = () => { queued = 0; select(current()) }
   const refresh = () => { if (!queued) queued = requestAnimationFrame(update) }
   update()
   window.addEventListener('scroll', refresh, { passive: true })
   window.addEventListener('resize', refresh)
-  pinned.addEventListener('change', refresh)
 
-  const go = (i: number) => window.scrollTo({ top: stop(i), behavior: reduced() ? 'auto' : 'smooth' })
-  rows.forEach((row, i) => {
-    row.querySelector('.tier-head')?.addEventListener('click', () => go(i))
-    row.addEventListener('focusin', () => { if (i !== active) go(i) })
+  rows.forEach(row => {
+    row.querySelector('.tier-head')?.addEventListener('click', () => {
+      const top = row.getBoundingClientRect().top + window.scrollY - window.innerHeight * (LINE - 0.12)
+      window.scrollTo({ top, behavior: reduced() ? 'auto' : 'smooth' })
+    })
   })
 
   const near = new IntersectionObserver(entries => {
@@ -269,8 +259,8 @@ function mountTierRail(): void {
     void import('./earthLights').then(({ mountEarthLights }) => {
       lights = mountEarthLights(art, section, rail)
       lights.show(lightsFor(rows[active]!))
-      return lights.ready.then(() => { if (caption) caption.hidden = false })
-    }).catch(() => { /* The artwork stays as painted, and the caption hidden. */ })
+      return lights.ready.then(() => { if (readout) readout.hidden = false })
+    }).catch(() => { /* The artwork stays as painted, and the readout hidden. */ })
   }, { rootMargin: '400px 0px' })
   near.observe(section)
 }
