@@ -288,11 +288,11 @@ export class ExtractTf implements Extractor {
         favorRecall,
         product,
       ),
-      // Escalate when a strategy produced nothing at all, or the article
-      // cascade a region that only names the page (headingsOnly; a region the
-      // last resort found is a list's). Routing to a non-article strategy is
-      // not by itself an escalation reason.
-      escalate: main === null || (strategy === 'article' && headingsOnly(main)),
+      // Escalate when a strategy produced nothing at all, a region the page
+      // hides (hiddenRegion), or the article cascade a region that only names
+      // the page (headingsOnly; a region the last resort found is a list's).
+      // Routing to a non-article strategy is not by itself an escalation reason.
+      escalate: main === null || hiddenRegion(main) || (strategy === 'article' && headingsOnly(main)),
       ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
@@ -319,6 +319,39 @@ export class ExtractTf implements Extractor {
 
 /** Default instance. */
 export const extractTf = new ExtractTf()
+
+/**
+ * Whether the page hides the region: it, or an element around it, carries `hidden`. What the page does not show is not
+ * its content, however much text it holds (ROADMAP PA item 4: Eurostat's data browser read in a browser, whose only
+ * prose was the EU banner's hidden dropdown, answered `success` with it). A hidden part inside a shown region, a
+ * collapsed answer for one, stays part of that region. Not hidden: `hidden="until-found"`, which a reader's search
+ * opens; a React streaming segment (`<div hidden id="S:1">`), which the page's script moves into place; and
+ * `aria-hidden`, which a modal sets on the page behind it and which hides nothing from the eye.
+ */
+function hiddenRegion(region: Element): boolean {
+  for (let el: Element | null = region; el !== null; el = el.parentElement) {
+    const hidden = el.getAttribute('hidden')
+    if (hidden !== null && hidden.toLowerCase() !== 'until-found' && !reactStreamedSegment(el)) return true
+  }
+  return false
+}
+
+/** The id React gives a part of the page it streams hidden and then moves into place (an optional identifier prefix, `S:`, a hex number). */
+const REACT_STREAMED_SEGMENT = /S:[0-9a-f]+$/i
+
+/**
+ * Whether a hidden element is a part React streams: `<div hidden id="S:1">`, or inside a table a bare `<table hidden>`
+ * around the part that carries the id (`<tbody id="S:1">`, `<colgroup id="S:1">`, or `<tr id="S:1">` under the tbody
+ * the parser adds).
+ */
+function reactStreamedSegment(el: Element): boolean {
+  if (REACT_STREAMED_SEGMENT.test(el.id)) return true
+  if (el.tagName.toLowerCase() !== 'table' || el.id !== '') return false
+  const part = el.firstElementChild
+  if (part === null) return false
+  if (REACT_STREAMED_SEGMENT.test(part.id)) return true
+  return part.tagName.toLowerCase() === 'tbody' && part.id === '' && REACT_STREAMED_SEGMENT.test(part.firstElementChild?.id ?? '')
+}
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100

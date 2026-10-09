@@ -64,6 +64,51 @@ describe('extractTf', () => {
     expect(out.mainHtml).not.toContain('Manage your privacy')
   })
 
+  it('does not take a region the page hides for its content (ROADMAP PA item 4)', () => {
+    // Eurostat's data browser read in a browser: the only prose was the EU banner's hidden dropdown; the data is drawn by script (T055).
+    const banner = (attrs: string) => `<!doctype html><html><body><div id="globan"><div class="wt-globan--content"><div id="dropdown" class="wt-globan--dropdown"${attrs}>
+<p>All official European Union website addresses are in the <b>europa.eu</b> domain.</p><p><a href="https://european-union.europa.eu/institutions">See all EU institutions and bodies</a></p></div></div></div>
+<div id="app"><canvas width="1200" height="600"></canvas></div></body></html>`
+    for (const attrs of [' hidden=""', ' hidden', ' HIDDEN="hidden"']) expect(extractTf.extract(banner(attrs)).escalate, attrs).toBe(true)
+    // A region inside a hidden container is hidden too.
+    const article = `<article><h1>Archived notice</h1><p>This notice stays in the page for the site's scripts and is never shown to a reader of it, whatever it says at length.</p></article>`
+    expect(extractTf.extract(`<!doctype html><html><body><div hidden>${article}</div><div id="app"></div></body></html>`).escalate).toBe(true)
+    // The same region shown is content; a hidden answer inside a shown article is part of it.
+    expect(extractTf.extract(banner('')).escalate).toBe(false)
+    const faq = extractTf.extract(`<!doctype html><html><body><article><h1>Delivery questions</h1><p>Orders leave the warehouse within two working days and arrive within a week across the country.</p><details><summary>Can I change the address?</summary><div hidden><p>Yes, until the parcel ships.</p></div></details></article></body></html>`)
+    expect(faq.escalate).toBe(false)
+    // Judged under every strategy, not the article cascade alone: a table page whose main region is hidden.
+    const readings = '<main><h1>Readings</h1><table><tr><th>Station</th><th>Flow</th></tr><tr><td>Meridian</td><td>41</td></tr></table></main>'
+    const shownTable = extractTf.extract(`<!doctype html><html><head><title>Page</title></head><body>${readings}</body></html>`)
+    const hiddenTable = extractTf.extract(`<!doctype html><html><head><title>Page</title></head><body><div hidden>${readings}</div></body></html>`)
+    expect([shownTable.strategy, shownTable.escalate]).toEqual(['table', false])
+    expect([hiddenTable.strategy, hiddenTable.escalate]).toEqual(['table', true])
+  })
+
+  it('reads a region a reader can still see or find as shown, whatever its markup says (ROADMAP PA item 4)', () => {
+    const article = `<main><h1>Templates</h1><p>Jumpstart your next app with a template: a commerce storefront, a blog, a dashboard or an AI chatbot, each ready to deploy.</p><p>Every template comes with its source, a live demo and a guide to the parts worth changing first.</p></main>`
+    const page = (wrap: (inner: string) => string) => extractTf.extract(`<!doctype html><html><body>${wrap(article)}</body></html>`)
+    // React streams a part of the page hidden and its script moves it into place (vercel.com/templates over HTTP), with or without an identifier prefix.
+    for (const id of ['S:5', 'S:1f', 'R:S:0']) expect(page((inner) => `<div id="__next"></div><div hidden id="${id}">${inner}</div>`).escalate, id).toBe(false)
+    expect(page((inner) => `<div hidden id="S:x">${inner}</div>`).escalate).toBe(true)
+    // An exempt part inside a container that is hidden is still hidden.
+    expect(page((inner) => `<div hidden><div hidden id="S:2">${inner}</div></div>`).escalate).toBe(true)
+    expect(page((inner) => `<div hidden><div hidden="until-found">${inner}</div></div>`).escalate).toBe(true)
+    // Inside a table React puts the id on the part it streams and `hidden` on a bare table around it (React 19's
+    // renderToPipeableStream, a component that suspends inside <tbody>): the rows are the page's table.
+    const rows = Array.from({ length: 5 }, (_, i) => `<tr><td>Station ${i}</td><td>${40 + i}</td></tr>`).join('')
+    const streamedTable = (part: string) => extractTf.extract(`<!doctype html><html><head><title>Page</title></head><body><main><h1>Readings</h1><table><thead><tr><th>Station</th><th>Flow</th></tr></thead></table></main>${part}</body></html>`)
+    for (const part of [`<table hidden><tbody id="S:0">${rows}</tbody></table>`, `<table hidden>${rows.replace('<tr>', '<tr id="S:1">')}</table>`, `<table hidden id="S:3"><tbody>${rows}</tbody></table>`]) {
+      expect(streamedTable(part).escalate, part.slice(0, 40)).toBe(false)
+    }
+    expect(streamedTable(`<table hidden><tbody>${rows}</tbody></table>`).escalate).toBe(true)
+    // A modal marks the page behind it aria-hidden (Radix, through hideOthers), which hides nothing from the eye.
+    expect(page((inner) => `<div id="__next" aria-hidden="true">${inner}</div><div role="dialog"><h2>Your privacy</h2><p>We use cookies.</p><button>Accept</button></div>`).escalate).toBe(false)
+    // A reader's search opens a section hidden until found.
+    expect(page((inner) => `<div hidden="until-found">${inner}</div>`).escalate).toBe(false)
+    expect(page((inner) => `<div hidden="Until-Found">${inner}</div>`).escalate).toBe(false)
+  })
+
   it('escalates on a page with no prose at all', () => {
     const out = extractTf.extract('<!doctype html><html><body><div id="root"></div></body></html>')
     expect(out.escalate).toBe(true)
