@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cleanTree, detectRenderSignals, extractTf, htmlToMarkdown, pruneTree, rawSignals, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
 import { parse } from '../src/dom.js'
+import { headingsOnly } from '../src/extract.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -67,6 +68,75 @@ describe('extractTf', () => {
     const out = extractTf.extract('<!doctype html><html><body><div id="root"></div></body></html>')
     expect(out.escalate).toBe(true)
     expect(out.mainHtml).toBe('')
+  })
+
+  it('escalates on a page whose main region says nothing beyond its headings and in-page jump links (ROADMAP PA item 4)', () => {
+    // The Tesla inventory page through a vendor, loaded with no vehicles: a heading was its whole content.
+    const page = (main: string) => `<!doctype html><html><head><title>Inventory</title></head><body>
+<header><nav><a href="/models">Model S</a> <a href="/model3">Model 3</a> <a href="/modelx">Model X</a> <a href="/shop">Shop</a></nav></header>
+<main class="inventory">${main}</main>
+<footer><nav><a href="/about">Tesla © 2026</a> <a href="/privacy">Privacy &amp; Legal</a> <a href="/contact">Contact</a></nav></footer></body></html>`
+    for (const main of [
+      '<h3>Don\'t see the Tesla you\'re looking for?</h3>',
+      '<div><h2>Results</h2><a href="#filters">Skip to Filters</a></div><h1 class="placeholder">Inventory Search Results Fetching...</h1>',
+    ]) expect(extractTf.extract(page(main)).escalate, main).toBe(true)
+    // A heading with something to say beyond it is content.
+    const said = extractTf.extract(page('<h1>Model 3</h1><p>Rear-wheel drive, 363 miles of range, from $42,490.</p>'))
+    expect(said.escalate).toBe(false)
+    expect(said.mainHtml).toContain('363 miles of range')
+  })
+
+  it('keeps short or heading-led pages that are content: cards, a terse product, prose in headings, a one-line notice', () => {
+    // Each of these is content under extract-tf/14 too: the rule must leave them so.
+    const shell = (head: string, main: string) => `<!doctype html><html><head><title>Page</title>${head}</head><body>
+<header><nav><a href="/">Home</a> <a href="/shop">Shop</a> <a href="/about">About</a> <a href="/contact">Contact</a></nav></header>
+<main>${main}</main><footer><nav><a href="/terms">Terms</a> <a href="/privacy">Privacy</a></nav></footer></body></html>`
+    const pages: Record<string, string> = {
+      'category grid': shell('', '<h1>Shop</h1><ul class="products">' + ['Hoodies', 'Shirts', 'Caps', 'Bags'].map((n) => `<li class="product-category product"><a href="/c/${n}"><img src="/${n}.jpg" alt="${n}"><h2>${n} <mark class="count">(3)</mark></h2></a></li>`).join('') + '</ul>'),
+      'publications': shell('', '<h1>Publications</h1>' + ['Sparse attention at scale in practice', 'Retrieval for long documents and tables', 'Evaluating extraction on real sites', 'Ladders for web access', 'Evidence records that travel', 'Budgets for paid providers'].map((t, i) => `<div class="pub"><h3><a href="/p/${i}">${t}</a></h3><span>Published in 2024 by the lab</span></div>`).join('')),
+      'blog archive': shell('', '<h1>Archive</h1>' + ['How we test extraction on two hundred pages', 'What a spend ledger is for and how it settles', 'Why a provider success is not verified content', 'Reading pages that load their data late'].map((t, i) => `<article><h2><a href="/post/${i}">${t}</a></h2></article>`).join('')),
+      'terse product': shell('<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Acme Widget","offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD"}}</script>', '<h1>Acme Widget</h1><img src="/w.jpg" alt="widget"><span class="price">$19.99</span><p>In stock</p>'),
+      'prose in headings': shell('', '<h1>About us</h1><h3>We have built small kilns by hand since 1990, from a single workshop by the harbour.</h3><h3>Every kiln is fired twice before it leaves, and each one ships with its own logbook.</h3>'),
+      'one-line notice': shell('', '<h1>公告</h1><p>本店今日休息，明天照常营业。</p>'),
+      'score table': shell('', '<h1>Final score</h1><table><tr><th>Team</th><th>Pts</th></tr><tr><td>Home</td><td>3</td></tr><tr><td>Away</td><td>1</td></tr></table>'),
+      'chart': shell('', '<h1>Chart: US inflation rate since 2000</h1><img src="/chart.png" alt="Line chart of US CPI inflation 2000-2026">'),
+      // Kept so by the strategy alone: a list of heading-named cards with no thumbnails, a product with its price in a heading.
+      'bare category grid': shell('', '<h1>Shop</h1><ul class="products">' + ['Hoodies', 'Shirts', 'Caps', 'Bags'].map((n) => `<li class="product-category product"><a href="/c/${n}"><h2>${n} <mark class="count">(3)</mark></h2></a></li>`).join('') + '</ul>'),
+      'price in a heading': shell('<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Acme Widget","offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD"}}</script>', '<div class="product"><h1>Acme Widget</h1><h2 class="price">$19.99</h2></div>'),
+      'gallery': shell('', '<h1>Gallery: our 2026 summer collection</h1><div class="grid">' + ['dress', 'shirt', 'hat'].map((n) => `<img src="/${n}.jpg" alt="The ${n} in linen">`).join('') + '</div>'),
+    }
+    for (const [name, html] of Object.entries(pages)) expect(extractTf.extract(html).escalate, name).toBe(false)
+  })
+
+  it('judges a region by what it says beside its headings, jump links set aside, without recursing (headingsOnly)', () => {
+    const region = (html: string) => parse(`<!doctype html><html><body><main>${html}</main></body></html>`).document.querySelector('main')!
+    expect(headingsOnly(region('<h2>Results</h2>'))).toBe(true)
+    // A jump link is not content, however long; a link to another page is.
+    expect(headingsOnly(region('<h2>Results</h2><a href="#filters">Skip to the filters and the sort order</a>'))).toBe(true)
+    expect(headingsOnly(region('<h2>Results</h2><a href="/filters">Filters</a>'))).toBe(false)
+    // A symbol or two beside the heading is not content; three characters are; a script's text is not counted.
+    expect(headingsOnly(region('<h2>Results</h2><span>▸</span>'))).toBe(true)
+    expect(headingsOnly(region('<h2>Results</h2><span>ab</span>'))).toBe(true)
+    expect(headingsOnly(region('<h2>公告</h2><p>休息日</p>'))).toBe(false)
+    expect(headingsOnly(region('<h2>Results</h2><script>window.results = "loading the results for the page"</script>'))).toBe(true)
+    // Text inside a heading's own elements is heading text, and a page's indentation between tags is not text.
+    expect(headingsOnly(region('<h3><span>Don\'t see the Tesla</span> <em>you\'re looking for?</em></h3>'))).toBe(true)
+    expect(headingsOnly(region('\n    <section>\n      <h3>Don\'t see the Tesla you\'re looking for?</h3>\n      <a href="#filters">Skip to Filters</a>\n    </section>\n  '))).toBe(true)
+    // An image beside the heading is content; one inside it is part of the heading; media the Markdown drops are not
+    // content (a table drawn on a canvas, a video, an embedded frame).
+    expect(headingsOnly(region('<h1>Chart</h1><figure><img src="/c.png" alt="chart"></figure>'))).toBe(false)
+    expect(headingsOnly(region('<h1><img src="/logo.png" alt=""> Results</h1>'))).toBe(true)
+    for (const media of ['<canvas width="1512" height="640"></canvas>', '<video src="/v.mp4"></video>', '<iframe src="https://example.com/embed"></iframe>', '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>', '<img alt="no source">', '<img class="spinner" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">', '<img src="javascript:void(0)" alt="">']) {
+      expect(headingsOnly(region(`<h1>Sheet</h1>${media}`)), media).toBe(true)
+    }
+    // Headings that hold 100 characters or more are content in themselves.
+    expect(headingsOnly(region(`<h3>${'a'.repeat(99)}</h3>`))).toBe(true)
+    expect(headingsOnly(region(`<h3>${'a'.repeat(100)}</h3>`))).toBe(false)
+    // A region that is itself a heading counts its text as heading text.
+    const heading = parse('<!doctype html><html><body><h3>Don\'t see the Tesla you\'re looking for?</h3></body></html>').document.querySelector('h3')!
+    expect(headingsOnly(heading)).toBe(true)
+    // Thousands of elements deep.
+    expect(headingsOnly(region('<h1>Title</h1>' + '<div>'.repeat(6000) + '<p>Deep paragraph of real text.</p>' + '</div>'.repeat(6000)))).toBe(false)
   })
 
   it('keeps a card listing whose short texts the article cascade cannot see', () => {

@@ -68,6 +68,8 @@ interface FakeScript {
   gotoError?: Error
   /** Simulate a vendor that provisioned no context at all. */
   noContext?: boolean
+  /** The page says its data is loading for this many settle samples, then shows it. */
+  loadingSamples?: number
 }
 
 interface FakeState {
@@ -86,6 +88,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
     async newPage(): Promise<CdpPage> {
       state.pagesOpened++
       let current = 'about:blank'
+      let samples = 0
       return {
         async goto(url: string): Promise<CdpResponse | null> {
           if (script.gotoError) throw script.gotoError
@@ -103,9 +106,12 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
           }
         },
         async evaluate(expression: string) {
-          return expression === 'navigator.userAgent' ? ua : undefined
+          if (expression === 'navigator.userAgent') return ua
+          if (script.loadingSamples === undefined) return undefined
+          const loading = samples++ < script.loadingSamples
+          return JSON.stringify({ size: loading ? 10 : 90, text: loading ? 'Fetching...' : 'the data', loading })
         },
-        async waitForTimeout() {},
+        async waitForTimeout(ms: number) { if (script.loadingSamples !== undefined) await new Promise((resolve) => setTimeout(resolve, ms)) },
         async content() {
           return script.body ?? PAGE
         },
@@ -277,6 +283,17 @@ describe('vendor identity', () => {
     const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connector)
     const res = await transport.fetch('https://shop.example/dp/A')
     expect(res.status).toBe(200)
+  })
+
+  it('waits past the usual settle for a page that says its data is loading, and reports it (ROADMAP PA item 4)', async () => {
+    const api = sessionServing('bb_1')
+    // Twenty samples of 100 ms: about 2 s of "Fetching...", past the usual 1.5 s settle.
+    const bb = fakeBrowser({ loadingSamples: 20 })
+    const { connector } = connectorFor(bb)
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connector)
+    const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)
+    expect(res.settle).toMatchObject({ loadingSeen: true, stillLoading: false })
+    expect(res.settle!.waitedMs).toBeGreaterThan(1_500)
   })
 
   it('fails clearly when the vendor provisioned no context', async () => {
