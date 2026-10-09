@@ -26,6 +26,7 @@ import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
 import { errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
+import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import type { Dispatcher } from 'undici'
 
 /**
@@ -90,6 +91,8 @@ export interface ProviderResponse {
    * carried it rather than inferred later.
    */
   declaredUserAgent?: string | null
+  /** What the wait for the rendered page saw, a loading indicator included, when the transport waited for it. */
+  settle?: SettleOutcome
   /** What the vendor billed us, when it says. Reported, never estimated. */
   costUsd?: number | null
   /**
@@ -191,7 +194,8 @@ export class ProviderSubject implements SubjectAdapter {
 
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
-    try { return await this.fetchWithinBudget(url, scope, options) } finally { scope.dispose() }
+    // A page read while it still showed a loading indicator says so on the answer.
+    try { return withStillLoadingWarning(await this.fetchWithinBudget(url, scope, options)) } finally { scope.dispose() }
   }
 
   private async fetchWithinBudget(url: string, execution: ExecutionContext, options: FetchOptions): Promise<FetchResult> {
@@ -280,6 +284,8 @@ export class ProviderSubject implements SubjectAdapter {
     try {
       res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal), execution.signal)
       fetchedAt = new Date().toISOString()
+      const waited = loadingWaitEvent(res.settle, Date.now() - start, 'provider')
+      if (waited !== null) trace.push(waited)
       if (res.status === 429 || res.status === 503) {
         const delay = parseRetryAfterMs(res.headers['retry-after'] ?? null)
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)
