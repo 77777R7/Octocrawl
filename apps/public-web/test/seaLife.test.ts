@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CRAB, crabAlarmed, linkCells, readState, SHOAL, shoalSlots } from '../src/seaLife.js'
+import { CRAB, crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, rayRows, readState, renderState, SHOAL, shoalSlots } from '../src/seaLife.js'
 
 describe('Sea life', () => {
   it('swims a shoal as a chevron, the leader at its point and no two fish in one place', () => {
@@ -36,5 +36,39 @@ describe('Sea life', () => {
     const end = SHOAL.linkMs + n * SHOAL.readEveryMs
     expect(readState(end + 10, n)).toEqual({ linking: false, reading: -1, done: false })
     expect(readState(end + SHOAL.restMs, n).done).toBe(true)
+  })
+
+  it('opens a jellyfish’s bell quickly and closes it slowly, once a pulse', () => {
+    expect(jellyOpen(0)).toBeCloseTo(0)
+    expect(jellyOpen(JELLY.pulseMs * 0.3)).toBeCloseTo(1)
+    // A tenth of a pulse after it starts to open it is about half open; a tenth after it starts to close it is
+    // still nearly open.
+    expect(jellyOpen(JELLY.pulseMs * 0.1)).toBeLessThan(0.6)
+    expect(jellyOpen(JELLY.pulseMs * 0.4)).toBeGreaterThan(0.9)
+    expect(jellyOpen(JELLY.pulseMs)).toBeCloseTo(0)
+    for (let t = 0; t < 3 * JELLY.pulseMs; t += 37) { expect(jellyOpen(t)).toBeGreaterThanOrEqual(-1e-9); expect(jellyOpen(t)).toBeLessThanOrEqual(1 + 1e-9) }
+    expect(jellyRows(1, 0)[1]!.length).toBeGreaterThan(jellyRows(0, 0)[1]!.length)
+    expect(jellyRows(0.5, 1)).toHaveLength(4)
+  })
+
+  it('makes the octopus wait out a jellyfish’s render before the { } comes, then lets it go', () => {
+    const wait = JELLY.waitPulses * JELLY.pulseMs
+    expect(renderState(0)).toEqual({ rendering: true, give: 0, done: false })
+    expect(renderState(wait - 1).rendering).toBe(true)
+    expect(renderState(wait + JELLY.giveMs / 2).give).toBeCloseTo(0.5)
+    expect(renderState(wait + JELLY.giveMs)).toEqual({ rendering: false, give: 1, done: true })
+  })
+
+  it('beats a ray’s wings round, every row as wide as the rest, its nose leading the way it swims', () => {
+    for (const dir of [1, -1]) for (let b = 0; b < 1; b += 0.1) {
+      const rows = rayRows(dir, b)
+      expect(rows).toHaveLength(5)
+      expect(new Set(rows.map(r => r.length)).size).toBe(1)
+      const body = rows[2]!
+      if (dir > 0) { expect(body.trimEnd().endsWith('>')).toBe(true); expect(body.startsWith('~')).toBe(true) }
+      else { expect(body.startsWith('<')).toBe(true); expect(body.trimEnd().endsWith('~')).toBe(true) }
+    }
+    expect(rayRows(-1, 0)).not.toEqual(rayRows(-1, 0.6))
+    expect(rayRows(-1, 0.1)).toEqual(rayRows(-1, 1.1))
   })
 })

@@ -55,7 +55,7 @@ function colour(warm: number, alpha: number): string {
 
 /** What the octopus (octopusSwim.ts) may be doing that draws the eye: while it does, the water keeps calm, so the
  * two never compete. */
-const LOUD = new Set(['wave', 'bubbles', 'chase', 'meet', 'map'])
+const LOUD = new Set(['wave', 'bubbles', 'chase', 'meet', 'map', 'render'])
 
 /** Takes over a prerendered glyph cloud (`data-cols`, `data-rows`, `data-seed` name how it was drawn) with a canvas
  * that draws the same grid, moving, while it is on screen. Without motion, the prerendered marks stay. A cloud with
