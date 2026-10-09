@@ -11,7 +11,7 @@ const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 /** What Octocrawl does, as on the home page's What it does section, each with where to read more. */
 export const NAV_CAPABILITIES = [
   { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/docs/guides/extract-page/' },
-  { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/docs/reference/#rest-and-sdk' },
+  { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/docs/guides/map-site/' },
   { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/docs/guides/batch-results/' },
   { glyph: '◷', title: 'Watch a page', text: 'What changed, to your HTTPS webhook', href: '/docs/guides/monitor-webhook/' },
   { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/#what-it-does' },
@@ -30,7 +30,9 @@ export const NAV_CLIENTS = [
 /** The docs menu: the guide groups as the sidebar has them; the project pages (privacy, terms) stay in the footer. */
 export const NAV_DOC_GROUPS = ['Get started', 'Guides', 'Reference']
 
-const item = ({ glyph, title, text, href }) => `<li><a href="${href}"><span class="nav-glyph" aria-hidden="true">${esc(glyph)}</span><span class="nav-title">${esc(title)}</span><span class="nav-text">${esc(text)}</span></a></li>`
+// The spaces between the parts keep a link's text readable as words ("Scrape a page Markdown, …") for crawlers, readers
+// and copy-paste; the grid lays the parts out and ignores them.
+const item = ({ glyph, title, text, href }) => `<li><a href="${href}"><span class="nav-glyph" aria-hidden="true">${esc(glyph)}</span> <span class="nav-title">${esc(title)}</span> <span class="nav-text">${esc(text)}</span></a></li>`
 
 /** The header's navigation and its two actions (GitHub, Try it), the same on every page. `current` marks a top-level
  * item as the page being read: 'docs' or 'changelog'. */
@@ -42,7 +44,7 @@ export function siteNavMarkup(current = '') {
               <li class="nav-item"><details class="nav-drop"><summary>Product<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-product">
                 <div class="nav-col"><p class="nav-kicker">What it does</p><ul>${NAV_CAPABILITIES.map(item).join('')}</ul></div>
                 <div class="nav-col"><p class="nav-kicker">Use it from</p><ul>${NAV_CLIENTS.map(item).join('')}</ul></div>
-                <a class="nav-feature" href="/docs/connect-mcp/"><span class="nav-feature-tag">MCP</span><span class="nav-feature-title">Connect your agent in one line</span><code>claude mcp add \\\n  --transport http octocrawl \\\n  https://mcp.octocrawl.dev/mcp</code><span class="nav-feature-note">No account, 20 pages a day. Setup for every client <span aria-hidden="true">→</span></span></a>
+                <a class="nav-feature" href="/docs/connect-mcp/"><span class="nav-feature-tag">MCP</span> <span class="nav-feature-title">Connect your agent in one line</span> <code>claude mcp add \\\n  --transport http octocrawl \\\n  https://mcp.octocrawl.dev/mcp</code> <span class="nav-feature-note">No account, 20 pages a day. Setup for every client <span aria-hidden="true">→</span></span></a>
               </div></details></li>
               <li class="nav-item"><details class="nav-drop"><summary${current === 'docs' ? ' aria-current="page"' : ''}>Docs<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-docs">${docs}</div></details></li>
               <li class="nav-item"><a class="nav-link" href="/#free-tiers">Free tiers</a></li>
