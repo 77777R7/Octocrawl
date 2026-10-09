@@ -45,6 +45,12 @@
 //   cost           externalCostUsd as the API reports it, null when unknown; egressCostUsd is null
 //                  because nothing measures it yet. A table with any null is reported as unknown.
 //   denominator    every task in the selected set, including ones the API could not answer.
+//   paid calls     (octocrawl) the provider calls the page's Evidence Record lists (access.paidCalls, ROADMAP PA item 4):
+//                  each one's provider, what Octocrawl made of the page it returned (never the provider's word), and
+//                  whether it is the answer; chargedUsd is what the API's spend ledger charged the scrape
+//                  (usage.externalCostChargedUsd): the provider's stated price, else its price ceiling, an upper bound
+//                  and not its bill. 0 when the record lists no paid call; null when the API's record says nothing of
+//                  paid calls (a build before them, or no record).
 //   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
 //                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
 //                  success with another status, or no success, is `failed` with the reason it gave (an API that names the
@@ -233,6 +239,20 @@ async function zenrowsScrape(task) {
   }
 }
 
+/** The paid provider calls the answer's Evidence Record lists, each as its provider, verdict and role; null when the record says nothing of them. */
+function paidCallsOf(doc) {
+  const access = doc?.evidenceRecord?.access
+  if (access === undefined || access === null || !('paidCalls' in access)) return null
+  return (access.paidCalls ?? []).map((c) => ({ provider: c.provider, outcome: c.outcome, reason: c.reason, answer: c.answer, chargedUsd: c.chargedUsd }))
+}
+
+/** What the API's spend ledger charged the scrape: 0 when its record lists no paid call, null when that is not known. */
+function chargedOf(doc) {
+  if (typeof doc?.usage?.externalCostChargedUsd === 'number') return doc.usage.externalCostChargedUsd
+  const calls = paidCallsOf(doc)
+  return calls !== null && calls.length === 0 ? 0 : null
+}
+
 async function attempt(task, temperature) {
   const body = { url: task.url, ...(task.request ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }) }
   const started = Date.now()
@@ -263,13 +283,14 @@ async function attempt(task, temperature) {
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
+      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc) } : {}),
     },
     intervention: { access: access ?? null, lane: doc?.lane ?? null, egress: doc?.evidence?.envProxy ?? null },
     outcome: {
       verified, falseSuccess: doc?.status === 'success' && dataFailed,
       failedPredicates: results.filter((r) => !r.pass).map((r) => r.p.type + (r.p.path ? `:${r.p.path}` : '')),
       wallMs, externalCostUsd: doc?.usage?.externalCostUsd ?? null, egressCostUsd: null,
-      ...(target === 'octocrawl' ? {} : { credits: doc?.credits ?? (error === null ? null : 0) }),
+      ...(target === 'octocrawl' ? { chargedUsd: chargedOf(doc) } : { credits: doc?.credits ?? (error === null ? null : 0) }),
       completion: verified ? 'unattended_public' : null,
     },
     suspected: { cause: 'unknown', confidence: 'not_isolated' },
@@ -335,7 +356,16 @@ const summary = (temp) => {
     p50Ms: pct(r.map((x) => x.outcome.wallMs), 0.5), p95Ms: pct(r.map((x) => x.outcome.wallMs), 0.95),
     externalCostPer1000VerifiedUsd: costs.some((c) => c === null) || verifiedN === 0 ? null : (costs.reduce((a, b) => a + b, 0) / verifiedN) * 1000,
     egressCostPer1000VerifiedUsd: null,
-    ...((environment.target ?? 'octocrawl') === 'octocrawl' ? {} : (() => { const c = r.map((x) => x.outcome.credits); return { credits: c.some((v) => v === null || v === undefined) ? null : c.reduce((a, b) => a + b, 0), creditsPer1000Verified: c.some((v) => v === null || v === undefined) || verifiedN === 0 ? null : (c.reduce((a, b) => a + b, 0) / verifiedN) * 1000 } })()),
+    ...((environment.target ?? 'octocrawl') === 'octocrawl' ? (() => {
+      // Rows from a run before paid calls were recorded carry neither field: unknown, not none.
+      const charged = r.map((x) => x.outcome.chargedUsd ?? null)
+      const calls = r.map((x) => x.observed.paidCalls ?? null)
+      return {
+        chargedUsd: charged.some((c) => c === null) ? null : charged.reduce((a, b) => a + b, 0),
+        paidCalls: calls.some((c) => c === null) ? null : calls.reduce((a, b) => a + b.length, 0),
+        verifiedFromPaidCall: calls.some((c) => c === null) ? null : r.filter((x) => x.outcome.verified && x.observed.paidCalls.some((c) => c.answer)).length,
+      }
+    })() : (() => { const c = r.map((x) => x.outcome.credits); return { credits: c.some((v) => v === null || v === undefined) ? null : c.reduce((a, b) => a + b, 0), creditsPer1000Verified: c.some((v) => v === null || v === undefined) || verifiedN === 0 ? null : (c.reduce((a, b) => a + b, 0) / verifiedN) * 1000 } })()),
   }
 }
 const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
@@ -346,6 +376,9 @@ await writeFile(join(runDir, 'summary.json'), JSON.stringify({ command, environm
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
+  // A provider call's provider, what Octocrawl made of its page and whether it is the answer, for runs that recorded them.
+  const paidColumn = rows.some((r) => Array.isArray(r.observed.paidCalls) && r.observed.paidCalls.length > 0)
+  const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
@@ -360,9 +393,11 @@ if (recordFile !== undefined) {
     `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
-    '| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |`),
+    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its price ceiling: an upper bound, not its bill)`),
+    ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
+    `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}`,
+    `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
+    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
     ...(droppedRows.length === 0 ? [] : [`Dropped from the task file after this run, so outside every count above: ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')} (the reasons are in tasks.v1.json \`excluded\`).`, '']),
   ].join('\n')
