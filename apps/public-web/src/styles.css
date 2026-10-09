@@ -1319,7 +1319,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 /* With a script on a screen wide and tall enough, the window is pinned: the planet and the list of four stay in view
    while the page scrolls one step per tier, with half a step's hold on the last, and the tier the scroll has reached
    opens in the list while the others fold to their names. The visitor always sees all four and which one is lit,
-   and the scroll is the browser's own. The stage's --tiers (featureSections.ts) counts the steps; featureMotion.ts
+   and the scroll is the browser's own. The stage's --tiers (set by featureMotion.ts) counts the steps; featureMotion.ts
    reads the step from the stage's and the window's heights, and pins under the same query, so the hold here and its
    TAIL, and this query and its own, must agree. */
 @media (min-width: 861px) and (min-height: 720px) {
