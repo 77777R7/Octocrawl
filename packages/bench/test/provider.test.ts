@@ -93,6 +93,17 @@ describe('ProviderSubject robots gate', () => {
     expect(transport.calls).toHaveLength(1)
   })
 
+  it('records the wait for a page that still showed its data loading, and warns when it was read while it did (ROADMAP PA item 4)', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const stuck = await new ProviderSubject(decl(), new CountingTransport({ settle: { loadingSeen: true, stillLoading: true, waitedMs: 8_000 } }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(stuck.status).toBe('success')
+    expect(stuck.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'loading_wait', detail: { waitedMs: 8_000, cleared: false } }))
+    expect(stuck.warnings).toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+    const cleared = await new ProviderSubject(decl(), new CountingTransport({ settle: { loadingSeen: true, stillLoading: false, waitedMs: 2_400 } }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(cleared.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: { waitedMs: 2_400, cleared: true } }))
+    expect(cleared.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+  })
+
   it('returns the whole page for onlyMainContent false, with the same evidence', async () => {
     const body = PAGE.replace('<body>', '<body><nav><a href="/shop">Shop navigation</a></nav>').replace('</body>', '<footer>Provider footer</footer></body>')
     const { fetcher } = robotsServing(AMAZON_SHAPED)

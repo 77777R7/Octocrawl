@@ -830,9 +830,12 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           continue
         }
-        // A page still showing a loading indicator is waited for longer, leaving the capture reserve before the deadline.
-        const settled = await settle(remainingTimeout(execution, 1_500), execution.deadlineAt === undefined ? LOADING_WAIT_MAX_MS : Math.max(1, Math.min(LOADING_WAIT_MAX_MS, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())))
-        const waited = loadingWaitEvent(settled, Date.now() - start, 'browser_local')
+        // A page still showing a loading indicator is waited for longer, leaving the capture reserve before the deadline;
+        // not when the request waits itself (waitFor) or runs steps on the page, whose time this wait would take.
+        const callerWaits = (options.waitFor ?? 0) > 0 || (options.actions?.length ?? 0) > 0
+        const usual = remainingTimeout(execution, 1_500)
+        const settled = await settle(usual, callerWaits ? usual : execution.deadlineAt === undefined ? LOADING_WAIT_MAX_MS : Math.max(1, Math.min(LOADING_WAIT_MAX_MS, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())))
+        const waited = callerWaits ? null : loadingWaitEvent(settled, Date.now() - start, 'browser_local')
         if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {

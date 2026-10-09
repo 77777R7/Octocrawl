@@ -24,35 +24,44 @@ export interface SettleOutcome {
 }
 
 /**
- * Whether the page shows that its data is still on the way: a visible element marked busy (`aria-busy="true"`) or a
- * progress bar, a visible element whose short text is a loading message ("Loading…", "Fetching results...", "Please
- * wait") or ends in one ("Search Results Fetching..."), or three visible skeleton placeholders. A page captured then holds the placeholder, not the data (a vendor
- * page read in 1.5 s said "Inventory Search Results Fetching...", ROADMAP PA item 4).
+ * Whether a page with little text shows that its data is still on the way: a visible element marked busy
+ * (`aria-busy="true"`, the page's own root aside), or a visible short text, not a button's or a link's, that is or ends in
+ * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."). A page with more
+ * text than LOADING_PAGE_TEXT_MAX is read for that text: a loader left on it (more comments, a feed's next page) is not its
+ * data. Visible means a box of some size on the page that neither it nor an ancestor hides (`checkVisibility`, with
+ * opacity). Progress bars and skeleton classes are not signs: rating histograms, language bars and button styles use
+ * them on finished pages. The probe never fails the page: an error in it reads as not loading (ROADMAP PA item 4, where
+ * a vendor page read in 1.5 s said "Inventory Search Results Fetching...").
  */
+export const LOADING_PAGE_TEXT_MAX = 4_000
+
 export const LOADING_PROBE = `(() => {
-  const shown = (el) => {
-    const box = el.getBoundingClientRect()
-    if (box.width === 0 && box.height === 0) return false
-    const style = getComputedStyle(el)
-    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
-  }
-  for (const el of document.querySelectorAll('[aria-busy="true"], [role="progressbar"]')) if (shown(el)) return true
-  const message = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\\s+[\\w-]+){0,3}\\s*(?:\\.{2,3}|\\u2026)|loading|fetching|please wait)$/i
-  const trailing = /\\b(?:loading|fetching)\\s*(?:\\.{2,3}|\\u2026)$/i
-  const root = document.body ?? document.documentElement
-  if (root !== null) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  try {
+    const body = document.body
+    if (body === null || (body.innerText ?? '').length > ${LOADING_PAGE_TEXT_MAX}) return false
+    const shown = (el) => {
+      const box = el.getBoundingClientRect()
+      if (box.width < 1 || box.height < 1 || box.right <= 0 || box.bottom <= 0) return false
+      if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+      const style = getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+    }
+    for (const el of body.querySelectorAll('[aria-busy="true"]')) if (shown(el)) return true
+    const message = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\\s+[\\w-]+){0,3}\\s*(?:\\.{2,3}|\\u2026)|loading|fetching|please wait)$/i
+    const trailing = /\\b(?:loading|fetching)\\s*(?:\\.{2,3}|\\u2026)$/i
+    // 4 is NodeFilter.SHOW_TEXT, named so that a page replacing NodeFilter cannot break the probe.
+    const walker = document.createTreeWalker(body, 4)
     let seen = 0
     for (let node = walker.nextNode(); node !== null && seen < 20000; node = walker.nextNode(), seen++) {
       const text = (node.textContent ?? '').trim()
       if (text.length === 0 || text.length > 48 || !(message.test(text) || trailing.test(text))) continue
       const parent = node.parentElement
-      if (parent !== null && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'].includes(parent.tagName) && shown(parent)) return true
+      if (parent !== null && parent.closest('button, a') === null && shown(parent)) return true
     }
+    return false
+  } catch {
+    return false
   }
-  let skeletons = 0
-  for (const el of document.querySelectorAll('[class*="skeleton" i], [class*="shimmer" i]')) if (shown(el) && ++skeletons >= 3) return true
-  return false
 })()`
 
 /**
@@ -78,8 +87,10 @@ export async function waitForRenderedStability(
   let stableRounds = 0
   let loading = false
   let loadingSeen = false
+  // Only a caller that asked for the longer wait has a loading page held past the usual bound, or kept from finishing early.
+  const extends_ = loadingDeadline > deadline
   const outcome = (): SettleOutcome => ({ loadingSeen, stillLoading: loading, waitedMs: Date.now() - started })
-  const bound = () => (loading ? loadingDeadline : deadline)
+  const bound = () => (extends_ && loading ? loadingDeadline : deadline)
 
   while (Date.now() < bound()) {
     let snapshot: unknown
@@ -109,7 +120,7 @@ export async function waitForRenderedStability(
     else stableRounds = 0
     previous = current
 
-    if (Date.now() - observedSince >= minMs && stableRounds >= 2 && !loading) return outcome()
+    if (Date.now() - observedSince >= minMs && stableRounds >= 2 && !(extends_ && loading)) return outcome()
     await page.waitForTimeout(Math.min(sampleMs, Math.max(1, bound() - Date.now())))
   }
   return outcome()

@@ -47,8 +47,12 @@ describe('waitForRenderedStability', () => {
     // A loader that never goes ends the wait at loadingMaxMs, still loading.
     const stuck = { async evaluate() { return JSON.stringify({ size: 10, text: 'Loading...', loading: true }) }, waitForTimeout: sleep }
     expect(await waitForRenderedStability(stuck, { minMs: 20, maxMs: 60, loadingMaxMs: 200, sampleMs: 20 })).toMatchObject({ loadingSeen: true, stillLoading: true })
-    // Without loadingMaxMs a loading page is waited for no longer than any other.
+    // Without loadingMaxMs a loading page is waited for no longer than any other, and a stable one ends the wait as early.
     expect(await waitForRenderedStability(stuck, { minMs: 20, maxMs: 60, sampleMs: 20 })).toMatchObject({ loadingSeen: true, stillLoading: true })
+    let samples = 0
+    const counted = { async evaluate() { samples++; return JSON.stringify({ size: 10, text: 'Loading more posts…', loading: true }) }, waitForTimeout: sleep }
+    await waitForRenderedStability(counted, { minMs: 20, maxMs: 2_000, sampleMs: 20 })
+    expect(samples).toBeLessThan(20)
   })
 
   it('records the loading wait and warns on a page read as content while still loading', () => {

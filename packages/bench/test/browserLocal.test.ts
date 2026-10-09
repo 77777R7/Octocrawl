@@ -137,15 +137,38 @@ beforeAll(async () => {
           'for the navigation rather than merely written into the compliance record.</p>' +
           '</article></body></html>',
       )
-    } else if (req.url === '/fetching' || req.url === '/still-loading') {
-      // A results list that says it is on the way, then fills in 2.5 s after load (or never does).
+    } else if (req.url === '/fetching' || req.url === '/still-loading' || req.url === '/busy') {
+      // A results list that says it is on the way, then fills in 2.5 s after load (or never does). /fetching ends a sentence
+      // with the message, as the vendor page did, on a page that replaced NodeFilter; /busy marks the list busy instead.
       const items = Array.from({ length: 6 }, (_, i) => `<li>Result ${i + 1}: a drill with a price of $${(i + 1) * 20}</li>`).join('')
+      const busy = req.url === '/busy'
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end(
         '<!doctype html><html><body><main><h1>Search results</h1><p>The results for the query are listed below once they arrive.</p>' +
-          '<div id="results"><span>Fetching results...</span></div></main>' +
-          (req.url === '/fetching' ? `<script>setTimeout(function () { document.getElementById("results").innerHTML = "<ul>${items}</ul>" }, 2500)</script>` : '') +
+          (busy ? '<section id="results" aria-busy="true" style="min-height:40px"><p>Results</p></section>' : '<script>window.NodeFilter = undefined</script><div id="results"><span>Inventory Search Results Fetching...</span></div>') + '</main>' +
+          (req.url === '/still-loading' ? '' : `<script>setTimeout(function () { var r = document.getElementById("results"); r.innerHTML = "<ul>${items}</ul>"; r.removeAttribute("aria-busy") }, 2500)</script>`) +
           '</body></html>',
+      )
+    } else if (req.url === '/not-loading') {
+      // Loading words and signs a finished page carries: hidden, off-screen, on a control, in a long sentence, a meter, skeleton styles.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html aria-busy="true"><body><main><h1>Store hours</h1><p>The shop is open from nine to five on weekdays.</p>' +
+          '<div style="opacity:0"><span>Loading...</span></div>' +
+          '<span style="position:absolute;left:-9999px">Loading...</span>' +
+          '<button>Loading...</button><a href="/more">Fetching...</a>' +
+          '<p>For forty years our crew has been loading trucks and fetching...</p>' +
+          '<div role="progressbar" aria-valuenow="40" style="width:100px;height:8px;background:#ccc"></div>' +
+          '<div class="skeleton" style="height:10px"></div><div class="skeleton" style="height:10px"></div><div class="skeleton" style="height:10px"></div>' +
+          '</main></body></html>',
+      )
+    } else if (req.url === '/rich-loader') {
+      // A long article with a comments widget that never stops saying it is loading.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><article><h1>Long read</h1>' +
+          Array.from({ length: 60 }, (_, i) => `<p>Paragraph ${i + 1} of the long read goes on about the subject at some length, so that the page holds plenty of text of its own.</p>`).join('') +
+          '</article><aside><span>Loading comments...</span></aside></main></body></html>',
       )
     } else if (req.url === '/robots.txt') {
       robotsHits++
@@ -401,11 +424,24 @@ describe('BrowserLocalSubject transport', () => {
     const subject = new BrowserLocalSubject()
     try {
       // The list arrives 2.5 s after load: past the usual 1.5 s settle, so the wait for the loading message reaches it.
-      const loaded = await subject.fetch(`${url}/fetching`)
-      expect(loaded.status).toBe('success')
-      expect(loaded.markdown).toContain('Result 6: a drill with a price of $120')
-      expect(loaded.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
-      expect(loaded.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+      for (const path of ['/fetching', '/busy']) {
+        const loaded = await subject.fetch(`${url}${path}`)
+        expect(loaded.status, path).toBe('success')
+        expect(loaded.markdown, path).toContain('Result 6: a drill with a price of $120')
+        expect(loaded.trace, path).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+        expect(loaded.warnings ?? [], path).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+      }
+      // Loading words and signs on a finished page, and a loader left on a page with plenty of text, are not waited for.
+      for (const path of ['/not-loading', '/rich-loader']) {
+        const done = await subject.fetch(`${url}${path}`)
+        expect(done.status, path).toBe('success')
+        expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
+      }
+      // A request that waits itself (waitFor) gets that wait, not this one, and no warning from before it.
+      const waited = await subject.fetch(`${url}/fetching`, undefined, undefined, undefined, { waitFor: 3_000 })
+      expect(waited.markdown).toContain('Result 6')
+      expect(waited.trace.some((event) => event.event === 'loading_wait')).toBe(false)
+      expect(waited.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
       // A page whose message never goes is read when the wait ends, inside the caller's deadline, and the answer says so.
       const stuck = await subject.fetch(`${url}/still-loading`, Date.now() + 5_000)
       expect(stuck.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: false }) }))
