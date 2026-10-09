@@ -31,7 +31,7 @@ Most crawlers report "success" when they return empty pages, challenge screens, 
 
 ## What's Different
 
-1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which Octocrawl finds no main content (`failed`/`empty_unverified` with the whole page's Markdown), a main region that says nothing beyond its headings and in-page jump links ("Skip to Filters") included
+1. **Failure is a first-class outcome** — `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which Octocrawl finds no main content (`failed`/`empty_unverified` with the whole page's Markdown), an article region that only names the page included (headings of fewer than 100 characters and almost nothing beside them, in-page jump links such as "Skip to Filters" set aside)
 2. **Five false-success checks** — challenge text, wrong-page content, missing facts, truncation, yield-below-floor
 3. **Execution ladder** — HTTP → browser → user auth → proxy, with automatic routing, per-attempt trace, and task-level cost accounting
 4. **Ground-truth benchmark** — a 56-case fixture suite (soft 404s, challenge pages, SPAs, timeouts, zip bombs, tables) with verified false-success rates

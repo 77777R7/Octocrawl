@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cleanTree, detectRenderSignals, extractTf, htmlToMarkdown, pruneTree, rawSignals, wholePageBody, withoutLayoutMarkers } from '../src/index.js'
 import { parse } from '../src/dom.js'
+import { headingsOnly } from '../src/extract.js'
 
 const ARTICLE = `<!doctype html><html><head><title>Kiln temperatures and glaze vitrification</title></head>
 <body>
@@ -83,6 +84,42 @@ describe('extractTf', () => {
     const said = extractTf.extract(page('<h1>Model 3</h1><p>Rear-wheel drive, 363 miles of range, from $42,490.</p>'))
     expect(said.escalate).toBe(false)
     expect(said.mainHtml).toContain('363 miles of range')
+  })
+
+  it('keeps short or heading-led pages that are content: cards, a terse product, prose in headings, a one-line notice', () => {
+    // Each of these is content under extract-tf/14 too: the rule must leave them so.
+    const shell = (head: string, main: string) => `<!doctype html><html><head><title>Page</title>${head}</head><body>
+<header><nav><a href="/">Home</a> <a href="/shop">Shop</a> <a href="/about">About</a> <a href="/contact">Contact</a></nav></header>
+<main>${main}</main><footer><nav><a href="/terms">Terms</a> <a href="/privacy">Privacy</a></nav></footer></body></html>`
+    const pages: Record<string, string> = {
+      'category grid': shell('', '<h1>Shop</h1><ul class="products">' + ['Hoodies', 'Shirts', 'Caps', 'Bags'].map((n) => `<li class="product-category product"><a href="/c/${n}"><img src="/${n}.jpg" alt="${n}"><h2>${n} <mark class="count">(3)</mark></h2></a></li>`).join('') + '</ul>'),
+      'publications': shell('', '<h1>Publications</h1>' + ['Sparse attention at scale in practice', 'Retrieval for long documents and tables', 'Evaluating extraction on real sites', 'Ladders for web access', 'Evidence records that travel', 'Budgets for paid providers'].map((t, i) => `<div class="pub"><h3><a href="/p/${i}">${t}</a></h3><span>Published in 2024 by the lab</span></div>`).join('')),
+      'blog archive': shell('', '<h1>Archive</h1>' + ['How we test extraction on two hundred pages', 'What a spend ledger is for and how it settles', 'Why a provider success is not verified content', 'Reading pages that load their data late'].map((t, i) => `<article><h2><a href="/post/${i}">${t}</a></h2></article>`).join('')),
+      'terse product': shell('<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Acme Widget","offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD"}}</script>', '<h1>Acme Widget</h1><img src="/w.jpg" alt="widget"><span class="price">$19.99</span><p>In stock</p>'),
+      'prose in headings': shell('', '<h1>About us</h1><h3>We have built small kilns by hand since 1990, from a single workshop by the harbour.</h3><h3>Every kiln is fired twice before it leaves, and each one ships with its own logbook.</h3>'),
+      'one-line notice': shell('', '<h1>公告</h1><p>本店今日休息，明天照常营业。</p>'),
+      'score table': shell('', '<h1>Final score</h1><table><tr><th>Team</th><th>Pts</th></tr><tr><td>Home</td><td>3</td></tr><tr><td>Away</td><td>1</td></tr></table>'),
+    }
+    for (const [name, html] of Object.entries(pages)) expect(extractTf.extract(html).escalate, name).toBe(false)
+  })
+
+  it('judges a region by what it says beside its headings, jump links set aside, without recursing (headingsOnly)', () => {
+    const region = (html: string) => parse(`<!doctype html><html><body><main>${html}</main></body></html>`).document.querySelector('main')!
+    expect(headingsOnly(region('<h2>Results</h2>'))).toBe(true)
+    // A jump link is not content, however long; a link to another page is.
+    expect(headingsOnly(region('<h2>Results</h2><a href="#filters">Skip to the filters and the sort order</a>'))).toBe(true)
+    expect(headingsOnly(region('<h2>Results</h2><a href="/filters">Filters</a>'))).toBe(false)
+    // A symbol beside the heading is not content; three characters are.
+    expect(headingsOnly(region('<h2>Results</h2><span>▸</span>'))).toBe(true)
+    expect(headingsOnly(region('<h2>公告</h2><p>休息日</p>'))).toBe(false)
+    // Headings that hold 100 characters or more are content in themselves.
+    expect(headingsOnly(region(`<h3>${'a'.repeat(99)}</h3>`))).toBe(true)
+    expect(headingsOnly(region(`<h3>${'a'.repeat(100)}</h3>`))).toBe(false)
+    // A region that is itself a heading counts its text as heading text.
+    const heading = parse('<!doctype html><html><body><h3>Don\'t see the Tesla you\'re looking for?</h3></body></html>').document.querySelector('h3')!
+    expect(headingsOnly(heading)).toBe(true)
+    // Thousands of elements deep.
+    expect(headingsOnly(region('<h1>Title</h1>' + '<div>'.repeat(6000) + '<p>Deep paragraph of real text.</p>' + '</div>'.repeat(6000)))).toBe(false)
   })
 
   it('keeps a card listing whose short texts the article cascade cannot see', () => {
