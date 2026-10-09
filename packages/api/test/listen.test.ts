@@ -22,7 +22,7 @@ describe('parseListen: access grant (ADR 0005)', () => {
       writeFileSync(file, JSON.stringify(grant))
       for (const listen of [parseListen(['--access-grant', file], {}), parseListen([`--access-grant=${file}`], {}), parseListen([], { W2L_ACCESS_GRANT: file }), parseListen([], { W2L_ACCESS_GRANT: JSON.stringify(grant) })]) {
         expect(listen.accessGrant).toMatchObject({ tier: 'enhanced', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], budget: { perRunUsd: 5, perRequestUsd: null } })
-        expect(listen.notices).toContain('access grant (ADR 0005): tier enhanced; vendor_remote_browser, vendor_captcha_solving; run budget 5 USD; per-request budget none (not enforced yet); accepted by operator@example.test')
+        expect(listen.notices).toContain('access grant (ADR 0005): tier enhanced; vendor_remote_browser, vendor_captcha_solving; run budget 5 USD; per-request budget none; accepted by operator@example.test')
       }
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })

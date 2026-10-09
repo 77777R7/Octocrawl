@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
+import { MCP_VERSION } from '../src/server.js'
 import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedQuota, sweepTaskRoot, type HostedKeyRecord } from '../src/hostedApi.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
@@ -149,6 +150,29 @@ it('the /mcp endpoint speaks Streamable HTTP, offers three tools, and runs them 
     const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
   } finally { await holder.close() }
+})
+
+it('publishes a server card with the tools /mcp lists and no sign-in, and answers 404 for any other /.well-known file', async () => {
+  const { url, quota } = await start()
+  const response = await fetch(`${url}/.well-known/mcp/server-card.json`)
+  expect(response.status).toBe(200)
+  const card = await response.json() as { serverInfo: { name: string; version: string }; authentication: { required: boolean }; tools: { name: string; description: string; inputSchema: unknown }[] }
+  expect(card.serverInfo).toMatchObject({ name: 'octocrawl', version: MCP_VERSION })
+  expect(card.authentication).toEqual({ required: false })
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`)))
+    expect(card.serverInfo.version).toBe(client.getServerVersion()?.version)
+    const listed = (await client.listTools()).tools
+    expect(card.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))).toEqual(listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })))
+  } finally { await client.close() }
+  for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server', '/.well-known/mcp-config', '/.well-known/mcp/server-cards.json']) {
+    const missing = await fetch(`${url}${path}`)
+    expect(missing.status, path).toBe(404)
+    expect((await missing.json() as { code: string }).code).toBe('not_found')
+  }
+  // Reading discovery files spends no one's pages.
+  expect(quota.counts.size).toBe(0)
 })
 
 it('a body that is not JSON is 400, and a flood of made-up keys is limited per address before any lookup', async () => {

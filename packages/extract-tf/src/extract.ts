@@ -13,6 +13,7 @@
 
 import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
+import { linkTarget } from './markdown.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
 import { detectRenderSignals, hydrationShown, rawSignals } from './render.js'
 import { namedBy } from './selectors.js'
@@ -287,9 +288,11 @@ export class ExtractTf implements Extractor {
         favorRecall,
         product,
       ),
-      // Escalate only when a strategy produced nothing at all. Routing to a
-      // non-article strategy is not by itself an escalation reason.
-      escalate: main === null,
+      // Escalate when a strategy produced nothing at all, or the article
+      // cascade a region that only names the page (headingsOnly; a region the
+      // last resort found is a list's). Routing to a non-article strategy is
+      // not by itself an escalation reason.
+      escalate: main === null || (strategy === 'article' && headingsOnly(main)),
       ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
@@ -316,3 +319,46 @@ export class ExtractTf implements Extractor {
 
 /** Default instance. */
 export const extractTf = new ExtractTf()
+
+/** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
+const HEADINGS_ONLY_MAX_CHARS = 100
+/** Text beside the headings, in-page jump links set aside, that makes a region content: a symbol or two ("▸") does not. */
+const MIN_PROSE_CHARS = 3
+
+/**
+ * Whether an article region only names the page: its headings hold fewer than HEADINGS_ONLY_MAX_CHARS characters, it
+ * has fewer than MIN_PROSE_CHARS beside them, in-page jump links ("Skip to Filters") and scripts set aside, and no image
+ * beside them that the Markdown carries (a chart or a gallery under its title is content; a canvas, a video or an iframe
+ * leaves nothing in the Markdown, so it is not). Such a region
+ * is not the page's content, and the page escalates as one with none found (ROADMAP PA item 4: a vendor page whose list
+ * had not loaded answered `success` with "Don't see the Tesla you're looking for?"). Asked only of the article cascade's
+ * region: a list, table or product region is short or heading-led by design (cards named by headings, a terse buy box).
+ * A loop, not recursion: a page may be thousands of elements deep.
+ */
+export function headingsOnly(region: Element): boolean {
+  const isHeading = (el: Element) => /^h[1-6]$/.test(el.tagName.toLowerCase())
+  let headingChars = 0
+  let prose = 0
+  const stack: { node: Node; inHeading: boolean }[] = [{ node: region, inHeading: isHeading(region) }]
+  while (stack.length > 0) {
+    const { node, inHeading } = stack.pop()!
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) {
+        const chars = (child.textContent ?? '').replace(/\s+/g, ' ').trim().length
+        if (inHeading) headingChars += chars
+        else prose += chars
+        if (prose >= MIN_PROSE_CHARS || headingChars >= HEADINGS_ONLY_MAX_CHARS) return false
+        continue
+      }
+      if (child.nodeType !== 1) continue
+      const el = child as Element
+      const tag = el.tagName.toLowerCase()
+      if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue
+      if (tag === 'a' && (el.getAttribute('href') ?? '').startsWith('#')) continue
+      // The image's target as the Markdown writes it: a `data:` or `javascript:` source (a spinner, a lazy placeholder) leaves none.
+      if (!inHeading && tag === 'img' && linkTarget(el.getAttribute('src') ?? '', null) !== null) return false
+      stack.push({ node: el, inHeading: inHeading || isHeading(el) })
+    }
+  }
+  return true
+}

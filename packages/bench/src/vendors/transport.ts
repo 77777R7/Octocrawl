@@ -169,6 +169,7 @@ export class CdpVendorTransport implements ProviderTransport {
         // subject treats that as unobserved, never as agreement.
         sentUserAgent: res.sentUserAgent,
         sentClientHints: res.sentClientHints,
+        ...(res.settle === undefined ? {} : { settle: res.settle }),
         declaredUserAgent: declared,
         // Neither vendor states a per-request price in its API response, and
         // an estimate in this field would read as a measurement.

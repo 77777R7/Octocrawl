@@ -27,7 +27,7 @@ import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
-import { isNavigationError, waitForRenderedStability } from '../browserSettle.js'
+import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
@@ -340,7 +340,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       // The lead warnings go before the ones the steps and the list added, never in place of them.
-      const done = withListCaveat(withActions(result, ran.actions, options.list))
+      // A page read while it still showed a loading indicator says so on the answer.
+      const done = withStillLoadingWarning(withListCaveat(withActions(result, ran.actions, options.list)))
       return {
         ...done,
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(done.warnings ?? [])] }),
@@ -754,9 +755,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const shownPage = page
       // Documents loaded when the last wait for stability began: one loaded since has not settled.
       let settledLoads = 0
-      const settle = async (maxMs: number) => {
+      const settle = async (maxMs: number, loadingMaxMs = maxMs) => {
         settledLoads = documents.loads
-        await raceWithSignal(waitForRenderedStability(shownPage, { maxMs }), signal)
+        return await raceWithSignal(waitForRenderedStability(shownPage, { maxMs, loadingMaxMs }), signal)
       }
 
       // Rate-limit facts are captured at actual navigation, after setup.
@@ -829,7 +830,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
           continue
         }
-        await settle(remainingTimeout(execution, 1_500))
+        // A page still showing a loading indicator is waited for longer, leaving the capture reserve before the deadline;
+        // not when the request waits itself (waitFor) or runs steps on the page, whose time this wait would take.
+        const callerWaits = (options.waitFor ?? 0) > 0 || (options.actions?.length ?? 0) > 0
+        const usual = remainingTimeout(execution, 1_500)
+        const settled = await settle(usual, callerWaits ? usual : execution.deadlineAt === undefined ? LOADING_WAIT_MAX_MS : Math.max(1, Math.min(LOADING_WAIT_MAX_MS, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())))
+        const waited = callerWaits ? null : loadingWaitEvent(settled, Date.now() - start, 'browser_local')
+        if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({

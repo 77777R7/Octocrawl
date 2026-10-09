@@ -4,7 +4,7 @@ import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
 import { VISITOR_DAILY_PREVIEWS } from '../../../packages/public-preview/src/quota.js'
 import { CAPABILITIES, clientCopy, CLIENTS, tierAmount, tierCaption, TIERS } from '../src/featureSections.js'
 import { glyphBand } from '../src/glyphArt.js'
-import { pageMarkup, sectionBar } from '../src/page.js'
+import { FAQ, faqJsonLd, pageMarkup, sectionBar } from '../src/page.js'
 import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
 
 describe('Page markup', () => {
@@ -19,6 +19,29 @@ describe('Page markup', () => {
     const sections = [...page.matchAll(/<section class="[^"]*" id="([^"]+)"/g)].map(([, id]) => id)
     expect(sections).toEqual(['result-section', 'how-it-works', 'what-it-does', 'get-started', 'free-tiers', 'faq'])
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
+  })
+
+  it('gives only the Get started cloud the sea’s weather', () => {
+    const clouds = [...pageMarkup().matchAll(/<pre class="glyph-cloud[^"]*"[^>]*>/g)].map(([tag]) => tag)
+    expect(clouds).toHaveLength(2)
+    expect(clouds.filter(tag => tag.includes(' data-weather '))).toEqual(['<pre class="glyph-cloud" data-cols="150" data-rows="30" data-seed="11" data-weather aria-hidden="true">'])
+  })
+
+  it('gives search engines the FAQ the page shows, as FAQPage data that cannot close its script', () => {
+    const script = faqJsonLd()
+    const json = script.replace(/^<script type="application\/ld\+json">/, '').replace(/<\/script>$/, '')
+    expect(json).not.toContain('<')
+    const data = JSON.parse(json) as { '@type': string, mainEntity: Array<{ name: string, acceptedAnswer: { text: string } }> }
+    expect(data['@type']).toBe('FAQPage')
+    expect(data.mainEntity.map(item => item.name)).toEqual(FAQ.map(([question]) => question))
+    expect(data.mainEntity[1]!.acceptedAnswer.text).toContain('Amazon.sg product pages (/dp/ASIN) are in Beta.')
+    expect(pageMarkup().match(/<details class="faq-item">/g)).toHaveLength(FAQ.length)
+  })
+
+  it('marks only links that leave the site with an arrow in the header', () => {
+    const header = pageMarkup().split('</header>')[0]!
+    expect(header.match(/↗/g)).toHaveLength(1)
+    expect(header).toMatch(/github\.com\/77777R7\/Octocrawl[^]*?↗/)
   })
 
   it('links the brand to the home page and keeps the header octopus still', () => {
@@ -136,7 +159,8 @@ describe('Page markup', () => {
     const page = pageMarkup()
     for (const t of TIERS) expect(page).toContain(`<div class="tier-row" id="tier-${t.n}"`)
     expect(page.match(/<div class="tier-panel">/g)).toHaveLength(TIERS.length)
-    expect(page).not.toMatch(/aria-expanded|class="tier-panel"[^>]* hidden/)
+    const start = page.indexOf('id="free-tiers"')
+    expect(page.slice(start, page.indexOf('</section>', start))).not.toMatch(/aria-expanded|class="tier-panel"[^>]* hidden/)
     expect(page).toContain('<p class="tier-hint" aria-hidden="true" hidden>Scroll to light the planet <span>↓</span></p>')
   })
 

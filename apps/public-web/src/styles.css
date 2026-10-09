@@ -76,23 +76,21 @@ a { color: inherit; }
 .hero-click-spark { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .hero-click-canvas { display: block; width: 100%; height: 100%; }
 .hero .band { position: relative; z-index: 2; flex: none; }
+/* The header's menus open over the hero below it. */
+.hero .band-header { z-index: 20; }
 /* The top offset comes from the viewport, not the content, so a message under the card only grows downward. It puts
    the middle of the cells and the card at 48% of the screen (the cells are 46% of it, 340 to 500 px) and keeps at
    least 16 px under the header. */
 .hero > main { display: flex; flex: 1 0 auto; flex-direction: column; padding: max(16px, 25vh - 174px, 48vh - 424px) 0 clamp(12px, 3vh, 32px); padding: max(16px, 25svh - 174px, 48svh - 424px) 0 clamp(12px, 3svh, 32px); }
 
-.site-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 88px; padding-inline: 24px; }
+.site-header { position: relative; z-index: 30; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 88px; padding-inline: 24px; }
+.site-header .header-actions { justify-self: end; }
 .brand { display: inline-flex; align-items: center; gap: 8px; justify-self: start; color: #fff; text-decoration: none; }
 .brand-mark { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 2px 15px rgba(10, 69, 168, .55)); }
 /* The wordmark is Inter Medium drawn as outlines (assets/octocrawl-wordmark.svg), so it needs no web font. */
 .brand-name { display: block; width: auto; height: 23px; }
-.site-nav { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
-.site-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; text-decoration: none; white-space: nowrap; color: #eef6ff; }
-.site-nav a:hover { color: #ffae86; }
-.site-nav a span { margin-left: 6px; }
-.github-link { display: inline-flex; align-items: center; justify-self: end; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-size: 13px; font-weight: 650; text-decoration: none; }
-.github-link:hover { border-color: #ffae86; background: rgba(255, 255, 255, .14); }
-.github-link svg { width: 17px; height: 17px; flex: none; }
+/* The navigation, GitHub and Try it are styled in public/docs-assets/nav.css, shared with the docs pages. */
+@media (max-width: 900px) { .site-header { grid-template-columns: 1fr auto auto; gap: 8px; } }
 
 .hero-cells { position: relative; display: grid; min-height: clamp(340px, 46vh, 500px); min-height: clamp(340px, 46svh, 500px); }
 .hero-copy { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 32px; text-align: center; }
@@ -753,15 +751,10 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .hero-shade { background: linear-gradient(180deg, rgba(3, 14, 45, .43), rgba(3, 14, 45, .4) 49%, rgba(3, 14, 45, .58) 67%, rgba(3, 14, 45, .79)); }
   .hero > main { padding-top: max(0px, 47vh - 319px); padding-top: max(0px, 47svh - 319px); }
   .hero-octopus-static { width: 630px; height: 630px; top: calc(max(319px, 47vh) - 315px); top: calc(max(319px, 47svh) - 315px); right: -120px; background-position: 271.6px 271.6px, 343px 271.6px, center; background-size: 12px 12px, 12px 12px, auto 112%; opacity: .14; }
-  .site-header { grid-template-columns: auto 1fr auto; min-height: 72px; padding-inline: 10px; }
-  .site-nav { justify-self: end; }
+  .site-header { min-height: 72px; padding-inline: 10px; }
   .brand { gap: 2px; }
   .brand-mark { width: 38px; height: 38px; }
   .brand-name { height: 18px; }
-  .site-nav { gap: 0; }
-  .site-nav a { padding: 0 8px; font-size: 12px; }
-  .github-link { width: 44px; padding: 0; justify-content: center; }
-  .github-label, .github-link .card-arrow { display: none; }
   .hero-copy { padding: 56px 16px 32px; }
   .hero h1 { font-size: clamp(40px, 11vw, 54px); }
   .hero-description { margin-top: 20px; font-size: 15px; }
@@ -835,10 +828,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .footer-col { padding: 8px 18px 28px; }
 }
 
-/* A phone too narrow for the name and both links: How it works stays at the hero's foot and in the footer. */
-@media (max-width: 420px) {
-  .site-nav .nav-how { display: none; }
-}
 
 /* The narrowest phones: slimmer tool buttons keep Get code on the first row beside Options. */
 @media (max-width: 360px) {
@@ -1229,6 +1218,31 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .start-head .section-kicker { justify-content: center; }
 .start-head h2 { margin: 18px 0 0; color: #142a57; font-size: clamp(38px, 4.6vw, 64px); line-height: 1.04; letter-spacing: -.055em; }
 .start-head h2 em { color: var(--orange-ink); font-style: normal; }
+/* The way into the octopus game (octopusGame.ts): quiet, by the kelp on a wide screen, under the words on a narrow one. */
+.start-head > .sea-play:not([hidden]) { display: block; min-height: 40px; margin: 10px auto 0; padding: 0 6px; border: 0; background: none; color: var(--muted); font: 500 12px/40px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; cursor: pointer; }
+.start-head > .sea-play:hover { color: var(--orange-ink); }
+/* Wide: in the 44px between the words and the client tabs (.use-tabs margin-top), clear of both. */
+@media (min-width: 861px) { .start-head > .sea-play:not([hidden]) { position: absolute; bottom: -42px; left: 3%; margin: 0; } }
+/* The octopus game: full screen, the page's glyphs on a dark sea. */
+.sea-game { position: fixed; inset: 0; z-index: 1000; color: var(--on-navy); background: var(--navy-deep); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sea-game:focus { outline: none; }
+.sea-game :focus-visible { outline: 2px solid #fa935f; outline-offset: 2px; }
+.sea-hud { position: absolute; top: 0; right: 0; left: 0; display: flex; align-items: center; gap: 22px; white-space: nowrap; height: 52px; padding: 0 16px 0 20px; border-bottom: 1px solid rgba(176, 200, 240, .14); font-size: 13px; letter-spacing: .06em; }
+.sea-hud-score { color: var(--orange-100); }
+.sea-hud-lives { color: var(--orange-200); }
+.sea-hud-best { margin-left: auto; color: var(--on-navy-3); }
+.sea-close, .sea-ink, .sea-button { min-height: 40px; padding: 0 14px; border: 1px solid rgba(176, 200, 240, .3); border-radius: 4px; color: var(--on-navy); background: rgba(6, 22, 52, .6); font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; cursor: pointer; }
+.sea-close:hover, .sea-ink:hover:not(:disabled), .sea-button:hover { border-color: var(--orange-200); color: var(--orange-100); }
+.sea-field { position: absolute; top: 52px; right: 0; bottom: 0; left: 0; width: 100%; height: calc(100% - 52px); touch-action: none; }
+.sea-ink { min-width: 56px; }
+.sea-ink:disabled { opacity: .4; cursor: default; }
+.sea-panel { position: absolute; top: 50%; left: 50%; width: min(560px, calc(100% - 32px)); max-height: calc(100% - 84px); overflow: auto; padding: 26px 26px 22px; border: 1px solid rgba(176, 200, 240, .18); border-radius: 8px; background: rgba(6, 22, 52, .94); transform: translate(-50%, -50%); }
+.sea-panel[hidden] { display: none; }
+.sea-panel-title { margin: 0; color: #fff; font: 650 24px/1.2 Inter, system-ui, sans-serif; letter-spacing: -.02em; }
+.sea-panel-lines { display: grid; gap: 8px; margin: 18px 0 0; padding: 0; color: var(--on-navy-2); font-size: 13px; line-height: 1.5; list-style: none; white-space: pre-wrap; }
+.sea-panel-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.sea-panel-buttons .sea-button:first-child { border-color: var(--orange); color: #fff; background: var(--orange); }
+@media (max-width: 600px) { .sea-hud { gap: 10px; padding: 0 8px; font-size: 12px; } .sea-hud-best { display: none; } .sea-ink { margin-left: auto; } .sea-close, .sea-ink { padding: 0 10px; } }
 .start-lead { max-width: 52ch; margin: 20px auto 0; color: var(--ink-soft); font-size: 17px; line-height: 1.6; text-wrap: pretty; }
 .use-tabs { display: flex; flex-wrap: wrap; justify-content: center; width: fit-content; max-width: 100%; gap: 2px; margin: 44px auto 0; padding: 4px; border: 1px solid #dfe6f0; border-radius: 6px; background: #fff; }
 .use-tabs[hidden] { display: none; }

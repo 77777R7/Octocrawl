@@ -8,4 +8,6 @@ Octocrawl as an MCP server over stdio, for Claude Desktop, Claude Code, Cursor, 
 
 `--base-url` (or `W2L_API_URL`, default `http://127.0.0.1:8787`) names the API; `--token` (or `W2L_API_TOKEN`) authenticates to a hosted one.
 
-Licence: AGPL-3.0-only. Source and documentation: https://github.com/77777R7/Octocrawl
+To try Octocrawl without installing anything, connect the client to hosted Octocrawl instead: `https://mcp.octocrawl.dev/mcp` (Streamable HTTP), no account and 20 pages a day per address, with `scrape` and `map`. Setup for each client: https://octocrawl.dev/docs/connect-mcp/
+
+Licence: AGPL-3.0-only. Website and docs: https://octocrawl.dev. Source: https://github.com/77777R7/Octocrawl

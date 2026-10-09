@@ -129,6 +129,8 @@ interface LadderProgress {
   grant: EvidenceAccessGrant | null
   /** The run's own ledger, with no cap, when the caller gave none: every provider call is still settled and recorded. */
   ledger: SpendLedger | null
+  /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
+  steppedPast: { channel: string; result: FetchResult } | null
 }
 
 /** A run's totals over its attempts: what every lane tried cost, each attempt kept as it was. */
@@ -172,6 +174,24 @@ export function summarize(channelsTried: readonly string[], attempts: readonly {
  * client-rendered shell. The ladder honours the subject's own ask rather
  * than re-deriving it.
  */
+/**
+ * A failure with no routing class that a stronger rung may still answer (ROADMAP PA item 4): a 403 or 405 answered
+ * without a gate Octocrawl recognises (a site's bot defence often answers so), a page a browser rendered with no main
+ * content it could verify, and on an http rung a refused connection (a defence that drops a client by its TLS does so;
+ * the browser is another client, and a paid provider is not asked for a network failure). Not a timeout, which on a
+ * slow or dead site would hold the scrape for the browser's wait too; not a rate limit, which asks for fewer requests
+ * rather than another client; nor an error status that is the page's own answer (404, 410, 5xx). Null when the failure
+ * stands; else what the ladder steps up for.
+ */
+function strongerRungMayAnswer(result: FetchResult, channelId: string): string | null {
+  if (result.status !== 'failed') return null
+  const status = result.evidence.httpStatus
+  if (result.failureReason === 'http_error' && (status === 403 || status === 405)) return `http_${status}`
+  if (result.failureReason === 'empty_unverified' && !HTTP_CHANNELS.has(channelId)) return 'empty_unverified'
+  if (result.failureReason === 'connection_error' && HTTP_CHANNELS.has(channelId)) return 'connection_error'
+  return null
+}
+
 function resultRequestsEscalation(result: FetchResult): boolean {
   return result.escalations.some((e) => e.improved === null) || qualityEscalationEvent(result) !== null
 }
@@ -347,7 +367,7 @@ export class LadderRunner {
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, steppedPast: null }
     for (const filtered of this.options.channelsFiltered ?? []) {
       progress.ladderTrace.push({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: filtered.reason, dropped: [...filtered.dropped] } })
     }
@@ -380,11 +400,19 @@ export class LadderRunner {
     // result is the answer, its hop marked not improved. The later failure
     // stays in the audit.
     const failedAnswer = (result: FetchResult): FetchResult => {
-      if (result.status !== 'failed' || result.markdown !== null || classifyFetchFailure(result) !== null) return result
-      const kept = noMainContentEvidence(attempts)
-      if (kept === null || kept.result === result) return result
-      ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: kept.channel, detail: { kept: kept.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason } })
-      return { ...kept.result, escalations: kept.result.escalations.map((e) => (e.improved === null ? { ...e, improved: false } : e)) }
+      if (result.status !== 'failed' || result.markdown !== null) return result
+      const notImproved = (kept: FetchResult) => ({ ...kept, escalations: kept.escalations.map((e) => (e.improved === null ? { ...e, improved: false } : e)) })
+      const kept = classifyFetchFailure(result) === null ? noMainContentEvidence(attempts) : null
+      if (kept !== null && kept.result !== result) {
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: kept.channel, detail: { kept: kept.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason } })
+        return notImproved(kept.result)
+      }
+      // A page the ladder stepped past for a stronger rung (a 403 the site answered, a page rendered with no main content)
+      // says more than a later rung's failure with no page at all: a network error, a provider's own error, a timeout.
+      const stepped = progress.steppedPast
+      if (stepped === null || stepped.result === result || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
+      ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: stepped.channel, detail: { kept: stepped.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason ?? result.blockReason } })
+      return notImproved(stepped.result)
     }
 
     // Sessions exist for authed mode ONLY. standard/research never load or
@@ -661,6 +689,10 @@ export class LadderRunner {
 
       const cls = classifyFetchFailure(result)
       const subjectAsked = resultRequestsEscalation(result)
+      // Content an earlier rung found stays the answer: a later rung's failure is not stepped past. Nor is the saved login's:
+      // the rungs after it do not carry the login, and would answer with the logged-out page.
+      const stronger = cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id) : null
+      if (stronger !== null && (result.evidence.httpStatus != null || result.markdown !== null)) progress.steppedPast = { channel: channel.id, result }
 
       ladderTrace.push({
         at: result.usage.wallMs,
@@ -670,11 +702,11 @@ export class LadderRunner {
           vendorId: channel.vendorId ?? null,
           status: result.status,
           failureClass: cls,
-          escalate: subjectAsked ? 'subject_escalations' : null,
+          escalate: subjectAsked ? 'subject_escalations' : stronger,
         },
       })
 
-      if (cls === null && !subjectAsked) {
+      if (cls === null && !subjectAsked && stronger === null) {
         // Infrastructure failure or a terminal refusal, and the subject did
         // not ask for anything higher. If an earlier channel produced real
         // content, that content is still the answer — the failure does not
@@ -1040,9 +1072,12 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     // A page a rung kept as evidence when it found no main content stays on
     // the timeout, as evidence.
     const evidence = noMainContentEvidence(attempts)
-    const base = evidence?.result ?? (returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
-    const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: evidence === null ? detail : { ...detail, evidence: evidence.channel } }
-    result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
+    // Else the page a rung was stepped past for (a 403 the site answered), over a cut rung that returned no page.
+    const stepped = evidence === null && (returned === null || returned.evidence.httpStatus == null) ? progress.steppedPast : null
+    const base = evidence?.result ?? stepped?.result ?? (returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
+    const kept = evidence?.channel ?? stepped?.channel ?? null
+    const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: kept === null ? detail : { ...detail, evidence: kept } }
+    result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? stepped?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
   }
   const summary = summarize(channelsTried, attempts)
   // A provider rung the deadline cut before it returned may have billed: its cost is unknown, not the 0 of the rungs that did return.

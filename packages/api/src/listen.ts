@@ -130,7 +130,7 @@ function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted
 /** The startup line that says what the grant allows. */
 export function accessGrantNotice(grant: AccessGrant): string {
   const usd = (value: number | null) => (value === null ? 'none' : `${value} USD`)
-  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)} (not enforced yet)${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
+  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)}${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
 }
 
 /** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
