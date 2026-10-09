@@ -1324,7 +1324,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
    TAIL, and this query and its own, must agree. */
 @media (min-width: 861px) and (min-height: 720px) {
   .is-story .tier-stage { height: calc(100vh + (var(--tiers) - .5) * 60vh); height: calc(100svh + (var(--tiers) - .5) * 60svh); }
-  .is-story .tier-pin { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; overflow: clip; }
+  .is-story .tier-pin { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }
   .is-story .tier-wrap { min-height: 0; padding: 28px 32px 0; }
   .is-story .tier-hint { margin-top: 14px; }
   .is-story.is-begun .tier-hint { opacity: 0; }
@@ -1334,7 +1334,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   /* A folded tier keeps its words in the page (a reader, or the Tab key, still reaches them, and focus inside one
      unfolds it: featureMotion.ts); only its height goes. */
   .is-story .tier-panel { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s cubic-bezier(.2, .8, .2, 1), opacity .25s ease; }
-  .is-story .tier-panel-in { min-height: 0; padding-bottom: 16px; overflow: hidden; overflow: clip; }
+  .is-story .tier-panel-in { min-height: 0; padding-bottom: 16px; overflow: hidden; }
   .is-story .tier-row.is-active .tier-panel { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .15s; }
   .is-story .tier-unit { margin-bottom: 10px; }
   .is-story .tier-facts { gap: 7px; }
