@@ -85,10 +85,16 @@ export function looksAutomated(req: IncomingMessage): boolean {
   return false
 }
 
-/** The operator's own browser, marked by visiting any page with ?internal=1 (and cleared with ?internal=0). Its
- * events are still logged, flagged internal, so counts can leave them out without losing deploy checks. */
+/** The operator's own browser, marked by visiting any page with ?internal=1 (and cleared with ?internal=0), and the
+ * browser built into the Claude desktop app, where the operator's and its agents' site checks run: it reads as a
+ * current Chrome with a "Claude/<version>" token added (not Anthropic's crawlers, which say "ClaudeBot" or
+ * "Claude-User"). Their events are still logged, flagged internal, so counts can leave them out without losing deploy
+ * checks. */
 export const INTERNAL_COOKIE = 'w2l_internal'
+const CLAUDE_APP_AGENT = /\bClaude\/\d/
 export function internalVisit(req: IncomingMessage): boolean {
+  const agent = req.headers['user-agent']
+  if (typeof agent === 'string' && CLAUDE_APP_AGENT.test(agent)) return true
   return req.headers.cookie?.split(';').some(part => part.trim() === `${INTERNAL_COOKIE}=1`) ?? false
 }
 

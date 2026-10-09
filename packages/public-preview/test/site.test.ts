@@ -256,6 +256,18 @@ describe('first-party analytics', () => {
     expect(lines.map(line => [line.event, line.internal])).toEqual([['w2l_web_event', true], ['w2l_web_event', undefined], ['w2l_preview', true]])
   })
 
+  it('flags the browser built into the Claude desktop app as internal, but not Anthropic\'s crawlers or a plain Chrome', async () => {
+    const { url, lines } = await site()
+    const event = (agent: string) => fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': agent }, body: JSON.stringify({ name: 'page_view', props: { path: '/' } }) })
+    await event('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/2.19675.1 Chrome/152.0.7977.130 Safari/537.36')
+    await event('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +Claude-User@anthropic.com)')
+    await event('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)')
+    await event('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36')
+    expect(lines.map(line => line.internal)).toEqual([true, undefined, undefined, undefined])
+    // The app's browser is still a current browser, not an automated one.
+    expect(lines[0]!.automated).toBe(false)
+  })
+
   it('flags self-named tools, monitors and stale browser strings as automated, and current browsers as not', () => {
     const automated = (agent: string | undefined) => looksAutomated({ headers: agent === undefined ? {} : { 'user-agent': agent } } as Parameters<typeof looksAutomated>[0])
     const current = [
