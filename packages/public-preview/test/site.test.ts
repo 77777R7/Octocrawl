@@ -158,6 +158,23 @@ describe('public site routes', () => {
     expect((await fetch(`${url}/robots.txt`)).headers.get('cache-control')).toBe('public, max-age=3600')
   })
 
+  it('caches a file for a year only when its address changes with its content', async () => {
+    const { url } = await site()
+    const dir = tempDirs.at(-1)!
+    await mkdir(join(dir, 'assets'), { recursive: true })
+    for (const name of ['index-DbE3-Qka.js', 'index-CL7ALmNF.css', 'scene-earth.webp', 'octopus-original.webp', 'favicon-192.png']) await writeFile(join(dir, 'assets', name), 'x')
+    const cache = async (path: string) => (await fetch(`${url}${path}`)).headers.get('cache-control')
+    expect(await cache('/assets/index-DbE3-Qka.js')).toBe('public, max-age=31536000, immutable')
+    expect(await cache('/assets/index-CL7ALmNF.css')).toBe('public, max-age=31536000, immutable')
+    expect(await cache('/assets/favicon-192.png?v=5c23d78f6787')).toBe('public, max-age=31536000, immutable')
+    // Artwork keeps its name when it changes, and "original" is not a content hash.
+    expect(await cache('/assets/scene-earth.webp')).toBe('public, max-age=3600')
+    expect(await cache('/assets/octopus-original.webp')).toBe('public, max-age=3600')
+    expect(await cache('/assets/favicon-192.png')).toBe('public, max-age=3600')
+    expect(await cache('/')).toBe('no-store')
+    expect(await cache('/?v=5c23d78f6787')).toBe('no-store')
+  })
+
   it('rejects a public origin with a path or plain http', () => {
     expect(parsePublicOrigin('https://w2l.example/')).toBe('https://w2l.example')
     expect(() => parsePublicOrigin('https://w2l.example/app')).toThrow()

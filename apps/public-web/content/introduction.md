@@ -1,4 +1,4 @@
-# One link. Web data, ready.
+# Introduction to Octocrawl
 
 Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
-import { pageMarkup } from './src/page'
+import { faqJsonLd, pageMarkup } from './src/page'
 import { versionPublicAssets } from './scripts/publicAssetVersions.mjs'
 
 export default defineConfig({
@@ -10,7 +10,9 @@ export default defineConfig({
     transformIndexHtml(html) {
       const slot = '<div id="app"></div>'
       if (!html.includes(slot)) throw new Error('index.html must contain an empty #app element')
-      return versionPublicAssets(html.replace(slot, `<div id="app">${pageMarkup()}</div>`), fileURLToPath(new URL('./public', import.meta.url)))
+      // The FAQ's structured data goes in the head, from the same list the FAQ section shows.
+      const withFaq = html.replace('</head>', `  ${faqJsonLd()}\n  </head>`)
+      return versionPublicAssets(withFaq.replace(slot, `<div id="app">${pageMarkup()}</div>`), fileURLToPath(new URL('./public', import.meta.url)))
     },
   }],
   build: {
