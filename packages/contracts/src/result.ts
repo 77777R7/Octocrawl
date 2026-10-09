@@ -309,7 +309,9 @@ export interface FetchWarning {
    * `screenshot_unavailable`: the `screenshot` format was asked for and the
    * browser lane rendered the page but could not capture it
    * (`screenshot_failed` in the trace); `screenshot` is null and the page
-   * result stands.
+   * result stands. `page_still_loading`: a browser or provider lane read the
+   * page as content while it still showed a loading indicator, after waiting
+   * for it (`loading_wait` in the trace): its data may not be in the answer.
    */
   code: string
   message: string

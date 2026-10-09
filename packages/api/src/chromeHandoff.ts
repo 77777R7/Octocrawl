@@ -579,7 +579,11 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       }
       // Through, but elsewhere on the site (a sign-in that ends on the home page): the tab goes back to the page asked for.
       if (!asked) {
-        if (returns >= RETURNS) throw new HandoffNotThrough(`${url} was not read: after you got through, the tab stayed on ${pageOf(state.href)}, not the page asked for`, sawGate, 'elsewhere')
+        if (returns >= RETURNS) {
+          // "You got through" only when there was a check and the person acted in the tab; a check that cleared by itself is not theirs.
+          const where = sawGate !== null && heard.act !== null ? `after you got through, the tab stayed on ${pageOf(state.href)}` : `each time Octocrawl took the tab back to it, the site led it on to ${pageOf(state.href)}`
+          throw new HandoffNotThrough(`${url} was not read: ${where}, not the page asked for`, sawGate, 'elsewhere')
+        }
         returns++
         documentsAtReturn = heard.documents
         clear = 0

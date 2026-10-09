@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
 import { versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
+import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'dist', 'docs')
@@ -191,8 +192,9 @@ function shareHead(path, title, description) {
   return `<link rel="canonical" href="${ORIGIN}${path}" /><meta property="og:type" content="article" /><meta property="og:site_name" content="Octocrawl" /><meta property="og:url" content="${ORIGIN}${path}" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:image" content="${OG_IMAGE}" /><meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" /><meta property="og:image:alt" content="${OG_IMAGE_ALT}" /><meta name="twitter:card" content="summary_large_image" /><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />`
 }
 
-function header(inDocs = true) {
-  return `<header class="doc-header"><div class="doc-header-inner"><a class="doc-brand" href="/" aria-label="Octocrawl home"><img class="doc-mark" src="/assets/octopus-160.webp" width="34" height="34" alt="" /><img class="doc-wordmark" src="/assets/octocrawl-wordmark.svg" width="122" height="20" alt="" /></a><nav aria-label="Top navigation"><a href="/docs/"${inDocs ? ' aria-current="page"' : ''}>Docs</a><a class="try-link" href="/">Try it <span aria-hidden="true">↗</span></a></nav></div></header>`
+/** The site's header: the same navigation as the home page (siteNav.mjs), with the page's own top-level item marked. */
+function header(current = 'docs') {
+  return `<header class="doc-header"><div class="doc-header-inner"><a class="doc-brand" href="/" aria-label="Octocrawl home"><img class="doc-mark" src="/assets/octopus-160.webp" width="34" height="34" alt="" /><img class="doc-wordmark" src="/assets/octocrawl-wordmark.svg" width="122" height="20" alt="" /></a>${siteNavMarkup(current)}${siteActionsMarkup()}</div></header>`
 }
 
 /** Structured data for a docs page: a technical article that is part of the Octocrawl site, and its place under Home
@@ -212,9 +214,9 @@ function documentHtml(page, content, index, toc) {
   const next = pages[index + 1]
   const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>← Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next →</small>${escape(next.title)}</a>` : '<span></span>'}</nav>`
   return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), headTitle(page), page.description)}<link rel="alternate" type="text/markdown" href="${pathFor(page)}index.md" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" />${articleData(page)}<title>${escape(headTitle(page))}</title></head>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), headTitle(page), page.description)}<link rel="alternate" type="text/markdown" href="${pathFor(page)}index.md" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" />${articleData(page)}<title>${escape(headTitle(page))}</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header()}
-<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script></body></html>`
+<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
 }
 
 await mkdir(output, { recursive: true })
@@ -232,6 +234,27 @@ for (const [index, page] of pages.entries()) {
   markdown.push({ page, text })
 }
 
+// The changelog, from the repository's CHANGELOG.md: what changed, newest first, each version a section. Links to
+// files in the repository go to them on GitHub, since the site does not serve them. Unreleased is what is on main and
+// not yet in a published package.
+const CHANGELOG_PATH = '/changelog/'
+const changelogSource = (await readFile(join(root, '..', '..', 'CHANGELOG.md'), 'utf8'))
+  .replace(/\]\(((?:docs|research|packages|apps|scripts|examples|python|cloudflare)\/[^)\s]+)\)/g, '](https://github.com/77777R7/Octocrawl/blob/main/$1)')
+  .replace(/^# Changelog\n/, '# Changelog\n\nWhat changed in Octocrawl, newest first. **Unreleased** is on main and on this site, and not yet in a published package; each numbered version is on npm and PyPI.\n')
+{
+  const toc = []
+  const content = renderMarkdown(changelogSource, toc)
+  const description = 'What changed in Octocrawl, version by version: the CLI, SDKs, MCP server, hosted API and this site.'
+  const crumbs = { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [['Octocrawl', '/'], ['Changelog', CHANGELOG_PATH]].map(([name, path], index) => ({ '@type': 'ListItem', position: index + 1, name, item: `${ORIGIN}${path}` })) }
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(description)}" />${shareHead(CHANGELOG_PATH, 'Changelog | Octocrawl', description)}<link rel="alternate" type="text/markdown" href="${CHANGELOG_PATH}index.md" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" /><script type="application/ld+json">${JSON.stringify(crumbs).replace(/</g, '\\u003c')}</script><title>Changelog | Octocrawl</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header('changelog')}
+<div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / Changelog</p><article class="doc-article">${content}</article></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
+  await mkdir(join(root, 'dist', 'changelog'), { recursive: true })
+  await writeFile(join(root, 'dist', 'changelog', 'index.html'), versionPublicAssets(html, join(root, 'public')))
+  await writeFile(join(root, 'dist', 'changelog', 'index.md'), changelogSource)
+}
+
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
 const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. It is open source (AGPL-3.0). Hosted Octocrawl serves scrape and map at https://api.octocrawl.dev and https://mcp.octocrawl.dev/mcp, keyless within a daily allowance; the published packages (npx octocrawl) run everything on your own computer through REST, a TypeScript SDK, a Python client or MCP.'
@@ -240,7 +263,7 @@ const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
   `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
-  '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, '',
+  '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, `- [Changelog](${ORIGIN}${CHANGELOG_PATH}index.md): what changed, version by version`, '',
 ].join('\n')
 await writeFile(join(root, 'dist', 'llms.txt'), llms)
 await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation\n\n> ${summary}\n`, ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`)].join('\n'))
@@ -248,13 +271,14 @@ await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation
 // The page the server answers with, status 404, for any path without a file: in the docs' reading layout, with the
 // docs pages beside it and the two ways back. It is never indexed.
 const notFound = `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>Page not found | Octocrawl</title></head>
-<body><a class="skip-link" href="#main-content">Skip to content</a>${header(false)}
-<div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div></body></html>`
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" /><title>Page not found | Octocrawl</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header('')}
+<div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div><script defer src="/docs-assets/nav.js"></script></body></html>`
 await writeFile(join(root, 'dist', '404.html'), versionPublicAssets(notFound, join(root, 'public')))
 
-// Crawlers may read every page; the API is not for them. The sitemap lists the home page and each docs page.
+// Crawlers may read every page; the API is not for them. The sitemap lists the home page, each docs page and the changelog.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
-const locations = [['/', HOME_UPDATED], ...pages.map(page => [pathFor(page), page.updated])]
-await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc><lastmod>${updated}</lastmod></url>`).join('\n')}\n</urlset>\n`)
-console.log(`Built ${pages.length} Octocrawl documentation pages in ${output}, with Markdown copies, llms.txt, 404.html, robots.txt and sitemap.xml`)
+// The changelog changes with almost every merge, so it carries no lastmod rather than a day that is soon wrong.
+const locations = [['/', HOME_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [CHANGELOG_PATH, null]]
+await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc>${updated ? `<lastmod>${updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`)
+console.log(`Built ${pages.length} Octocrawl documentation pages in ${output}, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt and sitemap.xml`)

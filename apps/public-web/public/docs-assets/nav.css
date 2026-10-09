@@ -1,0 +1,81 @@
+/* The top navigation (scripts/siteNav.mjs), on the home page and every docs page. Both headers are dark, so the bar's
+   words are light; the menus open as white cards. One brand orange per menu: the featured card. */
+.site-nav { position: relative; font-size: 13px; font-weight: 600; }
+.nav-list { display: flex; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.nav-item { position: static; }
+.site-nav summary, .site-nav .nav-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 8px; color: #eef6ff; text-decoration: none; white-space: nowrap; cursor: pointer; list-style: none; }
+.site-nav summary::-webkit-details-marker { display: none; }
+.site-nav summary:hover, .site-nav .nav-link:hover, .nav-drop[open] > summary { color: #ffae86; }
+.site-nav [aria-current="page"] { text-decoration: underline dotted; text-underline-offset: 6px; }
+.site-nav summary:focus-visible, .site-nav a:focus-visible { outline: 2px solid #ffae86; outline-offset: 2px; }
+.nav-caret { font-size: 10px; opacity: .8; transition: transform .2s ease; }
+.nav-drop[open] .nav-caret { transform: rotate(180deg); }
+
+.nav-panel { position: absolute; z-index: 40; top: calc(100% + 10px); left: 50%; display: grid; gap: 8px 28px; padding: 22px 24px; border: 1px solid #e0e8f2; border-radius: 14px; color: #14254a; background: #fff; box-shadow: 0 24px 60px rgba(7, 27, 79, .28); transform: translateX(-50%); text-align: left; font-weight: 400; }
+.nav-panel::before { content: ""; position: absolute; top: -12px; left: 0; right: 0; height: 12px; }
+.nav-product { width: min(900px, calc(100vw - 32px)); grid-template-columns: 1fr 1fr 250px; }
+.nav-docs { width: min(820px, calc(100vw - 32px)); grid-template-columns: repeat(4, 1fr); }
+.nav-panel ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.nav-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: #566b8c; font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.nav-kicker::before { content: ""; width: 6px; height: 6px; background: #b8461d; }
+.nav-panel li a { display: grid; grid-template-columns: 28px 1fr; align-items: baseline; gap: 0 6px; padding: 8px 10px; border-radius: 8px; color: #14254a; text-decoration: none; transition: background-color .15s ease; }
+.nav-docs li a { grid-template-columns: 1fr; padding: 7px 10px; }
+.nav-panel li a:hover { background: #f2f5fa; }
+.nav-glyph { grid-row: span 2; color: #b8461d; font: 600 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+.nav-title { font-size: 14px; font-weight: 600; }
+.nav-text { grid-column: 2; color: #566b8c; font-size: 12.5px; line-height: 1.45; }
+
+.nav-feature { display: flex; flex-direction: column; align-self: start; gap: 10px; padding: 18px; border-radius: 12px; color: #fff; background: #f3683d; text-decoration: none; }
+.nav-feature:hover { background: #e95b2f; }
+.nav-feature-tag { align-self: flex-start; padding: 2px 8px; border: 1px solid rgba(255, 255, 255, .7); border-radius: 999px; font: 600 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+.nav-feature-title { font-size: 17px; font-weight: 700; line-height: 1.25; }
+.nav-feature code { display: block; padding: 10px 12px; border-radius: 8px; color: #e6eefc; background: #061634; font: 10.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow-x: auto; }
+.nav-feature-note { font-size: 12.5px; line-height: 1.45; }
+
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.github-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-size: 13px; font-weight: 650; text-decoration: none; }
+.github-link:hover { border-color: #ffae86; background: rgba(255, 255, 255, .14); }
+.github-link svg { width: 17px; height: 17px; flex: none; }
+.header-actions .try-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border-radius: 10px; color: #081b42; background: #f3683d; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.header-actions .try-link:hover { background: #ff9365; }
+.nav-toggle { display: none; }
+
+/* Phones and narrow windows: a Menu button opens the navigation as a sheet under the header, menus as sections. */
+@media (max-width: 900px) {
+  .has-nav-js .nav-toggle:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-family: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+  .nav-toggle-mark { font-size: 16px; }
+  .has-nav-js .site-nav { position: absolute; z-index: 40; top: 100%; left: 8px; right: 8px; display: none; max-height: calc(100svh - 96px); overflow-y: auto; padding: 10px; border: 1px solid #e0e8f2; border-radius: 14px; background: #fff; box-shadow: 0 24px 60px rgba(7, 27, 79, .28); }
+  .has-nav-js .site-nav.is-open { display: block; }
+  .has-nav-js .nav-list { flex-direction: column; align-items: stretch; gap: 0; }
+  .has-nav-js .site-nav summary, .has-nav-js .site-nav .nav-link { display: flex; justify-content: space-between; color: #14254a; font-size: 15px; }
+  .has-nav-js .site-nav summary:hover, .has-nav-js .site-nav .nav-link:hover, .has-nav-js .nav-drop[open] > summary { color: #b8461d; }
+  .has-nav-js .nav-panel { position: relative; top: auto; left: auto; width: auto; grid-template-columns: 1fr; padding: 4px 4px 12px; border: 0; box-shadow: none; transform: none; }
+  .has-nav-js .nav-panel::before { display: none; }
+  .nav-feature code { display: none; }
+}
+@media (max-width: 900px) {
+  html:not(.has-nav-js) .nav-list { flex-wrap: wrap; }
+  .header-actions { order: 2; }
+  .nav-toggle { order: 3; }
+}
+@media (max-width: 600px) {
+  .github-link { width: 44px; padding: 0; justify-content: center; }
+  .github-label, .github-link .card-arrow { display: none; }
+}
+@media (max-width: 420px) {
+  .header-actions .try-link { display: none; }
+}
+/* Opening prints the menu like a terminal: the card appears a text line at a time (20 steps, about one line each,
+   one step every 15 ms so it never reads as dropped frames) under a dotted print head, its entries appear one after
+   another, and nav.js decodes its monospaced words (kickers, glyphs, the command) from noise. Nothing slides or fades.
+   The animations fill backwards only, so the open card keeps no clip. */
+.nav-panel.is-printing, .site-nav.is-printing { animation: nav-print .3s steps(20, end) backwards; }
+.nav-panel.is-printing::after, .site-nav.is-printing::after { content: ""; position: absolute; left: 14px; right: 14px; height: 3px; background: radial-gradient(circle, #b8461d 1.1px, transparent 1.5px) 0 50% / 7px 3px repeat-x; pointer-events: none; animation: nav-head .3s steps(20, end) forwards; }
+.nav-panel.is-printing li, .nav-panel.is-printing .nav-feature, .nav-panel.is-printing .nav-kicker { animation: nav-row .01s backwards; animation-delay: calc(var(--row, 0) * 22ms + 40ms); }
+@keyframes nav-print { from { clip-path: inset(0 0 calc(100% - 3px) 0 round 14px); } to { clip-path: inset(0 0 0 0 round 14px); } }
+@keyframes nav-head { from { top: 0; opacity: 1; } 85% { opacity: 1; } to { top: calc(100% - 3px); opacity: 0; } }
+@keyframes nav-row { from, to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .nav-caret, .nav-panel li a { transition: none; }
+  .nav-panel.is-printing, .site-nav.is-printing, .nav-panel.is-printing *, .nav-panel.is-printing::after, .site-nav.is-printing::after { animation: none; }
+}

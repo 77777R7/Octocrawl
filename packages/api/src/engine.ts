@@ -1232,7 +1232,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /**
    * One page read in the person's Chrome on a site they allowed (`allowed`), without a click of theirs; a check it
    * shows waits for them. The page, or why it was not read: revoked, its tab closed or the caller gone (`cancelled`),
-   * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), or the wait over (`timeout`).
+   * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
+   * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
   async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
     try {
@@ -1255,6 +1256,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(url, { status: 'cancelled' }, error.message, wallMs)
       // Chrome refused a command (a tab it would not open, a page it would not answer for): not a wait that ran out.
       if (error.kind === 'chrome') return unreadInUserBrowser(url, { status: 'failed', failureReason: 'connection_error' }, error.message, wallMs)
+      // The site led the tab elsewhere each time it was taken back to the page: a limit of returns reached, not a wait.
+      if (error.kind === 'elsewhere') return unreadInUserBrowser(url, { status: 'failed', failureReason: 'redirect_limit' }, error.message, wallMs)
       const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
       return unreadInUserBrowser(url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
     }
