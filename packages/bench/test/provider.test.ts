@@ -93,6 +93,15 @@ describe('ProviderSubject robots gate', () => {
     expect(transport.calls).toHaveLength(1)
   })
 
+  it('reports a page whose main region is only a heading as failed, not as content, and keeps the page as evidence (ROADMAP PA item 4)', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const body = '<!doctype html><html><body><nav><a href="/models">Model S</a> <a href="/model3">Model 3</a></nav><main><h3>Don\'t see the Tesla you\'re looking for?</h3></main><footer><a href="/about">About</a></footer></body></html>'
+    const out = await new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher).fetch('https://shop.example/inventory')
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+    expect(out.markdown).toContain("Don't see the Tesla you're looking for?")
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true }) }))
+  })
+
   it('records the wait for a page that still showed its data loading, and warns when it was read while it did (ROADMAP PA item 4)', async () => {
     const { fetcher } = robotsServing(AMAZON_SHAPED)
     const stuck = await new ProviderSubject(decl(), new CountingTransport({ settle: { loadingSeen: true, stillLoading: true, waitedMs: 8_000 } }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')

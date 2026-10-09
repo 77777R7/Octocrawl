@@ -69,6 +69,22 @@ describe('extractTf', () => {
     expect(out.mainHtml).toBe('')
   })
 
+  it('escalates on a page whose main region says nothing beyond its headings and in-page jump links (ROADMAP PA item 4)', () => {
+    // The Tesla inventory page through a vendor, loaded with no vehicles: a heading was its whole content.
+    const page = (main: string) => `<!doctype html><html><head><title>Inventory</title></head><body>
+<header><nav><a href="/models">Model S</a> <a href="/model3">Model 3</a> <a href="/modelx">Model X</a> <a href="/shop">Shop</a></nav></header>
+<main class="inventory">${main}</main>
+<footer><nav><a href="/about">Tesla © 2026</a> <a href="/privacy">Privacy &amp; Legal</a> <a href="/contact">Contact</a></nav></footer></body></html>`
+    for (const main of [
+      '<h3>Don\'t see the Tesla you\'re looking for?</h3>',
+      '<div><h2>Results</h2><a href="#filters">Skip to Filters</a></div><h1 class="placeholder">Inventory Search Results Fetching...</h1>',
+    ]) expect(extractTf.extract(page(main)).escalate, main).toBe(true)
+    // A heading with something to say beyond it is content.
+    const said = extractTf.extract(page('<h1>Model 3</h1><p>Rear-wheel drive, 363 miles of range, from $42,490.</p>'))
+    expect(said.escalate).toBe(false)
+    expect(said.mainHtml).toContain('363 miles of range')
+  })
+
   it('keeps a card listing whose short texts the article cascade cannot see', () => {
     // books.toscrape.com's Art category: eight cards of title link, price and
     // stock, no pager, and a category name too short to be a block.

@@ -287,9 +287,10 @@ export class ExtractTf implements Extractor {
         favorRecall,
         product,
       ),
-      // Escalate only when a strategy produced nothing at all. Routing to a
-      // non-article strategy is not by itself an escalation reason.
-      escalate: main === null,
+      // Escalate when a strategy produced nothing at all, or a region that says
+      // nothing beyond its headings and in-page jump links (headingsOnly).
+      // Routing to a non-article strategy is not by itself an escalation reason.
+      escalate: main === null || headingsOnly(main),
       ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
@@ -316,3 +317,32 @@ export class ExtractTf implements Extractor {
 
 /** Default instance. */
 export const extractTf = new ExtractTf()
+
+/** Text a region needs beyond its headings and in-page jump links to be content. */
+const MIN_PROSE_CHARS = 20
+
+/**
+ * Whether a region says nothing beyond its headings and its in-page jump links ("Skip to Filters"): fewer than
+ * MIN_PROSE_CHARS characters of other text. Such a region names a page but is not its content, and the page escalates as
+ * one with none found (ROADMAP PA item 4: a vendor page whose list had not loaded answered `success` with "Don't see the
+ * Tesla you're looking for?"). The text of links to other pages counts; only in-page jump links are set aside.
+ */
+function headingsOnly(region: Element): boolean {
+  const heading = (el: Element) => /^h[1-6]$/.test(el.tagName.toLowerCase())
+  if (heading(region)) return true
+  let prose = 0
+  const walk = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (prose >= MIN_PROSE_CHARS) return
+      if (child.nodeType === 3) { prose += (child.textContent ?? '').replace(/\s+/g, ' ').trim().length; continue }
+      if (child.nodeType !== 1) continue
+      const el = child as Element
+      const tag = el.tagName.toLowerCase()
+      if (heading(el) || tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue
+      if (tag === 'a' && (el.getAttribute('href') ?? '').startsWith('#')) continue
+      walk(el)
+    }
+  }
+  walk(region)
+  return prose < MIN_PROSE_CHARS
+}
