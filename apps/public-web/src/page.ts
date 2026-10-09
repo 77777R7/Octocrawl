@@ -1,3 +1,4 @@
+import { capabilitiesMarkup, startMarkup, tiersMarkup } from './featureSections'
 import { glyphBand, glyphCloud } from './glyphArt'
 import { sessionMarkup } from './sessionScript'
 import { waitlistMarkup } from './waitlistMarkup'
@@ -6,6 +7,9 @@ import { waitlistMarkup } from './waitlistMarkup'
  * section renumbers the rest. The bar repeats the section's kicker, so screen readers skip it. */
 const SECTION_BARS = [
   ['how-it-works', 'HOW IT WORKS'],
+  ['what-it-does', 'WHAT IT DOES'],
+  ['get-started', 'GET STARTED'],
+  ['free-tiers', 'FREE TIERS'],
   ['faq', 'FAQ'],
 ] as const
 
@@ -21,6 +25,29 @@ export function sectionBar(id: (typeof SECTION_BARS)[number][0]): string {
 }
 
 
+
+/** The FAQ: each question with its answer (HTML). The section shows them, and the page's FAQPage data repeats them,
+ * so the two cannot drift apart. */
+export const FAQ: ReadonlyArray<readonly [question: string, answer: string]> = [
+  ["Does Octocrawl respect robots.txt? Is this legal?", "We can’t give legal advice; here is what the preview does. It reads a site’s robots.txt before it fetches a page. If the page is disallowed, or robots.txt can’t be reached (a server error, no answer or a timeout), it stops and reports the page as blocked; a robots.txt that answers with a 4xx status counts as no rules, as RFC 9309 provides. It never signs in, solves a CAPTCHA or gets past a verification page, and it refuses private network addresses. What you do with a page is up to you and the site’s terms."],
+  ["Which sites work?", "Public pages anyone can open without signing in. The preview reads them over HTTP without running JavaScript, so a page that only appears in a browser may come back incomplete. It reads pages up to 2 MiB and files such as PDFs up to 5 MiB, and stops after 40 seconds. Amazon.sg product pages (<code>/dp/ASIN</code>) are in Beta. X and Reddit posts often don’t come through: robots rules, sign-in walls or verification pages can stop the preview, and a hosted X or Reddit result hasn’t been verified yet. See <a href=\"/docs/limits/\">Limits and result states</a>."],
+  ["Why only five previews a day?", "The preview is a limited public trial: five previews per visitor and 150 for the whole site each UTC day. A request turned down before a preview starts, such as a malformed URL, or localhost or a private IP address typed into it, doesn’t count. Once a preview starts it counts, whatever the result, including a host name that turns out to point to a private network or a page stopped by robots.txt. Octocrawl on your own computer has no daily limit."],
+  ["Do you store the URLs I submit, or the results?", "Results aren’t saved: your recent runs live in this page and are gone when you leave it. Each preview logs its state and the host of the page, never its path. While you type, the page asks the service for a short hint about the address, so that address appears in our hosting provider’s request log, kept for 30 days. The details are on the <a href=\"/docs/privacy/\">Privacy</a> page."],
+  ["How is Octocrawl different from Firecrawl or Crawl4AI?", "Octocrawl reports what it actually read: a blocked, incomplete or timed-out page is a result with a reason, and checked fields carry their source. The <a href=\"https://github.com/77777R7/Octocrawl/blob/main/docs/benchmark-gate.md\">benchmark notes</a> compare the three tools on the same test suite, with the limits of that comparison. For moving off Firecrawl, Octocrawl has a partial, local Firecrawl v1 shim."],
+  ["Can I call it from a script or an agent?", "Not this preview page: it is for trying Octocrawl in a browser. Call <a href=\"/docs/connect-mcp/\">hosted Octocrawl</a> instead: <code>https://api.octocrawl.dev/v1/scrape</code> over REST, or <code>https://mcp.octocrawl.dev/mcp</code> from Claude Code, Cursor, OpenCode or Codex, keyless within a daily allowance and with a key for more. Or run Octocrawl yourself with no limit."],
+  ["Is it free?", "The preview and the keyless hosted allowance are free and need no account. A key, issued on request, gives more pages a day and the browser lane; credit packs are planned but not sold yet. Octocrawl is open source under the AGPL-3.0, and running it yourself costs nothing but your own machine."],
+]
+
+/** The FAQ as schema.org FAQPage data, in plain text, for the page's head (vite.config.ts writes it there). `<` is
+ * escaped so no answer can close the script element. */
+export function faqJsonLd(): string {
+  const text = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  const data = {
+    '@context': 'https://schema.org', '@type': 'FAQPage',
+    mainEntity: FAQ.map(([question, answer]) => ({ '@type': 'Question', name: text(question), acceptedAnswer: { '@type': 'Answer', text: text(answer) } })),
+  }
+  return `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`
+}
 
 /** The page's markup. The build writes it into index.html (see vite.config.ts), so the headline, the form and every
  * section are in the HTML itself: readable before any script runs, by search engines and by LLM readers alike.
@@ -44,9 +71,9 @@ export function pageMarkup(): string {
           <nav class="site-nav" aria-label="Main navigation">
             <a class="nav-how" href="#how-it-works">How it works</a>
             <a class="nav-how" href="#faq">FAQ</a>
-            <a href="/docs/">Docs <span aria-hidden="true">↗</span></a>
+            <a href="/docs/">Docs</a>
           </nav>
-          <a class="github-link" href="https://github.com/77777R7/w2l" aria-label="Octocrawl on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span class="github-label">GitHub</span><span class="card-arrow" aria-hidden="true">↗</span></a>
+          <a class="github-link" href="https://github.com/77777R7/Octocrawl" aria-label="Octocrawl on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span class="github-label">GitHub</span><span class="card-arrow" aria-hidden="true">↗</span></a>
         </header>
       </div>
 
@@ -144,7 +171,7 @@ export function pageMarkup(): string {
                     </div>
                     <p class="option-error" id="fields-error" role="alert"></p>
                   </section>
-                  <p class="sheet-note">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason.<br />PDFs up to 5 MB · Amazon.sg product pages take no options.</p>
+                  <p class="sheet-note">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason.<br />PDFs up to 5 MiB · Amazon.sg product pages take no options.</p>
                 </div>
               </div>
               <dialog class="code-dialog" id="code-dialog" aria-labelledby="code-title" aria-describedby="code-lead">
@@ -185,7 +212,7 @@ export function pageMarkup(): string {
           <div><p class="section-kicker"><span class="kicker-square"></span> YOUR RESULTS</p><h2 id="runs-title">Recent runs</h2></div>
           <div class="runs-aside">
             <p class="runs-note">This visit only · cleared when you leave the page</p>
-            <p class="runs-next">Use it in your agent: <a href="/docs/connect-mcp/">Connect MCP</a> · <a href="https://github.com/77777R7/w2l">Run it yourself <span aria-hidden="true">↗</span></a></p>
+            <p class="runs-next">Use it in your agent: <a href="/docs/connect-mcp/">Connect MCP</a> · <a href="https://github.com/77777R7/Octocrawl">Run it yourself <span aria-hidden="true">↗</span></a></p>
           </div>
         </div>
       </div>
@@ -210,7 +237,7 @@ export function pageMarkup(): string {
             <p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p>
             <h2 id="how-title">From web page<br />to usable content.</h2>
             <ol class="how-list" role="list">
-              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get 3&nbsp;previews a&nbsp;day.</p></div></li>
+              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get five&nbsp;previews a&nbsp;day.</p></div></li>
               <li class="how-step"><span class="step-number" aria-hidden="true">02</span><div><h3>Octocrawl checks, then reads</h3><p>It respects robots.txt and reads only what anyone can open, then reports the status, final URL and time.</p></div></li>
               <li class="how-step"><span class="step-number" aria-hidden="true">03</span><div><h3>Use the content</h3><p>Copy or download readable Markdown or the result JSON. Amazon.sg product pages add checked fields.</p></div></li>
             </ol>
@@ -220,11 +247,14 @@ export function pageMarkup(): string {
             <div class="how-replay" id="how-replay">
               <div class="how-replay-window" aria-hidden="true" inert>${sessionMarkup()}</div>
             </div>
-            <figcaption>A replay of two recorded runs on a local Octocrawl: the example page (24 Sep 2026) and an Amazon.sg product (23 Sep 2026). Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://docs.firecrawl.dev/introduction returned success in 2.51 seconds of server time, with Markdown that starts "Get Started" and "# Introduction". The Amazon.sg product B000NI69YA, a Fluke 116 HVAC Multimeter, was matched for Singapore 238823 at SGD 290.67, sold by Amazon US, in 4.00 seconds measured by the client.</span></figcaption>
+            <figcaption>A replay of two recorded runs: the example page on this site's preview (8 Oct 2026) and an Amazon.sg product on a local Octocrawl (23 Sep 2026). Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview returned success in 0.87 seconds of server time, with Markdown that starts "# Overview of HTTP" and then describes HTTP as a protocol for fetching resources such as HTML documents. The Amazon.sg product B000NI69YA, a Fluke 116 HVAC Multimeter, was matched for Singapore 238823 at SGD 290.67, sold by Amazon US, in 4.00 seconds measured by the client.</span></figcaption>
           </figure>
         </div>
       </div>
     </section>
+    ${capabilitiesMarkup(sectionBar('what-it-does'))}
+    ${startMarkup(sectionBar('get-started'))}
+    ${tiersMarkup(sectionBar('free-tiers'))}
     <section class="faq-section" id="faq" aria-labelledby="faq-title">
       ${sectionBar('faq')}
       <div class="band">
@@ -234,7 +264,7 @@ export function pageMarkup(): string {
             <p class="section-kicker"><span class="kicker-square"></span> FAQ</p>
             <h2 id="faq-title">Questions,<br />answered <em>plainly.</em></h2>
           </div>
-          <div class="faq-list"><details class="faq-item"><summary>Does Octocrawl respect robots.txt? Is this legal?</summary><p>We can’t give legal advice; here is what the preview does. It reads a site’s robots.txt before it fetches a page. If the page is disallowed, or robots.txt can’t be reached (a server error, no answer or a timeout), it stops and reports the page as blocked; a robots.txt that answers with a 4xx status counts as no rules, as RFC 9309 provides. It never signs in, solves a CAPTCHA or gets past a verification page, and it refuses private network addresses. What you do with a page is up to you and the site’s terms.</p></details><details class="faq-item"><summary>Which sites work?</summary><p>Public pages anyone can open without signing in. The preview reads them over HTTP without running JavaScript, so a page that only appears in a browser may come back incomplete. It reads pages up to 2 MiB and files such as PDFs up to 5 MiB, and stops after 40 seconds. Amazon.sg product pages (<code>/dp/ASIN</code>) are in Beta. X and Reddit posts often don’t come through: robots rules, sign-in walls or verification pages can stop the preview, and a hosted X or Reddit result hasn’t been verified yet. See <a href="/docs/limits/">Limits and result states</a>.</p></details><details class="faq-item"><summary>Why only five previews a day?</summary><p>The preview is a limited public trial: five previews per visitor and 150 for the whole site each UTC day. A request turned down before a preview starts, such as a malformed URL, or localhost or a private IP address typed into it, doesn’t count. Once a preview starts it counts, whatever the result, including a host name that turns out to point to a private network or a page stopped by robots.txt. Octocrawl on your own computer has no daily limit.</p></details><details class="faq-item"><summary>Do you store the URLs I submit, or the results?</summary><p>Results aren’t saved: your recent runs live in this page and are gone when you leave it. Each preview logs its state and the host of the page, never its path. While you type, the page asks the service for a short hint about the address, so that address appears in our hosting provider’s request log, kept for 30 days. The details are on the <a href="/docs/privacy/">Privacy</a> page.</p></details><details class="faq-item"><summary>How is Octocrawl different from Firecrawl or Crawl4AI?</summary><p>Octocrawl reports what it actually read: a blocked, incomplete or timed-out page is a result with a reason, and checked fields carry their source. The <a href="https://github.com/77777R7/w2l/blob/main/docs/benchmark-gate.md">benchmark notes</a> compare the three tools on the same test suite, with the limits of that comparison. For moving off Firecrawl, Octocrawl has a partial, local Firecrawl v1 shim.</p></details><details class="faq-item"><summary>Can I call it from a script or an agent?</summary><p>Not this preview page: it is for trying Octocrawl in a browser. Call <a href="/docs/connect-mcp/">hosted Octocrawl</a> instead: <code>https://api.octocrawl.dev/v1/scrape</code> over REST, or <code>https://mcp.octocrawl.dev/mcp</code> from Claude Code, Cursor, OpenCode or Codex, keyless within a daily allowance and with a key for more. Or run Octocrawl yourself with no limit.</p></details><details class="faq-item"><summary>Is it free?</summary><p>The preview and the keyless hosted allowance are free and need no account. A key, issued on request, gives more pages a day and the browser lane; credit packs are planned but not sold yet. Octocrawl is open source under the AGPL-3.0, and running it yourself costs nothing but your own machine.</p></details></div>
+          <div class="faq-list">${FAQ.map(([question, answer]) => `<details class="faq-item"><summary>${question}</summary><p>${answer}</p></details>`).join('')}</div>
         </div>
       </div>
     </section>
@@ -250,17 +280,17 @@ export function pageMarkup(): string {
           </div>
           <div class="footer-cards">
             <a class="footer-card is-primary" href="#top"><span class="footer-card-mark" aria-hidden="true">→</span>Try a page<span class="card-arrow" aria-hidden="true">↑</span></a>
-            <a class="footer-card" href="https://github.com/77777R7/w2l"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Star on GitHub<span class="card-arrow" aria-hidden="true">↗</span></a>
+            <a class="footer-card" href="https://github.com/77777R7/Octocrawl"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Star on GitHub<span class="card-arrow" aria-hidden="true">↗</span></a>
             <a class="footer-card" href="/docs/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>Documentation<span class="card-arrow" aria-hidden="true">↗</span></a>
           </div>
         </div>
       </div>
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
-          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#faq">FAQ</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#what-it-does">What it does</a></li><li><a href="#get-started">Get started</a></li><li><a href="#free-tiers">Free tiers</a></li><li><a href="#faq">FAQ</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/w2l/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/w2l/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/w2l">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/Octocrawl/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/Octocrawl/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/Octocrawl">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
         </nav>
       </div>
     </footer>

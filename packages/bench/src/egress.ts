@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { LookupFunction } from 'node:net'
-import { Agent, Pool, ProxyAgent, type Dispatcher } from 'undici'
+import { Agent, Pool, ProxyAgent, request, type Dispatcher } from 'undici'
 import {
   evaluateResolved,
   evaluateHostname,
@@ -219,6 +219,22 @@ export class EgressRoutes {
   close(): Promise<void> {
     this.closing ??= Promise.all([this.direct.close(), ...[...this.proxies.values()].map(proxy => proxy.close())]).then(() => {})
     return this.closing
+  }
+}
+
+/**
+ * One GET of `url` through `server` alone, for an operator's own check of a proxy (the egress pool's exit echo):
+ * no robots.txt, no identity, no address check, since the operator names both the proxy and the URL. The body is
+ * capped at `maxBytes`; the dispatcher is closed afterwards.
+ */
+export async function fetchThroughProxy(server: ProxyServer, url: string, timeoutMs = 10_000, maxBytes = 64 * 1024): Promise<{ status: number; body: string }> {
+  const dispatcher = createProxyDispatcher(server)
+  try {
+    const answer = await request(url, { method: 'GET', dispatcher, signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json, text/plain;q=0.9' } })
+    const body = await readCappedBody(answer.body, maxBytes)
+    return { status: answer.statusCode, body: Buffer.from(body).toString('utf8') }
+  } finally {
+    await dispatcher.close()
   }
 }
 

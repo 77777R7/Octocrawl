@@ -69,6 +69,7 @@ import {
   BATCH_ERRORS_MAX_LIMIT,
   RequestError,
   type FetchResult,
+  type ListFormatRequest,
   type NetworkPolicy,
   type ScrapeRequest,
   type StepRecord,
@@ -109,9 +110,10 @@ import {
   type MapSources,
   cacheLookupRequested,
   cacheStateOf,
+  givenUpPaidCalls,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
+import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
@@ -123,8 +125,8 @@ import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, FileSessionStore, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, type AccessChoice, type BlockReason, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
+import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
@@ -167,6 +169,8 @@ export interface HandoffHooks {
   onHidden?: (url: string) => void
   /** The my-browser lane asks the person, in a page it opened in their Chrome, to allow these sites. */
   onAllow?: (hosts: readonly string[]) => void
+  /** A list's check is behind the person: Octocrawl reads each page they page on to in that tab; `pages` read so far, the kept ones included. */
+  onContinue?: (url: string, pages: number) => void
   signal?: AbortSignal
 }
 
@@ -378,6 +382,11 @@ export interface ApiEngineOptions {
    */
   egressProxies?: readonly ProxyServer[]
   /**
+   * A URL that answers with the caller's address (`W2L_EGRESS_ECHO_URL`): each pool egress is asked it through its
+   * own proxy, and a page read through that egress records where it left from (`access.egress.exit`). Absent: not asked.
+   */
+  egressEchoUrl?: string | null
+  /**
    * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
    * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
    * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
@@ -464,6 +473,59 @@ function writeTaskEgress(file: string, id: string): void {
 const DEFAULT_WORKER_COUNT = 4
 
 /**
+ * Whether a page of a list shows again what an earlier one shows, as the list merge tells it (its items' whole text), or that
+ * cannot be told (a selector the extractor does not take, no list read from the first page, or the merge cut short): a page shown again at an address of its own, as a
+ * result set tied to the session that made it comes back in another session, would be counted twice by a sum. A page with no
+ * item adds none to a sum, so it is not one.
+ */
+export function listPagesRepeat(pages: readonly { url: string; html: string }[], itemSelector: string): boolean {
+  // A selector the extractor does not take (`:has()`, `:nth-child()`, `+`, `~`) finds no item here though the browser counted some: it cannot be told.
+  if (invalidSelector(itemSelector) !== null) return true
+  const merged = mergeListPages(pages.map(({ url, html }) => ({ url, html })), { type: 'list', itemSelector } as ListFormatRequest)
+  return merged === null || merged.spec === null || merged.list.pages !== pages.length || merged.list.truncated
+}
+
+/**
+ * A continued list's `itemsRead`: the kept pages' count plus each page the person showed, only when no page can be counted
+ * twice, else null (unknown). That needs pages with addresses of their own, told by the addresses themselves: the kept pages
+ * each at their own, the check's page at none of them, no page the person showed at a kept one, and the check's page not the
+ * list's own (a pager reopened there shows the kept pages again); and every count known.
+ */
+export function continuedItemsRead(pages: { stepUrl: string; checkUrl: string; kept: readonly string[]; keptItems: number | null | undefined; shown: readonly { url: string; items?: number | null }[] }): number | null {
+  const at = (href: string): string => {
+    try {
+      const parsed = new URL(href)
+      return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '') || '/'}${parsed.search}`
+    } catch {
+      return href
+    }
+  }
+  const kept = pages.kept.map(at)
+  const addressed = new Set(kept).size === kept.length && !kept.includes(at(pages.checkUrl)) && at(pages.checkUrl) !== at(pages.stepUrl)
+    && pages.shown.every((page) => !kept.includes(at(page.url)))
+  if (!addressed || typeof pages.keptItems !== 'number') return null
+  let sum = pages.keptItems
+  for (const page of pages.shown) {
+    if (typeof page.items !== 'number') return null
+    sum += page.items
+  }
+  return sum
+}
+
+/** `promise`'s value, or null once the context's signal aborts or its deadline passes first. */
+function settledBy<T>(promise: Promise<T | null>, context: ExecutionContext): Promise<T | null> {
+  if (context.signal?.aborted || (context.deadlineAt !== undefined && context.deadlineAt <= Date.now())) return Promise.resolve(null)
+  if (context.signal === undefined && context.deadlineAt === undefined) return promise
+  return new Promise((resolve) => {
+    const done = (value: T | null) => { clearTimeout(timer); context.signal?.removeEventListener('abort', aborted); resolve(value) }
+    const aborted = () => done(null)
+    const timer = context.deadlineAt === undefined ? undefined : setTimeout(aborted, context.deadlineAt - Date.now())
+    context.signal?.addEventListener('abort', aborted, { once: true })
+    promise.then(done, () => done(null))
+  })
+}
+
+/**
  * How the cache takes part in one page's fetch: the key of the page under
  * the options that shape its result, the age bounds of a lookup (null: none
  * is made), whether a miss ends the page (`lockdown`) and whether a
@@ -530,8 +592,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const grantedBudget = (budget: Task['budget']): Task['budget'] => {
     const cap = accessGrant?.budget.perRunUsd ?? null
-    if (cap === null) return budget
-    return { ...budget, maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }
+    const perPage = accessGrant?.budget.perRequestUsd ?? null
+    return {
+      ...budget,
+      ...(cap === null ? {} : { maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }),
+      // One page's own cap within the run's (ROADMAP PA item 4).
+      ...(perPage === null ? {} : { maxCostPerPageUsd: perPage }),
+    }
   }
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
@@ -542,7 +609,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
   }
   /** The operator's egress proxies, when any: every fetch leaves through one of them. */
-  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy)
+  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy, Date.now, options.egressEchoUrl ?? null)
+  /**
+   * The page's trace with where its pool egress leaves from, when the pool's echo said (egress_exit); unchanged otherwise.
+   * A cache hit keeps the exit its original read recorded: the echo's answer now is not where that read left from. The
+   * wait for the echo ends with the page's signal or deadline, the exit then unknown, so it never outlasts a `timeout`.
+   */
+  const withEgressExit = async (result: FetchResult, egress: Egress | undefined, context: ExecutionContext = {}): Promise<FetchResult> => {
+    if (egress === undefined || egressPool === null || result.trace.some((event) => event.event === 'cache_hit')) return result
+    const exit = await settledBy(egressPool.exitOf(egress.id), context)
+    return exit === null ? result : { ...result, trace: [...result.trace, { at: 0, lane: result.lane, event: 'egress_exit', detail: { proxy: egress.id, ...exit } }] }
+  }
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
   const fileStore = new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
@@ -770,7 +847,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -913,7 +990,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const completed = await store.countCompletedSteps(taskId)
       const counts = await store.countSteps(taskId)
       const webhook = jobWebhooks.status(task)
-      const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
+      // What the handoff would take: for a batch with a paginate step, the lists stopped at a check alone, read step by step; for the rest, the count of stopped pages.
+      const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined
+        : listsPages(task) ? (await stepsOf(store, taskId, 'errors')).filter((step) => handoffNeededIn(task, step)).length
+          : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -1007,6 +1087,85 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * contentful read) is a result; a check still showing, an error or no
    * content leaves the stopped result standing.
    */
+  /** The paginate step of a result that stopped at a check (ListStop `challenge`), or null. */
+  function listCheckOf(result: FetchResult): ListRun | null {
+    return (result.actions?.lists ?? []).find((run) => run.type === 'paginate' && run.stoppedBy === 'challenge' && run.challenge !== undefined) ?? null
+  }
+
+  /**
+   * A list's continuation in the person's Chrome: the page the check was on opens there, they get through it and page on
+   * by clicking Next themselves, W2L reads each page as they show it (nothing of its own runs in their browser), and the
+   * pages W2L's own lane read before the check (kept on the stopped result) and these are merged into one list, each page
+   * once. The result is the last page as read, with the whole list and the step's run as it now stands.
+   */
+  async function continueList(chrome: UserChrome, step: StepRecord, run: ListRun, selection: NonNullable<Task['batch']>, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal): Promise<{ result: FetchResult } | { reason: string }> {
+    const prior = step.result!
+    const action = (selection.actions ?? []).find((item): item is Extract<PageAction, { type: 'paginate' }> => item.type === 'paginate')
+    if (action === undefined) return { reason: 'the batch has no paginate step to go on with' }
+    const kept = (prior.actions?.scrapes ?? []).filter((scrape) => scrape.step === run.index).map(({ url, html }) => ({ url, html }))
+    const from = run.challenge!.page
+    const url = run.challenge!.url
+    try {
+      const judged = { ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }), ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }), ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }) }
+      const read = await chrome.readList(url, {
+        ...(waitMs === undefined ? {} : { waitMs }),
+        ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
+        ...(hooks.onConfirm === undefined ? {} : { onConfirm: hooks.onConfirm }),
+        ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
+        signal,
+        ...judged,
+        follow: {
+          nextSelector: action.nextSelector,
+          ...(action.itemSelector === undefined ? {} : { itemSelector: action.itemSelector }),
+          // A pager with no address of its own opens at the list's own page: the pages before the check are shown again on the way, and do not count against the limit.
+          maxPages: Math.max(1, (action.maxPages ?? LIST_DEFAULTS.maxPages) - (new URL(url).pathname + new URL(url).search === new URL(step.url).pathname + new URL(step.url).search ? 0 : kept.length)),
+          onStart: (pageUrl) => hooks.onContinue?.(pageUrl, kept.length + 1),
+          onPage: (pageUrl, pages) => hooks.onContinue?.(pageUrl, kept.length + pages),
+        },
+      })
+      // Through the check, but no page after it within the wait: the item keeps its stopped result, and a later handoff goes on from here.
+      if (read.stoppedBy === 'deadline' && read.pages.length === 1) return { reason: `you got through the check at page ${from}, but did not page on in that tab in time: hand the batch over again to go on from there` }
+      const last = read.pages[read.pages.length - 1]!
+      // The last page as the person showed it is the page; the list format is applied over every page below, not to it alone.
+      const { list, ...withoutList } = fetchOpts
+      const base = pageFromUserBrowser({ ...read.first, finalUrl: last.url, html: last.html }, prior, withoutList)
+      const pages = [...kept, ...read.pages]
+      const merged = list === undefined ? null : mergeListPages(pages, list)
+      const rounds = pages.length
+      const continued = { from, pages: read.pages.length, by: 'user_browser' as const }
+      // The items on the last page, as the person's tab counted them, and over every page only when a sum cannot count a page twice:
+      // by the pages' addresses, and by their items, since a result set tied to the session that made it comes back at new ones.
+      const itemsRead = action.itemSelector === undefined || listPagesRepeat(pages, action.itemSelector) ? null
+        : continuedItemsRead({ stepUrl: step.url, checkUrl: url, kept: kept.map((page) => page.url), keptItems: run.itemsRead, shown: read.pages })
+      const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: last.items ?? null, itemsRead, continued } : item)
+      // Each page says who read it: W2L's own browser before the check (the kept pages), the person's after it.
+      const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map(({ url: pageUrl, html }) => ({ url: pageUrl, html, step: run.index, by: 'user_browser' as const }))], lists }
+      const valued = merged !== null && merged.valued
+      const short = read.stoppedBy !== 'end'
+      const at = base.usage.wallMs
+      const result: FetchResult = {
+        ...base,
+        ...(valued ? { status: 'success' as const, failureReason: null, blockReason: null } : {}),
+        actions,
+        ...(merged === null ? {} : { list: merged.list }),
+        warnings: [
+          ...(base.warnings ?? []).filter((warning) => warning.code !== 'list_not_exhausted'),
+          ...(short ? [{ code: 'list_not_exhausted', message: `The list of step ${run.index} (paginate) stopped before its end (${read.stoppedBy === 'max' ? `its limit of ${rounds} pages` : 'the wait for you to page on in your Chrome ended'}): more items may follow.` }] : []),
+        ],
+        trace: [
+          ...base.trace,
+          { at, lane: base.lane, event: 'list_continued', detail: { step: run.index, from, pages: read.pages.length, stoppedBy: read.stoppedBy, by: 'user_browser', kept: kept.length, keptBy: prior.lane } },
+          ...(merged === null ? [] : [{ at, lane: base.lane, event: 'list_extracted', detail: { records: merged.list.records.length, incomplete: merged.list.incomplete, pages: merged.list.pages, truncated: merged.list.truncated } }]),
+        ],
+      }
+      if (!CONTENTFUL_STATUS.has(result.status)) return { reason: `the page Octocrawl read in Chrome was ${result.status} (${result.blockReason ?? result.failureReason ?? 'no reason'}), not the list` }
+      return { result }
+    } catch (error) {
+      if (!(error instanceof HandoffNotThrough)) throw error
+      return { reason: error.message }
+    }
+  }
+
   async function readThrough(chrome: UserChrome, url: string, prior: FetchResult, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal): Promise<{ result: FetchResult } | { reason: string }> {
     try {
       // The page is through as the read below judges it: with the request's tags and blockAds.
@@ -1073,7 +1232,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /**
    * One page read in the person's Chrome on a site they allowed (`allowed`), without a click of theirs; a check it
    * shows waits for them. The page, or why it was not read: revoked, its tab closed or the caller gone (`cancelled`),
-   * the check it still showed (`blocked`), or the wait over (`timeout`).
+   * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), or the wait over (`timeout`).
    */
   async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
     try {
@@ -1094,6 +1253,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const wallMs = Date.now() - started
       if (allowed.signal.aborted) return unreadInUserBrowser(url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${url} was read`, wallMs)
       if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(url, { status: 'cancelled' }, error.message, wallMs)
+      // Chrome refused a command (a tab it would not open, a page it would not answer for): not a wait that ran out.
+      if (error.kind === 'chrome') return unreadInUserBrowser(url, { status: 'failed', failureReason: 'connection_error' }, error.message, wallMs)
       const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
       return unreadInUserBrowser(url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
     }
@@ -1211,7 +1372,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (webhookOf(task) !== undefined) throw new CrawlStateError(`batch ${taskId} has a webhook: a page read in your own Chrome is read signed in as you, and is not sent to another address; its stopped items are not handed over`)
       handoffs.add(taskId)
       try {
-        const waiting = (await stepsOf(store, taskId, 'errors')).filter(handoffNeeded)
+        const waiting = (await stepsOf(store, taskId, 'errors')).filter((step) => handoffNeededIn(task, step))
         const items: BatchHandoffResponse['items'] = []
         if (waiting.length > 0) {
           const selection = task.batch
@@ -1227,7 +1388,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
               {
                 // A caller that went away hands nothing more over: each item left keeps its stopped result.
                 if (signal.aborted) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'the handoff was cancelled before this page' }); continue }
-                const read = await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal)
+                // A list stopped at a check: the person gets through it and pages on in that tab, and the item is the whole list.
+                const listRun = step.result?.actions === undefined ? null : listCheckOf(step.result!)
+                const read = listRun === null ? await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal) : await continueList(chrome, step, listRun, selection, fetchOpts, req.waitMs, hooks, signal)
                 if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
                 const result = read.result
                 const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
@@ -1246,6 +1409,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 const { audit: _stoppedAudit, ...kept } = step
                 const replaced: StepRecord = { ...kept, status: stepStatusFromResult(stored.status), lane: stored.lane, contentHash: stored.evidence.rawBodySha256, cached: false, result: stored, updatedAt: new Date().toISOString() }
                 await store.putStep(replaced)
+                if (listRun !== null) await store.clearPagesRead(taskId, step.canonicalUrl)
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
                 // The item replaced is a job event of its own: a webhook delivery when the batch has a receiver, then the hub's.
                 const page = compactPage(replaced, task)
@@ -1388,6 +1552,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         let used = current
         let outcome = await pageAtom.scrape(url, context)
         const events: TraceEvent[] = []
+        const carried: TraceEvent[] = []
         while (egressInDoubt(outcome)) {
           let reason: string
           if (current === used) {
@@ -1409,10 +1574,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             reason = 'moved_with_task'
           }
           events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.egress!.id, to: current.egress!.id, reason, switches } })
+          // The read given up still paid for its provider calls: they stay on the page's record, none of them its answer.
+          carried.push(...givenUpPaidCalls(outcome.result.trace))
           used = current
           outcome = await pageAtom.scrape(url, context)
         }
-        return events.length === 0 ? outcome : { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, ...events] } }
+        const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...carried, ...outcome.result.trace, ...events] }, used.egress, context)
+        return result === outcome.result ? outcome : { ...outcome, result }
       },
       close: () => pageAtom.close(),
     }
@@ -1473,18 +1641,19 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
       const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
       if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
-      // The terminal event follows the terminal task row the run wrote; a run paused by shutdown has none.
-      await finishJob(task, store)
-      inflight.delete(task.id)
-      // After the run is out of the in-flight set, as before: removing the session file does not hold the task as running.
+      // The session files go before anyone hears of the end: a webhook's receiver or an events stream told of the terminal
+      // row finds no cookies on the disk. A run paused by shutdown keeps them for its resume, and has no terminal event.
       const after = await store.getTask(task.id)
       await endCookieSession(after !== null && isTerminalStatus(after.status))
+      // The terminal event follows the terminal task row the run wrote.
+      await finishJob(task, store)
+      inflight.delete(task.id)
       await store.close()
     }).catch(async (error: unknown) => {
       inflight.delete(task.id); crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       await markCrawlFailed(store, task.id)
-      await finishJob(task, store, error instanceof Error ? error.message : String(error))
       await endCookieSession(true)
+      await finishJob(task, store, error instanceof Error ? error.message : String(error))
       await store.close()
     })
     runningCrawls.set(task.id, orchestrator)
@@ -1542,7 +1711,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
+    const scrapeEgress = mode === 'authed' ? undefined : egressPool?.pick()
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, scrapeEgress)
     const policy: CrawlPolicy = {
       mode,
       // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
@@ -1581,10 +1751,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // Its JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline: the person's time is theirs.
         return deliver(full, createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }), true)
       }
+      // A scrape's paid calls are held to the grant's per-request cap, else its run cap (ROADMAP PA item 4).
+      const scrapeCap = accessGrant?.budget.perRequestUsd ?? accessGrant?.budget.perRunUsd ?? null
+      const scrapeSpend = scrapeCap === null ? undefined : createSpendLedger(scrapeCap)
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
-        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
-          .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+        ? await runner.run(req.url, undefined, scrapeSpend === undefined ? scope : { ...scope, spend: scrapeSpend }, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
+          .then(async (fetched) => ({ ...fetched, result: afterFetch(plan, answer, await withEgressExit(fetched.result, scrapeEgress, scope)) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.
       const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null
@@ -1601,7 +1774,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const full: ScrapeRun = {
         ...result,
         // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
-        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd },
+        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd, ...(run.result.usage.externalCostChargedUsd === undefined ? {} : { externalCostChargedUsd: run.result.usage.externalCostChargedUsd }) },
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
         summary,
@@ -2509,7 +2682,26 @@ function crawlPolicyAllowlist(seedUrl: string, allowlistedDomains: readonly stri
  * to take, so such a batch's stopped items are not handed over.
  */
 function handoffUnread(task: Task): string | null {
-  return task.batch === undefined ? null : unreadByPerson(fetchOptions(task.batch, task.batch.formats))
+  if (task.batch === undefined) return null
+  const options = fetchOptions(task.batch, task.batch.formats)
+  // One paginate step alone is the exception: its list goes on by the person's own paging after a check (continueList).
+  return listsPages(task) ? unreadByPerson({ ...options, actions: undefined }) : unreadByPerson(options)
+}
+
+/**
+ * Whether a batch's only step is a paginate step with an `itemSelector`: its items stopped at a check inside the list are
+ * handed over as a list's continuation. The items are what tells a page of the list from another page the person opens in
+ * that tab (one of its records, their account); without them no page is told apart, and the batch is not handed over.
+ */
+function listsPages(task: Task): boolean {
+  const actions = task.batch?.actions ?? []
+  return actions.length === 1 && actions[0]!.type === 'paginate' && actions[0]!.itemSelector !== undefined
+}
+
+/** Whether a step is handed to the person for this task: a page stopped at a check, or, for a batch with a paginate step, a list stopped at one (the person pages on from there; a page its step never reached is not read by them). */
+function handoffNeededIn(task: Task, step: StepRecord): boolean {
+  if (!handoffNeeded(step)) return false
+  return !listsPages(task) || (step.result?.actions?.lists ?? []).some((run) => run.type === 'paginate' && run.stoppedBy === 'challenge' && run.challenge !== undefined)
 }
 
 /** Whether a batch's stopped items can be handed to the person: not when it asked for what their Chrome cannot give, nor when it has a webhook, which would send pages read signed in as them to another address. */
@@ -2601,7 +2793,7 @@ function compactPage(step: StepRecord, task: Task): CrawlPage {
 
 function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handoffOffered = false): CrawlPage {
   const result = step.result
-  const handoff = handoffOffered && handoffNeeded(step) ? handoffRequestOf(step) : null
+  const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
   const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })

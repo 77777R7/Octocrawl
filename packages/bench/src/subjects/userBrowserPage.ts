@@ -13,7 +13,7 @@
  * robots.txt decision (W2L fetched nothing; the person's browser did).
  */
 
-import { estimateTokens, type BlockReason, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { estimateTokens, givenUpPaidCalls, type BlockReason, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
@@ -53,6 +53,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     ...(prior === null ? [] : [
       { at: 0, lane: LANE, event: 'handoff_from', detail: { status: prior.status, blockReason: prior.blockReason, failureReason: prior.failureReason, lane: prior.lane, rawBodySha256: prior.evidence.rawBodySha256 } },
       ...robotsOf(prior, LANE),
+      // The stopped run's provider calls were paid for: they stay on the page's record, none of them the page the person read.
+      ...givenUpPaidCalls(prior.trace),
     ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },

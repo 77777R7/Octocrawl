@@ -155,8 +155,8 @@ That first deploy sets every variable. For a later release, deploy the new image
 The service routes traffic to tagged revisions, so a later `gcloud run deploy` creates a revision that serves nothing until traffic moves to it. Deploy without traffic, move all of it to the new revision under a new tag, and keep the previous tag as the rollback:
 
 ```sh
-export W2L_REVISION_SUFFIX=landing   # names the revision w2l-public-preview-landing
-export W2L_TAG=r17landing            # one tag per release; the previous tag stays as the rollback
+export W2L_REVISION_SUFFIX="landing-${W2L_SOURCE_SHA}"   # names the revision w2l-public-preview-landing-<sha>
+export W2L_TAG=r17landing                                 # one tag per release; the previous tag stays as the rollback
 gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
 gcloud run services update-traffic w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
@@ -165,6 +165,16 @@ gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project
 ```
 
 Confirm that the new revision has `percent: 100`, and that `https://octocrawl.dev/` serves the new build. To roll back, run `update-traffic` with `--to-tags=<previous tag>=100`.
+
+Two things that have gone wrong at this step:
+
+- A revision name is taken for good, even after the revision is deleted. A suffix that was used once (`brand` and `brand2` both were, 2026-10-07) makes `gcloud run deploy` fail with "Found a conflicting revision name", so the suffix carries the source SHA as above.
+- The page is new at once, but `favicon.ico`, the SVG wordmark, the stylesheets and other files under `assets/` and `docs-assets/` keep serving the previous build for up to four hours (`cache-control: public, max-age=14400`, `cf-cache-status: HIT`). The Worker fetches the `run.app` address, so Cloudflare caches those files under that address, and purging the `octocrawl.dev` URLs (`cf cache purge --body '{"files": [...]}'`) reports success but changes nothing. Purge the whole zone after every deploy, then check that a file comes back as `MISS`:
+
+  ```sh
+  cf cache purge -z octocrawl.dev --force --body '{"purge_everything":true}'
+  curl -sI https://octocrawl.dev/favicon.ico | grep -i cf-cache-status
+  ```
 
 The `--allow-unauthenticated` flag is intentional for this limited, public trial. The Secret Manager grants are restricted to the dedicated runtime service account. Secret versions referenced as environment variables are resolved at instance startup; after rotating those secrets, deploy a new revision so every instance uses the new value. Verify the actual `/api/health` and preview behavior on the returned HTTPS URL before sharing it.
 

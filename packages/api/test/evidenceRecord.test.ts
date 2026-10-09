@@ -133,12 +133,12 @@ describe('Evidence Record: HTTP lane', () => {
 
   it('states the route and the client: undici on the http rung, impit on the compatible one, in the full and compact shapes', async () => {
     expect(valid((await scrape(http, { url: `${origin}/article` })).evidenceRecord).access)
-      .toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended' })
+      .toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null })
     const grant = accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['compatible_transport'] }))
     const compat = engineWith({ accessGrant: grant, compatHosts: ['127.0.0.1'], channelsFor: mode => buildChannels(mode, { networkPolicy: policy, compatTransport: true }).filter(channel => channel.id === 'http' || channel.id === 'http_compat') })
     const full = await scrape(compat, { url: `${origin}/article` })
     expect(full.channelsTried).toEqual(['http_compat'])
-    const expected = { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended' }
+    const expected = { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null }
     expect(valid(full.evidenceRecord).access).toEqual(expected)
     expect(valid((await scrape(compat, { url: `${origin}/article`, formats: ['markdown'], debug: false })).evidenceRecord).access).toEqual(expected)
   })
@@ -320,6 +320,7 @@ describe('Evidence Record: browser lane', () => {
 describe('Evidence Record: provider lane', () => {
   const VENDOR_UA = 'Mozilla/5.0 (compatible; fixture-vendor/1.0; +https://vendor.example/bot)'
   let provider: ApiEngine
+  let channel: Channel
   beforeAll(() => {
     const transport: ProviderTransport = {
       async fetch(url) {
@@ -328,8 +329,8 @@ describe('Evidence Record: provider lane', () => {
       },
     }
     const subject = new ProviderSubject({ id: 'fixture', declaredUserAgent: VENDOR_UA, capabilities: ['headless_browser'], honoursCallerUserAgent: false }, transport, 'research', null, robotsFetcherVia())
-    const channel: Channel = {
-      id: 'provider', vendorId: 'fixture', identity: identityForRoute('research', { resume: true }),
+    channel = {
+      id: 'provider', vendorId: 'fixture', priceCeilingUsd: 0, identity: identityForRoute('research', { resume: true }),
       fetch: (url, _session, execution, options) => subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options),
     }
     provider = engineWith({ channelsFor: () => [channel] })
@@ -349,6 +350,16 @@ describe('Evidence Record: provider lane', () => {
     expect(valid(missing.evidenceRecord)).toMatchObject({ status: 'failed', reason: 'http_error', httpStatus: 404, outputSha256: { markdown: sha256Utf8(missing.markdown!) } })
     const blocked = await scrape(provider, { url: `${origin}/challenge`, mode: 'research' })
     expect(valid(blocked.evidenceRecord)).toMatchObject({ status: 'blocked', httpStatus: 403, lane: 'provider' })
+  })
+
+  it('lists each paid call, with what the ledger charged and what Octocrawl made of its page, and the grant it was made under (ROADMAP PA item 4)', async () => {
+    const grant = { sha256: 'c'.repeat(64), tier: 'enhanced', attestedAt: '2026-10-09T00:00:00Z' }
+    const paid = engineWith({ channelsFor: () => [{ ...channel, priceCeilingUsd: 0.25, grant, grantCapabilities: ['vendor_remote_browser'] }] })
+    const read = valid((await scrape(paid, { url: `${origin}/article`, mode: 'research' })).evidenceRecord)
+    expect(read.access).toMatchObject({ route: 'vendor', grant, paidCalls: [{ provider: 'fixture', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.25, chargedUsd: 0.25, reportedCostUsd: null, outcome: 'success', reason: null, answer: true }] })
+    // The provider returned the site's check: the call was paid for, and the page is blocked, not read.
+    const blocked = valid((await scrape(paid, { url: `${origin}/challenge`, mode: 'research' })).evidenceRecord)
+    expect(blocked).toMatchObject({ status: 'blocked', access: { completion: null, paidCalls: [{ outcome: 'blocked', reason: blocked.reason, chargedUsd: 0.25, answer: true }] } })
   })
 
   it('records JSON field evidence and a refusal under robots.txt', async () => {

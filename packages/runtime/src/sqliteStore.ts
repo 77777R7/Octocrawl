@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
-import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
+import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, ListPageRead, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
 import { assertId, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore } from './taskStore.js'
 
 export const CHECKPOINT_FILENAME = 'checkpoint.sqlite'
@@ -35,6 +35,7 @@ interface AttemptRow {
   budget_exceeded: string | null
   recovered_from_attempt_id: string | null
   discovery_json?: string | null
+  charged_usd?: number | null
 }
 
 interface StepRow {
@@ -82,7 +83,8 @@ CREATE TABLE IF NOT EXISTS attempts (
    content_tokens_unknown INTEGER NOT NULL DEFAULT 0,
   budget_exceeded TEXT,
   recovered_from_attempt_id TEXT,
-  discovery_json TEXT
+  discovery_json TEXT,
+  charged_usd REAL
 );
 
 CREATE TABLE IF NOT EXISTS steps (
@@ -107,6 +109,21 @@ CREATE INDEX IF NOT EXISTS steps_attempt ON steps(attempt_id);
 CREATE INDEX IF NOT EXISTS steps_task_created_id ON steps(task_id, created_at, id);
 CREATE INDEX IF NOT EXISTS steps_task_status_created_id ON steps(task_id, status, created_at, id);
 CREATE INDEX IF NOT EXISTS attempts_task ON attempts(task_id);
+
+CREATE TABLE IF NOT EXISTS list_pages (
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  canonical_url TEXT NOT NULL,
+  step INTEGER NOT NULL,
+  page INTEGER NOT NULL,
+  page_url TEXT NOT NULL,
+  html TEXT NOT NULL,
+  state TEXT NOT NULL,
+  items TEXT,
+  item_refs TEXT,
+  count INTEGER,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (task_id, canonical_url, step, page)
+);
 `
 
 /**
@@ -139,6 +156,7 @@ export class SqliteTaskStore implements TaskStore {
       try { this.db.exec('ALTER TABLE attempts ADD COLUMN content_tokens_unknown INTEGER NOT NULL DEFAULT 0') } catch {}
       try { this.db.exec('ALTER TABLE attempts ADD COLUMN recovered_from_attempt_id TEXT') } catch {}
       try { this.db.exec('ALTER TABLE attempts ADD COLUMN discovery_json TEXT') } catch {}
+      try { this.db.exec('ALTER TABLE attempts ADD COLUMN charged_usd REAL') } catch {}
       try { this.db.exec('ALTER TABLE tasks ADD COLUMN batch_json TEXT') } catch {}
       try { this.db.exec('ALTER TABLE tasks ADD COLUMN crawl_json TEXT') } catch {}
       try { this.db.exec('ALTER TABLE tasks ADD COLUMN attribution_json TEXT') } catch {}
@@ -200,9 +218,9 @@ export class SqliteTaskStore implements TaskStore {
     this.db
       .prepare(
         `INSERT INTO attempts (
-           id, task_id, status, started_at, ended_at, pages_fetched, wall_ms, cost_usd, cost_unknown, content_tokens, content_tokens_unknown, budget_exceeded, recovered_from_attempt_id, discovery_json
+           id, task_id, status, started_at, ended_at, pages_fetched, wall_ms, cost_usd, cost_unknown, content_tokens, content_tokens_unknown, budget_exceeded, recovered_from_attempt_id, discovery_json, charged_usd
          ) VALUES (
-           @id, @task_id, @status, @started_at, @ended_at, @pages_fetched, @wall_ms, @cost_usd, @cost_unknown, @content_tokens, @content_tokens_unknown, @budget_exceeded, @recovered_from_attempt_id, @discovery_json
+           @id, @task_id, @status, @started_at, @ended_at, @pages_fetched, @wall_ms, @cost_usd, @cost_unknown, @content_tokens, @content_tokens_unknown, @budget_exceeded, @recovered_from_attempt_id, @discovery_json, @charged_usd
          )
          ON CONFLICT(id) DO UPDATE SET
            task_id = excluded.task_id,
@@ -217,7 +235,8 @@ export class SqliteTaskStore implements TaskStore {
            content_tokens_unknown = excluded.content_tokens_unknown,
            budget_exceeded = excluded.budget_exceeded,
            recovered_from_attempt_id = excluded.recovered_from_attempt_id,
-           discovery_json = excluded.discovery_json`,
+           discovery_json = excluded.discovery_json,
+           charged_usd = excluded.charged_usd`,
       )
       .run({
         id: attempt.id,
@@ -234,6 +253,7 @@ export class SqliteTaskStore implements TaskStore {
         budget_exceeded: attempt.budgetExceeded,
         recovered_from_attempt_id: attempt.recoveredFromAttemptId ?? null,
         discovery_json: attempt.discovery === undefined || attempt.discovery === null ? null : JSON.stringify(attempt.discovery),
+        charged_usd: attempt.chargedUsd ?? null,
       })
   }
 
@@ -392,6 +412,29 @@ export class SqliteTaskStore implements TaskStore {
     return row === undefined ? null : stepFromRow(row)
   }
 
+  async putPageRead(taskId: string, canonicalUrl: string, page: ListPageRead): Promise<void> {
+    assertId('taskId', taskId)
+    this.db
+      .prepare(
+        `INSERT INTO list_pages (task_id, canonical_url, step, page, page_url, html, state, items, item_refs, count, created_at)
+         VALUES (@task_id, @canonical_url, @step, @page, @page_url, @html, @state, @items, @item_refs, @count, @created_at)
+         ON CONFLICT(task_id, canonical_url, step, page) DO UPDATE SET
+           page_url = excluded.page_url, html = excluded.html, state = excluded.state, items = excluded.items, item_refs = excluded.item_refs, count = excluded.count, created_at = excluded.created_at`,
+      )
+      .run({ task_id: taskId, canonical_url: canonicalUrl, step: page.step, page: page.page, page_url: page.url, html: page.html, state: page.state, items: page.items, item_refs: page.itemRefs, count: page.count, created_at: new Date().toISOString() })
+  }
+
+  async listPagesRead(taskId: string, canonicalUrl: string): Promise<readonly ListPageRead[]> {
+    const rows = this.db
+      .prepare(`SELECT step, page, page_url, html, state, items, item_refs, count FROM list_pages WHERE task_id = ? AND canonical_url = ? ORDER BY step, page`)
+      .all(taskId, canonicalUrl) as { step: number; page: number; page_url: string; html: string; state: string; items: string | null; item_refs: string | null; count: number | null }[]
+    return rows.map((row) => ({ step: row.step, page: row.page, url: row.page_url, html: row.html, state: row.state, items: row.items, itemRefs: row.item_refs, count: row.count }))
+  }
+
+  async clearPagesRead(taskId: string, canonicalUrl: string): Promise<void> {
+    this.db.prepare(`DELETE FROM list_pages WHERE task_id = ? AND canonical_url = ?`).run(taskId, canonicalUrl)
+  }
+
   async close(): Promise<void> {
     this.db.close()
   }
@@ -429,6 +472,7 @@ function attemptFromRow(row: AttemptRow): Attempt {
     budgetExceeded: row.budget_exceeded as Attempt['budgetExceeded'],
     ...(row.recovered_from_attempt_id ? { recoveredFromAttemptId: row.recovered_from_attempt_id } : {}),
     ...(row.discovery_json ? { discovery: JSON.parse(row.discovery_json) as NonNullable<Attempt['discovery']> } : {}),
+    ...(typeof row.charged_usd === 'number' ? { chargedUsd: row.charged_usd } : {}),
   }
 }
 

@@ -1,0 +1,11 @@
+{
+  "purpose": "ROADMAP PA item 3, the last clause: a list that stops at a check at page N >= 2 is handed to the person, verified at page N, and continues. These are listing tasks of tasks.v1.json whose first page Octocrawl read in both G0 windows, each with a paginate step, so a check the site puts up deeper in the list can be met. Chosen 2026-10-08 before any paginate run; selectors read from each site's page 1 that day. The blind set (B*) is left out, as no choice is built from it. Every candidate stays in the record's denominator.",
+  "maxPages": 5,
+  "candidates": [
+    { "id": "T033", "url": "https://www.amazon.com/s?k=laptop", "nextSelector": "a.s-pagination-next", "itemSelector": "div[data-component-type=\"s-search-result\"]" },
+    { "id": "T051", "url": "https://www.indeed.com/jobs?q=data+analyst&l=Remote", "nextSelector": "a[data-testid=\"pagination-page-next\"]", "itemSelector": "div.job_seen_beacon" },
+    { "id": "T020", "url": "https://www.newegg.com/p/pl?d=laptop", "nextSelector": "a.paginations-next", "itemSelector": "a.goods-title" },
+    { "id": "T044", "url": "https://www.rightmove.co.uk/property-for-sale/London.html", "nextSelector": "button.rmds_pagination__next", "itemSelector": "[data-testid^=\"propertyCard-\"]" },
+    { "id": "T041", "url": "https://www.zillow.com/homes/for_sale/Seattle,-WA_rb/", "nextSelector": "a[title=\"Next page\"]", "itemSelector": "[data-testid=\"property-card\"]" }
+  ]
+}

@@ -25,7 +25,7 @@
 
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
+import type { EvidenceAccessGrant, ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
   CONTENTFUL_STATUS,
   describeEgressProxy,
@@ -40,7 +40,7 @@ import {
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import { readFileSync } from 'node:fs'
-import { accessGrantFromText } from '@w2l/http-core'
+import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, VENDOR_CAPABILITY_ACCESS } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
 import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
@@ -52,8 +52,8 @@ import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
 import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
-import { browserbaseOps } from './vendors/browserbase.js'
-import { steelOps } from './vendors/steel.js'
+import { BROWSERBASE_MIN_SESSION_MS, browserbaseOps } from './vendors/browserbase.js'
+import { STEEL_MIN_SESSION_MS, steelOps } from './vendors/steel.js'
 import type { VendorResumeContext } from './vendors/transport.js'
 import {
   FileRoutingHistory,
@@ -147,6 +147,13 @@ export function buildChannels(
      * `vendor_remote_browser`.
      */
     vendorPolicy?: import('@w2l/http-core').VendorPolicy
+    /**
+     * The prices the access grant accepted per provider (ROADMAP PA item 4): a provider rung's price ceiling, the longest
+     * session and the most bytes one call may take. A provider without one is not called.
+     */
+    vendorTariffs?: Readonly<Record<string, import('@w2l/http-core').VendorTariff>>
+    /** The access grant the provider rungs are called under, as their paid calls' record names it (accessGrantRef). */
+    vendorGrant?: EvidenceAccessGrant
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
     localSubjects?: {
@@ -265,7 +272,7 @@ export function buildChannels(
       fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
           ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession),
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -334,7 +341,7 @@ export function buildChannels(
           }
           return skip
         }
-        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride)
+        return authedSubjectFor(session).fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, undefined, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume })
       },
       close: async () => {
         for (const subject of authedSubjects.values()) await subject.teardown()
@@ -362,6 +369,8 @@ export function buildChannels(
   const vendorChannel = (
     vendorId: string,
     ops: ReturnType<typeof browserbaseOps> | ReturnType<typeof steelOps>,
+    /** The shortest session the provider can be told to end at: a session whose release failed bills until then. */
+    sessionFloorMs = 0,
   ): Channel => {
     let connected: Awaited<ReturnType<typeof connectVendor>> | null = null
     let pending: Promise<Awaited<ReturnType<typeof connectVendor>>> | null = null
@@ -380,6 +389,14 @@ export function buildChannels(
       if (establishedResume !== null) pendingResume = establishedResume
     }
 
+    // Under a tariff (ROADMAP PA item 4) every call opens a connection and a session of its own, released when it ends:
+    // nothing idles billing between calls, and concurrent calls never share or close each other's session.
+    const tariff = opts.vendorTariffs?.[vendorId] ?? null
+    const connectOwn = (execution?: ExecutionContext) => {
+      opts.onVendorConnect?.(vendorId)
+      return connectVendor(ops, opts.vendorConnector, pendingResume ?? null, execution?.deadlineAt, execution?.signal, opts.vendorPolicy?.authorized ?? [])
+    }
+
     const ensureConnected = async (execution?: ExecutionContext) => {
       if (connected !== null) return connected
       if (pending === null) {
@@ -395,7 +412,7 @@ export function buildChannels(
       return await pending
     }
 
-    return {
+    const raw: Channel = {
       id: 'provider',
       vendorId,
       identity: identityForRoute(mode, { resume: true }),
@@ -470,19 +487,23 @@ export function buildChannels(
         } else {
           await preparePersistence(execution)
         }
-        const { declaration, transport } = await ensureConnected(execution)
-        if (pendingResume !== null) {
-          transport.useResumedSession(pendingResume)
+        const { declaration, transport } = tariff !== null ? await connectOwn(execution) : await ensureConnected(execution)
+        try {
+          if (pendingResume !== null) {
+            transport.useResumedSession(pendingResume)
+          }
+          const { ProviderSubject } = await import('./subjects/provider.js')
+          const subject = new ProviderSubject(
+            declaration,
+            transport,
+            mode,
+            null,
+            providerRobots,
+          )
+          return await subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
+        } finally {
+          if (tariff !== null) await transport.close().catch(() => {})
         }
-        const { ProviderSubject } = await import('./subjects/provider.js')
-        const subject = new ProviderSubject(
-          declaration,
-          transport,
-          mode,
-          null,
-          providerRobots,
-        )
-        return subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
       },
       close: async () => {
         if (connected !== null) {
@@ -493,15 +514,30 @@ export function buildChannels(
         await providerRoutes?.close()
       },
     }
+    // Under a tariff a call holds its session for at most maxSessionMs; the price ceiling is the tariff's.
+    // What the record says each session was created with: the remote browser, and what the policy let the provider turn on.
+    const grantCapabilities = [...new Set(['vendor_remote_browser', ...ops.decision.enabled.flatMap((c) => VENDOR_CAPABILITY_ACCESS[c.capability] ?? [])])]
+    return {
+      ...raw,
+      grantCapabilities,
+      ...(opts.vendorGrant === undefined ? {} : { grant: opts.vendorGrant }),
+      priceCeilingUsd: tariff === null ? null : tariffCeilingUsd(tariff, sessionFloorMs),
+      fetch: async (url, session, execution, options) => {
+        if (tariff === null || tariff.maxSessionMs === null) return raw.fetch(url, session, execution, options)
+        return raw.fetch(url, session, { ...execution, deadlineAt: Math.min(execution?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + tariff.maxSessionMs) }, options)
+      },
+    }
   }
 
   if (bbKey !== '' || opts.vendorOps?.browserbase !== undefined) {
-    const ops = opts.vendorOps?.browserbase ?? browserbaseOps({ apiKey: bbKey }, undefined, opts.vendorPolicy)
-    channels.push(vendorChannel('browserbase', ops))
+    const sessionTimeoutMs = opts.vendorTariffs?.browserbase?.maxSessionMs ?? null
+    const ops = opts.vendorOps?.browserbase ?? browserbaseOps({ apiKey: bbKey, ...(sessionTimeoutMs === null ? {} : { sessionTimeoutMs }) }, undefined, opts.vendorPolicy)
+    channels.push(vendorChannel('browserbase', ops, BROWSERBASE_MIN_SESSION_MS))
   }
   if (steelKey !== '' || opts.vendorOps?.steel !== undefined) {
-    const ops = opts.vendorOps?.steel ?? steelOps({ apiKey: steelKey }, undefined, opts.vendorPolicy)
-    channels.push(vendorChannel('steel', ops))
+    const sessionTimeoutMs = opts.vendorTariffs?.steel?.maxSessionMs ?? null
+    const ops = opts.vendorOps?.steel ?? steelOps({ apiKey: steelKey, ...(sessionTimeoutMs === null ? {} : { sessionTimeoutMs }) }, undefined, opts.vendorPolicy)
+    channels.push(vendorChannel('steel', ops, STEEL_MIN_SESSION_MS))
   }
 
   return channels
@@ -602,6 +638,9 @@ export async function runLadder(args: Args): Promise<number> {
   const fileStore = new FileStore(join(process.env.W2L_TASK_ROOT ?? '.w2l/api', 'files'))
   const channels = buildChannels(args.mode, {
     vendorPolicy,
+    // The grant's tariffs give each provider its price ceiling (ROADMAP PA item 4): one without is not called.
+    vendorTariffs: grant?.tariffs ?? {},
+    ...(grant === null ? {} : { vendorGrant: accessGrantRef(grant) }),
     browserEngine: browserEngineChoice(process.env, grant, false),
     networkPolicy,
     fileStore,
@@ -630,7 +669,9 @@ export async function runLadder(args: Args): Promise<number> {
   const runner = new LadderRunner(channels, policy, history, handoff, sessionStore)
 
   try {
-    const run = await runner.run(args.url)
+    // One scrape's paid calls are held to the grant's per-request cap, else its run cap.
+    const cap = grant?.budget.perRequestUsd ?? grant?.budget.perRunUsd ?? null
+    const run = await runner.run(args.url, undefined, cap === null ? {} : { spend: createSpendLedger(cap) })
     console.log('')
     console.log(
       formatScrapeReport({

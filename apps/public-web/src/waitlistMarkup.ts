@@ -18,7 +18,7 @@ export function waitlistMarkup(): string {
           <div class="waitlist-copy">
             <p class="section-kicker"><span class="kicker-square" aria-hidden="true"></span>HOSTED OCTOCRAWL</p>
             <h2 id="waitlist-title">Ask for a hosted Octocrawl key.</h2>
-            <p>Hosted Octocrawl is open without a key for a few pages a day. A key gives more pages a day and the browser lane; keys are issued by hand for now. Leave your email and what you would use it for, and we will write back, and may ask once how it went.</p>
+            <p>Hosted Octocrawl is open without a key for 20 pages a day per address. A key gives more pages a day and the browser lane; keys are issued by hand for now. Leave your email and what you would use it for, and we will write back, and may ask once how it went.</p>
           </div>
           <form class="waitlist-form">
             <label class="waitlist-field"><span>Email</span><input type="email" name="email" required maxlength="254" autocomplete="email" /></label>

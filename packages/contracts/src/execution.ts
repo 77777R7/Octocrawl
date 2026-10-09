@@ -27,6 +27,69 @@ export interface ExecutionContext {
    * a listener's error never changes the fetch. Absent: nothing is told early.
    */
   onTrace?: (event: TraceEvent) => void
+  /**
+   * Hear of each page a paginate step reads the moment it is read (ROADMAP PA item 3), for a caller that keeps
+   * them in the task's checkpoint: a run cut at page N then resumes from them through `listResume`. A listener's
+   * error never changes the fetch. Absent: nothing is told.
+   */
+  onListPage?: (page: ListPageRead) => void
+  /**
+   * The pages a paginate step of this URL read before an earlier run was cut, from the task's checkpoint. The
+   * browser lane counts them as read: it passes over them on its way along the site's own Next links (the only way
+   * to page N+1 when pages have no address of their own), tells and reads the pages after them, and merges every
+   * page once. Absent: the list starts from its first page.
+   */
+  listResume?: { pages: readonly ListPageRead[] }
+  /**
+   * The run's spend ledger (ROADMAP PA item 4): a rung that costs a third party reserves its price ceiling here before
+   * its call and settles after, so a run's concurrent pages, retries and providers share one cap and none overruns it.
+   * Absent: nothing is reserved, as before (a run with no third-party rung).
+   */
+  spend?: SpendLedger
+}
+
+/**
+ * A spend ledger: the cap a run (or one page of it) may spend on third parties, what is settled and what is reserved.
+ * A paid call reserves its price ceiling first and is not made when the ceiling does not fit.
+ */
+export interface SpendLedger {
+  /** Reserve `ceilingUsd` against this ledger's cap and every enclosing one; null when it does not fit. */
+  reserve(ceilingUsd: number): SpendReservation | null
+  /** A ledger over the same totals whose own reservations are also capped at `capUsd` (one page's `perRequestUsd`); null: no cap of its own. */
+  child(capUsd: number | null): SpendLedger
+  /** Spend settled so far, in US dollars: each call at its reported price, or at its ceiling when none was reported. */
+  readonly settledUsd: number
+  /** Ceilings reserved by calls not yet settled. */
+  readonly reservedUsd: number
+  /** The cap; null: none. */
+  readonly capUsd: number | null
+}
+
+/** One reserved call. */
+export interface SpendReservation {
+  /** The call was made: settle at the price the provider reported, or at the ceiling when it reported none. Returns what was charged. */
+  settle(reportedUsd: number | null): number
+  /** The call was not made: give the reservation back. */
+  release(): void
+}
+
+/** One page a paginate step read: what `onListPage` tells and `listResume` gives back. */
+export interface ListPageRead {
+  /** Index of the paginate step among the request's actions. */
+  step: number
+  /** 1-based position among the pages the step read, the resumed ones included. */
+  page: number
+  /** The URL the browser showed when the page was read. */
+  url: string
+  html: string
+  /** The page's state key as the lane computed it (its URL and its items or words), to know the page again on a resume. */
+  state: string
+  /** The hash of the elements `itemSelector` matched, or null without one. */
+  items: string | null
+  /** The hash of the links and sources inside those elements alone, which a changed price or date leaves as it was; null without `itemSelector` or when no item has one. */
+  itemRefs: string | null
+  /** How many elements `itemSelector` matched on the page; null without one. */
+  count: number | null
 }
 
 /** A cookie as a browser context takes and gives it (Playwright's shape). */

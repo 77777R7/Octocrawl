@@ -4,7 +4,7 @@ Octocrawl and this site are run by Howard Lun. There are two ways to get in touc
 
 ## Questions, bugs and ideas
 
-Open an issue on [GitHub](https://github.com/77777R7/w2l/issues). For a question, add the `question` label. Issues are public: never post passwords, keys or personal data in one.
+Open an issue on [GitHub](https://github.com/77777R7/Octocrawl/issues). For a question, add the `question` label. Issues are public: never post passwords, keys or personal data in one.
 
 ## Privacy
 

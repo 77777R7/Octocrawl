@@ -1,4 +1,4 @@
-# One link. Web data, ready.
+# Introduction to Octocrawl
 
 Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
 
@@ -6,19 +6,19 @@ Octocrawl turns a public web page into readable content and, on supported pages,
 
 ## Try Octocrawl
 
-Paste `https://docs.firecrawl.dev/introduction` into [the Octocrawl page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
+Paste `https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview` into [the Octocrawl page](/) and select **Extract page**. The result shows readable Markdown, the final URL, a page status, and the time from submission until the result is visible. Choose **Format** to see its links, its page info, the fields you set in **Options**, or the whole result JSON instead, then copy or download the output without another extraction.
 
 This is a recorded result from the preview, not a guaranteed response for every future visit:
 
 ```json
 {
-  "observedAt": "2026-09-24T08:52:01.350Z",
-  "requestedUrl": "https://docs.firecrawl.dev/introduction",
+  "observedAt": "2026-10-08T18:23:02.090Z",
+  "requestedUrl": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
   "status": "success",
-  "finalUrl": "https://docs.firecrawl.dev/introduction",
-  "title": "Introduction",
-  "totalMs": 2509,
-  "excerpt": "Get Started\n# Introduction"
+  "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+  "title": "Overview of HTTP",
+  "totalMs": 873,
+  "excerpt": "# Overview of HTTP\n\n**HTTP** is a [protocol](https://developer.mozilla.org/en-US/docs/Glossary/Protocol) for fetching resources such as HTML documents."
 }
 ```
 

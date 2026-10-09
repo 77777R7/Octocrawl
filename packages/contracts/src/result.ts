@@ -69,6 +69,12 @@ export interface ResourceUsage {
    * once proxy sessions declare a price.
    */
   externalCostUsd: number | null
+  /**
+   * What the run's spend ledger charged for this fetch's paid calls (ROADMAP PA item 4): each call at the price its
+   * provider reported, or at its price ceiling when it reported none, so it is never below the cost and stands in for
+   * it in the run's cap. Absent when no paid call was made through a ledger; `externalCostUsd` stays the exact cost or null.
+   */
+  externalCostChargedUsd?: number
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
   /**
@@ -165,6 +171,33 @@ export interface TraceEvent {
   lane: Lane
   event: string
   detail?: Record<string, unknown>
+}
+
+/**
+ * The paid provider calls (`paid_calls`, ROADMAP PA item 4) of a result that is not the page's answer: a read given up for
+ * another egress, or the run whose stopped page the person read in their Chrome. They were paid for, so they stay on the
+ * page's record, none of them its answer.
+ */
+export function givenUpPaidCalls(trace: readonly TraceEvent[]): TraceEvent[] {
+  return trace.filter((event) => event.event === 'paid_calls').map((event) => {
+    const calls = Array.isArray(event.detail?.calls) ? (event.detail.calls as Record<string, unknown>[]) : []
+    return { ...event, detail: { ...event.detail, calls: calls.map((call) => ({ ...call, answer: false })) } }
+  })
+}
+
+/**
+ * A run that threw after paid provider calls carries them on its error, as the `paid_calls` event its answer would have
+ * had, so whoever turns the error into the page's result keeps them on its record. The error is returned as it was.
+ */
+export function carryPaidCalls(error: unknown, event: TraceEvent): unknown {
+  if (typeof error === 'object' && error !== null && Object.isExtensible(error)) Object.defineProperty(error, 'paidCalls', { value: event, enumerable: false, configurable: true })
+  return error
+}
+
+/** The `paid_calls` event a thrown run carried (carryPaidCalls); null when it carried none. */
+export function paidCallsOfError(error: unknown): TraceEvent | null {
+  const event = typeof error === 'object' && error !== null ? (error as { paidCalls?: unknown }).paidCalls : undefined
+  return typeof event === 'object' && event !== null && (event as TraceEvent).event === 'paid_calls' ? event as TraceEvent : null
 }
 
 export interface LadderAttempt {

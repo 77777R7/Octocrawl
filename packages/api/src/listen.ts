@@ -81,6 +81,8 @@ export interface ListenConfig {
    * never on a hosted server. Empty: none.
    */
   egressProxies: ProxyServer[]
+  /** `W2L_EGRESS_ECHO_URL`: the URL each egress is asked where it leaves from; only with egress proxies. Null: not asked. */
+  egressEchoUrl: string | null
 }
 
 /** W2L_EGRESS_PROXIES, checked at startup: the grant must name egress_sessions; a hosted server refuses them. */
@@ -90,6 +92,17 @@ function readEgressProxies(env: NodeJS.ProcessEnv, grant: AccessGrant | null, ho
   if (hosted) throw new Error('W2L_EGRESS_PROXIES is refused on a hosted server (ADR 0005: a hosted server connects direct, to addresses it checked)')
   if (!(grant?.capabilities ?? []).includes('egress_sessions')) throw new Error('W2L_EGRESS_PROXIES needs an access grant that names egress_sessions (ADR 0005; --access-grant or W2L_ACCESS_GRANT)')
   return proxies
+}
+
+/** W2L_EGRESS_ECHO_URL, checked at startup: an http(s) URL, and only beside W2L_EGRESS_PROXIES, the egresses it asks about. */
+function readEgressEchoUrl(env: NodeJS.ProcessEnv, egresses: readonly ProxyServer[]): string | null {
+  const raw = env.W2L_EGRESS_ECHO_URL?.trim() ?? ''
+  if (raw === '') return null
+  if (egresses.length === 0) throw new Error('W2L_EGRESS_ECHO_URL asks each egress proxy where it leaves from: it needs W2L_EGRESS_PROXIES')
+  let url: URL
+  try { url = new URL(raw) } catch { throw new Error('W2L_EGRESS_ECHO_URL must be an http(s) URL') }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('W2L_EGRESS_ECHO_URL must be an http(s) URL')
+  return url.href
 }
 
 /**
@@ -117,7 +130,7 @@ function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted
 /** The startup line that says what the grant allows. */
 export function accessGrantNotice(grant: AccessGrant): string {
   const usd = (value: number | null) => (value === null ? 'none' : `${value} USD`)
-  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)} (not enforced yet)${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
+  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)}${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
 }
 
 /** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
@@ -138,8 +151,9 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
   const compatHosts = compatHostsChoice(env, accessGrant, hosted)
   const egressList = readEgressProxies(env, accessGrant, hosted)
-  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one`]
-  const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains; a request with custom headers or mobile keeps the http rung`]
+  const egressEchoUrl = readEgressEchoUrl(env, egressList)
+  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one${egressEchoUrl === null ? '' : `; each is asked where it leaves from at ${new URL(egressEchoUrl).host}`}`]
+  const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains${(env.W2L_COMPAT_HOSTS ?? '').trim() === '' ? ' (the hosts its acceptance showed it helps, research/access/benefit-hosts.v1.json; W2L_COMPAT_HOSTS names others, none turns it off)' : ''}; a request with custom headers or mobile keeps the http rung`]
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -164,6 +178,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       browserEngine,
       compatHosts,
       egressProxies: egressList,
+      egressEchoUrl,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -192,6 +207,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     browserEngine,
     compatHosts,
     egressProxies: egressList,
+    egressEchoUrl,
   }
 }
 

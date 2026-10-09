@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createSpendLedger } from '@w2l/http-core'
 import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
@@ -82,6 +83,8 @@ function channel(
   return {
     id,
     vendorId,
+    // A provider fixture is free: a known ceiling of 0 (ROADMAP PA item 4 calls no provider without one).
+    ...(vendorId === undefined ? {} : { priceCeilingUsd: 0 }),
     identity,
     calls,
     async fetch(url: string): Promise<FetchResult> {
@@ -380,7 +383,7 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
   it('numbers each attempt and says when its rung was asked and answered, and which vendor a provider rung was', async () => {
     const url = 'https://example.com/p'
     const browser = channel('browser_local', [{ ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }])
-    const vendor = { ...channel('provider', [contentfulResult(url, 'browser_local')]), vendorId: 'steel' }
+    const vendor = { ...channel('provider', [contentfulResult(url, 'browser_local')]), vendorId: 'steel', priceCeilingUsd: 0 }
     const run = await new LadderRunner([channel('http', [thinHttpSuccess(url)]), browser, vendor], { mode: 'research' }).run(url)
     const attempts = run.summary.attempts
     expect(attempts.map((a) => [a.channel, a.ordinal, a.vendorId])).toEqual([['http', 1, undefined], ['browser_local', 2, undefined]])
@@ -723,6 +726,7 @@ describe('LadderRunner — an answer without content', () => {
     const hanging: Channel = {
       id: 'provider',
       vendorId: 'steel',
+      priceCeilingUsd: 0,
       identity: COHERENT,
       fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
     }
@@ -1224,6 +1228,7 @@ describe('LadderRunner — third-party cost of a run', () => {
   const hanging = (id: string, vendorId?: string): Channel => ({
     id,
     vendorId,
+    ...(vendorId === undefined ? {} : { priceCeilingUsd: 0 }),
     identity: COHERENT,
     fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })),
   })
@@ -1246,5 +1251,190 @@ describe('LadderRunner — third-party cost of a run', () => {
     const kept = await new LadderRunner([channel('http', [free(thin())]), channel('provider', [unpriced(providerErrorResult(url, 'steel'))], 'steel')], { mode: 'authed' }).run(url)
     expect(kept.result.lane).toBe('http')
     expect(kept.result.usage.externalCostUsd).toBeNull()
+  })
+})
+
+describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () => {
+  const url = 'https://example.com/p'
+  const failed = (failureReason: FetchResult['failureReason'], httpStatus: number | null, lane: FetchResult['lane'] = 'http'): FetchResult => {
+    const base = failedResult(url, failureReason)
+    return { ...base, lane, evidence: { ...base.evidence, httpStatus } }
+  }
+
+  it('goes on past a 403 or 405 answered without a gate it recognises, and says why', async () => {
+    for (const status of [403, 405]) {
+      const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+      const run = await new LadderRunner([channel('http', [failed('http_error', status)]), browser], { mode: 'standard' }).run(url)
+      expect(run.channelsTried).toEqual(['http', 'browser_local'])
+      expect(run.result).toMatchObject({ status: 'success', lane: 'browser_local' })
+      expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'http', detail: expect.objectContaining({ escalate: `http_${status}` }) }))
+    }
+  })
+
+  it('stops at an error status that is the page\'s own answer, and at a rate limit', async () => {
+    for (const first of [failed('http_error', 404), failed('http_error', 410), failed('http_error', 500), { ...blockedResult(url, 'rate_limit'), evidence: { ...blockedResult(url, 'rate_limit').evidence, httpStatus: 429 } }]) {
+      const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+      const run = await new LadderRunner([channel('http', [first]), browser], { mode: 'standard' }).run(url)
+      expect(run.channelsTried).toEqual(['http'])
+      expect(browser.calls).toEqual([])
+    }
+  })
+
+  it('offers a page a browser rendered with no main content it could verify to the provider', async () => {
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('empty_unverified', 200, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider' })
+  })
+
+  it('offers an http rung\'s refused connection to the browser, never a provider, and keeps a timeout as the answer', async () => {
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [failed('connection_error', null)]), browser], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result.lane).toBe('browser_local')
+    // The browser's own network failure is not offered on to a paid provider.
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const down = await new LadderRunner([channel('http', [failed('connection_error', null)]), channel('browser_local', [failed('connection_error', null, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(down.channelsTried).toEqual(['http', 'browser_local'])
+    expect(provider.calls).toEqual([])
+    // A timeout on a slow or dead site would hold the scrape for the browser's wait too: it stays the answer.
+    const slow = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    expect((await new LadderRunner([channel('http', [failed('timeout', null)]), slow], { mode: 'standard' }).run(url)).channelsTried).toEqual(['http'])
+  })
+
+  it('leaves an http rung\'s own empty page to that rung, which asks for the browser itself when it should', async () => {
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [failed('empty_unverified', 200)]), browser], { mode: 'standard' }).run(url)
+    expect(run.channelsTried).toEqual(['http'])
+  })
+
+  it('answers with the page it stepped past when the stronger rungs fail with none, and says so', async () => {
+    const forbidden = { ...failed('http_error', 403), markdown: '# Forbidden' }
+    // The browser cannot connect: the site's own 403 is the answer, not the browser's network error.
+    const unreachable = await new LadderRunner([channel('http', [forbidden]), channel('browser_local', [failed('connection_error', null, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(unreachable.result).toMatchObject({ status: 'failed', failureReason: 'http_error', lane: 'http', markdown: '# Forbidden', evidence: { httpStatus: 403 } })
+    expect(unreachable.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', detail: { kept: 'http', failed: 'browser_local', reason: 'connection_error' } }))
+    // A provider's error after a page the browser rendered with no main content keeps that page.
+    const rendered = { ...failed('empty_unverified', 200, 'browser_local'), markdown: 'WHOLE PAGE' }
+    const provider = { ...channel('provider', [providerErrorResult(url, 'steel')], 'steel'), priceCeilingUsd: 0.01 }
+    const vendorDown = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [rendered]), provider], ALLOWED_ALL).run(url)
+    expect(vendorDown.channelsTried).toEqual(['http', 'browser_local', 'provider'])
+    expect(vendorDown.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'browser_local', markdown: 'WHOLE PAGE' })
+    // The deadline cuts the browser: the run ends on time, with the 403 as its evidence.
+    const hanging: Channel = { id: 'browser_local', identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner([channel('http', [forbidden]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', markdown: '# Forbidden', evidence: { httpStatus: 403 }, usage: { deadlineExceeded: true } })
+  })
+
+  it('never steps past the saved login: the rungs after it do not carry it', async () => {
+    const store = new MemorySessionStore()
+    await store.save({ domain: 'example.com', attestedBy: 'test', attestedAt: '2026-10-09T00:00:00.000Z', vendor: 'browser_local_authed', cookies: [{ name: 'sid', value: 'secret', domain: '.example.com', path: '/' }] })
+    for (const refused of [{ ...failed('empty_unverified', 200, 'browser_local_authed'), markdown: 'LOGGED-IN DASHBOARD' }, failed('http_error', 403, 'browser_local_authed')]) {
+      const http = channel('http', [{ ...contentfulResult(url, 'http'), markdown: 'PUBLIC LOGGED-OUT VARIANT' }])
+      const run = await new LadderRunner([http, channel('browser_local', [contentfulResult(url, 'browser_local')]), channel('authed_session', [refused])], { mode: 'authed' }, null, null, store).run(url)
+      expect(run.channelsTried).toEqual(['authed_session'])
+      expect(run.result).toMatchObject({ status: 'failed', lane: 'browser_local_authed' })
+      expect(http.calls).toEqual([])
+    }
+  })
+
+  it('keeps content an earlier rung found rather than going on past a later rung\'s 403', async () => {
+    const thin: FetchResult = { ...contentfulResult(url, 'http'), trace: [{ at: 5, lane: 'http', event: 'quality_low_yield', detail: { contentTokens: 20, confidence: 0.1 } }] }
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [thin]), channel('browser_local', [failed('http_error', 403, 'browser_local')]), provider], ALLOWED_ALL).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(provider.calls).toEqual([])
+  })
+})
+
+describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', () => {
+  const url = 'https://example.com/p'
+  const blockedHttp = () => channel('http', [blockedResult(url, 'cloudflare_challenge')])
+  const priced = (ceiling: number | null, responses: FetchResult[]) => ({ ...channel('provider', responses, 'steel'), priceCeilingUsd: ceiling })
+
+  it('reserves the ceiling before the call and settles at it when the provider reported no price, and the result says so', async () => {
+    const ledger = createSpendLedger(1)
+    const run = await new LadderRunner([blockedHttp(), priced(0.3, [contentfulResult(url, 'provider')])], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider', usage: { externalCostUsd: null, externalCostChargedUsd: 0.3 } })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: { vendorId: 'steel', ceilingUsd: 0.3, chargedUsd: 0.3, basis: 'ceiling', call: 1 } }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    expect(ledger.reservedUsd).toBe(0)
+  })
+
+  it('settles at the price the provider reported', async () => {
+    const ledger = createSpendLedger(1)
+    const reported = { ...contentfulResult(url, 'provider'), usage: { ...contentfulResult(url, 'provider').usage, externalCostUsd: 0.12 } }
+    const run = await new LadderRunner([blockedHttp(), priced(0.3, [reported])], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.summary.attempts.at(-1)!.result.usage).toMatchObject({ externalCostUsd: 0.12, externalCostChargedUsd: 0.12 })
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: expect.objectContaining({ chargedUsd: 0.12, basis: 'reported' }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.12)
+  })
+
+  it('does not call a provider whose ceiling does not fit what is left, nor one with no ceiling, and says why', async () => {
+    const dear = priced(0.3, [contentfulResult(url, 'provider')])
+    const tight = await new LadderRunner([blockedHttp(), dear], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(0.2) })
+    expect(dear.calls).toEqual([])
+    expect(tight.result.lane).toBe('http')
+    expect(tight.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'steel', reason: expect.stringContaining('budget'), ceilingUsd: 0.3, capUsd: 0.2 }) }))
+    const unpriced = priced(null, [contentfulResult(url, 'provider')])
+    const none = await new LadderRunner([blockedHttp(), unpriced], ALLOWED_ALL).run(url)
+    expect(unpriced.calls).toEqual([])
+    expect(none.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'steel', reason: expect.stringContaining('no price ceiling') }) }))
+  })
+
+  it('puts on the answer what the ledger charged the whole run, a provider that failed before it included', async () => {
+    const ledger = createSpendLedger(1)
+    const failing = { ...channel('provider', [providerErrorResult(url, 'browserbase')], 'browserbase'), priceCeilingUsd: 0.05 }
+    const winning = priced(0.03, [contentfulResult(url, 'provider')])
+    const run = await new LadderRunner([blockedHttp(), failing, winning], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(run.result.lane).toBe('provider')
+    expect(run.result.usage.externalCostChargedUsd).toBeCloseTo(0.08)
+    expect(ledger.settledUsd).toBeCloseTo(0.08)
+  })
+
+  it('puts every paid call of the run on the answer: the provider, its charge, what Octocrawl made of its page, and which is the answer', async () => {
+    const grant = { sha256: 'a'.repeat(64), tier: 'enhanced', attestedAt: '2026-10-09T00:00:00Z' }
+    const failing = { ...channel('provider', [providerErrorResult(url, 'browserbase')], 'browserbase'), priceCeilingUsd: 0.05, grant, grantCapabilities: ['vendor_remote_browser'] }
+    const winning = { ...priced(0.03, [contentfulResult(url, 'provider')]), grant, grantCapabilities: ['vendor_remote_browser', 'vendor_captcha_solving'] }
+    const run = await new LadderRunner([blockedHttp(), failing, winning], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect(run.result.trace.filter((event) => event.event === 'paid_calls').map((event) => event.detail)).toEqual([{ grant, calls: [
+      { provider: 'browserbase', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.05, chargedUsd: 0.05, reportedCostUsd: null, outcome: 'failed', reason: 'provider_error', answer: false },
+      { provider: 'steel', rung: 'provider', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], ceilingUsd: 0.03, chargedUsd: 0.03, reportedCostUsd: null, outcome: 'success', reason: null, answer: true },
+    ] }])
+    // A run that called no provider has none.
+    const local = await new LadderRunner([channel('http', [contentfulResult(url, 'http')])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect(local.result.trace.some((event) => event.event === 'paid_calls')).toBe(false)
+  })
+
+  it('charges a call the deadline cut at its ceiling, and says so on the answer', async () => {
+    const ledger = createSpendLedger(1)
+    const hangingProvider: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner([blockedHttp(), hangingProvider], ALLOWED_ALL).run(url, undefined, { spend: ledger, deadlineAt: Date.now() + 150 })
+    expect(cut.result.usage).toMatchObject({ deadlineExceeded: true, externalCostChargedUsd: 0.3 })
+    expect(cut.ladderTrace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: expect.objectContaining({ vendorId: 'steel', chargedUsd: 0.3, basis: 'ceiling', ended: 'without_an_answer' }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    // The record keeps the call: it returned no page, so nothing was made of one, and it is not the answer.
+    expect(cut.result.trace.find((event) => event.event === 'paid_calls')?.detail?.calls).toEqual([expect.objectContaining({ provider: 'steel', chargedUsd: 0.3, outcome: null, reason: null, answer: false })])
+  })
+
+  it('does not retry after a handoff when the retry\'s ceiling does not fit the budget', async () => {
+    const ledger = createSpendLedger(0.5)
+    const handoffRequest: HandoffRequest = { reason: 'captcha_required', liveViewUrl: 'https://live.example/session', rationale: 'a captcha the provider could not clear' }
+    const vendor = priced(0.3, [{ ...blockedResult(url, 'captcha'), handoff: handoffRequest }, contentfulResult(url, 'provider')])
+    const handoff: HumanHandoff = { async takeOver() { return { domain: 'example.com', attestedBy: 'test', attestedAt: new Date().toISOString(), vendor: 'steel', cookies: [] } } }
+    const run = await new LadderRunner([vendor], ALLOWED_ALL, null, handoff).run(url, undefined, { spend: ledger })
+    // The first call took 0.3 of 0.5: the retry's 0.3 does not fit, so it is not made.
+    expect(vendor.calls).toHaveLength(1)
+    expect(run.result.status).not.toBe('success')
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_handoff_retry_failed', detail: expect.objectContaining({ reason: expect.stringContaining('not called') }) }))
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+  })
+
+    it('charges a call that threw at its ceiling: its session may have billed', async () => {
+    const ledger = createSpendLedger(1)
+    const throwing: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: async () => { throw new Error('session dropped') } }
+    await expect(new LadderRunner([blockedHttp(), throwing], ALLOWED_ALL).run(url, undefined, { spend: ledger })).rejects.toThrow('session dropped')
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    expect(ledger.reservedUsd).toBe(0)
   })
 })

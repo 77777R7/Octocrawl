@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer as createNetServer, type AddressInfo } from 'node:net'
 import { ChromeLoginError, connectCdp, type CdpConnection } from '../src/chromeLogin.js'
-import { HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
+import { HandoffNotThrough, openUserChrome, rewrittenInPlace } from '../src/chromeHandoff.js'
 
 const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
@@ -247,5 +247,104 @@ describe('the person\'s Chrome', () => {
   it('without remote debugging on, says how to turn it on', async () => {
     await rm(join(userDataDir, 'DevToolsActivePort'))
     await expect(openUserChrome({ userDataDir, connect: fakeChrome([]).connect })).rejects.toThrow(/chrome:\/\/inspect\/#remote-debugging/)
+  })
+})
+
+describe('an address a page\'s script rewrote in place', () => {
+  it('is the page it came at when it keeps its origin, path and every parameter both name; another page of a list is not', () => {
+    // Indeed, seen 2026-10-09: its paging token dropped, the job shown named.
+    expect(rewrittenInPlace('https://www.indeed.com/jobs?q=data+analyst&l=Remote&start=10&pp=tok', 'https://www.indeed.com/jobs?q=data+analyst&l=Remote&start=10&vjk=76ded9')).toBe(true)
+    expect(rewrittenInPlace('https://site.test/list/', 'https://site.test/list#top')).toBe(true)
+    // A page parameter changed: another page of the list.
+    expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/jobs?start=20')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs?tag=a&tag=b', 'https://site.test/jobs?tag=a')).toBe(false)
+    // A page or offset dropped: the page may be showing its first page. A token dropped (Indeed's pp) is not one.
+    expect(rewrittenInPlace('https://site.test/jobs?q=x&start=10', 'https://site.test/jobs?q=x')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs?q=x&page=2&pp=tok9', 'https://site.test/jobs?q=x&page=2')).toBe(true)
+    // Another path or another origin is never the page.
+    expect(rewrittenInPlace('https://site.test/jobs?start=10', 'https://site.test/job/1?start=10')).toBe(false)
+    expect(rewrittenInPlace('https://site.test/jobs', 'https://other.test/jobs')).toBe(false)
+    expect(rewrittenInPlace('not a url', 'https://site.test/')).toBe(false)
+  })
+})
+
+describe('a list the person pages on through, in the tab W2L kept', () => {
+  let userDataDir: string
+  beforeEach(async () => {
+    userDataDir = await mkdtemp(join(tmpdir(), 'w2l-handoff-list-'))
+    await mkdir(userDataDir, { recursive: true })
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
+  })
+  afterEach(async () => { await rm(userDataDir, { recursive: true, force: true }) })
+
+  const LIST = (n: number) => `<html><body>${[1, 2, 3].map((i) => `<div class="card"><a class="name" href="/p/${n * 10 + i}">Item ${n * 10 + i}</a></div>`).join('')}<a class="next" href="/list/${n + 1}">Next</a></body></html>`
+  const page = (n: number, extra: Partial<State> & { key?: string; next?: string } = {}) => at(`https://site.test/list/${n}`, LIST(n), { active: true, key: `k${n}`, next: 'usable', ...extra })
+  const follow = { nextSelector: 'a.next', itemSelector: 'div.card', endGraceMs: 20 }
+
+  it('reads the page the check was on, then each page the person shows by paging on, and ends when Next is gone on the last one', async () => {
+    // Through the check at page 2 on three reads, then the follow: page 2 again (known), page 3 twice, page 4 (no Next) twice and once more.
+    const chrome = fakeChrome([page(2, { html: GATE, active: false }), page(2), page(2), page(2), page(2), page(3), page(3), page(4, { next: 'gone' }), page(4, { next: 'gone' }), page(4, { next: 'gone' })])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const seen: string[] = []
+    const read = await reader.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, onStart: (url) => seen.push(`start ${url}`), onPage: (url, pages) => seen.push(`${pages} ${url}`) } })
+    reader.close()
+    expect(read.first).toMatchObject({ finalUrl: 'https://site.test/list/2', act: 'user_activation' })
+    expect(read.pages.map((item) => item.url)).toEqual(['https://site.test/list/2', 'https://site.test/list/3', 'https://site.test/list/4'])
+    expect(read.stoppedBy).toBe('end')
+    expect(seen).toEqual(['start https://site.test/list/2', '2 https://site.test/list/3', '3 https://site.test/list/4'])
+    // The tab W2L opened is closed once, at the end.
+    expect(chrome.calls.filter((call) => call === 'Target.closeTarget')).toHaveLength(1)
+  })
+
+  it('reads no page off the site, on a login path, with a password field or not answered 2xx, and no check met on the way until the person is through it', async () => {
+    const chrome = fakeChrome([page(2), page(2), page(2), page(2),
+      at('https://other.test/list/3', LIST(3), { key: 'k3', next: 'usable' }), at('https://other.test/list/3', LIST(3), { key: 'k3', next: 'usable' }),
+      at('https://site.test/login', LIST(3), { key: 'k3', next: 'usable' }), at('https://site.test/login', LIST(3), { key: 'k3', next: 'usable' }),
+      page(3, { secret: true }), page(3, { secret: true }),
+      page(3, { status: 500 }), page(3, { status: 500 }),
+      page(3, { html: GATE, key: 'gate' }), page(3, { html: GATE, key: 'gate' }),
+      page(3), page(3), page(3, { next: 'gone' }), page(3, { next: 'gone' })])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const waiting: string[] = []
+    const read = await reader.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, onWaiting: (url, check) => waiting.push(`${url} ${check}`), follow })
+    reader.close()
+    expect(read.pages.map((item) => item.url)).toEqual(['https://site.test/list/2', 'https://site.test/list/3'])
+    expect(read.stoppedBy).toBe('end')
+    expect(waiting).toEqual(['https://site.test/list/3 captcha'])
+  })
+
+  it('does not take a pager that disables Next while it loads the next page for the list\'s end', async () => {
+    // Next disabled for about 60 ms (many reads) while page 3 loads, then page 3; its Next stays disabled past the grace: the end.
+    const chrome = fakeChrome([page(2), page(2), page(2), page(2), ...Array<State>(30).fill(page(2, { next: 'disabled' })), page(3), page(3), page(3, { next: 'disabled' })])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const read = await reader.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, endGraceMs: 100 } })
+    reader.close()
+    expect(read.pages.map((item) => item.url)).toEqual(['https://site.test/list/2', 'https://site.test/list/3'])
+    expect(read.stoppedBy).toBe('end')
+  })
+
+  it('ends as deadline when no new page shows for idleMs, as max at the page limit, and throws when cancelled or the tab is gone', async () => {
+    const idle = await openUserChrome({ userDataDir, connect: fakeChrome([page(2), page(2), page(2), page(2)]).connect })
+    const stayed = await idle.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, idleMs: 30 } })
+    idle.close()
+    expect(stayed).toMatchObject({ stoppedBy: 'deadline' })
+    expect(stayed.pages).toHaveLength(1)
+
+    const limited = await openUserChrome({ userDataDir, connect: fakeChrome([page(2), page(2), page(2), page(2), page(3), page(3)]).connect })
+    expect(await limited.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, maxPages: 2 } })).toMatchObject({ stoppedBy: 'max', pages: [{ url: 'https://site.test/list/2' }, { url: 'https://site.test/list/3' }] })
+    limited.close()
+
+    const gone = fakeChrome([page(2), page(2), page(2), page(2), page(3), 'closed'])
+    const left = await openUserChrome({ userDataDir, connect: gone.connect })
+    await expect(left.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow })).rejects.toMatchObject({ kind: 'gone' })
+    left.close()
+    expect(gone.calls.filter((call) => call === 'Target.closeTarget')).toHaveLength(1)
+
+    const controller = new AbortController()
+    const cancelled = await openUserChrome({ userDataDir, connect: fakeChrome([page(2), page(2), page(2), page(2)]).connect })
+    const reading = cancelled.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, signal: controller.signal, follow })
+    setTimeout(() => controller.abort(), 20)
+    await expect(reading).rejects.toMatchObject({ kind: 'cancelled' })
+    cancelled.close()
   })
 })

@@ -6,6 +6,7 @@ import {
   DEFAULT_CRAWL_BUDGET,
   type Attempt,
   type FetchResult,
+  type ListPageRead,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
@@ -120,6 +121,21 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
     afterEach(async () => {
       await store.close()
       await cleanup()
+    })
+
+    it('keeps the pages a list step read for a URL, in order and each once, until they are cleared with its step', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const read = (step: number, page: number, url: string): ListPageRead => ({ step, page, url, html: `<ul><li>${page}</li></ul>`, state: `s${page}`, items: `i${page}`, itemRefs: null, count: 1 })
+      await store.putPageRead('task-1', 'https://example.com/list', read(0, 2, 'https://example.com/list?p=2'))
+      await store.putPageRead('task-1', 'https://example.com/list', read(0, 1, 'https://example.com/list'))
+      await store.putPageRead('task-1', 'https://example.com/other', read(0, 1, 'https://example.com/other'))
+      // The same page told again replaces what was kept.
+      await store.putPageRead('task-1', 'https://example.com/list', { ...read(0, 2, 'https://example.com/list?p=2'), html: '<ul><li>two</li></ul>' })
+      expect(await store.listPagesRead('task-1', 'https://example.com/list')).toEqual([read(0, 1, 'https://example.com/list'), { ...read(0, 2, 'https://example.com/list?p=2'), html: '<ul><li>two</li></ul>' }])
+      await store.clearPagesRead('task-1', 'https://example.com/list')
+      expect(await store.listPagesRead('task-1', 'https://example.com/list')).toEqual([])
+      expect(await store.listPagesRead('task-1', 'https://example.com/other')).toHaveLength(1)
     })
 
     it('round-trips task, attempt, and a URL-granularity step', async () => {

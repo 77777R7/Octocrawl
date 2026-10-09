@@ -3,6 +3,9 @@ import { mountHeroAscii } from './ascii'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
+import { mountFeatureSections } from './featureMotion'
+import { mountGlyphBand } from './glyphBandMotion'
+import { mountOctopusSwim } from './octopusSwim'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
@@ -102,6 +105,10 @@ try {
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
+mountFeatureSections()
+for (const band of document.querySelectorAll<HTMLElement>('.glyph-band')) mountGlyphBand(band)
+const startHead = document.querySelector<HTMLElement>('.start-head')
+if (startHead) mountOctopusSwim(startHead)
 for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 
 const form = document.querySelector<HTMLFormElement>('#preview-form')!
@@ -174,12 +181,12 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' |
     name = `${url.hostname.replace(/^www\./, '')}-${lastSegment}`
   } catch { /* An unsuccessful request may not have a parseable URL. */ }
   const safe = name.replace(/[^a-z0-9.-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 72) || 'page'
-  return `w2l-${safe}.${extension}`
+  return `octocrawl-${safe}.${extension}`
 }
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   track('example_click')
-  input.value = 'https://docs.firecrawl.dev/introduction'
+  input.value = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
   // Focus stays on the button (Extract page is the next stop), so the hero keeps moving: nothing is being typed.
   message.textContent = 'Example URL added. Select “Extract page” to begin.'
   message.className = 'form-message'
@@ -380,7 +387,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
   const docs = result.status === 'quota_exceeded'
     ? textElement('a', 'Run it yourself ↗', 'guidance-link')
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
-  docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/w2l' : '/docs/limits/'
+  docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/Octocrawl' : '/docs/limits/'
   actions.append(json, docs)
   if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
   panel.append(actions)
@@ -1310,7 +1317,7 @@ function renderCode(): void {
 
 codeButton.addEventListener('click', () => {
   track('get_code_open')
-  let url = 'https://docs.firecrawl.dev/introduction'
+  let url = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
   try { url = normalizeUrl(input.value) } catch { /* The example, until a valid URL is entered. */ }
   const request = { url, view: outputView, onlyMainContent: mainContent.checked, fields: readFields().fields }
   codeTexts = { curl: restSnippet(request), mcp: mcpSnippet(request), prompt: mcpPrompt(request) }

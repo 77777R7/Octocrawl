@@ -23,11 +23,13 @@ import {
   type ActionPdf,
   type ActionsResult,
   type ExecutionContext,
+  type ListChallenge,
+  type ListPageRead,
   type PageAction,
   type ScreenshotViewport,
   type TraceEvent,
 } from '@w2l/contracts'
-import { abortableSleep, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { abortableSleep, classifyGate, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { captureArtifact } from '../rawArtifact.js'
 import { captureScreenshot } from './screenshot.js'
 
@@ -314,14 +316,16 @@ async function pageState(ctx: ActionRunContext, itemSelector: string | undefined
   const changing = JSON.stringify(first) !== JSON.stringify(second)
   if (second.items !== null) {
     const items = hash(second.items.map((item, i) => `${item.refs}\u0001${steady(first.items?.[i]?.text ?? '', item.text)}`).join('\u0000'))
-    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items, changing }
+    // The items' links and sources alone: what a changed price or date between two reads of the page leaves as it was.
+    const itemRefs = second.items.some((item) => item.refs !== '') ? hash(second.items.map((item) => item.refs).join('\u0000')) : null
+    return { html, url, state: `${withoutHash(url)}\u0000${items}`, items, itemRefs, changing }
   }
   const stillThere = new Set(first.refs)
   const page = hash(`${steady(first.text, second.text)}\u0001${second.refs.filter((ref) => stillThere.has(ref)).join(' ')}`)
-  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null, changing }
+  return { html, url, state: `${withoutHash(url)}\u0000${page}`, items: null, itemRefs: null, changing }
 }
 
-interface PageState { html: string; url: string; state: string; items: string | null; changing: boolean }
+interface PageState { html: string; url: string; state: string; items: string | null; itemRefs: string | null; changing: boolean }
 
 /** How long paginate reads a page that changed while it was read, waiting for two reads in a row that agree. */
 const STEADY_READ_WAIT_MS = 3_000
@@ -494,9 +498,47 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
   let itemsRead: number | null = action.itemSelector === undefined ? null : 0
   let items: number | null = null
   let stoppedBy: ListStop
+  let challenge: ListChallenge | undefined
+  // The pages an earlier run of this step read before it was cut (ExecutionContext.listResume): counted as read from the
+  // start. The site's own Next links are the only way to the page after them, so they are passed over on the way: a page
+  // the checkpoint holds and has not shown again yet is known by its state, its items, their links alone (a price that
+  // changed meanwhile), or its own address when the pages have addresses of their own (two or more, all distinct). Any
+  // other page goes through every check a new page does, so a list still ends the way it did; a kept page known by none
+  // of those keys (rows without links whose text changed) is read again, and the limit then counts it twice.
+  const resumed = (ctx.execution.listResume?.pages ?? []).filter((read) => read.step === index).sort((a, b) => a.page - b.page)
+  const resumedUrls = new Set(resumed.map((read) => withoutHash(read.url)))
+  const addressed = resumed.length >= 2 && resumedUrls.size === resumed.length
+  const shownAgain = resumed.map(() => false)
+  let replayed = 0
+  let fresh = 0
+  for (const read of resumed) {
+    result.scrapes.push({ url: read.url, html: read.html, step: index })
+    pages++
+    if (itemsRead !== null) itemsRead = read.count === null ? itemsRead : itemsRead + read.count
+  }
+  if (resumed.length > 0) ctx.trace.push({ at: ctx.at(), lane: 'browser_local', event: 'list_resumed', detail: { step: index, pages: resumed.length, from: resumed[resumed.length - 1]!.url, addressed } })
+  // Items' links tell kept pages apart only where they differ between them: rows that all link to the same place (a shared
+  // "details" link, an icon) say nothing about which page they are on.
+  const refsCounts = new Map<string, number>()
+  for (const page of resumed) if (page.itemRefs !== null) refsCounts.set(page.itemRefs, (refsCounts.get(page.itemRefs) ?? 0) + 1)
+  const knownBy = { content: 0, links: 0, address: 0 }
+  const kept = (read: PageState): number => {
+    const left = (match: (page: ListPageRead) => boolean) => resumed.findIndex((page, i) => !shownAgain[i] && match(page))
+    let hit = left((page) => read.state === page.state || (read.items !== null && read.items === page.items))
+    if (hit !== -1) { knownBy.content++; return hit }
+    if (read.itemRefs !== null && refsCounts.get(read.itemRefs) === 1) hit = left((page) => page.itemRefs === read.itemRefs)
+    if (hit !== -1) { knownBy.links++; return hit }
+    if (addressed) hit = left((page) => withoutHash(page.url) === withoutHash(read.url))
+    if (hit !== -1) knownBy.address++
+    return hit
+  }
+  const tell = (read: { url: string; html: string; state: string; items: string | null; itemRefs: string | null; count: number | null }) => {
+    try { ctx.execution.onListPage?.({ step: index, page: pages, ...read }) } catch { /* a listener's error never changes the fetch */ }
+  }
   try {
     for (;;) {
-      let { html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector)
+      let read = await steadyPageState(ctx, action.itemSelector)
+      let { html, url, state, items: listed } = read
       // Next clicked and the page unchanged, or showing the records it showed before under a URL changed within the page (an app
       // that changes the URL first and loads its rows after, keeping the old ones meanwhile): its page may be on the way, and gets
       // COME_BACK_WAIT_MS. A new document with the same records (a first page under two URLs) has arrived, and is not waited for.
@@ -505,11 +547,35 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         const until = comeBackUntil(ctx)
         while (unchanged() && Date.now() < until) {
           await abortableSleep(250, ctx.execution.signal)
-          ;({ html, url, state, items: listed } = await steadyPageState(ctx, action.itemSelector))
+          read = await steadyPageState(ctx, action.itemSelector)
+          ;({ html, url, state, items: listed } = read)
         }
       }
       lastState = state
       lastListed = listed
+      // A check the site put up where the next page should be, by its decisive marks alone (a Cloudflare interstitial, a
+      // PerimeterX press-and-hold, Amazon's or Reddit's verification form): the step stops here without reading it, the pages
+      // before it keep their records, and the result is blocked with the check's reason. A page of nothing but a CAPTCHA
+      // widget is told from a page with little on it only by the extractor, after the steps: the lane's own verdict then marks
+      // the step as stopped at it (withActions). A page with records on it is a page, whatever widget it also carries.
+      const onPage = action.itemSelector === undefined ? null : await bounded(ctx, ctx.page.locator(action.itemSelector).count())
+      const gate = classifyGate({ status: 200, header: () => null, body: html, contentful: true })
+      if (gate !== null) {
+        challenge = { page: pages + 1, url, reason: gate.reason, signals: gate.signals }
+        ctx.trace.push({ at: ctx.at(), lane: 'browser_local', event: 'list_challenge', detail: { step: index, page: pages + 1, url, reason: gate.reason, signals: [...gate.signals] } })
+        stoppedBy = 'challenge'
+        break
+      }
+      // A page the checkpoint holds, shown again on the way to the pages after it: passed over, not read again.
+      const held = kept(read)
+      if (held !== -1) {
+        shownAgain[held] = true
+        replayed++
+        alreadyRead = 0
+        seenStates.add(state)
+        if (listed !== null) seenItems.add(listed)
+        items = onPage
+      } else {
       // The same URL showing what it showed before: Next led back or did nothing, and the list is over.
       if (seenStates.has(state)) { stoppedBy = 'repeat'; break }
       seenStates.add(state)
@@ -523,12 +589,19 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
         if (listed !== null) seenItems.add(listed)
         result.scrapes.push({ url, html, step: index })
         pages++
-        if (action.itemSelector !== undefined) {
-          items = await bounded(ctx, ctx.page.locator(action.itemSelector).count())
-          itemsRead = (itemsRead ?? 0) + items
+        if (onPage !== null) {
+          items = onPage
+          itemsRead = (itemsRead ?? 0) + onPage
         }
+        fresh++
+        // A page with no record on it is not kept for a resume: nothing on it is lost by reading it again, and it may be the
+        // check the lane's verdict names.
+        if (onPage !== 0) tell({ url, html, state, items: listed, itemRefs: read.itemRefs, count: action.itemSelector === undefined ? null : items })
       }
-      if (pages >= max) { stoppedBy = 'max'; break }
+      }
+      // The limit counts the checkpoint's pages; while they are being passed over the browser is not yet on the last of them,
+      // so the step stops at it once they are all shown again, or at the first page read anew.
+      if (pages >= max && (replayed >= resumed.length || fresh > 0)) { stoppedBy = 'max'; break }
       if (await unusable(ctx, action.nextSelector) !== null) { stoppedBy = 'end'; break }
       if (!roundFits(ctx, waitMs)) { stoppedBy = 'deadline'; break }
       loadsAtClick = ctx.loadedDocuments().length
@@ -541,7 +614,11 @@ async function paginate(action: Extract<PageAction, { type: 'paginate' }>, ctx: 
     if (!isDeadline(error)) throw error
     stoppedBy = 'deadline'
   }
-  return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead }
+  if (resumed.length > 0) {
+    const event = ctx.trace.find((item) => item.event === 'list_resumed' && item.detail?.step === index)
+    if (event?.detail !== undefined) { event.detail.replayed = replayed; event.detail.knownBy = knownBy }
+  }
+  return { index, type: 'paginate', stoppedBy, rounds: pages, items, itemsRead, ...(resumed.length === 0 ? {} : { resumed: resumed.length }), ...(challenge === undefined ? {} : { challenge }) }
 }
 
 /**

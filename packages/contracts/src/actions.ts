@@ -5,6 +5,7 @@
  * that fails ends the pipeline, and the result keeps the page as it stood.
  */
 
+import type { BlockReason } from './status.js'
 import type { ScreenshotEvidence } from './result.js'
 import type { ScreenshotViewport } from './structured.js'
 
@@ -97,8 +98,21 @@ export interface ActionPdf {
   base64: string
 }
 
-/** Why a scrollToEnd, loadMore or paginate step stopped. `max` and `deadline` stop short of the list's end. */
-export type ListStop = 'end' | 'no_growth' | 'repeat' | 'max' | 'deadline'
+/**
+ * Why a scrollToEnd, loadMore or paginate step stopped. `max` and `deadline` stop short of the list's end; so does
+ * `challenge`: a check the site put up on the next page (a Cloudflare interstitial, a page of nothing but a CAPTCHA),
+ * which paginate stops at without reading it, the result then `blocked` with the check's reason.
+ */
+export type ListStop = 'end' | 'no_growth' | 'repeat' | 'max' | 'deadline' | 'challenge'
+
+/** The check a paginate step stopped at (ListStop `challenge`): the page it would have been, its URL, and what the gate saw. */
+export interface ListChallenge {
+  /** 1-based position the page would have had among the pages read. */
+  page: number
+  url: string
+  reason: BlockReason
+  signals: readonly string[]
+}
 
 /** What a scrollToEnd, loadMore or paginate step did. */
 export interface ListRun {
@@ -109,15 +123,30 @@ export interface ListRun {
   rounds: number
   /** Elements matching `itemSelector` at the end (on the last page for paginate; summed over its pages in `itemsRead`); null without one. */
   items: number | null
-  /** paginate: elements matching `itemSelector` over every page read; null without one. */
+  /**
+   * paginate: elements matching `itemSelector` over every page read; null without one. After a continuation in the person's
+   * Chrome (`continued`), the kept pages' count plus each page they showed, as their tab counted it, only when the addresses show
+   * no page can be counted twice (the kept pages each at its own, the check's page and the pages shown at none of them, the check
+   * not at the list's own address), no page shows again what another shows (its items' whole text, as the list merge tells it:
+   * a result set tied to the session that made it comes back at new addresses), and every count is known; null (unknown) otherwise.
+   */
   itemsRead?: number | null
+  /** paginate: pages taken from the task's checkpoint after a run cut at page N (ExecutionContext.listResume), counted in `rounds`; absent when none. */
+  resumed?: number
+  /** paginate: the check the step stopped at, with `stoppedBy` `challenge`; absent otherwise. */
+  challenge?: ListChallenge
+  /**
+   * paginate: the pages read after the check at `from`, by the person paging on in their own browser once they got through
+   * it (the batch handoff), counted in `rounds`; `stoppedBy` then says how that reading ended. Absent otherwise.
+   */
+  continued?: { from: number; pages: number; by: 'user_browser' }
 }
 
 /** What the steps produced, each list in the order of its steps. */
 export interface ActionsResult {
   screenshots: ScreenshotEvidence[]
   /** Each page's HTML, with the index of the step that read it (a scrape step, or each page of a paginate step). */
-  scrapes: { url: string; html: string; step?: number }[]
+  scrapes: { url: string; html: string; step?: number; /** Set when the person read the page in their own browser (a list's continuation after a check); absent for W2L's own browser. */ by?: 'user_browser' }[]
   /** `type` is the JavaScript `typeof` of the value (`null` for null). */
   javascriptReturns: { type: string; value: unknown }[]
   pdfs: ActionPdf[]

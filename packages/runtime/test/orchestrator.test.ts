@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type FetchResult, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
+import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type ExecutionContext, type FetchResult, type ListPageRead, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
 import { crawlReportFromStore } from '../src/crawlReport.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
@@ -591,6 +591,67 @@ describe('CrawlOrchestrator batch append', () => {
   /** A batch run as the engine starts one: the stored task, depth 0, no host list, the whole host and exact URLs. */
   const batchSpec = { seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', maxDepth: 0, allowlistedDomains: [], crawlEntireDomain: true, deduplicateSimilarURLs: false, sitemap: 'skip' as const }
 
+  it('keeps the pages a list step read when shutdown cuts its URL, hands them to the atom when the batch resumes, and clears them once the URL is stored', async () => {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'batch-1', seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: [BATCH_A, BATCH_B], formats: ['markdown'], includeLinks: false, actions: [{ type: 'paginate', nextSelector: 'a.next' }] }, createdAt: STARTED, updatedAt: STARTED })
+    const read = (page: number): ListPageRead => ({ step: 0, page, url: `${BATCH_A}?p=${page}`, html: `<p>${page}</p>`, state: `s${page}`, items: null, itemRefs: null, count: null })
+    const shutdown = new AbortController()
+    class ListAtom implements ScrapeAtom {
+      readonly calls: { url: string; resume: ListPageRead[] | undefined }[] = []
+      async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+        this.calls.push({ url, resume: context?.listResume?.pages.map((page) => ({ ...page })) })
+        if (url === BATCH_A && this.calls.filter((call) => call.url === BATCH_A).length === 1) {
+          // Two pages read and told, then the service goes down before the URL has a result.
+          context?.onListPage?.(read(1))
+          context?.onListPage?.(read(2))
+          shutdown.abort(new DOMException('service shutdown', 'ShutdownError'))
+          throw new DOMException('service shutdown', 'ShutdownError')
+        }
+        return outcome(url, [])
+      }
+      async close(): Promise<void> {}
+    }
+    const atom = new ListAtom()
+    const first = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0, shutdownSignal: shutdown.signal }).run({ ...batchSpec, taskId: 'batch-1' })
+    expect(first.status).toBe('paused')
+    expect(await store.listPagesRead('batch-1', BATCH_A)).toEqual([read(1), read(2)])
+
+    const second = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, resumeFrom: 'batch-1' })
+    expect(second.status).toBe('completed')
+    expect(atom.calls.filter((call) => call.url === BATCH_A).map((call) => call.resume)).toEqual([undefined, [read(1), read(2)]])
+    // Stored with its URL's step: nothing is left to resume from.
+    expect(await store.listPagesRead('batch-1', BATCH_A)).toEqual([])
+    expect((await store.listSteps('batch-1')).map((step) => step.url).sort()).toEqual([BATCH_A, BATCH_B].sort())
+  })
+
+  it('keeps the pages a list step read when its URL stopped at a check the site put up, so a later run can go on from them', async () => {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'batch-1', seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: [BATCH_A, BATCH_B], formats: ['markdown'], includeLinks: false, actions: [{ type: 'paginate', nextSelector: 'a.next' }] }, createdAt: STARTED, updatedAt: STARTED })
+    const read = (page: number): ListPageRead => ({ step: 0, page, url: `${BATCH_A}?p=${page}`, html: `<p>${page}</p>`, state: `s${page}`, items: null, itemRefs: null, count: null })
+    const stoppedAt = (url: string, lists: FetchResult['actions'] extends infer A ? A extends { lists: infer L } ? L : never : never, status: FetchResult['status'] = 'blocked'): ScrapeOutcome => {
+      const result: FetchResult = { ...page(url), status, failureReason: null, blockReason: status === 'blocked' ? 'cloudflare_challenge' : null, actions: { screenshots: [], scrapes: [], javascriptReturns: [], pdfs: [], lists } }
+      return { result, links: [] }
+    }
+    class CheckedAtom implements ScrapeAtom {
+      async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+        if (url === BATCH_A) {
+          context?.onListPage?.(read(1))
+          context?.onListPage?.(read(2))
+          return stoppedAt(url, [{ index: 0, type: 'paginate', stoppedBy: 'challenge', rounds: 2, items: null, challenge: { page: 3, url: `${BATCH_A}?p=3`, reason: 'cloudflare_challenge', signals: ['cf_interstitial_text'] } }])
+        }
+        context?.onListPage?.(read(1))
+        // Blocked on its first page, with no list step stopped at a check: nothing to go on from.
+        return stoppedAt(url, [])
+      }
+      async close(): Promise<void> {}
+    }
+    const report = await new CrawlOrchestrator({ store, atom: new CheckedAtom(), clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, taskId: 'batch-1' })
+    expect(report.status).toBe('completed')
+    expect((await store.listSteps('batch-1')).map((step) => [step.url, step.status]).sort()).toEqual([[BATCH_A, 'blocked'], [BATCH_B, 'blocked']])
+    expect(await store.listPagesRead('batch-1', BATCH_A)).toEqual([read(1), read(2)])
+    expect(await store.listPagesRead('batch-1', BATCH_B)).toEqual([])
+  })
+
   it('seeds URLs appended while it runs, fetches them in the same attempt, also on a new host, and keeps the longer list at the end', async () => {
     const store = new MemoryTaskStore()
     await batchTask(store, [BATCH_A, BATCH_B])
@@ -717,6 +778,46 @@ describe('CrawlOrchestrator task options, budget and politeness', () => {
     expect(resumeAtom.fetches).toEqual([SEED, ITEM_A])
     expect(resumed).toMatchObject({ status: 'completed', budgetExceeded: 'pages', pagesFetched: 2 })
     expect(new Set((await store.listSteps(first.taskId)).map((step) => step.canonicalUrl)).size).toBe(2)
+  })
+
+  it('keeps the spend cap per task: a paid call of a page the shutdown cut still counts on resume (ROADMAP PA item 4)', async () => {
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, outcome(ITEM_A, [])], [ITEM_B, outcome(ITEM_B, [])]])
+    const shutdown = new AbortController()
+    // Every page makes one paid call charged at its $1 ceiling; the first run is shut down right after page A's call.
+    const paying = (cutAfter: string | null) => {
+      const paid: string[] = []
+      const atom: ScrapeAtom = {
+        async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+          const reservation = context?.spend?.reserve(1)
+          if (reservation === null || reservation === undefined) throw new Error(`no room for the paid call of ${url}`)
+          reservation.settle(null)
+          paid.push(url)
+          if (url === cutAfter) {
+            shutdown.abort(new DOMException('service shutdown', 'ShutdownError'))
+            await new Promise((resolve) => setTimeout(resolve, 20))
+          }
+          // As the ladder answers a paid call: the ledger's charge on the page's usage.
+          const page = pages.get(url)!
+          return { ...page, result: { ...page.result, usage: { ...page.result.usage, externalCostChargedUsd: 1 } } }
+        },
+        async close(): Promise<void> {},
+      }
+      return { atom, paid }
+    }
+    const store = new MemoryTaskStore()
+    const budget = { ...DEFAULT_CRAWL_BUDGET, maxCostUsd: 3 }
+    const first = paying(ITEM_A)
+    const firstReport = await new CrawlOrchestrator({ store, atom: first.atom, clock: new FakeClock(), workerCount: 1, shutdownSignal: shutdown.signal }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', budget })
+    expect(firstReport.status).toBe('paused')
+    expect(first.paid).toEqual([SEED, ITEM_A])
+    // Page A was never written, but its call was paid: the attempt keeps both charges.
+    expect((await store.listAttempts(firstReport.taskId)).map((attempt) => attempt.chargedUsd)).toEqual([2])
+    // The resume, under the task's budget as the engine passes it, opens its ledger at $2 of the $3: the refetched seed
+    // fills it, and page A is not paid for again.
+    const resumed = paying(null)
+    const resumeReport = await new CrawlOrchestrator({ store, atom: resumed.atom, clock: new FakeClock(), workerCount: 1 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', budget, resumeFrom: firstReport.taskId })
+    expect(resumed.paid).toEqual([SEED])
+    expect(resumeReport.budgetExceeded).toBe('cost')
   })
 
   it('resumes with the depth and host limits the task was started with', async () => {

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
+import { versionPublicAssets } from './publicAssetVersions.mjs'
+import { HOME_UPDATED, pages } from './docsPages.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'dist', 'docs')
@@ -11,22 +13,6 @@ const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mo
   name,
   createHash('sha256').update(await readFile(join(assetRoot, name))).digest('hex').slice(0, 12),
 ])))
-const pages = [
-  { slug: '', file: 'introduction.md', title: 'Introduction', description: 'Try Octocrawl with one public URL and learn what a verified result looks like.', group: 'Get started' },
-  { slug: 'connect-mcp', file: 'connect-mcp.md', title: 'Connect MCP', description: 'Connect Claude Code, Cursor, OpenCode or Codex to hosted Octocrawl with one URL, no key to start; or run it on your computer with npx.', group: 'Get started' },
-  { slug: 'guides/extract-page', file: 'extract-page.md', title: 'Extract a public page', description: 'Get readable Markdown, a final URL, status, and elapsed time from a public web page.', group: 'Guides' },
-  { slug: 'guides/amazon-product', file: 'amazon-product.md', title: 'Amazon.sg product JSON', description: 'Check a product ASIN, Singapore delivery region, currency, and missing fields.', group: 'Guides' },
-  { slug: 'guides/monitor-webhook', file: 'monitor-webhook.md', title: 'Monitor to HTTPS Webhook', description: 'Create a document Monitor and verify durable delivery by eventId.', group: 'Guides' },
-  { slug: 'guides/batch-results', file: 'batch-results.md', title: 'Page through batch results', description: 'Queue a durable URL batch and inspect every result through pagination.', group: 'Guides' },
-  { slug: 'limits', file: 'limits.md', title: 'Limits and result states', description: 'Understand preview quotas, supported sites, incomplete fields, blocks, and timeouts.', group: 'Reference' },
-  { slug: 'reference', file: 'reference.md', title: 'Advanced reference', description: 'Find REST, SDK, and self-hosted entry points after your first Octocrawl result.', group: 'Reference' },
-  { slug: 'compare/firecrawl', file: 'compare-firecrawl.md', title: 'Octocrawl vs Firecrawl', headTitle: 'Octocrawl vs Firecrawl: an open-source Firecrawl alternative', description: 'Compare Octocrawl and Firecrawl: licence, free and paid plans, self-hosting, evidence for every result, and when each is the better choice.', group: 'Compare' },
-  { slug: 'compare/octoparse', file: 'compare-octoparse.md', title: 'Octocrawl vs Octoparse', headTitle: 'Octocrawl vs Octoparse: an open-source Octoparse alternative', description: 'Compare Octocrawl and Octoparse: no-code setup, price, open source, Markdown for AI, evidence for every value, and when each is the better choice.', group: 'Compare' },
-  { slug: 'privacy', file: 'privacy.md', title: 'Privacy', description: 'What the public Octocrawl page records about a visit and a preview, what it never records, and how long it keeps it.', group: 'Project' },
-  { slug: 'terms', file: 'terms.md', title: 'Terms of use', description: 'The terms for the free public Octocrawl preview: what it is, its limits, results as they are, and who runs it.', group: 'Project' },
-  { slug: 'acceptable-use', file: 'acceptable-use.md', title: 'Acceptable use', description: 'What the public Octocrawl preview may not be used for, and how to report misuse.', group: 'Project' },
-  { slug: 'contact', file: 'contact.md', title: 'Contact', description: 'How to reach the Octocrawl operator about questions, privacy, security, site owners and misuse.', group: 'Project' },
-]
 
 // The preview server replaces this token with the site's public origin when it serves a page, the sitemap or
 // robots.txt (packages/public-preview/src/site.ts), so absolute URLs follow the domain without a rebuild.
@@ -95,7 +81,7 @@ const mcpClients = {
       intro: 'Merge this server into your project .cursor/mcp.json (or your user-level ~/.cursor/mcp.json). Keep existing servers.',
       code: `{\n  "mcpServers": {\n    "octocrawl": {\n      "url": "${REMOTE_MCP_URL}"\n    }\n  }\n}`, language: 'json',
       verify: 'Approve the server when Cursor asks, then check its tools in Cursor Settings → MCP. In Cursor CLI, cursor-agent mcp enable octocrawl approves it and cursor-agent mcp list-tools octocrawl lists the three tools.',
-      source: 'https://cursor.com/docs/context/mcp',
+      source: 'https://cursor.com/docs/mcp',
     },
     {
       id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Verified 2026-10-06',
@@ -111,7 +97,7 @@ const mcpClients = {
       intro: 'Add hosted Octocrawl to Codex as a Streamable HTTP server.',
       code: `codex mcp add octocrawl --url ${REMOTE_MCP_URL}`, language: 'bash',
       verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
-      source: 'https://developers.openai.com/codex/extend/mcp',
+      source: 'https://learn.chatgpt.com/docs/extend/mcp',
     },
   ],
   local: [
@@ -129,7 +115,7 @@ const mcpClients = {
       intro: 'Merge this server into your project .cursor/mcp.json (or your user-level ~/.cursor/mcp.json). Keep existing servers.',
       code: '{\n  "mcpServers": {\n    "octocrawl": {\n      "command": "npx",\n      "args": ["-y", "@octocrawl/mcp"]\n    }\n  }\n}', language: 'json',
       verify: 'Approve the server when Cursor asks, then check its tools in Cursor Settings → MCP. In Cursor CLI, cursor-agent mcp enable octocrawl approves it and cursor-agent mcp list-tools octocrawl lists the tools.',
-      source: 'https://cursor.com/docs/context/mcp',
+      source: 'https://cursor.com/docs/mcp',
     },
     {
       id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Verified 2026-10-06',
@@ -145,7 +131,7 @@ const mcpClients = {
       intro: 'Add the stdio server to Codex.',
       code: 'codex mcp add octocrawl -- npx -y @octocrawl/mcp', language: 'bash',
       verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
-      source: 'https://developers.openai.com/codex/extend/mcp',
+      source: 'https://learn.chatgpt.com/docs/extend/mcp',
     },
   ],
 }
@@ -239,7 +225,7 @@ for (const [index, page] of pages.entries()) {
   await mkdir(dirname(target), { recursive: true })
   const toc = []
   const content = renderPageContent(page, source, toc)
-  await writeFile(target, documentHtml(page, content, index, toc))
+  await writeFile(target, versionPublicAssets(documentHtml(page, content, index, toc), join(root, 'public')))
   // Every page is also published as its Markdown source, for LLM readers and llms.txt.
   const text = pageMarkdown(page, source)
   await writeFile(join(output, page.slug, 'index.md'), text)
@@ -252,7 +238,7 @@ const summary = 'Octocrawl turns a public web page into readable Markdown and, o
 const groups = [...new Set(pages.map(page => page.group))]
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
-  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/w2l.`, '',
+  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, '',
 ].join('\n')
@@ -265,10 +251,10 @@ const notFound = `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><title>Page not found | Octocrawl</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header(false)}
 <div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div></body></html>`
-await writeFile(join(root, 'dist', '404.html'), notFound)
+await writeFile(join(root, 'dist', '404.html'), versionPublicAssets(notFound, join(root, 'public')))
 
 // Crawlers may read every page; the API is not for them. The sitemap lists the home page and each docs page.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
-const locations = ['/', ...pages.map(pathFor)]
-await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(path => `  <url><loc>${ORIGIN}${path}</loc></url>`).join('\n')}\n</urlset>\n`)
+const locations = [['/', HOME_UPDATED], ...pages.map(page => [pathFor(page), page.updated])]
+await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc><lastmod>${updated}</lastmod></url>`).join('\n')}\n</urlset>\n`)
 console.log(`Built ${pages.length} Octocrawl documentation pages in ${output}, with Markdown copies, llms.txt, 404.html, robots.txt and sitemap.xml`)

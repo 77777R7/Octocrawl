@@ -191,6 +191,13 @@ function pageAddressRedirect(pathname: string, isDirectory: boolean, isIndexFile
   return target === null ? null : target.replace(/^\/+/, '/')
 }
 
+/** Whether a file's address changes whenever its content does, so it may be cached for a year: a script or stylesheet
+ * the build names by its content hash (`/assets/index-DbE3-Qka.js`), or any file asked for with the `?v=` content
+ * version the pages add (apps/public-web/scripts/publicAssetVersions.mjs). Artwork without either keeps an hour. */
+export function immutable(pathname: string, search: string): boolean {
+  return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(pathname) || /[?&]v=[0-9a-f]{8,}(?:&|$)/.test(search)
+}
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, search: string, origin: string, onPage: () => void): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
@@ -225,7 +232,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
     ? { link: `<${origin}${encodeURI(pageFolder ? `/${pageFolder}/` : '/')}>; rel="canonical"` } : {}
   res.writeHead(status, {
     'content-type': MIME[extension] ?? 'application/octet-stream', 'content-length': content.length,
-    'cache-control': status !== 200 || extension === '.html' ? 'no-store' : 'public, max-age=3600',
+    'cache-control': status !== 200 || extension === '.html' ? 'no-store' : immutable(pathname, search) ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
     ...STATIC_HEADERS, ...transportHeaders(origin), ...markdownCopy,
   })
   res.end(req.method === 'HEAD' ? undefined : content)

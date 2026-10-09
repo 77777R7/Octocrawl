@@ -5,8 +5,19 @@
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
-//          [--access '{"tier":"standard"}'] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp>
+//   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
+//                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
+//                maxAge 0 and storeInCache false (the same freshness as Octocrawl's maxAge 0; its default reuses pages up to
+//                two days old), proxy auto (basic, then its enhanced proxy on a failure: its strongest route, at one
+//                credit either way) and the task's timeout (at most 300 s). A key is read from the environment or from
+//                .w2l/access/competitors.env (git-ignored), and never written anywhere. FIRECRAWL_API_URL replaces the
+//                API's address (a stand-in for testing the driver, or a self-hosted Firecrawl, which the record must then say).
+//                zenrows is ZenRows' Fetch API (GET /v1/) with ZENROWS_API_KEY: mode=auto (it escalates to JS rendering and
+//                residential proxies itself and bills the configuration that worked) and response_type=markdown;
+//                ZENROWS_API_URL replaces its address the same way. A plan's 429 is waited out (Retry-After, else 15 s),
+//                five times at most, and the wait is left out of the page's time.
 //   Env: W2L_API_URL (default http://127.0.0.1:8787). W2L_EGRESS_ECHO_URL, when set, is fetched
 //   once through the environment proxy at the start, and the first IPv4 address in its answer is
 //   recorded as the exit address (for example https://api.ipify.org).
@@ -34,6 +45,21 @@
 //   cost           externalCostUsd as the API reports it, null when unknown; egressCostUsd is null
 //                  because nothing measures it yet. A table with any null is reported as unknown.
 //   denominator    every task in the selected set, including ones the API could not answer.
+//   paid calls     (octocrawl) the provider calls the page's Evidence Record lists (access.paidCalls, ROADMAP PA item 4):
+//                  each one's provider, what Octocrawl made of the page it returned (never the provider's word), and
+//                  whether it is the answer; chargedUsd is what the API's spend ledger charged the scrape
+//                  (usage.externalCostChargedUsd): the provider's stated price, else its price ceiling, an upper bound
+//                  and not its bill. 0 when the record lists no paid call; null when the API's record says nothing of
+//                  paid calls (a build before them, or no record).
+//   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
+//                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
+//                  success with another status, or no success, is `failed` with the reason it gave (an API that names the
+//                  target's 4xx is not counted as claiming content). Credits are inferred from the provider's published
+//                  billing (Firecrawl: one per document returned, none without one), since a scrape's answer does not
+//                  report them; USD stays null (the price per credit depends on the plan). ZenRows: its 200 with a body
+//                  is `success`, any other answer `failed` with its error code; a failure is not billed (0 credits), and a
+//                  success's credits are unknown (mode=auto does not say which configuration it billed; its
+//                  X-Request-Cost header is recorded as given, its unit unconfirmed).
 //
 // Each answer's Markdown is saved under .w2l/access/runs/<timestamp>/pages/ (git-ignored), so the
 // predicates can be re-checked with --rejudge; the committed record holds only the fields above.
@@ -55,6 +81,10 @@ const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--a
 const recordFile = flag('--record')
 const rejudgeDir = flag('--rejudge')
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
+const target = flag('--target') ?? 'octocrawl'
+const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cloud, POST /v2/scrape (proxy auto, maxAge 0, storeInCache false)', zenrows: 'ZenRows Fetch API, GET /v1/ (mode=auto, response_type=markdown)' }
+if (!(target in TARGETS)) throw new Error(`--target must be one of ${Object.keys(TARGETS).join(', ')}`)
+if (target !== 'octocrawl' && flag('--access') !== undefined) throw new Error('--access is an Octocrawl option; a competitor runs with its own strongest route')
 
 const DATA_TYPES = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'listRecordsMin'])
 const isData = (p) => DATA_TYPES.has(p.type) || (p.type === 'field' && /^(json|list|tables)\b/.test(p.path))
@@ -88,6 +118,38 @@ if (rejudgeDir === undefined && process.env.W2L_EGRESS_ECHO_URL) {
     environment.exitIp = (await res.text()).match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/)?.[0] ?? null
   } catch { environment.exitIp = null }
 }
+// A competitor's key: the environment first, then the git-ignored .w2l/access/competitors.env (KEY=value lines) of this
+// checkout, then of the main checkout when this one is a worktree.
+async function competitorKey(name) {
+  if (process.env[name]) return process.env[name]
+  const main = dirname(sh('git rev-parse --path-format=absolute --git-common-dir'))
+  for (const root of [...new Set([repo, main])]) {
+    try {
+      const line = (await readFile(join(root, '.w2l/access/competitors.env'), 'utf8')).split('\n').find((l) => l.trim().replace(/^export\s+/, '').startsWith(`${name}=`))
+      const value = line?.slice(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '')
+      if (value) return value
+    } catch {}
+  }
+  throw new Error(`${name} is not set: put it in the environment or in .w2l/access/competitors.env`)
+}
+const keys = rejudgeDir !== undefined || target === 'octocrawl' ? {} : target === 'firecrawl' ? { firecrawl: await competitorKey('FIRECRAWL_API_KEY') } : { zenrows: await competitorKey('ZENROWS_API_KEY') }
+
+/** Sends a competitor's request again while its plan answers 429 (Retry-After, else 15 s; five times at most), and says how long it waited. */
+async function paced(send) {
+  let res = await send()
+  let waitedMs = 0
+  for (let tries = 0; res.status === 429 && tries < 5; tries++) {
+    const after = Number(res.headers.get('retry-after'))
+    const before = Date.now()
+    await new Promise((resolve) => setTimeout(resolve, (Number.isFinite(after) && after > 0 ? after : 15) * 1000))
+    res = await send()
+    waitedMs += Date.now() - before
+  }
+  return { res, waitedMs }
+}
+// A competitor's API is on the internet: reached through the shell's proxy when one is set (Node's fetch ignores it).
+const outbound = target === 'octocrawl' || !environment.proxied ? undefined : new (await import('undici')).EnvHttpProxyAgent()
+environment.target = target
 const runDir = rejudgeDir === undefined ? join(repo, '.w2l/access/runs', environment.startedAt.replace(/[:.]/g, '-')) : join(repo, rejudgeDir)
 await mkdir(join(runDir, 'pages'), { recursive: true })
 const linesFile = join(runDir, 'attempts.jsonl')
@@ -115,16 +177,97 @@ function judge(p, doc) {
   }
 }
 
+/**
+ * Firecrawl Cloud's scrape of one task, as the document the predicates read: its success with the target's 2xx is
+ * `success`, anything else `failed` with its reason; `credits` from its published billing (one per document returned).
+ */
+async function firecrawlScrape(task) {
+  const timeout = Math.min(task.timeoutMs ?? 180_000, 300_000)
+  const send = () => fetch(`${process.env.FIRECRAWL_API_URL ?? 'https://api.firecrawl.dev'}/v2/scrape`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${keys.firecrawl}` },
+    body: JSON.stringify({ url: task.url, formats: task.request?.formats ?? ['markdown'], maxAge: 0, storeInCache: false, proxy: 'auto', timeout }),
+    signal: AbortSignal.timeout(timeout + 30_000),
+    ...(outbound === undefined ? {} : { dispatcher: outbound }),
+  })
+  // The plan's own rate limit (429) is the driver's pace, not the page's answer.
+  const { res, waitedMs } = await paced(send)
+  let body = null
+  try { body = await res.json() } catch {}
+  const data = body?.data ?? null
+  const meta = data?.metadata ?? {}
+  const code = typeof meta.statusCode === 'number' ? meta.statusCode : null
+  const claimed = body?.success === true && data !== null && (code === null || (code >= 200 && code < 300))
+  return {
+    apiStatus: res.status,
+    waitedMs,
+    doc: {
+      status: claimed ? 'success' : 'failed',
+      markdown: typeof data?.markdown === 'string' ? data.markdown : null,
+      evidence: { httpStatus: code },
+      failureReason: claimed ? null : (meta.error ?? body?.error ?? body?.code ?? (code !== null ? `http_${code}` : `api_${res.status}`)),
+      lane: meta.proxyUsed ? `firecrawl:${meta.proxyUsed}` : 'firecrawl',
+      credits: data !== null ? 1 : 0,
+    },
+  }
+}
+
+/** ZenRows' Fetch API for one task: its 200 with a body is `success`, anything else `failed` with its code; a failure is not billed. */
+async function zenrowsScrape(task) {
+  const query = new URLSearchParams({ apikey: keys.zenrows, url: task.url, mode: 'auto', response_type: 'markdown' })
+  const send = () => fetch(`${process.env.ZENROWS_API_URL ?? 'https://api.zenrows.com'}/v1/?${query}`, {
+    signal: AbortSignal.timeout(200_000),
+    ...(outbound === undefined ? {} : { dispatcher: outbound }),
+  })
+  const { res, waitedMs } = await paced(send)
+  const text = await res.text()
+  let code = null
+  if (res.status !== 200) { try { const j = JSON.parse(text); code = j.code ?? j.title ?? null } catch {} }
+  const claimed = res.status === 200 && text.length > 0
+  return {
+    apiStatus: res.status,
+    waitedMs,
+    doc: {
+      status: claimed ? 'success' : 'failed',
+      markdown: claimed ? text : null,
+      evidence: { httpStatus: null },
+      failureReason: claimed ? null : (code ?? `api_${res.status}`),
+      lane: 'zenrows:auto',
+      credits: claimed ? null : 0,
+      requestCost: res.headers.get('x-request-cost'),
+    },
+  }
+}
+
+/** The paid provider calls the answer's Evidence Record lists, each as its provider, verdict and role; null when the record says nothing of them. */
+function paidCallsOf(doc) {
+  const access = doc?.evidenceRecord?.access
+  if (access === undefined || access === null || !('paidCalls' in access)) return null
+  return (access.paidCalls ?? []).map((c) => ({ provider: c.provider, outcome: c.outcome, reason: c.reason, answer: c.answer, chargedUsd: c.chargedUsd }))
+}
+
+/** What the API's spend ledger charged the scrape: 0 when its record lists no paid call, null when that is not known. */
+function chargedOf(doc) {
+  if (typeof doc?.usage?.externalCostChargedUsd === 'number') return doc.usage.externalCostChargedUsd
+  const calls = paidCallsOf(doc)
+  return calls !== null && calls.length === 0 ? 0 : null
+}
+
 async function attempt(task, temperature) {
   const body = { url: task.url, ...(task.request ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }) }
   const started = Date.now()
-  let doc = null, apiStatus = null, error = null
+  let doc = null, apiStatus = null, error = null, waitedMs = 0
   try {
-    const res = await fetch(`${api}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(task.timeoutMs ?? 180_000) })
-    apiStatus = res.status
-    doc = await res.json()
+    if (target === 'firecrawl' || target === 'zenrows') {
+      ({ apiStatus, doc, waitedMs } = await (target === 'firecrawl' ? firecrawlScrape(task) : zenrowsScrape(task)))
+    } else {
+      const res = await fetch(`${api}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(task.timeoutMs ?? 180_000) })
+      apiStatus = res.status
+      doc = await res.json()
+    }
   } catch (e) { error = String(e) }
-  const wallMs = Date.now() - started
+  // The time a plan's rate limit held the request back is the driver's pace, not the page's.
+  const wallMs = Date.now() - started - waitedMs
   if (typeof doc?.markdown === 'string') await writeFile(join(runDir, 'pages', `${task.id}-${temperature}.md`), doc.markdown)
   const results = doc === null ? [] : task.predicates.map((p) => ({ p, pass: (() => { try { return judge(p, doc) } catch { return false } })() }))
   const answered = doc !== null && (doc.status === 'success' || doc.status === 'partial')
@@ -139,12 +282,15 @@ async function attempt(task, temperature) {
       lane: doc?.lane ?? null, channelsTried: doc?.channelsTried ?? doc?.summary?.channelsTried ?? null,
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
+      ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
+      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc) } : {}),
     },
     intervention: { access: access ?? null, lane: doc?.lane ?? null, egress: doc?.evidence?.envProxy ?? null },
     outcome: {
       verified, falseSuccess: doc?.status === 'success' && dataFailed,
       failedPredicates: results.filter((r) => !r.pass).map((r) => r.p.type + (r.p.path ? `:${r.p.path}` : '')),
       wallMs, externalCostUsd: doc?.usage?.externalCostUsd ?? null, egressCostUsd: null,
+      ...(target === 'octocrawl' ? { chargedUsd: chargedOf(doc) } : { credits: doc?.credits ?? (error === null ? null : 0) }),
       completion: verified ? 'unattended_public' : null,
     },
     suspected: { cause: 'unknown', confidence: 'not_isolated' },
@@ -210,6 +356,16 @@ const summary = (temp) => {
     p50Ms: pct(r.map((x) => x.outcome.wallMs), 0.5), p95Ms: pct(r.map((x) => x.outcome.wallMs), 0.95),
     externalCostPer1000VerifiedUsd: costs.some((c) => c === null) || verifiedN === 0 ? null : (costs.reduce((a, b) => a + b, 0) / verifiedN) * 1000,
     egressCostPer1000VerifiedUsd: null,
+    ...((environment.target ?? 'octocrawl') === 'octocrawl' ? (() => {
+      // Rows from a run before paid calls were recorded carry neither field: unknown, not none.
+      const charged = r.map((x) => x.outcome.chargedUsd ?? null)
+      const calls = r.map((x) => x.observed.paidCalls ?? null)
+      return {
+        chargedUsd: charged.some((c) => c === null) ? null : charged.reduce((a, b) => a + b, 0),
+        paidCalls: calls.some((c) => c === null) ? null : calls.reduce((a, b) => a + b.length, 0),
+        verifiedFromPaidCall: calls.some((c) => c === null) ? null : r.filter((x) => x.outcome.verified && x.observed.paidCalls.some((c) => c.answer)).length,
+      }
+    })() : (() => { const c = r.map((x) => x.outcome.credits); return { credits: c.some((v) => v === null || v === undefined) ? null : c.reduce((a, b) => a + b, 0), creditsPer1000Verified: c.some((v) => v === null || v === undefined) || verifiedN === 0 ? null : (c.reduce((a, b) => a + b, 0) / verifiedN) * 1000 } })()),
   }
 }
 const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
@@ -220,22 +376,28 @@ await writeFile(join(runDir, 'summary.json'), JSON.stringify({ command, environm
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
+  // A provider call's provider, what Octocrawl made of its page and whether it is the answer, for runs that recorded them.
+  const paidColumn = rows.some((r) => Array.isArray(r.observed.paidCalls) && r.observed.paidCalls.length > 0)
+  const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
     ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against tasks.v1.json with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''})` : 'direct'}`,
-    `- API: ${environment.api}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}`,
+    `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
+    `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
     `- Run: ${environment.startedAt} → ${finishedAt}`,
     `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`, '',
-    '| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
-    ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |`), '',
-    '| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |`),
+    `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
+    `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
+    ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
+    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its price ceiling: an upper bound, not its bill)`),
+    ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
+    `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}`,
+    `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
+    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
     ...(droppedRows.length === 0 ? [] : [`Dropped from the task file after this run, so outside every count above: ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')} (the reasons are in tasks.v1.json \`excluded\`).`, '']),
   ].join('\n')

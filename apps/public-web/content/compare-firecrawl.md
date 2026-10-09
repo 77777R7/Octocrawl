@@ -26,7 +26,7 @@ Choose **Octocrawl** if you need to show where your data came from, want blocked
 | Formats | Markdown, HTML, raw HTML, links, images, attributes, screenshot, tables as CSV, JSON, lists of repeated items | Markdown, summary, HTML, raw HTML, links, screenshot, JSON, images, branding, change tracking, audio, video and more |
 | Page actions | Wait, click, type, press, scroll, screenshot, run JavaScript; also scroll to the end, load more and follow pagination, each reporting why it stopped (on your computer) | Up to 50 actions a request |
 | Blocked pages | Plain HTTP, then Chromium. No CAPTCHA solving; you can clear a CAPTCHA or log in yourself in your own Chrome and let Octocrawl read the page | Managed proxies with automatic retry on a block |
-| robots.txt | Read and recorded for every URL. On your computer, a `robotsOverride` with your reason fetches one disallowed URL, on the record. The hosted service obeys it for every URL | Respected by default; ignoring it on a crawl is Enterprise only |
+| robots.txt | Read and recorded for every URL. On your computer a URL you name is fetched even where robots.txt disallows it, and the result records that; links a crawl or map finds obey it unless you turn that off. The hosted service obeys it for every URL | Respected by default; ignoring it on a crawl is Enterprise only |
 | MCP | Hosted URL (scrape, map) and a local server with crawl, batch and logins | Hosted MCP server, keyless to start, and a local server |
 | SDKs | TypeScript, Python client, CLI | Python, Node, Go, Java, Ruby, Rust, .NET, PHP, Elixir, CLI |
 

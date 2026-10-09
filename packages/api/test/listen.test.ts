@@ -22,7 +22,7 @@ describe('parseListen: access grant (ADR 0005)', () => {
       writeFileSync(file, JSON.stringify(grant))
       for (const listen of [parseListen(['--access-grant', file], {}), parseListen([`--access-grant=${file}`], {}), parseListen([], { W2L_ACCESS_GRANT: file }), parseListen([], { W2L_ACCESS_GRANT: JSON.stringify(grant) })]) {
         expect(listen.accessGrant).toMatchObject({ tier: 'enhanced', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], budget: { perRunUsd: 5, perRequestUsd: null } })
-        expect(listen.notices).toContain('access grant (ADR 0005): tier enhanced; vendor_remote_browser, vendor_captcha_solving; run budget 5 USD; per-request budget none (not enforced yet); accepted by operator@example.test')
+        expect(listen.notices).toContain('access grant (ADR 0005): tier enhanced; vendor_remote_browser, vendor_captcha_solving; run budget 5 USD; per-request budget none; accepted by operator@example.test')
       }
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
@@ -57,6 +57,12 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(local.notices).toContain('compatible transport (ADR 0005 compatible_transport): impit 0.14.5, profile chrome142, in place of the http rung for standard-mode pages on shop.test, www.news.test and their subdomains; a request with custom headers or mobile keeps the http rung')
     expect(() => parseListen([], { W2L_COMPAT_HOSTS: 'shop.test' })).toThrow(/needs an access grant that names compatible_transport/)
     expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_COMPAT_HOSTS: 'shop.test' })).toThrow(/refused on a hosted server/)
+    // Unset, the grant takes the hosts its acceptance showed it helps, and says so; none turns it off; hosted takes none.
+    const byDefault = parseListen([], { W2L_ACCESS_GRANT: grant })
+    expect(byDefault.compatHosts).toEqual(['fred.stlouisfed.org', 'www.idealo.de', 'www.investing.com', 'www.ironmountain.com', 'www.wayfair.com'])
+    expect(byDefault.notices.find((line) => line.startsWith('compatible transport'))).toContain('the hosts its acceptance showed it helps, research/access/benefit-hosts.v1.json')
+    expect(parseListen([], { W2L_ACCESS_GRANT: grant, W2L_COMPAT_HOSTS: 'none' }).compatHosts).toEqual([])
+    expect(parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant }).compatHosts).toEqual([])
   })
 
   it('takes W2L_EGRESS_PROXIES only under a grant that names egress_sessions, never hosted, and never names their credentials', () => {
@@ -70,6 +76,11 @@ describe('parseListen: access grant (ADR 0005)', () => {
     expect(local.notices.join('\n')).not.toContain('secret')
     expect(() => parseListen([], { W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/needs an access grant that names egress_sessions/)
     expect(() => parseListen(['--hosted', '--token', 'secret'], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' })).toThrow(/refused on a hosted server/)
+    // The echo URL asks those egresses where they leave from: only beside them, and only http(s).
+    expect(local.egressEchoUrl).toBeNull()
+    expect(parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080', W2L_EGRESS_ECHO_URL: 'https://ipinfo.io/json' }).egressEchoUrl).toBe('https://ipinfo.io/json')
+    expect(() => parseListen([], { W2L_EGRESS_ECHO_URL: 'https://ipinfo.io/json' })).toThrow(/needs W2L_EGRESS_PROXIES/)
+    expect(() => parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080', W2L_EGRESS_ECHO_URL: 'ftp://echo.test/' })).toThrow(/must be an http\(s\) URL/)
     expect(() => parseListen([], { W2L_ACCESS_GRANT: grant, W2L_EGRESS_PROXIES: 'socks5://proxy-a.test:1080' })).toThrow(/http:\/\/ and https:\/\/ proxies/)
   })
 
