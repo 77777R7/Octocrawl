@@ -28,7 +28,7 @@ export const NAV_CLIENTS = [
 ]
 
 /** The docs menu: the guide groups as the sidebar has them; the project pages (privacy, terms) stay in the footer. */
-export const NAV_DOC_GROUPS = ['Get started', 'Guides', 'Reference']
+export const NAV_DOC_GROUPS = ['Get started', 'Guides', 'Reference', 'Compare']
 
 const item = ({ glyph, title, text, href }) => `<li><a href="${href}"><span class="nav-glyph" aria-hidden="true">${esc(glyph)}</span><span class="nav-title">${esc(title)}</span><span class="nav-text">${esc(text)}</span></a></li>`
 

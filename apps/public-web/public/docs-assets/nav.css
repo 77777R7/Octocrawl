@@ -14,7 +14,7 @@
 .nav-panel { position: absolute; z-index: 40; top: calc(100% + 10px); left: 50%; display: grid; gap: 8px 28px; padding: 22px 24px; border: 1px solid #e0e8f2; border-radius: 14px; color: #14254a; background: #fff; box-shadow: 0 24px 60px rgba(7, 27, 79, .28); transform: translateX(-50%); text-align: left; font-weight: 400; }
 .nav-panel::before { content: ""; position: absolute; top: -12px; left: 0; right: 0; height: 12px; }
 .nav-product { width: min(900px, calc(100vw - 32px)); grid-template-columns: 1fr 1fr 250px; }
-.nav-docs { width: min(620px, calc(100vw - 32px)); grid-template-columns: repeat(3, 1fr); }
+.nav-docs { width: min(820px, calc(100vw - 32px)); grid-template-columns: repeat(4, 1fr); }
 .nav-panel ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .nav-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: #566b8c; font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
 .nav-kicker::before { content: ""; width: 6px; height: 6px; background: #b8461d; }
