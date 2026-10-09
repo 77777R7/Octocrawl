@@ -16,10 +16,11 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { ExecutionContext, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, SpendReservation, TraceEvent } from '@w2l/contracts'
-import { CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
+import type { EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, RobotsOverrideApplied, SpendReservation, TraceEvent } from '@w2l/contracts'
+import { carryPaidCalls, CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
 import {
   createExecutionScope,
+  createSpendLedger,
   raceWithSignal,
   throwIfExecutionStopped,
   classifyFetchFailure,
@@ -74,6 +75,10 @@ export interface Channel {
    * before the call. Null: no ceiling is known (no tariff in the grant), and the rung is not called. Absent on the local rungs.
    */
   readonly priceCeilingUsd?: number | null
+  /** The access grant a provider rung is called under, as its paid calls' record names it. */
+  readonly grant?: EvidenceAccessGrant
+  /** The ADR 0005 capabilities a provider rung's sessions are created with, for its paid calls' record. */
+  readonly grantCapabilities?: readonly string[]
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
   close?(): Promise<void>
@@ -118,6 +123,12 @@ interface LadderProgress {
   robotsOverrides: RobotsOverrideApplied[]
   /** What the spend ledger charged this run's paid calls, a call that threw or was cut included; null: none was charged. */
   charged: number | null
+  /** Each call the ledger settled, numbered in order (`call`, as its `spend_settled` event names it), for the answer's record. */
+  paidCalls: (Omit<EvidencePaidCall, 'answer'> & { call: number })[]
+  /** The grant the paid calls were made under; null until one is made. */
+  grant: EvidenceAccessGrant | null
+  /** The run's own ledger, with no cap, when the caller gave none: every provider call is still settled and recorded. */
+  ledger: SpendLedger | null
 }
 
 /** A run's totals over its attempts: what every lane tried cost, each attempt kept as it was. */
@@ -336,16 +347,17 @@ export class LadderRunner {
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null }
     for (const filtered of this.options.channelsFiltered ?? []) {
       progress.ladderTrace.push({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: filtered.reason, dropped: [...filtered.dropped] } })
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress.charged) }
+    try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress) }
     catch (error) {
-      if (!deadlineReached(scope)) throw error
-      return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress.charged)
+      // A run that throws keeps its paid calls on the error, for the record of whatever result the error becomes.
+      if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, null, Math.max(0, performance.now() - progress.startedAt), 'provider'))
+      return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress)
     } finally { scope.dispose() }
   }
 
@@ -763,10 +775,12 @@ export class LadderRunner {
       ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: label, detail: { vendorId: channel.vendorId ?? null, reason: 'no price ceiling: the access grant names no tariff for this provider, and a provider whose cost has no upper bound is not called' } })
       return null
     }
-    if (ceiling !== undefined && execution.spend !== undefined) {
-      reservation = execution.spend.reserve(ceiling)
+    if (ceiling !== undefined) {
+      // A caller with no budget gave no ledger: the run keeps one of its own, uncapped, so the call is still settled and on the record.
+      const ledger = execution.spend ?? (progress.ledger ??= createSpendLedger(null))
+      reservation = ledger.reserve(ceiling)
       if (reservation === null) {
-        ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: label, detail: { vendorId: channel.vendorId ?? null, reason: 'budget: its price ceiling does not fit what the run (or this request) has left', ceilingUsd: ceiling, settledUsd: execution.spend.settledUsd, reservedUsd: execution.spend.reservedUsd, capUsd: execution.spend.capUsd } })
+        ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: label, detail: { vendorId: channel.vendorId ?? null, reason: 'budget: its price ceiling does not fit what the run (or this request) has left', ceilingUsd: ceiling, settledUsd: ledger.settledUsd, reservedUsd: ledger.reservedUsd, capUsd: ledger.capUsd } })
         return null
       }
     }
@@ -776,20 +790,20 @@ export class LadderRunner {
       result = await raceWithSignal(channel.fetch(url, session, execution, options), execution.signal)
     } catch (error) {
       // A call that threw, or that the deadline cut, may have opened a session that bills: it is charged at its ceiling.
-      if (reservation !== null) {
+      if (reservation !== null && ceiling !== undefined) {
         const charged = reservation.settle(null)
-        progress.charged = (progress.charged ?? 0) + charged
-        ladderTrace.push({ at: Math.max(0, performance.now() - progress.startedAt), event: 'spend_settled', channel: label, detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: 'ceiling', ended: 'without_an_answer' } })
+        const call = paidCall(progress, channel, label, ceiling, charged, null, null)
+        ladderTrace.push({ at: Math.max(0, performance.now() - progress.startedAt), event: 'spend_settled', channel: label, detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: 'ceiling', ended: 'without_an_answer', call } })
       }
       throw error
     }
-    if (reservation === null) return result
+    if (reservation === null || ceiling === undefined) return result
     const charged = reservation.settle(result.usage.externalCostUsd)
-    progress.charged = (progress.charged ?? 0) + charged
+    const call = paidCall(progress, channel, label, ceiling, charged, result.usage.externalCostUsd, result)
     return {
       ...result,
       usage: { ...result.usage, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + charged },
-      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: result.usage.externalCostUsd === null ? 'ceiling' : 'reported' } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: result.usage.externalCostUsd === null ? 'ceiling' : 'reported', call } }],
     }
   }
 
@@ -1038,13 +1052,41 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
 }
 
 /**
+ * One call the ledger settled, added to the run's charge and to its paid calls: Octocrawl's verdict on the page the call
+ * returned (null when it returned none), never the provider's word. Returns the call's number in the run.
+ */
+function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null): number {
+  progress.charged = (progress.charged ?? 0) + chargedUsd
+  progress.grant ??= channel.grant ?? null
+  const call = progress.paidCalls.length + 1
+  progress.paidCalls.push({
+    provider: channel.vendorId ?? channel.id, rung, capabilities: [...(channel.grantCapabilities ?? [])], ceilingUsd, chargedUsd, reportedCostUsd,
+    outcome: result?.status ?? null, reason: result === null ? null : result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null, call,
+  })
+  return call
+}
+
+/**
  * The answer's third-party spend is the whole run's, not the kept rung's: a local answer kept after a provider attempt still
  * cost what the provider charged, and an unknown charge anywhere in the run makes it unknown.
  */
-/** The run's cost on its answer: the exact total over its attempts (null when one is unknown), and what the ledger charged them all. */
-function withRunCost(run: LadderRunResult, charged: number | null): LadderRunResult {
+/**
+ * The run's cost on its answer: the exact total over its attempts (null when one is unknown), and what the ledger charged
+ * them all; with every paid call of the run (`paid_calls`), the one whose page is the answer marked, for its record.
+ */
+function withRunCost(run: LadderRunResult, progress: LadderProgress): LadderRunResult {
   const { externalCostChargedUsd: _attempt, ...usage } = run.result.usage
-  return { ...run, result: { ...run.result, usage: { ...usage, externalCostUsd: run.summary.externalCostUsd, ...(charged === null ? {} : { externalCostChargedUsd: charged }) } } }
+  const result: FetchResult = { ...run.result, usage: { ...usage, externalCostUsd: run.summary.externalCostUsd, ...(progress.charged === null ? {} : { externalCostChargedUsd: progress.charged }) } }
+  if (progress.paidCalls.length === 0) return { ...run, result }
+  // The answer is a paid call's page when its own trace holds that call's settlement.
+  const own = result.trace.find((event) => event.event === 'spend_settled')?.detail?.call
+  return { ...run, result: { ...result, trace: [...result.trace, paidCallsEvent(progress, own, result.usage.wallMs, result.lane)] } }
+}
+
+/** The run's paid calls as one `paid_calls` event, the call numbered `answer` (if any) marked as the answer's. */
+function paidCallsEvent(progress: LadderProgress, answer: unknown, at: number, lane: Lane): TraceEvent {
+  const calls: EvidencePaidCall[] = progress.paidCalls.map(({ call, ...paid }) => ({ ...paid, answer: call === answer }))
+  return { at, lane, event: 'paid_calls', detail: { calls, grant: progress.grant } }
 }
 
 /**

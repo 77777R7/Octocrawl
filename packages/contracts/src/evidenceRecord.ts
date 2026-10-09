@@ -85,6 +85,50 @@ export interface EvidenceAccess {
    * the page was read with none. Added with the egress pool: optional, so that earlier records stay valid.
    */
   session?: EvidenceAccessSession | null
+  /**
+   * Every paid provider call the page was read with (ROADMAP PA item 4), in order: the provider, what the spend ledger
+   * reserved and charged, the price the provider stated, and what Octocrawl made of what came back. Null when no
+   * provider was called. Added with the spend ledger: optional, so that earlier records stay valid.
+   */
+  paidCalls?: readonly EvidencePaidCall[] | null
+  /** The access grant the paid calls were made under; null when no provider was called. Added with `paidCalls`. */
+  grant?: EvidenceAccessGrant | null
+}
+
+/** One paid provider call (ROADMAP PA item 4). A provider's own word on the page is never its outcome. */
+export interface EvidencePaidCall {
+  /** The provider's id, as the access grant's tariffs name it (`browserbase`, `steel`). */
+  provider: string
+  /** The rung that made the call; a retry after the person's handoff is `provider(retry)`. */
+  rung: string
+  /** The ADR 0005 capabilities the provider's session was created with: `vendor_remote_browser`, and solving or stealth when the grant named them. */
+  capabilities: readonly string[]
+  /** What the ledger reserved before the call: its price ceiling, from the grant's tariff. */
+  ceilingUsd: number
+  /** What the ledger charged: the price the provider stated, else the ceiling (a call that threw or was cut included). */
+  chargedUsd: number
+  /** The price the provider stated for the call; null when it stated none (Browserbase and Steel state none per call). */
+  reportedCostUsd: number | null
+  /**
+   * What Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an
+   * identity it did not send): never the provider's word that it succeeded. Null when the call returned no page (it
+   * threw, or the deadline cut it).
+   */
+  outcome: ResultStatus | null
+  /** Why the outcome is not a read page, as the record's own `reason`; null otherwise. */
+  reason: FailureReason | BlockReason | BudgetKind | null
+  /** The record's own page is this call's. */
+  answer: boolean
+}
+
+/** The access grant paid calls were made under: enough to name it, not a copy. */
+export interface EvidenceAccessGrant {
+  /** SHA-256 of the grant's text as Octocrawl read it (`shasum -a 256 grant.json`); null for a grant not read from text. */
+  sha256: string | null
+  /** The grant's tier. */
+  tier: string
+  /** When its attestation says the operator accepted the providers' terms and costs; null when it has none. */
+  attestedAt: string | null
 }
 
 export const ACCESS_EGRESS_SOURCES = ['pool', 'environment', 'direct'] as const
@@ -291,10 +335,12 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
-  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session']),
+  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session', 'paidCalls', 'grant']),
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'outcome', 'reason', 'answer']),
+  accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
 } as const
 
 /**
@@ -306,6 +352,6 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
-  access: ['completion', 'egress', 'session'],
+  access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
 }

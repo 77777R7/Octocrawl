@@ -110,9 +110,10 @@ import {
   type MapSources,
   cacheLookupRequested,
   cacheStateOf,
+  givenUpPaidCalls,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
+import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
@@ -846,7 +847,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1551,6 +1552,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         let used = current
         let outcome = await pageAtom.scrape(url, context)
         const events: TraceEvent[] = []
+        const carried: TraceEvent[] = []
         while (egressInDoubt(outcome)) {
           let reason: string
           if (current === used) {
@@ -1572,10 +1574,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             reason = 'moved_with_task'
           }
           events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.egress!.id, to: current.egress!.id, reason, switches } })
+          // The read given up still paid for its provider calls: they stay on the page's record, none of them its answer.
+          carried.push(...givenUpPaidCalls(outcome.result.trace))
           used = current
           outcome = await pageAtom.scrape(url, context)
         }
-        const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...outcome.result.trace, ...events] }, used.egress, context)
+        const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...carried, ...outcome.result.trace, ...events] }, used.egress, context)
         return result === outcome.result ? outcome : { ...outcome, result }
       },
       close: () => pageAtom.close(),

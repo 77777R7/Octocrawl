@@ -1263,7 +1263,7 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     const ledger = createSpendLedger(1)
     const run = await new LadderRunner([blockedHttp(), priced(0.3, [contentfulResult(url, 'provider')])], ALLOWED_ALL).run(url, undefined, { spend: ledger })
     expect(run.result).toMatchObject({ status: 'success', lane: 'provider', usage: { externalCostUsd: null, externalCostChargedUsd: 0.3 } })
-    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: { vendorId: 'steel', ceilingUsd: 0.3, chargedUsd: 0.3, basis: 'ceiling' } }))
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: { vendorId: 'steel', ceilingUsd: 0.3, chargedUsd: 0.3, basis: 'ceiling', call: 1 } }))
     expect(ledger.settledUsd).toBeCloseTo(0.3)
     expect(ledger.reservedUsd).toBe(0)
   })
@@ -1299,6 +1299,20 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     expect(ledger.settledUsd).toBeCloseTo(0.08)
   })
 
+  it('puts every paid call of the run on the answer: the provider, its charge, what Octocrawl made of its page, and which is the answer', async () => {
+    const grant = { sha256: 'a'.repeat(64), tier: 'enhanced', attestedAt: '2026-10-09T00:00:00Z' }
+    const failing = { ...channel('provider', [providerErrorResult(url, 'browserbase')], 'browserbase'), priceCeilingUsd: 0.05, grant, grantCapabilities: ['vendor_remote_browser'] }
+    const winning = { ...priced(0.03, [contentfulResult(url, 'provider')]), grant, grantCapabilities: ['vendor_remote_browser', 'vendor_captcha_solving'] }
+    const run = await new LadderRunner([blockedHttp(), failing, winning], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect(run.result.trace.filter((event) => event.event === 'paid_calls').map((event) => event.detail)).toEqual([{ grant, calls: [
+      { provider: 'browserbase', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.05, chargedUsd: 0.05, reportedCostUsd: null, outcome: 'failed', reason: 'provider_error', answer: false },
+      { provider: 'steel', rung: 'provider', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], ceilingUsd: 0.03, chargedUsd: 0.03, reportedCostUsd: null, outcome: 'success', reason: null, answer: true },
+    ] }])
+    // A run that called no provider has none.
+    const local = await new LadderRunner([channel('http', [contentfulResult(url, 'http')])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect(local.result.trace.some((event) => event.event === 'paid_calls')).toBe(false)
+  })
+
   it('charges a call the deadline cut at its ceiling, and says so on the answer', async () => {
     const ledger = createSpendLedger(1)
     const hangingProvider: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
@@ -1306,6 +1320,8 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     expect(cut.result.usage).toMatchObject({ deadlineExceeded: true, externalCostChargedUsd: 0.3 })
     expect(cut.ladderTrace).toContainEqual(expect.objectContaining({ event: 'spend_settled', detail: expect.objectContaining({ vendorId: 'steel', chargedUsd: 0.3, basis: 'ceiling', ended: 'without_an_answer' }) }))
     expect(ledger.settledUsd).toBeCloseTo(0.3)
+    // The record keeps the call: it returned no page, so nothing was made of one, and it is not the answer.
+    expect(cut.result.trace.find((event) => event.event === 'paid_calls')?.detail?.calls).toEqual([expect.objectContaining({ provider: 'steel', chargedUsd: 0.3, outcome: null, reason: null, answer: false })])
   })
 
   it('does not retry after a handoff when the retry\'s ceiling does not fit the budget', async () => {

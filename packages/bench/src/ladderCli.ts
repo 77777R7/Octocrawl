@@ -25,7 +25,7 @@
 
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
+import type { EvidenceAccessGrant, ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
 import {
   CONTENTFUL_STATUS,
   describeEgressProxy,
@@ -40,7 +40,7 @@ import {
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import { readFileSync } from 'node:fs'
-import { accessGrantFromText, createSpendLedger, tariffCeilingUsd } from '@w2l/http-core'
+import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, VENDOR_CAPABILITY_ACCESS } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
 import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
@@ -152,6 +152,8 @@ export function buildChannels(
      * session and the most bytes one call may take. A provider without one is not called.
      */
     vendorTariffs?: Readonly<Record<string, import('@w2l/http-core').VendorTariff>>
+    /** The access grant the provider rungs are called under, as their paid calls' record names it (accessGrantRef). */
+    vendorGrant?: EvidenceAccessGrant
     /** Test seam: override the local http/browser subjects entirely, so a
      *  composition test can drive the ladder without real network. */
     localSubjects?: {
@@ -513,8 +515,12 @@ export function buildChannels(
       },
     }
     // Under a tariff a call holds its session for at most maxSessionMs; the price ceiling is the tariff's.
+    // What the record says each session was created with: the remote browser, and what the policy let the provider turn on.
+    const grantCapabilities = [...new Set(['vendor_remote_browser', ...ops.decision.enabled.flatMap((c) => VENDOR_CAPABILITY_ACCESS[c.capability] ?? [])])]
     return {
       ...raw,
+      grantCapabilities,
+      ...(opts.vendorGrant === undefined ? {} : { grant: opts.vendorGrant }),
       priceCeilingUsd: tariff === null ? null : tariffCeilingUsd(tariff, sessionFloorMs),
       fetch: async (url, session, execution, options) => {
         if (tariff === null || tariff.maxSessionMs === null) return raw.fetch(url, session, execution, options)
@@ -634,6 +640,7 @@ export async function runLadder(args: Args): Promise<number> {
     vendorPolicy,
     // The grant's tariffs give each provider its price ceiling (ROADMAP PA item 4): one without is not called.
     vendorTariffs: grant?.tariffs ?? {},
+    ...(grant === null ? {} : { vendorGrant: accessGrantRef(grant) }),
     browserEngine: browserEngineChoice(process.env, grant, false),
     networkPolicy,
     fileStore,

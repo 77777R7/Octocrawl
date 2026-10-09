@@ -19,7 +19,9 @@
  * Pure, zero dependencies, like the rest of http-core.
  */
 
+import type { EvidenceAccessGrant } from '@w2l/contracts'
 import type { AccessAttestationInput } from './access.js'
+import { sha256Utf8 } from './hash.js'
 import { AUTHORIZABLE, evaluateAccessCapability, type AuthorizableCapability } from './vendor.js'
 
 export const ACCESS_TIERS = ['standard', 'enhanced', 'my_browser'] as const
@@ -38,6 +40,16 @@ export interface AccessGrant {
    * (ROADMAP PA item 4): a provider without one is not called. Empty: none.
    */
   tariffs: Readonly<Record<string, VendorTariff>>
+  /**
+   * SHA-256 of the grant's text as it was read (accessGrantFromText), so a record names the grant its paid calls were
+   * made under without copying it: `shasum -a 256 grant.json` gives the same digest. Absent on a grant built in code.
+   */
+  sha256?: string
+}
+
+/** What a record says of the grant a paid call was made under (ROADMAP PA item 4): its digest, tier and attestation time. */
+export function accessGrantRef(grant: AccessGrant): EvidenceAccessGrant {
+  return { sha256: grant.sha256 ?? null, tier: grant.tier, attestedAt: grant.attestation?.at ?? null }
 }
 
 /**
@@ -249,5 +261,5 @@ export function accessGrantFromText(text: string): AccessGrant {
   if (result.grant.scope.hosts !== null) {
     throw new Error('access grant refused: scope.hosts is not enforced yet, so a grant that names hosts would reach every host; leave scope out')
   }
-  return result.grant
+  return { ...result.grant, sha256: sha256Utf8(text) }
 }

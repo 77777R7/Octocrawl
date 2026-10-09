@@ -215,6 +215,9 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
     // Two calls at their $2.50 ceiling fill the $5 run budget: the third page is not fetched.
     expect(report).toMatchObject({ budgetExceeded: 'cost' })
     expect(calls).toBe(2)
+    // Each page whose call threw keeps that call on its record: charged at its ceiling, no page from it.
+    const items = (await engine.getBatchItems(batch.taskId ?? batch.id, { limit: 10 }))!.items.filter((item) => item.evidenceRecord?.access?.paidCalls != null)
+    expect(items.map((item) => item.evidenceRecord!.access!.paidCalls)).toEqual([0, 1].map(() => [expect.objectContaining({ provider: 'fake', chargedUsd: 2.5, ceilingUsd: 2.5, outcome: null, reason: null, answer: false })]))
     // An append runs the batch again: its ledger opens with what the earlier run was charged, so no call fits.
     const id = batch.taskId ?? batch.id
     expect((await post('/v1/batches', { appendToId: id, urls: [`${origin}/chrome?d`] })).status).toBeLessThan(300)
