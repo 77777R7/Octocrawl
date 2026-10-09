@@ -1,4 +1,5 @@
 import { whenVisible } from './motion'
+import { PET, petMood, rollAngle, startles } from './octopusPet'
 
 /* A small sea around the Get started heading, drawn in glyphs on the character grid, with an octopus living in it.
  *
@@ -12,8 +13,12 @@ import { whenVisible } from './motion'
  * (octopuses change colour), waving an arm (hi!), peeking at the heading (?), blowing bubbles, and reading a page: a little page floats down, it swims to it and holds it, reads, and the page breaks up into
  * Markdown (# - * >) that drifts away, which is what Octocrawl does. Now and then a fish (><>) comes by and the
  * octopus watches it: it may give chase until the fish darts off, the fish may come over to touch the arm it holds out
- * (<3, waking it if it sleeps), or swim once round it, or just pass and be waved at. Come too close with the pointer and it squirts ink
- * and flees; click the water and it comes to look. It never swims over the words: to cross, it rises above them.
+ * (<3, waking it if it sleeps), or swim once round it, or just pass and be waved at. Come at it fast with the pointer
+ * and it squirts ink and flees; come slowly and it only watches. Touch it (a click or a tap on its body) and it is
+ * glad: ^ ^, a heart, and it puffs up for a moment; the third touch in a row turns it a somersault, and seven in ten
+ * seconds are too many: a flat look, and it fades into the water for a while. Keep a finger on it and it is tickled
+ * (x x), bubbles streaming up. Click the water and it comes to look. It never swims over the words: to cross, it
+ * rises above them.
  *
  * Everything sits on a grid, so everything moves a cell at a time. It runs only while on screen and the visitor
  * allows motion; otherwise one still frame shows it resting. */
@@ -53,7 +58,8 @@ type FishMode = 'pass' | 'flee' | 'visit' | 'circle' | 'meet' | 'orbit'
 type Fish = { x: number, y: number, dir: number, face: number, side: number, speed: number, seed: number, big: boolean, mode: FishMode, at: number, angle: number, swept: number, waved: boolean }
 type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet'
 type Page = { x: number, y: number, stop: number, held: boolean, readAt: number }
-type Pose = { t: number, moving: number, trail: number, stretch: number, heading: number, curl: number, droop: number, wave: boolean, hold: boolean, reach: number }
+// `puff` is how swollen with pleasure it is (0 to 1), `roll` how far round a somersault it has turned.
+type Pose = { t: number, moving: number, trail: number, stretch: number, heading: number, curl: number, droop: number, wave: boolean, hold: boolean, reach: number, puff: number, roll: number }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const rad = (d: number) => d * Math.PI / 180
@@ -134,8 +140,12 @@ export function mountOctopusSwim(head: HTMLElement): void {
   let last = 0
   let raf = 0
   let lastStroke = -1
-  // Where the pointer is, when it last moved, and until when a click has made the octopus curious rather than shy.
-  const pointer = { x: -1e4, y: -1e4, at: -1e9, calm: 0 }
+  // Where the pointer is, when it last moved, how fast it has been moving (css px per second), and until when a
+  // click or a touch has made the octopus calm rather than shy.
+  const pointer = { x: -1e4, y: -1e4, at: -1e9, speed: 0, calm: 0 }
+  // Being touched: when each touch landed, when a finger came down on it and whether it is still there, how puffed
+  // up it is, and when a somersault began (0 for none).
+  const pet = { times: [] as number[], down: 0, held: false, puff: 0, rolledAt: 0 }
   const sea = new Map<number, Cell>()
   // The octopus's cells: how much of each it covers, over a box around it.
   let cover = new Float32Array(0)
@@ -287,15 +297,39 @@ export function mountOctopusSwim(head: HTMLElement): void {
   // Near enough the words to pass behind them (and not seem stuck to their ends).
   const behindWords = (x: number, y: number) => x > text.l - 20 && x < text.r + 20 && y > text.t - 8 && y < text.b + 8
 
+  /** A touch on its body. It is glad of it and stops for it, unless it is busy with a page or a fish; the third in a
+   * run turns it a somersault; too many, and it has had enough. */
+  const stroked = (now: number) => {
+    pet.times = pet.times.filter(at => now - at < PET.fedUpMs)
+    pet.times.push(now)
+    pointer.calm = now + PET.calmMs
+    const mood = petMood(pet.times, now)
+    if (mood === 'fedUp') {
+      pet.times.length = 0
+      pet.held = false
+      feel('-', now, 2800)
+      say(octo.x + 1.6 * R, octo.y - 1.8 * R, '...', now, 1.6)
+      begin('camo', now)
+      return
+    }
+    if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
+    if (act.kind === 'rest' || act.kind === 'bubbles') act.until = Math.max(act.until, now + 2600)
+    else if (act.kind !== 'read' && act.kind !== 'meet') begin('rest', now)
+    pet.puff = 1
+    feel('^', now, 1600)
+    say(octo.x + 1.4 * R, octo.y - 1.9 * R, '<3', now, 1.8)
+    if (mood === 'roll') { pet.rolledAt = now; say(octo.x - 2 * R, octo.y - 1.9 * R, '!', now, 1.2) }
+  }
+
   function step(now: number) {
     const t = (now - start) / 1000
     const dt = last ? Math.min(0.05, (now - last) / 1000) : 0
     last = now
 
-    // The pointer: watched from afar; moving up close it startles, squirts ink and flees. A still one, or the spot
-    // it was called to, does not frighten it.
+    // The pointer: watched from afar; coming up fast it startles, squirts ink and flees. A slow or still one, the
+    // spot it was called to, or one that has just touched it, does not frighten it.
     const pd = Math.hypot(pointer.x - octo.x, pointer.y - (octo.y + R))
-    if (pd < 2.6 * R + 20 && octo.flee <= 0 && now - pointer.at < 300 && now > pointer.calm) {
+    if (pd < 2.6 * R + 20 && octo.flee <= 0 && now - pointer.at < 300 && startles(pointer.speed) && now > pointer.calm) {
       if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
       squirt(now)
       feel('O', now, 900)
@@ -453,6 +487,16 @@ export function mountOctopusSwim(head: HTMLElement): void {
         }
       }
     }
+    // Touched: it puffs up and settles again, and a somersault ends. Held, it is tickled: it squints, bubbles stream
+    // up, and it stays put while the finger does.
+    pet.puff = Math.max(0, pet.puff - dt * 1.6)
+    if (pet.rolledAt && now - pet.rolledAt > PET.rollMs) pet.rolledAt = 0
+    if (pet.held && now - pet.down > PET.holdMs) {
+      feel('x', now, 150)
+      pointer.calm = now + PET.calmMs
+      if (!page?.held) act.until = Math.max(act.until, now + 600)
+      if (Math.floor(t * 6) !== Math.floor((t - dt) * 6)) bubbles.push({ x: octo.x + (Math.random() - 0.5) * 2 * R, y: octo.y - 1.2 * R, vx: 0, vy: -30 - Math.random() * 20, born: now, life: 2.2, glyph: Math.random() < 0.3 ? 'O' : 'o', alpha: 0.5 })
+    }
     if (now > act.until && !page?.held) choose(now)
 
     // Where to swim: the target, by way of the water above the words when they stand between.
@@ -529,23 +573,27 @@ export function mountOctopusSwim(head: HTMLElement): void {
       const i = (r - box.r0) * box.cols + (c - box.c0)
       if (c >= box.c0 && r >= box.r0 && c < box.c0 + box.cols && r < box.r0 + box.rows && cover[i]! < v) cover[i] = v
     }
-    // The head: round, or stretched along its way as it jets.
-    const along = R * pose.stretch
-    const across = R * 1.04 / pose.stretch
+    // The head: round, or stretched along its way as it jets, and a little swollen when touched.
+    const swell = 1 + 0.2 * pose.puff
+    const along = R * pose.stretch * swell
+    const across = R * 1.04 / pose.stretch * swell
     const cos = Math.cos(pose.heading)
     const sin = Math.sin(pose.heading)
-    for (let r = Math.floor((octo.y - R * 1.3) / CH); r <= (octo.y + R * 1.3) / CH; r++) {
-      for (let c = Math.floor((octo.x - R * 1.3) / CW); c <= (octo.x + R * 1.3) / CW; c++) {
+    for (let r = Math.floor((octo.y - R * 1.45) / CH); r <= (octo.y + R * 1.45) / CH; r++) {
+      for (let c = Math.floor((octo.x - R * 1.45) / CW); c <= (octo.x + R * 1.45) / CW; c++) {
         const x = c * CW - octo.x
         const y = r * CH - octo.y
         const d = (Math.hypot((x * cos + y * sin) / along, (y * cos - x * sin) / across) - 1) * R
         mark(c, r, clamp(0.5 - d / 2.5, 0, 1))
       }
     }
+    // Turning a somersault, the arms go round with it.
+    const rc = Math.cos(pose.roll)
+    const rs = Math.sin(pose.roll)
     for (const points of armPoints(pose, R)) {
       for (let k = 0; k < points.length; k += 3) {
-        const X = octo.x + points[k]!
-        const Y = octo.y + points[k + 1]!
+        const X = octo.x + points[k]! * rc - points[k + 1]! * rs
+        const Y = octo.y + points[k]! * rs + points[k + 1]! * rc
         const rr = points[k + 2]!
         for (let r = Math.floor((Y - rr - 3) / CH); r <= (Y + rr + 3) / CH; r++) {
           for (let c = Math.floor((X - rr - 3) / CW); c <= (X + rr + 3) / CW; c++) {
@@ -559,6 +607,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
     if (c < box.c0 || r < box.r0 || c >= box.c0 + box.cols || r >= box.r0 + box.rows) return 0
     return cover[(r - box.r0) * box.cols + (c - box.c0)]!
   }
+  /** Whether a point (css px from the head's corner) is on the octopus, as last drawn. */
+  const onBody = (x: number, y: number) => covered(Math.round(x / CW), Math.round(y / CH)) > 0.3
 
   function render(now: number, still = false) {
     const t = still ? 1.4 : (now - start) / 1000
@@ -583,6 +633,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
       wave: !still && act.kind === 'wave',
       hold: !still && !!page?.held,
       reach: !still && fish?.mode === 'meet' ? fish.side : 0,
+      puff: still ? 0 : pet.puff,
+      roll: !still && pet.rolledAt ? rollAngle(now - pet.rolledAt) : 0,
     }
     shape(pose)
 
@@ -642,7 +694,9 @@ export function mountOctopusSwim(head: HTMLElement): void {
 
     // The octopus: dense glyphs inside, lighter at the edge, its underside darker, its crown lit, and now and then a
     // wave of colour passing over it, as over a real one.
-    const eyes = [-1, 1].map(s => [Math.round((octo.x + s * 0.36 * R) / CW), Math.round((octo.y + 0.5 * R) / CH)] as const)
+    const rc = Math.cos(pose.roll)
+    const rs = Math.sin(pose.roll)
+    const eyes = [-1, 1].map(s => [Math.round((octo.x + s * 0.36 * R * rc - 0.5 * R * rs) / CW), Math.round((octo.y + s * 0.36 * R * rs + 0.5 * R * rc) / CH)] as const)
     const inEye = (c: number, r: number) => eyes.some(([ec, er]) => Math.abs(c - ec) <= 1 && r >= er - 1 && r <= er)
     const body = mix(ORANGE, SEA, hide * 0.9)
     const under = mix(RUST, SEA, hide * 0.9)
@@ -693,22 +747,41 @@ export function mountOctopusSwim(head: HTMLElement): void {
   new ResizeObserver(() => { layout(); if (reduced.matches) still() }).observe(head)
   head.addEventListener('pointermove', (event) => {
     const rect = head.getBoundingClientRect()
-    pointer.x = event.clientX - rect.left
-    pointer.y = event.clientY - rect.top
-    pointer.at = performance.now()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    const now = performance.now()
+    const dt = now - pointer.at
+    // Its speed, smoothed over the last few moves; a pointer that has just arrived has none.
+    pointer.speed = pointer.x > -1e3 && dt > 0 && dt < 200 ? pointer.speed * 0.6 + (Math.hypot(x - pointer.x, y - pointer.y) / dt) * 400 : 0
+    pointer.x = x
+    pointer.y = y
+    pointer.at = now
+    head.style.cursor = !reduced.matches && onBody(x, y) ? 'pointer' : ''
   })
-  head.addEventListener('pointerleave', () => { pointer.x = pointer.y = -1e4 })
-  // A click in the water: it comes to look.
+  const release = () => {
+    if (!pet.held) return
+    pet.held = false
+    if (performance.now() - pet.down > PET.holdMs) feel('^', performance.now(), 1000)
+  }
+  head.addEventListener('pointerleave', () => { pointer.x = pointer.y = -1e4; pointer.speed = 0; head.style.cursor = ''; release() })
+  head.addEventListener('pointerup', release)
+  head.addEventListener('pointercancel', release)
+  // A touch on the octopus; or a click in the water, and it comes to look. Only the main button, or a finger: a
+  // context menu would swallow the release.
   head.addEventListener('pointerdown', (event) => {
-    if (reduced.matches) return
+    if (reduced.matches || event.button !== 0) return
+    const now = performance.now()
     const rect = head.getBoundingClientRect()
-    const [x, y] = fit(event.clientX - rect.left, event.clientY - rect.top - R)
+    const px = event.clientX - rect.left
+    const py = event.clientY - rect.top
+    if (onBody(px, py)) { pet.down = now; pet.held = true; stroked(now); return }
+    const [x, y] = fit(px, py - R)
     if (overText(x, y) || (sides && !canCross() && side(x) !== side(octo.x))) return
-    begin('wander', performance.now())
+    begin('wander', now)
     octo.tx = x
     octo.ty = y
     octo.eager = true
-    pointer.calm = performance.now() + 4000
+    pointer.calm = now + 4000
   })
   layout()
   start = performance.now()
