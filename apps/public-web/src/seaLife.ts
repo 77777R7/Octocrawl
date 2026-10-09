@@ -1,7 +1,8 @@
 /* The sea's other creatures (octopusSwim.ts), the parts of them that can be kept pure and tested: a crab on the
  * floor that raises its claws when the octopus comes low near it (and is given a wide berth: it is the site's
- * robots.txt), and a shoal of fish the octopus maps when one passes: dotted lines run from its arm to each fish, and
- * it reads them one by one, which is what a crawl does. */
+ * robots.txt), a shoal of fish the octopus maps when one passes: dotted lines run from its arm to each fish, and
+ * it reads them one by one, which is what a crawl does; a jellyfish, a page that needs a browser, which the octopus
+ * can read only once it has rendered; and a ray, which is only scenery. */
 
 export const SHOAL = {
   /** How many fish make a shoal. */
@@ -56,4 +57,64 @@ export function readState(age: number, n: number): ReadState {
   const index = since >= 0 ? Math.floor(since / SHOAL.readEveryMs) : -1
   const flashing = index >= 0 && index < n && since - index * SHOAL.readEveryMs < SHOAL.readMs
   return { linking: age < end, reading: flashing ? index : -1, done: age >= end + SHOAL.restMs }
+}
+
+/** A jellyfish: a page that needs a browser to render. It rises slowly through the water, its bell opening and
+ * closing; the octopus that stops for it waits a couple of pulses for the page to render, then gets structured data
+ * ({ }) from it. */
+export const JELLY = {
+  /** One pulse, ms: the bell opens over the first part and closes over the rest. */
+  pulseMs: 2400,
+  /** How fast it rises (css px per second), and how long after one has gone the next comes. */
+  rise: 9,
+  everyMs: [45000, 75000] as const,
+  /** The pulses the octopus waits through, and how long the { } takes to reach it. */
+  waitPulses: 2,
+  giveMs: 1400,
+} as const
+
+/** How open the bell is `age` ms into the jellyfish's life, 0 (closed) to 1 (open): a quick opening, a slower close. */
+export function jellyOpen(age: number): number {
+  const f = (((age % JELLY.pulseMs) + JELLY.pulseMs) % JELLY.pulseMs) / JELLY.pulseMs
+  return f < 0.3 ? Math.sin((f / 0.3) * Math.PI / 2) : Math.cos(((f - 0.3) / 0.7) * Math.PI / 2)
+}
+
+/** The jellyfish's rows, top down, for how open its bell is and which way its tentacles hang (`sway` 0 or 1). Each
+ * row is drawn centred on the same column. */
+export function jellyRows(open: number, sway: number): string[] {
+  const bell = open > 0.66 ? ['.-~~-.', '(      )'] : open > 0.33 ? ['.-~-.', '(    )'] : ['.-.', '(  )']
+  return [...bell, sway ? '; | ;' : '| ; |', sway ? ' ; | ' : ' | ; ']
+}
+
+/** Where the octopus's wait for a jellyfish's page is, `age` ms after it stopped for it: still rendering, the { }
+ * on its way (0 to 1), and whether it is done. */
+export function renderState(age: number): { rendering: boolean, give: number, done: boolean } {
+  const wait = JELLY.waitPulses * JELLY.pulseMs
+  return { rendering: age < wait, give: age < wait ? 0 : Math.min(1, (age - wait) / JELLY.giveMs), done: age >= wait + JELLY.giveMs }
+}
+
+/** A ray: big, slow and faint, gliding through the water above the words now and then, its wings rising and
+ * falling. Only scenery: it goes its way and nothing reacts to it. */
+export const RAY = {
+  /** Its speed (css px per second), how long after one has gone the next comes, and one wingbeat (ms). */
+  speed: 22,
+  everyMs: [70000, 120000] as const,
+  beatMs: 3200,
+} as const
+
+const RAY_WIDTH = 15
+// Facing left: wings spread, half way, folded.
+const RAY_FRAMES = [
+  ['   .-.', " .'   '-._", '<  ° °    >---~', " '.   _.-'", "   '-'"],
+  ['', " .'''''-._", '<  ° °    >---~', " '.....-'", ''],
+  ['', '  .----._', '<  ° °    >---~', "  '----'", ''],
+].map(rows => rows.map(row => row.padEnd(RAY_WIDTH)))
+const MIRROR: Record<string, string> = { '<': '>', '>': '<', '/': '\\', '\\': '/', '(': ')', ')': '(' }
+
+/** The ray's rows, top down, facing `dir` (1 right, -1 left) at wingbeat phase `beat` (0 to 1): wings spread, half
+ * way, folded, half way. Every row is the same width, so the ray holds its cells; its nose leads, its tail trails. */
+export function rayRows(dir: number, beat: number): string[] {
+  const f = ((beat % 1) + 1) % 1
+  const frame = RAY_FRAMES[f < 0.25 ? 0 : f < 0.5 ? 1 : f < 0.75 ? 2 : 1]!
+  return dir > 0 ? frame.map(row => [...row].reverse().map(g => MIRROR[g] ?? g).join('')) : frame
 }
