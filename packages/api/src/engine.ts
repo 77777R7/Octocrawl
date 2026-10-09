@@ -1226,7 +1226,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /**
    * One page read in the person's Chrome on a site they allowed (`allowed`), without a click of theirs; a check it
    * shows waits for them. The page, or why it was not read: revoked, its tab closed or the caller gone (`cancelled`),
-   * the check it still showed (`blocked`), or the wait over (`timeout`).
+   * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), or the wait over (`timeout`).
    */
   async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
     try {
