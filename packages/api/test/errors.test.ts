@@ -39,18 +39,22 @@ describe('REST error codes', () => {
     expect(await call(createApp(engine, { token: 'secret' }), '/v1/crawl/missing')).toEqual({ status: 401, body: { error: 'unauthorized', code: 'unauthorized' } })
   })
 
-  it('keeps the cause of a 500 out of the response unless the server is local', async () => {
+  it('keeps the cause of a 500 out of the response unless the server is local, and logs it either way', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       expect(await call(createApp(engine), '/v1/scrape', post({ url }))).toEqual({ status: 500, body: { error: 'internal error', code: 'internal_error' } })
       expect(log).toHaveBeenCalledOnce()
       expect(String(log.mock.calls[0]?.[0])).toContain('SQLITE_IOERR')
+      // A local server answers with the cause and still logs it: a client that keeps no error body (a batch runner)
+      // leaves the log as the only record (the PA 4 Steel runs' 500s at about 32 s left none).
+      expect(await call(createApp(engine, { exposeInternalErrors: true }), '/v1/scrape', post({ url }))).toEqual({
+        status: 500, body: { error: 'SQLITE_IOERR: disk I/O error in /Users/someone/.w2l/api/checkpoint.sqlite', code: 'internal_error' },
+      })
+      expect(log).toHaveBeenCalledTimes(2)
+      expect(String(log.mock.calls[1]?.[0])).toContain('SQLITE_IOERR')
     } finally {
       log.mockRestore()
     }
-    expect(await call(createApp(engine, { exposeInternalErrors: true }), '/v1/scrape', post({ url }))).toEqual({
-      status: 500, body: { error: 'SQLITE_IOERR: disk I/O error in /Users/someone/.w2l/api/checkpoint.sqlite', code: 'internal_error' },
-    })
   })
 
   it('puts the same codes in the Firecrawl envelope under /fc', async () => {
