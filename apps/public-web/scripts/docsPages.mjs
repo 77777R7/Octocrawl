@@ -4,6 +4,7 @@
 export const pages = [
   { slug: '', file: 'introduction.md', title: 'Introduction', description: 'Try Octocrawl with one public URL and learn what a verified result looks like.', updated: '2026-10-09', group: 'Get started' },
   { slug: 'connect-mcp', file: 'connect-mcp.md', title: 'Connect MCP', description: 'Connect Claude Code, Cursor, OpenCode or Codex to hosted Octocrawl with one URL, no key to start; or run it on your computer with npx.', updated: '2026-10-09', group: 'Get started' },
+  { slug: 'guides/claude-code-web-access', file: 'claude-code-web-access.md', title: 'Give Claude Code web access', description: 'Add Octocrawl to Claude Code in one command, so it can map a site and read pages with their source, no account needed.', updated: '2026-10-09', group: 'Guides' },
   { slug: 'guides/extract-page', file: 'extract-page.md', title: 'Extract a public page', description: 'Get readable Markdown, a final URL, status, and elapsed time from a public web page.', updated: '2026-10-08', group: 'Guides' },
   { slug: 'guides/map-site', file: 'map-site.md', title: 'Map a site', description: "List a site's URLs from its links and sitemaps in seconds, each with where it was found, without reading every page.", updated: '2026-10-09', group: 'Guides' },
   { slug: 'guides/own-chrome', file: 'own-chrome.md', title: 'Use your own Chrome', description: 'Read pages signed in as you in the Chrome you already use, get through a check yourself, or save a login, on your own computer.', updated: '2026-10-09', group: 'Guides' },
