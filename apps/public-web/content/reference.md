@@ -4,7 +4,7 @@ Use the browser preview or [Connect MCP](/docs/connect-mcp/) for a first result.
 
 ## REST and SDK
 
-The API (`npx octocrawl serve`, on `127.0.0.1:8787`) has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The TypeScript SDK is published as `@octocrawl/sdk` and the Python client as `octocrawl-client` (0.3.1, 2026-10-06); each takes the API's base URL and an optional token.
+The API (`npx octocrawl serve`, on `127.0.0.1:8787`) has `POST /v1/scrape` for one URL, `POST /v1/batches` for an explicit URL array, and `GET /v1/batches/:id/items?limit=...&cursor=...` for paginated outcomes. Monitor and Delivery have separate REST resources. The TypeScript SDK is published as `@octocrawl/sdk` and the Python client as `octocrawl-client` (0.3.2, 2026-10-09); each takes the API's base URL and an optional token.
 
 A server started with tokens (`--token`, which can be repeated, or `W2L_API_TOKEN` and the comma-separated `W2L_API_TOKENS`) accepts a request only with `Authorization: Bearer <token>` naming one of them. Give each client its own token; restarting the server without a token revokes it. Tokens are compared as fixed-length SHA-256 digests in constant time. The SDK sends its `token` option, or `W2L_API_TOKEN` from the environment when no `token` is passed.
 
