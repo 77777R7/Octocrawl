@@ -1,5 +1,6 @@
 import { whenVisible } from './motion'
-import { PET, petMood, rollAngle, startles } from './octopusPet'
+import { offersPlay, PET, petMood, rollAngle } from './octopusPet'
+import { crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, RAY, rayRows, readState, renderState, SHOAL, shoalSlots } from './seaLife'
 
 /* A small sea around the Get started heading, drawn in glyphs on the character grid, with an octopus living in it.
  *
@@ -13,12 +14,23 @@ import { PET, petMood, rollAngle, startles } from './octopusPet'
  * (octopuses change colour), waving an arm (hi!), peeking at the heading (?), blowing bubbles, and reading a page: a little page floats down, it swims to it and holds it, reads, and the page breaks up into
  * Markdown (# - * >) that drifts away, which is what Octocrawl does. Now and then a fish (><>) comes by and the
  * octopus watches it: it may give chase until the fish darts off, the fish may come over to touch the arm it holds out
- * (<3, waking it if it sleeps), or swim once round it, or just pass and be waved at. Come at it fast with the pointer
- * and it squirts ink and flees; come slowly and it only watches. Touch it (a click or a tap on its body) and it is
- * glad: ^ ^, a heart, and it puffs up for a moment; the third touch in a row turns it a somersault, and seven in ten
- * seconds are too many: a flat look, and it fades into the water for a while. Keep a finger on it and it is tickled
- * (x x), bubbles streaming up. Click the water and it comes to look. It never swims over the words: to cross, it
+ * (<3, waking it if it sleeps), or swim once round it, or just pass and be waved at. The pointer passing over it
+ * does nothing: only a click or a tap does. Touch it (on its body) and it is glad: ^ ^, a heart, and it puffs up for
+ * a moment (busy with a page or fish, it carries on); the third touch in a row turns it a somersault, and seven in
+ * ten seconds are too many: a flat look, a puff of ink, and it fades into the water for a while. Keep a finger on it and it is tickled
+ * (x x), bubbles streaming up; the fifth touch in ten seconds and it holds out a ▶, which opens the octopus game
+ * (`octopus:play` on the head; main.ts opens it). Click the water and it comes to look. It never swims over the words: to cross, it
  * rises above them.
+ *
+ * Two more live in the sea when there is water beside the words (seaLife.ts). A crab (\/) walks the floor; come low
+ * near it and it raises its claws, \(\/)/, and the octopus gives it a wide berth: it is the site's robots.txt. Now
+ * and then a shoal of fish swims through in a chevron, and the octopus, if it is free, maps it: it keeps still and
+ * reaches out, dotted lines run from its arm to each fish, and it reads them one by one (each flashes #), which is
+ * what a crawl does; then the shoal swims on. Now and then a jellyfish rises from the floor beside the words, its
+ * bell opening and closing: a page that needs a browser. The octopus, if it is free, stops for it and waits out its
+ * render (· moving in the bell), and then { } comes to it from the jellyfish. And far off, now and then, a ray glides
+ * through the water above the words, faint and slow: only scenery. Swimming, it leaves a wake in the glyph cloud behind (glyphRipple.ts),
+ * and the cloud's weather softens while it does something that draws the eye (waving, blowing bubbles, a fish, a shoal or a jellyfish).
  *
  * Everything sits on a grid, so everything moves a cell at a time. It runs only while on screen and the visitor
  * allows motion; otherwise one still frame shows it resting. */
@@ -56,10 +68,20 @@ type FishMode = 'pass' | 'flee' | 'visit' | 'circle' | 'meet' | 'orbit'
 // A fish by its nose; `dir` is the way it is going, `face` the way it faces, `side` the octopus's side it visits,
 // `at` when it set off or arrived.
 type Fish = { x: number, y: number, dir: number, face: number, side: number, speed: number, seed: number, big: boolean, mode: FishMode, at: number, angle: number, swept: number, waved: boolean }
-type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet'
+type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet' | 'map' | 'render'
+// A jellyfish by the middle of its bell's top: when it came, whether it is drifting, being read (since `at`, on the
+// octopus's `side`) or done with, and a seed for its sway.
+type Jelly = { x: number, y: number, born: number, seed: number, mode: 'drift' | 'read' | 'done', at: number, side: number }
+// A ray by its top-left cell, the way it goes and when it came.
+type Ray = { x: number, y: number, dir: number, born: number }
+// A shoal by its leader's nose: the way it goes, how many, whether it is passing, being mapped or done with (read, or
+// left off: either way not mapped again), and, once mapped, when that began and the octopus's side it is on.
+// `want`: whether the octopus will stop for it at all (not every shoal interests it).
+type Shoal = { x: number, y: number, dir: number, speed: number, n: number, seed: number, mode: 'pass' | 'mapped' | 'done', at: number, side: number, want: boolean }
 type Page = { x: number, y: number, stop: number, held: boolean, readAt: number }
 // `puff` is how swollen with pleasure it is (0 to 1), `roll` how far round a somersault it has turned.
-type Pose = { t: number, moving: number, trail: number, stretch: number, heading: number, curl: number, droop: number, wave: boolean, hold: boolean, reach: number, puff: number, roll: number }
+// `reach` is the side whose middle arm reaches out (0 for neither) and `reachBy` how far it has, 0 to 1.
+type Pose = { t: number, moving: number, trail: number, stretch: number, heading: number, curl: number, droop: number, wave: boolean, hold: boolean, reach: number, reachBy: number, puff: number, roll: number }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const rad = (d: number) => d * Math.PI / 180
@@ -77,8 +99,13 @@ function armPoints(pose: Pose, R: number): number[][] {
       if (pose.wave && side > 0 && n === 0) { base = rad(-104) + Math.sin(pose.t * 8) * 0.42; curl = 0.35 }
       // Holding a page: the lower arms come in under it and curl round it.
       if (pose.hold && n === 2) { base = side > 0 ? rad(100) : Math.PI - rad(100); curl = 1.25 }
-      // Greeting a fish: the middle arm on its side reaches out to it.
-      if (pose.reach === side && n === 1) { base = side > 0 ? rad(4) : Math.PI - rad(4); curl = 0.25 }
+      // Greeting a fish, or reading a shoal or a jellyfish: the middle arm on its side reaches out to it, uncurling
+      // over a moment rather than all at once.
+      if (pose.reach === side && n === 1) {
+        const k = pose.reachBy * pose.reachBy * (3 - 2 * pose.reachBy)
+        base += ((side > 0 ? rad(4) : Math.PI - rad(4)) - base) * k
+        curl += (0.25 - curl) * k
+      }
       // Swimming, the arms swing round to trail behind, by way of underneath: measured from straight up, clockwise
       // for the right arms and anticlockwise for the left, so that none sweeps over the head.
       const fromUp = (angle: number) => ((side * (angle + Math.PI / 2) + 0.3) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - 0.3
@@ -126,13 +153,24 @@ export function mountOctopusSwim(head: HTMLElement): void {
   let text = { l: 0, t: 0, r: 0, b: 0 }
   let sides = true
   // The octopus by its head's centre.
-  const octo = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, flee: 0, gaze: 0, look: 0, eager: false }
+  const octo = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, gaze: 0, look: 0, eager: false }
+  // Its middle arm reaching out: to which side, and how far (eased, 0 to 1).
+  const reaching = { side: 0, by: 0 }
   // What it is doing, since when, until when, and when it got where it was going (0 until then).
   const act = { kind: 'rest' as Kind, since: 0, until: 0, at: 0 }
   const face = { eye: 'o', until: 0 }
   let page: Page | null = null
   let fish: Fish | null = null
   let nextFish = 0
+  let shoal: Shoal | null = null
+  let nextShoal = 0
+  let jelly: Jelly | null = null
+  let nextJelly = 0
+  let ray: Ray | null = null
+  let nextRay = 0
+  // The crab: where it is on the floor, the stretch it walks (none when lo >= hi), the way it goes, when it next
+  // steps, since when its claws are up (0 for down), and when it last sent the octopus off.
+  const crab = { x: 0, lo: 0, hi: 0, side: 0, dir: 1, next: 0, alarm: 0, warned: 0 }
   const bubbles: Particle[] = []
   const ink: Particle[] = []
   const plankton: Array<{ x: number, y: number, ox: number, oy: number, seed: number }> = []
@@ -140,12 +178,12 @@ export function mountOctopusSwim(head: HTMLElement): void {
   let last = 0
   let raf = 0
   let lastStroke = -1
-  // Where the pointer is, when it last moved, how fast it has been moving (css px per second), and until when a
-  // click or a touch has made the octopus calm rather than shy.
-  const pointer = { x: -1e4, y: -1e4, at: -1e9, speed: 0, calm: 0 }
+  let lastWake = 0
   // Being touched: when each touch landed, when a finger came down on it and whether it is still there, how puffed
   // up it is, and when a somersault began (0 for none).
   const pet = { times: [] as number[], down: 0, held: false, puff: 0, rolledAt: 0 }
+  // The ▶ it holds out to offer a game, until when, or null.
+  let play: { x: number, y: number, until: number } | null = null
   const sea = new Map<number, Cell>()
   // The octopus's cells: how much of each it covers, over a box around it.
   let cover = new Float32Array(0)
@@ -175,6 +213,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
     return [clamp(x, e.l * 0.85, width - e.r * 0.85), clamp(y, e.t + 2, height - e.b)]
   }
 
+  /** The floor's row, where the crab walks and the kelp stands. */
+  const floor = () => height - LINE
+  /** Whether the octopus's arms, at this spot, would come low near the crab. */
+  const nearCrab = (x: number, y: number) => crab.hi > crab.lo && crabAlarmed(crab.x, floor(), x, y + reach().b, R)
+
   /** Where it starts: beside the words, or above them when there is no water beside them. */
   const home = (): [number, number] => sides ? [text.l / 2, Math.max(reach().t + 2, (text.t + text.b) / 2 - R)] : [reach().l + 4, reach().t + 2]
 
@@ -184,7 +227,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     for (let i = 0; i < 60; i++) {
       const x = e.l + Math.random() * Math.max(1, width - e.l - e.r)
       const y = e.t + 2 + Math.random() * Math.max(1, (sides ? height : text.t) - e.t - e.b - 4)
-      if (overText(x, y)) continue
+      if (overText(x, y) || nearCrab(x, y)) continue
       if (sides && !canCross() && side(x) !== side(octo.x)) continue
       return [x, y]
     }
@@ -224,6 +267,17 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     plankton.length = 0
     for (let i = 0; i < Math.round(width * height / 26000); i++) plankton.push({ x: Math.random() * width, y: Math.random() * height, ox: 0, oy: 0, seed: Math.random() * 10 })
+    // The crab's walk: the floor on one side of the words, between the kelp, if there is room for one there.
+    crab.lo = crab.hi = 0
+    if (sides) {
+      if (!crab.side) crab.side = Math.random() < 0.5 ? -1 : 1
+      const [lo, hi] = crab.side < 0 ? [0.2 * width, text.l - 24 - 3 * cw] : [text.r + 24 + 3 * cw, 0.8 * width]
+      if (hi - lo >= 6 * cw) {
+        crab.lo = lo
+        crab.hi = hi
+        if (crab.x < lo || crab.x > hi) crab.x = (lo + hi) / 2
+      }
+    }
   }
 
   const put = (x: number, y: number, glyph: string, color: Rgb, alpha: number, z: number) => {
@@ -238,7 +292,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     ;[...words].forEach((glyph, i) => bubbles.push({ x: x + i * cw, y, vx: 0, vy: -12, born: now, life, glyph, alpha: 0.78, front: true }))
   }
   const squirt = (now: number) => {
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 22; i++) {
       const a = Math.random() * Math.PI * 2
       const v = 16 + Math.random() * 64
       ink.push({ x: octo.x, y: octo.y + R, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.8, born: now, life: 1.6 + Math.random() * 1.6, glyph: '', alpha: 0.7 })
@@ -261,6 +315,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
   const stay = () => { [octo.tx, octo.ty] = fit(octo.x + octo.vx / 1.3, octo.y + octo.vy / 1.3) }
   const begin = (kind: Kind, now: number) => {
     act.kind = kind
+    // The cloud behind (glyphRipple.ts) softens its weather while the octopus does something that draws the eye.
+    head.dataset.octopus = kind
     act.since = now
     act.at = 0
     octo.eager = false
@@ -288,12 +344,15 @@ export function mountOctopusSwim(head: HTMLElement): void {
       act.until = now + 22000
     }
     if (kind === 'chase') act.until = now + 9000
-    // A fish's visit: it stays where it is and the fish ends the visit.
+    // A fish's visit, or mapping a shoal: it stays where it is and the fish end it.
     if (kind === 'meet') { stay(); act.until = now + 12000 }
+    if (kind === 'map') { stay(); act.until = now + 9000 }
+    // Waiting out a jellyfish's render: it stays, and the jellyfish ends the wait.
+    if (kind === 'render') { stay(); act.until = now + 10000 }
   }
-  // Free to give chase; and, short of reading a page or chasing, free to stop for a visiting fish.
+  // Free to give chase; and, short of reading a page or seeing to fish, free to stop for a visiting fish or a shoal.
   const free = () => act.kind === 'wander' || act.kind === 'rest' || act.kind === 'bubbles'
-  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet'
+  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet' || act.kind === 'map' || act.kind === 'render'
   // Near enough the words to pass behind them (and not seem stuck to their ends).
   const behindWords = (x: number, y: number) => x > text.l - 20 && x < text.r + 20 && y > text.t - 8 && y < text.b + 8
 
@@ -302,11 +361,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
   const stroked = (now: number) => {
     pet.times = pet.times.filter(at => now - at < PET.fedUpMs)
     pet.times.push(now)
-    pointer.calm = now + PET.calmMs
     const mood = petMood(pet.times, now)
     if (mood === 'fedUp') {
       pet.times.length = 0
       pet.held = false
+      squirt(now)
       feel('-', now, 2800)
       say(octo.x + 1.6 * R, octo.y - 1.8 * R, '...', now, 1.6)
       begin('camo', now)
@@ -314,11 +373,15 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
     if (act.kind === 'rest' || act.kind === 'bubbles') act.until = Math.max(act.until, now + 2600)
-    else if (act.kind !== 'read' && act.kind !== 'meet') begin('rest', now)
+    else if (act.kind !== 'read' && act.kind !== 'meet' && act.kind !== 'map' && act.kind !== 'render') begin('rest', now)
     pet.puff = 1
     feel('^', now, 1600)
     say(octo.x + 1.4 * R, octo.y - 1.9 * R, '<3', now, 1.8)
     if (mood === 'roll') { pet.rolledAt = now; say(octo.x - 2 * R, octo.y - 1.9 * R, '!', now, 1.2) }
+    if (offersPlay(pet.times, now)) {
+      const s = octo.x > width / 2 ? -1 : 1
+      play = { x: octo.x + s * 2.8 * R, y: octo.y + 0.4 * R, until: now + PET.playMs }
+    }
   }
 
   function step(now: number) {
@@ -326,32 +389,12 @@ export function mountOctopusSwim(head: HTMLElement): void {
     const dt = last ? Math.min(0.05, (now - last) / 1000) : 0
     last = now
 
-    // The pointer: watched from afar; coming up fast it startles, squirts ink and flees. A slow or still one, the
-    // spot it was called to, or one that has just touched it, does not frighten it.
-    const pd = Math.hypot(pointer.x - octo.x, pointer.y - (octo.y + R))
-    if (pd < 2.6 * R + 20 && octo.flee <= 0 && now - pointer.at < 300 && startles(pointer.speed) && now > pointer.calm) {
-      if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
-      squirt(now)
-      feel('O', now, 900)
-      const away = Math.atan2(octo.y + R - pointer.y, octo.x - pointer.x)
-      begin('wander', now)
-      let [tx, ty] = fit(octo.x + Math.cos(away) * 380, octo.y + Math.sin(away) * 220)
-      if (overText(tx, ty) || (sides && !canCross() && side(tx) !== side(octo.x))) [tx, ty] = pick()
-      octo.tx = tx
-      octo.ty = ty
-      octo.vx += Math.cos(away) * 260
-      octo.vy += Math.sin(away) * 180
-      octo.eager = true
-      octo.flee = 2.4
-    }
-    octo.flee = Math.max(0, octo.flee - dt)
-    const watching = now - pointer.at < 2500 && pd < 340
-    // It watches the pointer, the words it came to peek at, a page drifting down to it, or a fish; otherwise where
-    // it goes.
+    // It looks at the words it came to peek at, a page drifting down to it, a shoal or jellyfish it is reading, or a
+    // fish; otherwise where it goes. The pointer passing by it does not notice: only a click or a tap.
     const falling = page && !page.held && act.at ? page : null
-    const lookX = watching ? pointer.x - octo.x : act.kind === 'peek' && act.at ? (text.l + text.r) / 2 - octo.x : falling ? falling.x - octo.x : fish ? fish.x - octo.x : octo.vx
+    const lookX = act.kind === 'peek' && act.at ? (text.l + text.r) / 2 - octo.x : falling ? falling.x - octo.x : act.kind === 'map' && shoal ? shoal.x - octo.x : act.kind === 'render' && jelly ? jelly.x - octo.x : fish ? fish.x - octo.x : octo.vx
     octo.gaze += (clamp(lookX / 40, -1, 1) - octo.gaze) * Math.min(1, dt * 6)
-    const lookY = page?.held ? 1 : falling ? -1 : fish && !watching ? clamp((fish.y - octo.y) / (2 * R), -1, 1) : 0
+    const lookY = page?.held ? 1 : falling ? -1 : act.kind === 'render' && jelly ? clamp((jelly.y - octo.y) / (2 * R), -1, 1) : fish ? clamp((fish.y - octo.y) / (2 * R), -1, 1) : 0
     octo.look += (lookY - octo.look) * Math.min(1, dt * 4)
 
     // A fish now and then. When the octopus is free it may give chase, or the fish may come over to visit it or swim
@@ -447,6 +490,134 @@ export function mountOctopusSwim(head: HTMLElement): void {
       }
     }
 
+    // A shoal now and then, through the open water. Swimming about or resting, the octopus maps one of the shoals
+    // that pass near (not every one, and never breaking off from anything else): it keeps still and reaches out,
+    // lines run to each fish, and it reads them one by one; called away, it leaves off.
+    if (!shoal && now > nextShoal && (sides || text.t > 5 * LINE)) {
+      const dir = Math.random() < 0.5 ? 1 : -1
+      const n = SHOAL.min + Math.floor(Math.random() * (SHOAL.max - SHOAL.min + 1))
+      const y = 2 * LINE + Math.random() * Math.max(LINE, (sides ? height - 3 * LINE : text.t - 2 * LINE) - 2 * LINE)
+      shoal = { x: dir > 0 ? -10 : width + 10, y, dir, speed: 38 + Math.random() * 16, n, seed: Math.random() * 6, mode: 'pass', at: now, side: 0, want: Math.random() < 0.6 }
+    }
+    if (shoal) {
+      const s = shoal
+      s.x += s.dir * s.speed * (s.mode === 'mapped' ? 0.3 : 1) * dt
+      if (s.mode === 'pass' && s.want && free() && Math.abs(s.x - octo.x) < 4.5 * R && Math.abs(s.y - octo.y) < 3.5 * R) {
+        s.mode = 'mapped'
+        s.at = now
+        s.side = s.x >= octo.x ? 1 : -1
+        begin('map', now)
+      }
+      if (s.mode === 'mapped') {
+        if (act.kind !== 'map') s.mode = 'done'
+        else if (readState(now - s.at, s.n).done) {
+          // Read: a little Markdown drifts off the last fish, and the shoal swims on.
+          const [lc, lr] = shoalSlots(s.n)[s.n - 1]!
+          for (let i = 0; i < 5; i++) bubbles.push({ x: s.x - s.dir * lc * cw + (i - 2) * cw, y: s.y + lr * LINE - LINE, vx: (Math.random() - 0.5) * 20, vy: -22 - Math.random() * 20, born: now + i * 60, life: 2.2, glyph: MARKDOWN[i]!, alpha: 0.7, front: true })
+          s.mode = 'done'
+          feel('^', now, 1400)
+          act.until = now + 900
+        }
+      }
+      const tail = s.x - s.dir * (s.n - 1) * SHOAL.gap * cw
+      if ((s.dir > 0 && tail > width + 80) || (s.dir < 0 && tail < -80)) {
+        shoal = null
+        nextShoal = now + 25000 + Math.random() * 20000
+        if (act.kind === 'map') begin('rest', now)
+      }
+    }
+
+    // A jellyfish now and then, rising from the floor through the water beside the words (with none beside them, it
+    // would rise through them, so it does not come). Swimming about or resting, the octopus stops for one that comes
+    // near and waits out its render; then { } comes to it, and the jellyfish rises on. One left off is not read again.
+    if (!jelly && now > nextJelly) {
+      if (sides) {
+        const s = Math.random() < 0.5 ? -1 : 1
+        const [lo, hi] = s < 0 ? [0.04 * width, text.l - 5 * cw] : [text.r + 5 * cw, 0.96 * width]
+        if (hi > lo) jelly = { x: lo + Math.random() * (hi - lo), y: height + LINE, born: now, seed: Math.random() * 6, mode: 'drift', at: 0, side: 0 }
+      }
+      // Tried again later if there was no room; once one comes, the wait starts when it has gone.
+      nextJelly = now + JELLY.everyMs[0] + Math.random() * (JELLY.everyMs[1] - JELLY.everyMs[0])
+    }
+    if (jelly) {
+      const j = jelly
+      j.y -= JELLY.rise * (j.mode === 'read' ? 0.25 : 1) * dt
+      j.x += Math.sin(t * 0.5 + j.seed) * 3 * dt
+      // Only one wholly in the water can be read: never one still coming up past the floor or leaving at the top.
+      const shown = j.y > LINE && j.y + 4 * LINE < height
+      if (j.mode === 'drift' && shown && free() && Math.abs(j.x - octo.x) < 4.5 * R && Math.abs(j.y - (octo.y + R)) < 3 * R) {
+        j.mode = 'read'
+        j.at = now
+        j.side = j.x >= octo.x ? 1 : -1
+        begin('render', now)
+        // Beside it, not over it: its middle arm reaches out to the bell, as to a visiting fish, from whichever side
+        // has room.
+        const spot = (side: number) => { const [x, y] = fit(j.x - side * 3.7 * R, j.y + LINE - 1.05 * R); return Math.abs(x - (j.x - side * 3.7 * R)) < 2 && !overText(x, y) ? [x, y] as const : null }
+        const at = spot(j.side) ?? spot(-j.side)
+        if (at) { if (!spot(j.side)) j.side = -j.side; [octo.tx, octo.ty] = at }
+      }
+      if (j.mode === 'read') {
+        if (act.kind !== 'render') j.mode = 'done'
+        else if (renderState(now - j.at).done) {
+          j.mode = 'done'
+          feel('^', now, 1400)
+          act.until = now + 900
+        }
+      }
+      if (j.y < -5 * LINE) {
+        jelly = null
+        // The next comes a while after this one has gone.
+        nextJelly = now + JELLY.everyMs[0] + Math.random() * (JELLY.everyMs[1] - JELLY.everyMs[0])
+        if (act.kind === 'render') begin('rest', now)
+      }
+    }
+
+    // Now and then, a while after the last has gone, a ray glides through the water above the words, far off: only
+    // scenery.
+    if (!ray && now > nextRay) {
+      const room = text.t - 8 * LINE
+      if (room > 0) {
+        const dir = Math.random() < 0.5 ? 1 : -1
+        ray = { x: dir > 0 ? -16 * cw : width + cw, y: 2 * LINE + Math.random() * room, dir, born: now }
+      }
+      nextRay = now + RAY.everyMs[0] + Math.random() * (RAY.everyMs[1] - RAY.everyMs[0])
+    }
+    if (ray) {
+      ray.x += ray.dir * RAY.speed * dt
+      if (ray.x < -20 * cw || ray.x > width + 20 * cw) {
+        ray = null
+        nextRay = now + RAY.everyMs[0] + Math.random() * (RAY.everyMs[1] - RAY.everyMs[0])
+      }
+    }
+
+    // The crab walks its stretch of floor a cell at a time, pausing and turning now and then. An octopus coming low
+    // near it gets the claws, and, unless it is busy, takes itself off up and away.
+    if (crab.hi > crab.lo) {
+      const alarmed = crabAlarmed(crab.x, floor(), octo.x, octo.y + reach().b, R)
+      if (alarmed && !crab.alarm) crab.alarm = now
+      if (!alarmed && crab.alarm && now - crab.alarm > 1500) crab.alarm = 0
+      if (!alarmed && now > crab.next) {
+        crab.x += crab.dir * cw
+        if (crab.x < crab.lo || crab.x > crab.hi) { crab.dir *= -1; crab.x = clamp(crab.x, crab.lo, crab.hi) }
+        else if (Math.random() < 0.06) crab.dir *= -1
+        crab.next = now + (Math.random() < 0.15 ? 1800 + Math.random() * 2500 : 420 + Math.random() * 380)
+      }
+      if (alarmed && now - crab.warned > 6000 && !busy()) {
+        // No fright: it just moves off, up and away from the claws.
+        crab.warned = now
+        begin('wander', now)
+        ;[octo.tx, octo.ty] = fit(octo.x + (Math.sign(octo.x - crab.x) || 1) * 2.5 * R, octo.y - 2.5 * R)
+        if (overText(octo.tx, octo.ty) || nearCrab(octo.tx, octo.ty)) [octo.tx, octo.ty] = pick()
+      }
+    }
+
+    // The arm it reaches out with eases out to a fish, a shoal or a jellyfish and back, over about 0.6 s; to change
+    // sides it draws the arm back in first.
+    const want = fish?.mode === 'meet' ? fish.side : act.kind === 'map' && shoal ? shoal.side : act.kind === 'render' && jelly ? jelly.side : 0
+    if (want && (reaching.side === want || reaching.by < 0.02)) { reaching.side = want; reaching.by = Math.min(1, reaching.by + dt / 0.6) }
+    else reaching.by = Math.max(0, reaching.by - dt / 0.6)
+    if (!reaching.by && !want) reaching.side = 0
+
     // The activity's own business.
     const there = Math.hypot(octo.tx - octo.x, octo.ty - octo.y) < 16
     if (there && !act.at) act.at = now
@@ -493,7 +664,6 @@ export function mountOctopusSwim(head: HTMLElement): void {
     if (pet.rolledAt && now - pet.rolledAt > PET.rollMs) pet.rolledAt = 0
     if (pet.held && now - pet.down > PET.holdMs) {
       feel('x', now, 150)
-      pointer.calm = now + PET.calmMs
       if (!page?.held) act.until = Math.max(act.until, now + 600)
       if (Math.floor(t * 6) !== Math.floor((t - dt) * 6)) bubbles.push({ x: octo.x + (Math.random() - 0.5) * 2 * R, y: octo.y - 1.2 * R, vx: 0, vy: -30 - Math.random() * 20, born: now, life: 2.2, glyph: Math.random() < 0.3 ? 'O' : 'o', alpha: 0.5 })
     }
@@ -517,7 +687,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
       lastStroke = stroke
       // Towards a waypoint (the water above the words) it strokes firmly; towards its spot, more gently as it nears.
       const waypoint = gx !== octo.tx || gy !== octo.ty
-      const push = clamp(tdist * 0.9, waypoint ? 120 : 40, octo.eager || octo.flee > 0 ? 240 : tdist > 300 ? 200 : 150)
+      const push = clamp(tdist * 0.9, waypoint ? 120 : 40, octo.eager ? 240 : tdist > 300 ? 200 : 150)
       octo.vx += (tdx / tdist) * push
       octo.vy += (tdy / tdist) * push
       for (let k = 0; k < 1 + (stroke % 2); k++) bubbles.push({ x: octo.x + (k ? cw : 0), y: octo.y - 1.2 * R, vx: 0, vy: -26 - Math.random() * 10, born: now + k * 140, life: 2.4, glyph: 'o', alpha: 0.45 })
@@ -535,6 +705,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     octo.x = nx
     octo.y = ny
+    // Swimming, it leaves a wake in the cloud behind (glyphRipple.ts).
+    if (Math.hypot(octo.vx, octo.vy) > 25 && now - lastWake > 110) {
+      lastWake = now
+      head.dispatchEvent(new CustomEvent('octopus:wake', { detail: { x: octo.x, y: octo.y + 0.6 * R } }))
+    }
 
     for (const list of [bubbles, ink]) {
       for (let i = list.length - 1; i >= 0; i--) {
@@ -632,7 +807,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
       droop: sleeping ? 0.45 : 0,
       wave: !still && act.kind === 'wave',
       hold: !still && !!page?.held,
-      reach: !still && fish?.mode === 'meet' ? fish.side : 0,
+      reach: still ? 0 : reaching.side,
+      reachBy: still ? 0 : reaching.by,
       puff: still ? 0 : pet.puff,
       roll: !still && pet.rolledAt ? rollAngle(now - pet.rolledAt) : 0,
     }
@@ -670,6 +846,59 @@ export function mountOctopusSwim(head: HTMLElement): void {
         const tail = fish.face > 0 ? fish.x - (look.length - 1) * cw : fish.x
         ;[...look].forEach((g, i) => { const x = tail + i * cw; if (!behindWords(x, fish!.y)) put(x, fish!.y, g, NAVY, 0.6, 20) })
       }
+      // The ray, far behind everything, even the kelp.
+      if (ray) {
+        const r0 = ray
+        rayRows(r0.dir, (now - r0.born) / RAY.beatMs).forEach((row, r) => [...row].forEach((g, c) => { if (g !== ' ') put(r0.x + c * cw, r0.y + r * LINE, g, NAVY, 0.18, 1) }))
+      }
+      // The jellyfish, its bell pulsing, behind the words; being read, a · moves in its bell while the page renders,
+      // then { } goes from it to the octopus's arm.
+      if (jelly) {
+        const j = jelly
+        const age = now - j.born
+        jellyRows(jellyOpen(age), Math.floor(age / 700 + j.seed) % 2).forEach((row, r) => {
+          const x0 = j.x - ((row.length - 1) / 2) * cw
+          ;[...row].forEach((g, c) => { const x = x0 + c * cw, y = j.y + r * LINE; if (g !== ' ' && !behindWords(x, y)) put(x, y, g, NAVY, r < 2 ? 0.5 : 0.32, 18) })
+        })
+        if (j.mode === 'read') {
+          const st = renderState(now - j.at)
+          if (st.rendering) put(j.x + ((Math.floor(now / 300) % 3) - 1) * cw, j.y + LINE, '·', RUST, 0.75, 19)
+          else if (st.give < 1) {
+            const ax = octo.x + j.side * 2.4 * R
+            const ay = octo.y + 1.05 * R
+            const gx = j.x + (ax - j.x) * st.give
+            const gy = j.y + LINE + (ay - j.y - LINE) * st.give
+            put(gx - cw, gy, '{', RUST, 0.85, 58)
+            put(gx + cw, gy, '}', RUST, 0.85, 58)
+          }
+        }
+      }
+      // The crab on the floor, claws up when alarmed.
+      if (crab.hi > crab.lo) {
+        const look = crab.alarm ? '\\(\\/)/' : '(\\/)'
+        const x0 = crab.x - (look.length - 1) / 2 * cw
+        ;[...look].forEach((g, i) => put(x0 + i * cw, floor(), g, NAVY, 0.55, 3))
+      }
+      // The shoal, drawn back from each nose, passes behind the words; mapped, lines run to each fish from the arm
+      // the octopus holds out, and the fish being read flashes.
+      if (shoal) {
+        const s = shoal
+        const read = s.mode === 'mapped' ? readState(now - s.at, s.n) : null
+        const armC = Math.round((octo.x + s.side * 2.4 * R) / cw)
+        const armR = Math.round((octo.y + 1.05 * R) / LINE)
+        shoalSlots(s.n).forEach(([dc, dr], i) => {
+          const fx = s.x - s.dir * dc * cw
+          const fy = s.y + dr * LINE + Math.sin(t * 2.2 + s.seed + i) * 3
+          const look = s.dir > 0 ? '><>' : '<><'
+          const tail = s.dir > 0 ? fx - 2 * cw : fx
+          const flashing = read?.reading === i
+          ;[...look].forEach((g, k) => { const x = tail + k * cw; if (!behindWords(x, fy)) put(x, fy, flashing && k === 1 ? '#' : g, NAVY, flashing ? 0.9 : 0.55, 20) })
+          if (read?.linking) for (const [c, r] of linkCells(armC, armR, Math.round(fx / cw), Math.round(fy / LINE))) if (!behindWords(c * cw, r * LINE)) put(c * cw, r * LINE, '·', NAVY, 0.5, 15)
+        })
+      }
+      // The ▶ it holds out, blinking slowly while the offer stands.
+      if (play && now < play.until) put(play.x, play.y, '▶', RUST, Math.floor((now - play.until) / 500) % 2 ? 0.95 : 0.6, 61)
+      else play = null
       // The page in front, whole, whether it floats or is held.
       if (page) ['.-,', '|=|', '\'-\''].forEach((line, r) => [...line].forEach((g, c) => put(page!.x + (c - 1) * cw, page!.y + (r - 1) * LINE, g, NAVY, 0.72, 55)))
     }
@@ -716,7 +945,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
         context.fillText(glyph, c * CW, r * CH)
       }
     }
-    // Its eyes, looking where it goes, at the pointer, at the words, or down at a page; blinking now and then.
+    // Its eyes, looking where it goes, at the words, at a fish, a shoal or a jellyfish, or down at a page; blinking
+    // now and then.
     const blink = !still && (t % 4.7) < 0.13
     const eye = sleeping || blink ? '-' : now < face.until ? face.eye : 'o'
     const gaze = clamp(Math.round(octo.gaze), -1, 1)
@@ -746,34 +976,34 @@ export function mountOctopusSwim(head: HTMLElement): void {
 
   new ResizeObserver(() => { layout(); if (reduced.matches) still() }).observe(head)
   head.addEventListener('pointermove', (event) => {
+    // Only the cursor answers the pointer: a hand over the octopus or its ▶, to say they can be touched.
     const rect = head.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    const now = performance.now()
-    const dt = now - pointer.at
-    // Its speed, smoothed over the last few moves; a pointer that has just arrived has none.
-    pointer.speed = pointer.x > -1e3 && dt > 0 && dt < 200 ? pointer.speed * 0.6 + (Math.hypot(x - pointer.x, y - pointer.y) / dt) * 400 : 0
-    pointer.x = x
-    pointer.y = y
-    pointer.at = now
-    head.style.cursor = !reduced.matches && onBody(x, y) ? 'pointer' : ''
+    head.style.cursor = !reduced.matches && (onBody(x, y) || (play && Math.hypot(x - play.x, y - play.y) < 24)) ? 'pointer' : ''
   })
   const release = () => {
     if (!pet.held) return
     pet.held = false
     if (performance.now() - pet.down > PET.holdMs) feel('^', performance.now(), 1000)
   }
-  head.addEventListener('pointerleave', () => { pointer.x = pointer.y = -1e4; pointer.speed = 0; head.style.cursor = ''; release() })
+  head.addEventListener('pointerleave', () => { head.style.cursor = ''; release() })
   head.addEventListener('pointerup', release)
   head.addEventListener('pointercancel', release)
   // A touch on the octopus; or a click in the water, and it comes to look. Only the main button, or a finger: a
   // context menu would swallow the release.
   head.addEventListener('pointerdown', (event) => {
-    if (reduced.matches || event.button !== 0) return
+    // A button or a link in the head is not the water.
+    if (reduced.matches || event.button !== 0 || (event.target as Element | null)?.closest?.('button, a')) return
     const now = performance.now()
     const rect = head.getBoundingClientRect()
     const px = event.clientX - rect.left
     const py = event.clientY - rect.top
+    if (play && now < play.until && Math.hypot(px - play.x, py - play.y) < 24) {
+      play = null
+      head.dispatchEvent(new CustomEvent('octopus:play'))
+      return
+    }
     if (onBody(px, py)) { pet.down = now; pet.held = true; stroked(now); return }
     const [x, y] = fit(px, py - R)
     if (overText(x, y) || (sides && !canCross() && side(x) !== side(octo.x))) return
@@ -781,11 +1011,13 @@ export function mountOctopusSwim(head: HTMLElement): void {
     octo.tx = x
     octo.ty = y
     octo.eager = true
-    pointer.calm = now + 4000
   })
   layout()
   start = performance.now()
   nextFish = start + 9000
+  nextShoal = start + 14000
+  nextJelly = start + 30000
+  nextRay = start + 50000
   begin('rest', start)
   act.until = start + 1800
   still()

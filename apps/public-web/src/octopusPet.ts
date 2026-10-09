@@ -11,10 +11,9 @@ export const PET = {
   holdMs: 500,
   /** How long a somersault takes. */
   rollMs: 900,
-  /** How long after a touch the pointer cannot startle it. */
-  calmMs: 5000,
-  /** A pointer coming at it faster than this (css px per second) startles it; a slower one it only watches. */
-  startleSpeed: 420,
+  /** The touch, counted in the last fedUpMs, at which it offers a game (▶), and how long the offer stands. */
+  playAt: 5,
+  playMs: 6000,
 } as const
 
 export type PetMood = 'glad' | 'roll' | 'fedUp'
@@ -34,5 +33,6 @@ export function rollAngle(age: number, ms: number = PET.rollMs): number {
   return 2 * Math.PI * (f < 0.5 ? 2 * f * f : 1 - (2 - 2 * f) ** 2 / 2)
 }
 
-/** Whether a pointer moving this fast (css px per second) startles it. */
-export const startles = (speed: number): boolean => speed > PET.startleSpeed
+/** Whether the touch at `now` is the one at which it offers a game. */
+export const offersPlay = (times: readonly number[], now: number): boolean => times.filter(at => now - at < PET.fedUpMs).length === PET.playAt
+

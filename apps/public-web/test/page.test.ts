@@ -21,6 +21,12 @@ describe('Page markup', () => {
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
   })
 
+  it('gives only the Get started cloud the sea’s weather', () => {
+    const clouds = [...pageMarkup().matchAll(/<pre class="glyph-cloud[^"]*"[^>]*>/g)].map(([tag]) => tag)
+    expect(clouds).toHaveLength(2)
+    expect(clouds.filter(tag => tag.includes(' data-weather '))).toEqual(['<pre class="glyph-cloud" data-cols="150" data-rows="30" data-seed="11" data-weather aria-hidden="true">'])
+  })
+
   it('gives search engines the FAQ the page shows, as FAQPage data that cannot close its script', () => {
     const script = faqJsonLd()
     const json = script.replace(/^<script type="application\/ld\+json">/, '').replace(/<\/script>$/, '')
