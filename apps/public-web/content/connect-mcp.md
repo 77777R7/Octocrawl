@@ -28,7 +28,7 @@ Cursor takes that block in `.cursor/mcp.json` (`"Bearer ${env:OCTOCRAWL_API_KEY}
 Use Octocrawl's scrape tool on https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview with formats ["markdown"]. Show the final URL, the HTTP status and the robots.txt decision from its evidenceRecord, then the first heading of the Markdown.
 ```
 
-The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key.
+The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key. For a walk-through of a real task in Claude Code, from finding the page with `map` to citing its Evidence Record, see [Give Claude Code web access](/docs/guides/claude-code-web-access/).
 
 ## What hosted Octocrawl does not do
 
