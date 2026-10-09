@@ -150,13 +150,7 @@ export class ExtractTf implements Extractor {
       : declaredFacts
     const amazonValidation = amazonProduct ? adapterFor(doc.document, options.url, sourceFacts).validation : null
     // Counted before cleaning, which may drop empty elements.
-    // A table with no rows, or with cells none of which holds text yet (rows drawn for a script to fill, as Nasdaq's
-    // quotes over HTTP). Rows without a cell are left to the client-rendering signal (detectRenderSignals).
-    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => {
-      if (table.querySelector('tr') === null) return true
-      const cells = Array.from(table.querySelectorAll('td, th'))
-      return cells.length > 0 && cells.every((cell) => (cell.textContent ?? '').trim() === '')
-    }).length
+    const emptyTableShells = Array.from(doc.document.querySelectorAll('table')).filter((table) => table.querySelector('tr') === null).length
     // Data the page's scripts will fetch once they run: whatever they build
     // from it is not in this HTML either.
     const fetchPreloads = Array.from(doc.document.querySelectorAll('link[rel][as]')).filter((link) =>
@@ -327,18 +321,23 @@ export class ExtractTf implements Extractor {
 export const extractTf = new ExtractTf()
 
 /**
- * Whether the page hides the region: it, or an element around it, carries `hidden`, `aria-hidden="true"` or an inline
- * `display: none`. What the page does not show is not its content, however much text it holds (ROADMAP PA item 4:
- * Eurostat's data browser read in a browser, whose only prose was the EU banner's hidden dropdown, answered `success`
- * with it). A hidden part inside a shown region, a collapsed answer for one, stays part of that region.
+ * Whether the page hides the region: it, or an element around it, carries `hidden`. What the page does not show is not
+ * its content, however much text it holds (ROADMAP PA item 4: Eurostat's data browser read in a browser, whose only
+ * prose was the EU banner's hidden dropdown, answered `success` with it). A hidden part inside a shown region, a
+ * collapsed answer for one, stays part of that region. Not hidden: `hidden="until-found"`, which a reader's search
+ * opens; a React streaming segment (`<div hidden id="S:1">`), which the page's script moves into place; and
+ * `aria-hidden`, which a modal sets on the page behind it and which hides nothing from the eye.
  */
 function hiddenRegion(region: Element): boolean {
   for (let el: Element | null = region; el !== null; el = el.parentElement) {
-    if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return true
-    if (/(?:^|;)\s*display\s*:\s*none\b/i.test(el.getAttribute('style') ?? '')) return true
+    const hidden = el.getAttribute('hidden')
+    if (hidden !== null && hidden.toLowerCase() !== 'until-found' && !REACT_STREAMED_SEGMENT.test(el.id)) return true
   }
   return false
 }
+
+/** The id React gives a part of the page it streams hidden and then moves into place (an optional identifier prefix, `S:`, a hex number). */
+const REACT_STREAMED_SEGMENT = /S:[0-9a-f]+$/i
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100
