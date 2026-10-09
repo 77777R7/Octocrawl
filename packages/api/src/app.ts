@@ -616,9 +616,10 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     // A cursor a client made up or truncated, on any route that pages through a task's steps.
     if (err instanceof InvalidCursorError) return fail(c, 'invalid_request', 'cursor is not one this API issued')
     if (err instanceof SyntaxError) return fail(c, 'invalid_json', 'body must be JSON')
-    if (options.exposeInternalErrors === true) return fail(c, 'internal_error', err.message)
+    // Logged whether or not the response carries the message: a client that keeps no error body (a batch runner) leaves
+    // the log as the only record of what broke.
     console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err.stack ?? String(err) }))
-    return fail(c, 'internal_error', 'internal error')
+    return fail(c, 'internal_error', options.exposeInternalErrors === true ? err.message : 'internal error')
   })
 
   return app
