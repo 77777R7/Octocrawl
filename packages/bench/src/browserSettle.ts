@@ -69,7 +69,8 @@ export const LOADING_PROBE = `(() => {
  * both rendered text and DOM size. A stable loading shell must not finish the
  * wait before the minimum window, while long-polling pages remain bounded.
  * A page that loads another document meanwhile (a script or a meta refresh
- * navigates) is observed afresh, within the same bound.
+ * navigates) is observed afresh: within the same bound, or, for a caller that
+ * waits for loading pages (`loadingMaxMs`), as still loading, within that one.
  */
 export async function waitForRenderedStability(
   page: SettlePage,
