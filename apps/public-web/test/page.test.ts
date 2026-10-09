@@ -33,7 +33,9 @@ describe('Page markup', () => {
   })
 
   it('marks only links that leave the site with an arrow in the header', () => {
-    expect(pageMarkup()).toContain('<a href="/docs/">Docs</a>')
+    const header = pageMarkup().split('</header>')[0]!
+    expect(header.match(/↗/g)).toHaveLength(1)
+    expect(header).toMatch(/github\.com\/77777R7\/Octocrawl[^]*?↗/)
   })
 
   it('links the brand to the home page and keeps the header octopus still', () => {
@@ -148,7 +150,8 @@ describe('Page markup', () => {
     const page = pageMarkup()
     for (const t of TIERS) expect(page).toContain(`<div class="tier-row" id="tier-${t.n}"`)
     expect(page.match(/<div class="tier-panel">/g)).toHaveLength(TIERS.length)
-    expect(page).not.toMatch(/aria-expanded|class="tier-panel"[^>]* hidden/)
+    const start = page.indexOf('id="free-tiers"')
+    expect(page.slice(start, page.indexOf('</section>', start))).not.toMatch(/aria-expanded|class="tier-panel"[^>]* hidden/)
     expect(page).toContain('<p class="tier-hint" aria-hidden="true" hidden>Scroll to light the planet <span>↓</span></p>')
   })
 

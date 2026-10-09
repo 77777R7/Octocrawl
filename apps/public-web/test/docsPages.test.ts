@@ -27,8 +27,9 @@ describe('sitemap lastmod', () => {
     }
   })
 
-  // On a branch: a page whose content this branch changed must have a later day than main gave it. On main itself
-  // nothing has changed, so a commit that forgot the day fails before it merges, never afterwards.
+  // On a branch: a page whose content this branch changed must have a later day than main gave it, or today's (a
+  // second change on the day of the first keeps its day). On main itself nothing has changed, so a commit that forgot
+  // the day fails before it merges, never afterwards.
   it.skipIf(!base)('moves a page\'s day on whenever this branch changes its content', () => {
     let before: string
     try { before = git('show', `${base}:${PAGES_FILE}`) } catch { return } // the list is new on this branch
@@ -36,10 +37,12 @@ describe('sitemap lastmod', () => {
       ? before.match(/HOME_UPDATED = '([\d-]+)'/)?.[1]
       : before.match(new RegExp(`file: '${page.replace('.', '\\.')}'[^\\n]*updated: '([\\d-]+)'`))?.[1]
     const changed = new Set(git('diff', '--name-only', '--relative', base!).split('\n'))
+    // Yesterday in UTC, so a day written in a time zone ahead of UTC still counts as today.
+    const recent = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     for (const [page, updated, files] of current) {
       const previous = was(page)
       if (!previous || !files.some(file => changed.has(file))) continue
-      expect([page, `${previous} → ${updated}`, updated > previous]).toEqual([page, `${previous} → ${updated}`, true])
+      expect([page, `${previous} → ${updated}`, updated > previous || updated >= recent]).toEqual([page, `${previous} → ${updated}`, true])
     }
   })
 })
