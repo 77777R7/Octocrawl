@@ -1,6 +1,6 @@
 import { whenVisible } from './motion'
 import { offersPlay, PET, petMood, rollAngle } from './octopusPet'
-import { crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, RAY, rayRows, readState, renderState, SHOAL, shoalSlots } from './seaLife'
+import { ANEMONE, anemoneRows, crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, RAY, rayRows, readState, renderState, SHOAL, shoalSlots, storeState } from './seaLife'
 
 /* A small sea around the Get started heading, drawn in glyphs on the character grid, with an octopus living in it.
  *
@@ -29,7 +29,10 @@ import { crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, RAY, rayRows, read
  * what a crawl does; then the shoal swims on. Now and then a jellyfish rises from the floor beside the words, its
  * bell opening and closing: a page that needs a browser. The octopus, if it is free, stops for it and waits out its
  * render (· moving in the bell), and then { } comes to it from the jellyfish. And far off, now and then, a ray glides
- * through the water above the words, faint and slow: only scenery. Swimming, it leaves a wake in the glyph cloud behind (glyphRipple.ts),
+ * through the water above the words, faint and slow: only scenery. On the floor across from the crab a sea anemone
+ * (\|/) sways: the octopus's cache. Now and then, after reading a page, it takes what it read there and tucks it in
+ * (# sink into it, and its tentacles glow); and touched too often, it goes and hides in it, the tentacles closing
+ * over it, until it has calmed down. Swimming, it leaves a wake in the glyph cloud behind (glyphRipple.ts),
  * and the cloud's weather softens while it does something that draws the eye (waving, blowing bubbles, a fish, a shoal or a jellyfish).
  *
  * Everything sits on a grid, so everything moves a cell at a time. It runs only while on screen and the visitor
@@ -68,7 +71,7 @@ type FishMode = 'pass' | 'flee' | 'visit' | 'circle' | 'meet' | 'orbit'
 // A fish by its nose; `dir` is the way it is going, `face` the way it faces, `side` the octopus's side it visits,
 // `at` when it set off or arrived.
 type Fish = { x: number, y: number, dir: number, face: number, side: number, speed: number, seed: number, big: boolean, mode: FishMode, at: number, angle: number, swept: number, waved: boolean }
-type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet' | 'map' | 'render'
+type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet' | 'map' | 'render' | 'store' | 'hide'
 // A jellyfish by the middle of its bell's top: when it came, whether it is drifting, being read (since `at`, on the
 // octopus's `side`) or done with, and a seed for its sway.
 type Jelly = { x: number, y: number, born: number, seed: number, mode: 'drift' | 'read' | 'done', at: number, side: number }
@@ -171,6 +174,8 @@ export function mountOctopusSwim(head: HTMLElement): void {
   // The crab: where it is on the floor, the stretch it walks (none when lo >= hi), the way it goes, when it next
   // steps, since when its claws are up (0 for down), and when it last sent the octopus off.
   const crab = { x: 0, lo: 0, hi: 0, side: 0, dir: 1, next: 0, alarm: 0, warned: 0 }
+  // The anemone: where it stands on the floor, and whether there is room for it.
+  const anemone = { x: 0, on: false }
   const bubbles: Particle[] = []
   const ink: Particle[] = []
   const plankton: Array<{ x: number, y: number, ox: number, oy: number, seed: number }> = []
@@ -278,7 +283,25 @@ export function mountOctopusSwim(head: HTMLElement): void {
         if (crab.x < lo || crab.x > hi) crab.x = (lo + hi) / 2
       }
     }
+    // The anemone: on the floor across from the crab, between the kelp and the words, if there is room for it there.
+    anemone.on = false
+    if (sides) {
+      // Between the inner kelp and the words, where the octopus can sit right over it without its arms reaching over
+      // the words; if there is no such place, there is no anemone.
+      const s = -crab.side
+      const [kelpEdge, wordsEdge] = s < 0 ? [0.15 * width + 2 * cw, text.l - 3 * cw] : [0.85 * width - 2 * cw, text.r + 3 * cw]
+      const clear = s < 0 ? text.l - 16 - reach().r : text.r + 16 + reach().l
+      const mid = (kelpEdge + wordsEdge) / 2
+      anemone.x = s < 0 ? Math.min(mid, clear) : Math.max(mid, clear)
+      anemone.on = s < 0 ? anemone.x - 4 * cw > kelpEdge && anemone.x + 4 * cw < wordsEdge : anemone.x + 4 * cw < kelpEdge && anemone.x - 4 * cw > wordsEdge
+    }
   }
+  /** Whether the octopus can get to the anemone from where it is, and whether it is on its own side of the words (a
+   * frightened octopus hides near by, it does not cross the page to). */
+  const canReachAnemone = () => anemone.on && (!sides || canCross() || side(anemone.x) === side(octo.x))
+  const anemoneNear = () => anemone.on && (!sides || side(anemone.x) === side(octo.x))
+  /** Where the octopus sits over the anemone: as low as it goes, its arms in the tentacles. */
+  const overAnemone = () => fit(anemone.x, height)
 
   const put = (x: number, y: number, glyph: string, color: Rgb, alpha: number, z: number) => {
     const col = Math.round(x / cw)
@@ -349,10 +372,12 @@ export function mountOctopusSwim(head: HTMLElement): void {
     if (kind === 'map') { stay(); act.until = now + 9000 }
     // Waiting out a jellyfish's render: it stays, and the jellyfish ends the wait.
     if (kind === 'render') { stay(); act.until = now + 10000 }
+    // To the anemone, to tuck in what it read, or to hide; it ends there (or gives up if it cannot get there).
+    if (kind === 'store' || kind === 'hide') { [octo.tx, octo.ty] = overAnemone(); act.until = now + 12000; octo.eager = kind === 'hide' }
   }
   // Free to give chase; and, short of reading a page or seeing to fish, free to stop for a visiting fish or a shoal.
   const free = () => act.kind === 'wander' || act.kind === 'rest' || act.kind === 'bubbles'
-  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet' || act.kind === 'map' || act.kind === 'render'
+  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet' || act.kind === 'map' || act.kind === 'render' || act.kind === 'store' || act.kind === 'hide'
   // Near enough the words to pass behind them (and not seem stuck to their ends).
   const behindWords = (x: number, y: number) => x > text.l - 20 && x < text.r + 20 && y > text.t - 8 && y < text.b + 8
 
@@ -368,12 +393,13 @@ export function mountOctopusSwim(head: HTMLElement): void {
       squirt(now)
       feel('-', now, 2800)
       say(octo.x + 1.6 * R, octo.y - 1.8 * R, '...', now, 1.6)
-      begin('camo', now)
+      // Off to hide in the anemone if it is near by; otherwise it fades into the water where it is.
+      begin(anemoneNear() ? 'hide' : 'camo', now)
       return
     }
     if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
     if (act.kind === 'rest' || act.kind === 'bubbles') act.until = Math.max(act.until, now + 2600)
-    else if (act.kind !== 'read' && act.kind !== 'meet' && act.kind !== 'map' && act.kind !== 'render') begin('rest', now)
+    else if (act.kind !== 'read' && act.kind !== 'meet' && act.kind !== 'map' && act.kind !== 'render' && act.kind !== 'store' && act.kind !== 'hide') begin('rest', now)
     pet.puff = 1
     feel('^', now, 1600)
     say(octo.x + 1.4 * R, octo.y - 1.9 * R, '<3', now, 1.8)
@@ -655,9 +681,15 @@ export function mountOctopusSwim(head: HTMLElement): void {
           page = null
           feel('^', now, 1600)
           act.until = now + 1700
+          // Now and then it takes what it read to the anemone, its cache.
+          if (canReachAnemone() && Math.random() < ANEMONE.storeShare) begin('store', now)
         }
       }
     }
+    // At the anemone: tucking in what it read, it is glad when done; hiding, it stays until it has calmed down.
+    if (act.kind === 'store' && act.at && storeState(now - act.at).done && act.until > now + 700) { feel('^', now, 1400); act.until = now + 600 }
+    if (act.kind === 'hide' && act.at && act.until > act.at + ANEMONE.hideMs) act.until = act.at + ANEMONE.hideMs
+
     // Touched: it puffs up and settles again, and a somersault ends. Held, it is tickled: it squints, bubbles stream
     // up, and it stays put while the finger does.
     pet.puff = Math.max(0, pet.puff - dt * 1.6)
@@ -797,6 +829,13 @@ export function mountOctopusSwim(head: HTMLElement): void {
       const a = (now - act.since) / 1000
       hide = a < 1.6 ? a / 1.6 : a < 4 ? 1 : a < 4.5 ? 1 - (a - 4) / 0.5 : 0
     }
+    // Hiding in the anemone: it fades as the tentacles close over it, and comes back as it leaves.
+    const hiding = !still && act.kind === 'hide' && act.at > 0
+    if (hiding) {
+      const a = (now - act.at) / 1000
+      const end = ANEMONE.hideMs / 1000
+      hide = Math.min(a / 0.6, 1, Math.max(0, (end - a) / 0.5))
+    }
     const pose: Pose = {
       t,
       moving,
@@ -832,6 +871,27 @@ export function mountOctopusSwim(head: HTMLElement): void {
           put(fx * width + (zig + sway) * cw, height - (j + 1) * LINE, j === tall - 1 ? '\'' : zig ? ')' : '(', NAVY, 0.32 - j * 0.025, 2)
         }
       })
+    }
+    // The anemone on the floor: swaying, glowing as something is tucked in, closed over the octopus hiding in it (in
+    // front of it then). Like the kelp it is there in the still frame too.
+    if (anemone.on) {
+      const storing = !still && act.kind === 'store' && act.at > 0 ? storeState(now - act.at) : null
+      const rows = anemoneRows(still ? 0.25 : t / (ANEMONE.swayMs / 1000), hiding && hide > 0.3)
+      rows.forEach((row, r) => {
+        const x0 = anemone.x - ((row.length - 1) / 2) * cw
+        const y = height - (rows.length - r) * LINE
+        ;[...row].forEach((g, c) => {
+          if (g === ' ') return
+          const glow = storing && r < 2 ? storing.glow : 0
+          put(x0 + c * cw, y, g, glow > 0.05 ? RUST : NAVY, glow > 0.05 ? 0.5 + 0.4 * glow : 0.45, hiding && hide > 0.3 ? 57 : 3)
+        })
+      })
+      // What it read, sinking from above the anemone, through the octopus's arms, into its middle.
+      if (storing && storing.sink < 1) {
+        const from = Math.min(octo.y + 0.5 * R, height - 6 * LINE)
+        const to = height - 2 * LINE
+        for (let i = 0; i < 3; i++) put(anemone.x + (i - 1) * cw, from + (to - from) * storing.sink, MARKDOWN[i]!, RUST, 0.8, 58)
+      }
     }
     if (!still) {
       for (const p of bubbles) {

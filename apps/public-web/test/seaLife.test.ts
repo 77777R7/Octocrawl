@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CRAB, crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, rayRows, readState, renderState, SHOAL, shoalSlots } from '../src/seaLife.js'
+import { ANEMONE, anemoneRows, CRAB, crabAlarmed, JELLY, jellyOpen, jellyRows, linkCells, rayRows, readState, renderState, SHOAL, shoalSlots, storeState } from '../src/seaLife.js'
 
 describe('Sea life', () => {
   it('swims a shoal as a chevron, the leader at its point and no two fish in one place', () => {
@@ -70,5 +70,24 @@ describe('Sea life', () => {
     }
     expect(rayRows(-1, 0)).not.toEqual(rayRows(-1, 0.6))
     expect(rayRows(-1, 0.1)).toEqual(rayRows(-1, 1.1))
+  })
+
+  it('sways an anemone’s tentacles in and out, closes them over the octopus, and keeps every row as wide', () => {
+    const open = anemoneRows(0.1, false), drawn = anemoneRows(0.6, false), shut = anemoneRows(0, true)
+    for (const rows of [open, drawn, shut]) { expect(rows).toHaveLength(3); expect(new Set(rows.map(r => r.length)).size).toBe(1) }
+    expect(open).not.toEqual(drawn)
+    expect(shut).not.toEqual(open)
+    expect(anemoneRows(1.1, false)).toEqual(open)
+    // Its foot never moves.
+    expect(open[2]).toBe(shut[2])
+  })
+
+  it('sinks what the octopus stores into the anemone, then lights its tentacles, then is done', () => {
+    expect(storeState(0)).toEqual({ sink: 0, glow: 0, done: false })
+    expect(storeState(ANEMONE.storeMs * 0.3).glow).toBe(0)
+    expect(storeState(ANEMONE.storeMs * 0.6).sink).toBe(1)
+    expect(storeState(ANEMONE.storeMs * 0.7).glow).toBeCloseTo(1)
+    expect(storeState(ANEMONE.storeMs * 0.85).glow).toBeLessThan(1)
+    expect(storeState(ANEMONE.storeMs).done).toBe(true)
   })
 })
