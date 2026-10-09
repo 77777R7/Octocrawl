@@ -21,6 +21,10 @@ describe('Page markup', () => {
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
   })
 
+  it('writes no style attribute, which the site’s Content-Security-Policy (style-src \'self\') would drop', () => {
+    expect(pageMarkup()).not.toMatch(/\sstyle="/)
+  })
+
   it('gives only the Get started cloud the sea’s weather', () => {
     const clouds = [...pageMarkup().matchAll(/<pre class="glyph-cloud[^"]*"[^>]*>/g)].map(([tag]) => tag)
     expect(clouds).toHaveLength(2)
@@ -150,8 +154,9 @@ describe('Page markup', () => {
     // The artwork is the page's own asset, sized, lazy and decorative.
     expect(page).toContain('<div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>')
     expect(readFileSync(new URL('../public/assets/scene-earth.webp', import.meta.url)).length).toBeGreaterThan(0)
-    // The pinned window scrolls one step per tier (styles.css .is-story .tier-stage), so the stage counts them.
-    expect(page).toContain(`<div class="tier-stage" id="tier-stage" style="--tiers: ${TIERS.length}">`)
+    // The pinned window scrolls one step per tier (styles.css .is-story .tier-stage); the script gives the stage the
+    // count, because the site's CSP drops style attributes in the markup.
+    expect(page).toContain('<div class="tier-stage" id="tier-stage">')
     expect(page.match(/<div class="tier-pin" id="tier-pin">/g)).toHaveLength(1)
   })
 

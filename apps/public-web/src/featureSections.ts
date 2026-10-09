@@ -294,8 +294,8 @@ export function capabilitiesMarkup(bar: string): string {
 /** Section 04: the four free ways to use Octocrawl, every one written out, over the Earth artwork that fills the
  * whole section. With a script on a wide screen the window (.tier-pin) is pinned while the page scrolls one step per
  * tier: the list of four stays in view, the tier the scroll has reached opens and lights as many of the planet's
- * painted marks, and the others fold to their names (featureMotion.ts, earthLights.ts; the stage's --tiers gives
- * the stylesheet the number of steps). On a narrow screen the tiers pass one by one over the planet. Without a
+ * painted marks, and the others fold to their names (featureMotion.ts, earthLights.ts; the script gives the stage
+ * the number of steps as --tiers, since the site's CSP refuses style attributes in the markup). On a narrow screen the tiers pass one by one over the planet. Without a
  * script the tiers simply follow one another over the artwork as painted. */
 export function tiersMarkup(bar: string): string {
   const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-caption="${esc(tierCaption(t))}">
@@ -307,7 +307,7 @@ export function tiersMarkup(bar: string): string {
               </div></div>
             </div>`).join('\n            ')
   return `<section class="tier-section is-earth" id="free-tiers" aria-labelledby="tier-title">
-      <div class="tier-stage" id="tier-stage" style="--tiers: ${TIERS.length}">
+      <div class="tier-stage" id="tier-stage">
       <div class="tier-pin" id="tier-pin">
       <div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>
       ${bar}
