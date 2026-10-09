@@ -101,6 +101,28 @@ describe('extractTf', () => {
     expect(extractTf.extract(page(content.replace('<div class="main-content"', '<main class="main-content"').replace(/<\/div>$/, '</main>'))).mainHtml).not.toContain('Shop the latest motors deals')
     const thin = extractTf.extract(page('<div role="main"><p>Laptops</p></div>' + content.replace(' role="main"', '')))
     expect(thin.mainHtml).toContain('$405.99')
+    // An <article> inside a wider role="main" is the content, as before.
+    const story = `<article><h1>Refurbished laptops, tested</h1>${Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1}: every machine is tested and cleaned by a certified refurbisher, with a new battery and a warranty.</p>`).join('')}</article>`
+    const wide = extractTf.extract(`<!doctype html><html><body><div role="main"><section class="intro"><p>Also this week: the best budget gaming laptops of the year, chosen by our editors.</p></section>${story}</div></body></html>`)
+    expect(wide.mainHtml).toContain('Refurbished laptops, tested')
+    expect(wide.mainHtml).not.toContain('the best budget gaming laptops')
+    // So is a <main>.
+    const inner = extractTf.extract(`<!doctype html><html><body><div role="main"><section class="intro"><p>Also this week: the best budget gaming laptops of the year, chosen by our editors.</p></section>${story.replace('<article>', '<main>').replace('</article>', '</main>')}</div></body></html>`)
+    expect(inner.mainHtml).toContain('Refurbished laptops, tested')
+    expect(inner.mainHtml).not.toContain('the best budget gaming laptops')
+  })
+
+  it('keeps the page\'s h1 when it sits outside the region marked role="main"', () => {
+    // Stack Exchange: the question's h1 and its Asked/Viewed line sit above <div id="mainbar" role="main">, which holds
+    // the question and the answers (one of them with an h1 of its own).
+    const answer = `<div class="answer"><h1>Quick answer:</h1>${Array.from({ length: 3 }, (_, i) => `<p>Answer line ${i + 1}: use tar with the x, z and f flags to extract the archive into the current directory.</p>`).join('')}</div>`
+    const html = `<!doctype html><html><head><title>command line - What do I need to extract a .tar.gz file? - Ask Ubuntu</title></head><body><div id="content"><div class="inner-content">
+<div id="question-header"><h1>What command do I need to unzip/extract a .tar.gz file?</h1></div><div class="meta">Asked 13 years ago, viewed 4.2m times</div>
+<div id="mainbar" role="main"><p>I received a huge .tar.gz file from a client that contains about 800 MB of image files when uncompressed.</p><p>Our hosting company's FTP is very slow, so I want to extract it on the server.</p>${answer}</div>
+<div id="sidebar"><ul><li><a href="/q/1">Linked question one</a></li><li><a href="/q/2">Linked question two</a></li></ul></div></div></div></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.title).toBe('What command do I need to unzip/extract a .tar.gz file?')
+    expect(out.mainHtml).toContain('What command do I need to unzip/extract a .tar.gz file?')
   })
 
   it('reads a region a reader can still see or find as shown, whatever its markup says (ROADMAP PA item 4)', () => {

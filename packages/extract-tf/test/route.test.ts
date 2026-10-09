@@ -387,8 +387,10 @@ describe('routePage', () => {
       expect(route(page(offered('SearchResultsPage')))).toEqual({ type: 'collection', strategy: 'article' })
       const out = extractTf.extract(page(offered('CollectionPage')))
       for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
-      // The same products under a node that declares no collection are still the page's own.
-      expect(route(page(offered('WebPage'))).type).toBe('product')
+      // A product page's own Product under its WebPage stays its own, beside a row of microdata product cards.
+      const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'WebPage', mainEntity: { '@type': 'Product', name: 'Cobalt teapot', offers: { '@type': 'Offer', price: '84.00', priceCurrency: 'USD' } } })}</script>`
+      const cards = `<ul>${Array.from({ length: 6 }, (_, i) => `<li class="product card" itemscope itemtype="https://schema.org/Product"><a href="/p/${i}">${name(i)}</a><span class="price">$${12 + i}.00</span></li>`).join('')}</ul>`
+      expect(route(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware, glazed in cobalt ash.</p>${cards}</main>`, own)).type).toBe('product')
     })
 
     it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
