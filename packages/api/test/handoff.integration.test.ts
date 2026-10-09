@@ -8,6 +8,7 @@ import { chromium, type BrowserContext, type Page } from 'playwright'
 import { buildChannels } from '@w2l/bench'
 import { localNetworkPolicy, type CrawlPage } from '@w2l/contracts'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { openUserChrome } from '../src/chromeHandoff.js'
 
 /**
  * The handoff end to end: a batch stopped at a check, handed to "the person"
@@ -32,6 +33,15 @@ beforeAll(async () => {
     const html = (body: string, status = 200, headers: Record<string, string> = {}) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers }); res.end(`<!doctype html><html><head><title>Members</title></head><body>${body}</body></html>`) }
     if (req.url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (req.url === '/open') return html(ARTICLE.replace('member page', 'open page'))
+    // As a Lark sheet: its grid on a canvas, its shortcut list in a sidebar a class hides; a closed tab, a hidden box
+    // with one thing shown in it, and the page's data. First, an element whose class adds a child to each copy made of it,
+    // and a form named for a property of the document.
+    if (req.url === '/sheet') {
+      return html(`<x-grow></x-grow><form name="implementation"></form><style>.hotkeys { visibility: hidden } .shown { visibility: visible }</style><canvas width="600" height="300"></canvas>${ARTICLE}`
+        + `<div class="hotkeys"><ul>${'<li>Insert new sheet Shift F11</li>'.repeat(40)}</ul><p class="shown">Shown inside the hidden box</p></div>`
+        + '<div style="display:none">The closed tab</div><script type="application/ld+json">{"@type":"Thing","name":"The data"}</script>'
+        + '<script>customElements.define("x-grow", class extends HTMLElement { constructor() { super(); this.appendChild(document.createElement("span")) } })</script>')
+    }
     // A captcha until the person passes it: their browser then holds the cookie the page checks.
     if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(captcha('passed'))
     // Through the captcha, a page with nothing on it: not the page asked for.
@@ -143,6 +153,29 @@ function person(context: BrowserContext, acts: Record<string, (page: Page) => Pr
   context.on('page', listener)
   return () => context.off('page', listener)
 }
+
+describe('reading a page in the person\'s own Chrome', () => {
+  it('shownOnly reads the page as it shows: not a panel or a tab it hides, but what is shown inside a hidden box, and its scripts', async () => {
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    try {
+      const shown = await reader.read(`${base}/sheet`, { unattended: true, shownOnly: true, pollMs: 50, waitMs: 20_000 })
+      expect(shown.html).toContain('The member page')
+      expect(shown.html).toContain('Shown inside the hidden box')
+      expect(shown.html).toContain('"name":"The data"')
+      expect(shown.html).toContain('<canvas')
+      expect(shown.html).not.toContain('Insert new sheet')
+      expect(shown.html).not.toContain('The closed tab')
+      // The whole document beside it, read at the same moment.
+      expect(shown.document).toContain('Insert new sheet')
+      // Without it, the whole document, as before.
+      const whole = await reader.read(`${base}/sheet`, { unattended: true, pollMs: 50, waitMs: 20_000 })
+      expect(whole.html).toContain('Insert new sheet')
+      expect(whole.html).toContain('The closed tab')
+    } finally {
+      reader.close()
+    }
+  }, 60_000)
+})
 
 describe('handing a page a check stopped to the person, in their own Chrome', () => {
   it('the stopped item waits for the person; once they are through, W2L reads the page there and the item is the page', async () => {

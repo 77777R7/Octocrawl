@@ -73,6 +73,12 @@ export interface UserChromeReadOptions {
    * URL's own.
    */
   allowedHosts?: readonly string[]
+  /**
+   * Read the page as it shows: without the elements it does not show (`display: none`, or `visibility: hidden` with
+   * nothing shown inside), such as a help panel a sheet keeps hidden beside a grid it draws on a canvas. What is not
+   * shown by nature (a script, a style, a template) stays. Default false: the whole document.
+   */
+  shownOnly?: boolean
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
   includeTags?: readonly string[]
   excludeTags?: readonly string[]
@@ -175,6 +181,36 @@ const STATE = `JSON.stringify({
   hidden: document.visibilityState === 'hidden',
   field: (() => { const el = document.activeElement; if (!el) return null; if (el.isContentEditable) return 'edit:' + String(el.textContent).slice(0, 500); return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.tagName + ':' + String(el.value).slice(0, 500) : null })(),
 })`
+
+/**
+ * The page's address and, as `shown`, its HTML without the elements it does not show (JSON; the whole document is the
+ * wait's last read, not sent again, so a page as large as the wait can read is read): `display: none`, or `visibility: hidden` with nothing shown
+ * inside. Kept: what is never shown (script, style, template and the like) and what is inside an SVG, by its own rules.
+ * The copy is made in a document of its own, with no window: the page's own element classes do not run on it, so it
+ * stays element for element what the page has. (DOMParser, not document.implementation, which a form the page names
+ * `implementation` hides.)
+ */
+const SHOWN_HTML = `(() => {
+  const root = document.documentElement
+  if (!root) return JSON.stringify({ href: location.href, shown: '' })
+  const copy = new DOMParser().parseFromString('', 'text/html').importNode(root, true)
+  const originals = root.querySelectorAll('body *')
+  const copies = copy.querySelectorAll('body *')
+  const unshown = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'TITLE', 'BASE'])
+  const gone = []
+  // In document order: what is inside an element already left out comes right after it, and goes with it.
+  let last = null
+  for (let i = 0; i < originals.length; i++) {
+    const el = originals[i]
+    if ((last !== null && last.contains(el)) || unshown.has(el.tagName) || el.closest('svg') !== null) continue
+    const style = getComputedStyle(el)
+    const hidden = style.display === 'none' || ((style.visibility === 'hidden' || style.visibility === 'collapse')
+      && !Array.from(el.querySelectorAll('*')).some((inner) => getComputedStyle(inner).visibility === 'visible'))
+    if (hidden) { gone.push(copies[i]); last = el }
+  }
+  for (const el of gone) el.remove()
+  return JSON.stringify({ href: location.href, shown: copy.outerHTML })
+})()`
 
 /** The main document's last response, as the browser received it. */
 interface DocumentResponse {
@@ -508,6 +544,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     let hiddenSince: number | null = null
     let toldHidden = false
     let clear = 0
+    // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
+    let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
@@ -521,6 +559,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         const answer = await connection.send('Runtime.evaluate', { expression: STATE, returnByValue: true }, sessionId) as { result?: { value?: string } }
         if (typeof answer.result?.value !== 'string') { clear = 0; continue }
         state = JSON.parse(answer.result.value) as PageState
+        seen = { href: state.href, documents: heard.documents }
         if (typeof info.targetInfo?.url === 'string') state.href = info.targetInfo.url
         // The person's activation of this document, which a click or a key press gives it (a click in a captcha's frame included) and its script cannot.
         if (heard.act === null) {
@@ -590,13 +629,34 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         open(true)
         continue
       }
+      let html = state.html
+      let whole: string | undefined
+      if (options.shownOnly === true) {
+        // The page as it shows, read once it is through, beside the whole document the wait last read: a page that moved
+        // on between the two (another address, a new document) is read again, as in the wait.
+        try {
+          const shown = await connection.send('Runtime.evaluate', { expression: SHOWN_HTML, returnByValue: true }, sessionId) as { result?: { value?: unknown }; exceptionDetails?: unknown }
+          if (shown.exceptionDetails !== undefined || typeof shown.result?.value !== 'string') { clear = 0; continue }
+          const now = JSON.parse(shown.result.value) as { href: string; shown: string }
+          if (now.href !== seen.href || heard.documents !== seen.documents) { clear = 0; continue }
+          html = now.shown
+          whole = state.html
+        } catch (error) {
+          const left = gone(error)
+          if (left !== null) throw left
+          world = null
+          clear = 0
+          continue
+        }
+      }
       kept = true
       return { read: {
         requestedUrl: url,
         finalUrl: state.href,
         status,
         contentType: response?.headers['content-type'] ?? null,
-        html: state.html,
+        html,
+        ...(whole === undefined ? {} : { document: whole }),
         fetchedAt: new Date().toISOString(),
         wallMs: Date.now() - started,
         sawGate,

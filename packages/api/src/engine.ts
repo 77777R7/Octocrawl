@@ -1240,6 +1240,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const read = await chrome.read(url, {
         unattended: true,
         allowedHosts: allowed.hosts,
+        // What the person sees in their Chrome: not a panel the page keeps hidden (a sheet's shortcut list beside its grid).
+        shownOnly: true,
         ...(waitMs === undefined ? {} : { waitMs }),
         ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
         ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),

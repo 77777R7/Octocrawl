@@ -31,8 +31,14 @@ export interface UserBrowserRead {
   status: number | null
   /** The document's Content-Type header as received; null when it was not seen. */
   contentType: string | null
-  /** The rendered document. */
+  /** The rendered document, or the page as it shows when `document` is given. */
   html: string
+  /**
+   * The whole rendered document, when `html` is the page as it shows (the my-browser lane): whether the page shows a
+   * check is judged on it, as the wait for the page judged it, and it is the raw body (`rawHtml`, its SHA-256 and
+   * size); the content is read from `html`.
+   */
+  document?: string
   fetchedAt: string
   /** From opening the page to reading it, the person's time included. */
   wallMs: number
@@ -48,6 +54,8 @@ export interface UserBrowserRead {
 export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | null, options: FetchOptions): FetchResult {
   const LANE: UserBrowserLane = prior === null ? 'my_browser' : 'browser_local_authed'
   const { html: body, finalUrl, wallMs } = read
+  // The whole document: the raw body, and what a check is judged on, as the wait judged it; `body` may be the page as it shows.
+  const whole = read.document ?? body
   const status = read.status ?? 200
   const trace: TraceEvent[] = [
     ...(prior === null ? [] : [
@@ -72,14 +80,14 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       redirectChain: [],
       redirectChainComplete: false,
       contentType: read.contentType,
-      rawBodySha256: sha256Utf8(body),
+      rawBodySha256: sha256Utf8(whole),
       artifacts: [],
       fetchedAt: read.fetchedAt,
     },
     usage: {
       wallMs,
       bytesWire: null,
-      bytesDecompressed: Buffer.byteLength(body),
+      bytesDecompressed: Buffer.byteLength(whole),
       // W2L sent none: the person's browser made the requests, as many as it did.
       requestCount: 0,
       attemptCount: 0,
@@ -89,7 +97,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     trace,
   }
-  const gate = classifyGate({ status, header: () => null, body })
+  const gate = classifyGate({ status, header: () => null, body: whole })
   const errorPage = errorPageEvidence(status, read.contentType, body, finalUrl, options)
   const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
   const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {
@@ -107,7 +115,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   let wholePage: string | null = null
   let listPage = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
-  if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
+  const judged = whole === body || gate === null ? extracted : extractTf.extract(whole, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+  if ((judged.escalate || judged.lastResort === true) && gate !== null) return blocked(gate)
   if (extracted.escalate && !selectionAsked(options)) {
     wholePage = wholePageMarkdown(body, finalUrl, options)
     listPage = listRecordsFound(body, finalUrl, options)
@@ -115,7 +124,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(wholePage === null ? {} : { links }) }
     }
   }
-  const decisive = classifyGate({ status, header: () => null, body, contentful: true })
+  const decisive = classifyGate({ status, header: () => null, body: whole, contentful: true })
   if (decisive !== null) return blocked(decisive)
   const markdown = wholePageAsked(options) || listPage
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
@@ -148,7 +157,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       adapterValidation: extracted.adapterValidation,
       labelledValues: extracted.labelledValues,
     },
-    ...htmlFormats(body, body, extracted.mainHtml, options),
+    ...htmlFormats(whole, body, extracted.mainHtml, options),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
   })
 }
