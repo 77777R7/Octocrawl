@@ -429,6 +429,9 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     // The bound: about 1,400 characters of text is short, about 1,600 is not.
     expect(classifyGate(res({ body: short(`<p>${'word '.repeat(270)}</p>`), contentful: true }))?.reason).toBe('bot_detected_generic')
     expect(classifyGate(res({ body: short(`<p>${'word '.repeat(310)}</p>`), contentful: true }))).toBeNull()
+    // A character whose lowercase is longer ("İ") does not shift where the reader finds the page's tags.
+    expect(classifyGate(res({ body: short('<p>İstanbul mağazası</p>').replace('<title>Notice</title>', '<title>İ Notice</title>'), contentful: true }))?.reason).toBe('bot_detected_generic')
+    expect(classifyGate(res({ body: `<html><head><title>İ</title></head><BODY><H1>Unusual activity</H1><SCRIPT>var a = "${'x'.repeat(3_000)}"</SCRIPT><P>No automated traffic.</P></BODY></html>`, contentful: true }))?.reason).toBe('bot_detected_generic')
     // Entities, hexadecimal and named, are read as what they show.
     expect(classifyGate(res({ body: '<html><body><h1>Error</h1><p>Reference&#x20;&#x23;18&#x2e;2f1d3e17&#x2e;1791543951&#x2e;6a0b2c</p></body></html>', contentful: true }))?.signals).toContain('akamai_reference')
     expect(classifyGate(res({ body: '<html><body><h1>Unusual&nbsp;activity</h1><p>No automated requests, please.</p></body></html>', contentful: true }))?.reason).toBe('bot_detected_generic')

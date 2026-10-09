@@ -435,7 +435,8 @@ function shortWallPage(body: string): string[] | null {
  * built to make a scanner search again and again).
  */
 function pageText(body: string): { text: string; headings: string[] } | null {
-  const lower = body.toLowerCase()
+  // Positions are the body's own: a lowercased copy can be longer ("İ" lowercases to two characters), so tags are matched
+  // case-insensitively in place.
   const visible: string[] = []
   let visibleLength = 0
   const headings: string[] = []
@@ -456,18 +457,19 @@ function pageText(body: string): { text: string; headings: string[] } | null {
     // Entities shorten the text once decoded, a few times at most: past four times the bound the page is long; the exact
     // bound is checked on the decoded text.
     if (visibleLength > WALL_PAGE_MAX_TEXT * 4) return null
-    if (lower.startsWith('<!--', open)) {
-      const close = lower.indexOf('-->', open + 4)
+    if (body.startsWith('<!--', open)) {
+      const close = body.indexOf('-->', open + 4)
       if (close < 0) break
       at = close + 3
       continue
     }
     const end = body.indexOf('>', open + 1)
     if (end < 0) break
-    const tag = /^<(\/?)([a-z][a-z0-9-]*)(?=[\s/>])/.exec(lower.slice(open, Math.min(end + 1, open + 64)))
+    const tag = /^<(\/?)([a-z][a-z0-9-]*)(?=[\s/>])/i.exec(body.slice(open, Math.min(end + 1, open + 64)))
     at = end + 1
     if (tag === null) continue
-    const [, closing, name] = tag as unknown as [string, string, string]
+    const [, closing, tagName] = tag as unknown as [string, string, string]
+    const name = tagName.toLowerCase()
     if (name === 'head') { inHead = closing === ''; continue }
     if (name === 'body') { inHead = false; continue }
     if (HEADING_ELEMENTS.has(name)) {
@@ -475,8 +477,10 @@ function pageText(body: string): { text: string; headings: string[] } | null {
       else if (heading !== null && heading.name === name) { headings.push(collapse(decodeEntities(heading.parts.join(' ')))); heading = null }
       continue
     }
-    if (closing === '' && HIDDEN_ELEMENTS.has(name) && lower[end - 1] !== '/') {
-      const close = lower.indexOf(`</${name}`, at)
+    if (closing === '' && HIDDEN_ELEMENTS.has(name) && body[end - 1] !== '/') {
+      const closer = new RegExp(`</${name}`, 'gi')
+      closer.lastIndex = at
+      const close = closer.exec(body)?.index ?? -1
       if (close < 0) break
       const closeEnd = body.indexOf('>', close)
       if (closeEnd < 0) break
