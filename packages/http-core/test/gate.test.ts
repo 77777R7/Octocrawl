@@ -416,6 +416,58 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     }
   })
 
+  it('reads only what a page shows: its text past scripts, styles, templates, SVG and comments, entities decoded, within 1,500 characters', () => {
+    const short = (inner: string) => `<html><head><title>Notice</title></head><body><h1>We've noticed some unusual activity</h1>${inner}<p>We don’t allow automated traffic.</p></body></html>`
+    const bulk = 'x'.repeat(2_000)
+    // Hidden content of any length leaves the page short; a self-closing SVG hides nothing after it.
+    for (const hidden of [`<script>var s = "${bulk}"</script>`, `<style>.a{content:"${bulk}"}</style>`, `<noscript>${bulk}</noscript>`, `<template>${bulk}</template>`, `<svg><text>${bulk}</text></svg>`, `<!-- a > b ${bulk} -->`]) {
+      expect(classifyGate(res({ body: short(hidden), contentful: true }))?.reason, hidden.slice(0, 12)).toBe('bot_detected_generic')
+    }
+    // A custom element named like one is visible text, and so is the text after a self-closing SVG.
+    expect(classifyGate(res({ body: short(`<svg-icon>${bulk}</svg-icon>`), contentful: true }))).toBeNull()
+    expect(classifyGate(res({ body: `<html><body><h1>Unusual activity</h1><p>No automated traffic.</p><svg viewBox="0 0 1 1"/><p>${bulk}</p></body></html>`, contentful: true }))).toBeNull()
+    // The bound: about 1,400 characters of text is short, about 1,600 is not.
+    expect(classifyGate(res({ body: short(`<p>${'word '.repeat(270)}</p>`), contentful: true }))?.reason).toBe('bot_detected_generic')
+    expect(classifyGate(res({ body: short(`<p>${'word '.repeat(310)}</p>`), contentful: true }))).toBeNull()
+    // Entities, hexadecimal and named, are read as what they show.
+    expect(classifyGate(res({ body: '<html><body><h1>Error</h1><p>Reference&#x20;&#x23;18&#x2e;2f1d3e17&#x2e;1791543951&#x2e;6a0b2c</p></body></html>', contentful: true }))?.signals).toContain('akamai_reference')
+    expect(classifyGate(res({ body: '<html><body><h1>Unusual&nbsp;activity</h1><p>No automated requests, please.</p></body></html>', contentful: true }))?.reason).toBe('bot_detected_generic')
+  })
+
+  it('takes the wording in each of its forms: a title or any heading, traffic or activity, and each kind of automation', () => {
+    const page = (head: string, h: string, copy: string) => `<html><head><title>${head}</title></head><body>${h}<p>${copy}</p></body></html>`
+    for (const [head, h, copy] of [
+      ['Suspicious activity', '', 'We block automated access to this site.'],
+      ['Shop', '<h2>Unusual traffic detected</h2>', 'Our systems noticed automated requests.'],
+      ['Shop', '<h3>Suspicious traffic</h3>', 'We do not serve automated queries.'],
+      ['Shop', '<h1>Unusual activity</h1>', 'Automated browsing is not allowed.'],
+    ] as const) expect(classifyGate(res({ body: page(head, h, copy), contentful: true }))?.reason, h || head).toBe('bot_detected_generic')
+    // The wording in the copy alone, not in a heading, is not enough.
+    expect(classifyGate(res({ body: page('Shop', '<h1>Shop</h1>', 'We saw unusual activity and block automated traffic.'), contentful: true }))).toBeNull()
+  })
+
+  it('names Akamai only by a reference in its own shape, and only on a page answered with a 2xx', () => {
+    for (const ref of ['See the reference: Version 18.90ac3017.1791543951.f255f62e', 'Reference #18.2f1d3e17.17915.6a0b2c', 'Reference #18.zzzzzzzz.1791543951.6a0b2c']) {
+      expect(classifyGate(res({ body: `<html><body><h1>Notes</h1><p>${ref}</p></body></html>`, contentful: true })), ref).toBeNull()
+    }
+    // Akamai prints the same reference on its error pages, which are the page's own answer.
+    const gatewayTimeout = '<HTML><HEAD><TITLE>Gateway Timeout</TITLE></HEAD><BODY><H1>Gateway Timeout</H1>The proxy server did not receive a timely response from the upstream server.<P>Reference&#32;&#35;1&#46;ad5732b8&#46;1524839189&#46;5bb6380</BODY></HTML>'
+    for (const status of [400, 404, 500, 503, 504]) {
+      for (const contentful of [true, false]) expect(classifyGate(res({ status, body: gatewayTimeout, contentful })), `${status}`).toBeNull()
+    }
+    // Any 2xx answer, not only a 200.
+    expect(classifyGate(res({ status: 203, body: akamai, contentful: true }))?.signals).toContain('akamai_reference')
+  })
+
+  it('leaves a captcha or a login form on such a page to the gate a person can get through', () => {
+    const captcha = '<html><body><h1>Unusual traffic detected</h1><p>Our systems detected automated requests from your network. Complete the check below to continue.</p><form><div class="g-recaptcha" data-sitekey="6Lc"></div></form></body></html>'
+    expect(classifyGate(res({ body: captcha }))?.reason).toBe('captcha')
+    const login = '<html><body><h1>We noticed suspicious activity</h1><p>To protect your account from automated access, please sign in to continue.</p><form><input type="password"></form></body></html>'
+    expect(classifyGate(res({ body: login }))?.reason).toBe('login_wall')
+    // A wall cut off mid-page is still read up to where it ends.
+    expect(classifyGate(res({ body: '<html><body><h1>Unusual activity</h1><p>No automated traffic.</p><script>var never = "closed', contentful: true }))?.reason).toBe('bot_detected_generic')
+  })
+
   it('leaves long pages, and short ones with half the evidence, to the rest of the classifier', () => {
     const long = (inner: string) => `<html><body><article>${inner}${'<p>A long article goes on about traffic, security and the web at length, paragraph after paragraph.</p>'.repeat(30)}</article></body></html>`
     // An article about bot walls quotes both the heading and the copy, and an Akamai reference.

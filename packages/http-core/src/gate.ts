@@ -330,12 +330,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   const px = perimeterXChallenge(head, lower)
   if (px !== null) return { reason: 'captcha', signals: px }
 
-  // A short page that is only a refusal of automated visitors, read past the head: such walls often sit behind
-  // a page's worth of scripts (ROADMAP PA item 4).
-  const wall = shortWallPage(res.body)
-  if (wall !== null) return { reason: 'bot_detected_generic', signals: wall }
-
-  if (contentful) return null
+  // A short page answered with a 2xx that is only a refusal of automated visitors, read past the head: such walls often
+  // sit behind a page's worth of scripts (ROADMAP PA item 4). Decisive on a page read as content; on one that was not, a
+  // captcha or a login form on it names the gate first, since a person can get through those.
+  const wall = res.status >= 200 && res.status < 300 ? shortWallPage(res.body) : null
+  if (contentful) return wall === null ? null : { reason: 'bot_detected_generic', signals: wall }
 
   // --- interactive captcha widget ----------------------------------------
   // Reached only when no Cloudflare managed-challenge marker fired, so a
@@ -356,6 +355,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     if (bareLoginHeading) signals.push('heading_sign_in')
     return { reason: 'login_wall', signals }
   }
+
+  if (wall !== null) return { reason: 'bot_detected_generic', signals: wall }
 
   // --- geo restriction ----------------------------------------------------
   const geo = matched(lower, GEO_MARKERS)
@@ -403,30 +404,91 @@ const WALL_PAGE_MAX_TEXT = 1_500
 const AKAMAI_REFERENCE = /\b(?:reference|incident)\b\s*(?:number|id|no\.?)?\s*[:#]?\s*#?\s*\d{1,3}\.[0-9a-f]{6,8}\.\d{10}\.[0-9a-f]{6,12}\b/i
 const UNUSUAL_ACTIVITY = /\b(?:unusual|suspicious) (?:activity|traffic)\b/i
 const AUTOMATED_TRAFFIC = /\bautomated (?:traffic|access|requests|queries|browsing)\b/i
+/** Elements whose content is not the page's visible text. */
+const HIDDEN_ELEMENTS: ReadonlySet<string> = new Set(['script', 'style', 'noscript', 'template', 'svg'])
+/** Elements whose text names the page. */
+const HEADING_ELEMENTS: ReadonlySet<string> = new Set(['h1', 'h2', 'h3', 'title'])
 
 /**
- * The signals of a short page that is only a refusal of automated visitors, or null. Two such pages answered HTTP 200
- * and were read as content in the PA 4 Steel runs: Autotrader's Akamai page, whose text carries Akamai's reference to the
+ * The signals of a short page, answered with a 2xx, that is only a refusal of automated visitors, or null. Two such pages
+ * were read as content in the PA 4 Steel runs: Autotrader's Akamai page, whose text carries Akamai's reference to the
  * refused request, and Nordstrom's wall, whose heading reports unusual activity and whose copy refuses automated
  * traffic, 120 KB past the head the rest of the classifier reads. Each needs the page's visible text to be short
- * (WALL_PAGE_MAX_TEXT): an article quoting either is long. The whole body is read, the visible text only when a
- * trigger word is in it.
+ * (WALL_PAGE_MAX_TEXT): an article quoting either is long. Not on an error status: Akamai prints the same reference on
+ * its 5xx and 4xx error pages, which are the page's own answer. The body is read in one linear pass that stops at the
+ * bound (pageText).
  */
 function shortWallPage(body: string): string[] | null {
-  if (!/reference|incident|unusual|suspicious/i.test(body)) return null
-  const text = visibleText(body)
-  if (text.length > WALL_PAGE_MAX_TEXT) return null
-  if (AKAMAI_REFERENCE.test(text)) return ['akamai_reference', 'short_page']
-  const headings = [...body.matchAll(/<(h[1-3]|title)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map((m) => decodeEntities(m[2]!.replace(/<[^>]*>/g, ' ')))
-  if (headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(text)) return ['heading_unusual_activity', 'text_automated_traffic', 'short_page']
+  if (!/\b(?:reference|incident|unusual|suspicious)\b/i.test(body)) return null
+  const page = pageText(body)
+  if (page === null) return null
+  if (AKAMAI_REFERENCE.test(page.text)) return ['akamai_reference', 'short_page']
+  if (page.headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(page.text)) return ['heading_unusual_activity', 'text_automated_traffic', 'short_page']
   return null
 }
 
-/** The text a page shows, roughly: its body without scripts, styles, templates and markup, entities decoded, whitespace collapsed. */
-function visibleText(body: string): string {
-  const inBody = body.replace(/<head\b[\s\S]*?<\/head\s*>/i, ' ')
-  const bare = inBody.replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ')
-  return decodeEntities(bare).replace(/\s+/g, ' ').trim()
+/**
+ * The text a page shows and the text of its headings (h1–h3, its title), roughly: markup, comments, the head's other
+ * content and the content of scripts, styles, templates and SVG left out, entities decoded, whitespace collapsed. Null
+ * once the visible text passes WALL_PAGE_MAX_TEXT. One pass in linear time: each tag, comment and hidden element's end is
+ * found once, from where the last one ended, and an end that is missing ends the reading there (a page cut off, or one
+ * built to make a scanner search again and again).
+ */
+function pageText(body: string): { text: string; headings: string[] } | null {
+  const lower = body.toLowerCase()
+  const visible: string[] = []
+  let visibleLength = 0
+  const headings: string[] = []
+  let heading: { name: string; parts: string[] } | null = null
+  let inHead = false
+  let at = 0
+  const text = (raw: string) => {
+    if (raw.length === 0) return
+    if (heading !== null) heading.parts.push(raw)
+    if (inHead) return
+    visible.push(raw)
+    visibleLength += collapse(raw).length + 1
+  }
+  while (at < body.length) {
+    const open = body.indexOf('<', at)
+    if (open < 0) { text(body.slice(at)); break }
+    text(body.slice(at, open))
+    // Entities shorten the text once decoded, a few times at most: past four times the bound the page is long; the exact
+    // bound is checked on the decoded text.
+    if (visibleLength > WALL_PAGE_MAX_TEXT * 4) return null
+    if (lower.startsWith('<!--', open)) {
+      const close = lower.indexOf('-->', open + 4)
+      if (close < 0) break
+      at = close + 3
+      continue
+    }
+    const end = body.indexOf('>', open + 1)
+    if (end < 0) break
+    const tag = /^<(\/?)([a-z][a-z0-9-]*)(?=[\s/>])/.exec(lower.slice(open, Math.min(end + 1, open + 64)))
+    at = end + 1
+    if (tag === null) continue
+    const [, closing, name] = tag as unknown as [string, string, string]
+    if (name === 'head') { inHead = closing === ''; continue }
+    if (name === 'body') { inHead = false; continue }
+    if (HEADING_ELEMENTS.has(name)) {
+      if (closing === '') heading = { name, parts: [] }
+      else if (heading !== null && heading.name === name) { headings.push(collapse(decodeEntities(heading.parts.join(' ')))); heading = null }
+      continue
+    }
+    if (closing === '' && HIDDEN_ELEMENTS.has(name) && lower[end - 1] !== '/') {
+      const close = lower.indexOf(`</${name}`, at)
+      if (close < 0) break
+      const closeEnd = body.indexOf('>', close)
+      if (closeEnd < 0) break
+      at = closeEnd + 1
+    }
+  }
+  const visibleText = collapse(decodeEntities(visible.join(' ')))
+  return visibleText.length > WALL_PAGE_MAX_TEXT ? null : { text: visibleText, headings }
+}
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 function decodeEntities(text: string): string {
