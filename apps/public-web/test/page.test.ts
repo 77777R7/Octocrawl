@@ -150,6 +150,9 @@ describe('Page markup', () => {
     // The artwork is the page's own asset, sized, lazy and decorative.
     expect(page).toContain('<div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>')
     expect(readFileSync(new URL('../public/assets/scene-earth.webp', import.meta.url)).length).toBeGreaterThan(0)
+    // The pinned window scrolls one step per tier (styles.css .is-story .tier-stage), so the stage counts them.
+    expect(page).toContain(`<div class="tier-stage" id="tier-stage" style="--tiers: ${TIERS.length}">`)
+    expect(page.match(/<div class="tier-pin" id="tier-pin">/g)).toHaveLength(1)
   })
 
   it('shows every tier with its details, so nothing needs a click', () => {

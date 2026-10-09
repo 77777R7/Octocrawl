@@ -292,20 +292,23 @@ export function capabilitiesMarkup(bar: string): string {
 }
 
 /** Section 04: the four free ways to use Octocrawl, every one written out, over the Earth artwork that fills the
- * whole section. With a script the artwork stays in view while the tiers pass one by one, the scroll settles with a
- * tier in the middle of the screen, and that tier lights as many of the planet's painted marks (featureMotion.ts,
- * earthLights.ts). Without a script the tiers simply follow one another over the artwork as painted. */
+ * whole section. With a script on a wide screen the window (.tier-pin) is pinned while the page scrolls one step per
+ * tier: the list of four stays in view, the tier the scroll has reached opens and lights as many of the planet's
+ * painted marks, and the others fold to their names (featureMotion.ts, earthLights.ts; the stage's --tiers gives
+ * the stylesheet the number of steps). On a narrow screen the tiers pass one by one over the planet. Without a
+ * script the tiers simply follow one another over the artwork as painted. */
 export function tiersMarkup(bar: string): string {
   const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-caption="${esc(tierCaption(t))}">
               <h3 class="tier-head"><span class="tier-n" aria-hidden="true">${t.n}</span><span class="tier-name">${t.name}</span><span class="tier-leader" aria-hidden="true"></span><span class="tier-amount"><b>${tierAmount(t.perDay)}</b>${t.perDay === null ? '<span class="visually-hidden"> no daily limit</span>' : ' a day'}</span></h3>
-              <div class="tier-panel">
+              <div class="tier-panel"><div class="tier-panel-in">
                 <p class="tier-unit">${t.unit}</p>
                 <dl class="tier-facts">${t.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
                 <a class="tier-link" href="${t.link[0]}">${t.link[1]} <span aria-hidden="true">${t.link[2]}</span></a>
-              </div>
+              </div></div>
             </div>`).join('\n            ')
   return `<section class="tier-section is-earth" id="free-tiers" aria-labelledby="tier-title">
-      <div class="tier-stage">
+      <div class="tier-stage" id="tier-stage" style="--tiers: ${TIERS.length}">
+      <div class="tier-pin" id="tier-pin">
       <div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>
       ${bar}
       <div class="band">
@@ -320,11 +323,14 @@ export function tiersMarkup(bar: string): string {
             <div class="tier-rail" id="tier-rail">
             ${rows}
             </div>
-            <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
           </div>
           <p class="earth-caption" id="earth-caption" aria-hidden="true" hidden>${esc(tierCaption(TIERS[0]!))}</p>
         </div>
       </div>
       </div>
+      </div>
+      <div class="band"><div class="frame tier-foot-band">
+        <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
+      </div></div>
     </section>`
 }

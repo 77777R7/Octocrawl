@@ -184,19 +184,27 @@ function mountClients(): void {
   })
 }
 
-/** Free tiers, a page at a time: the planet stays in view while the tiers pass, each with a screen's worth of room.
- * The tier in the middle of the screen is lit, and when the scroll comes to rest between two tiers it settles with
- * one in the middle: the next one if the visitor moved that way past a seventh of the screen, otherwise the nearest.
- * The scroll is the browser's own; outside the tiers it is left alone. A tier's name turns to it. The lights load
- * (in their own chunk, with a worker) only as the section comes near. */
+/** Half a step's hold on the last tier before the window lets go. styles.css (.is-story .tier-stage) adds the same. */
+const TAIL = 0.5
+
+/** Free tiers. On a screen wide and tall enough the window is pinned (styles.css .is-story) while the page scrolls
+ * one step per tier: the step is what the stage is taller than the window, shared out over the tiers and the hold,
+ * so the tier the scroll has reached is simply the nearest whole step, and it opens in the list. Elsewhere the tiers
+ * pass one by one over the planet, and the one nearest the middle of the screen is lit. Either way the scroll is
+ * the browser's own: nothing settles or snaps it. A tier's name turns to it, and so does focus landing in a folded
+ * one. The lights load (in their own chunk, with a worker) only as the section comes near. */
 function mountTierRail(): void {
   const rail = document.querySelector<HTMLElement>('#tier-rail')
   const section = rail?.closest<HTMLElement>('section')
+  const stage = section?.querySelector<HTMLElement>('.tier-stage')
+  const pin = section?.querySelector<HTMLElement>('.tier-pin')
   const art = section?.querySelector<HTMLElement>('.earth-art')
-  if (!rail || !section || !art) return
+  if (!rail || !section || !stage || !pin || !art) return
   const rows = [...rail.querySelectorAll<HTMLElement>('.tier-row')]
   const caption = document.querySelector<HTMLElement>('#earth-caption')
   const hint = section.querySelector<HTMLElement>('.tier-hint')
+  // The same query pins the window in styles.css (.is-story .tier-pin); the two must agree.
+  const pinned = window.matchMedia('(min-width: 861px) and (min-height: 720px)')
   const lightsFor = (row: HTMLElement) => row.dataset.lights === 'all' ? Number.POSITIVE_INFINITY : Number(row.dataset.lights)
   let active = -1
   let lights: import('./earthLights').EarthLights | null = null
@@ -213,20 +221,26 @@ function mountTierRail(): void {
       if (i === index) row.setAttribute('aria-current', 'step')
       else row.removeAttribute('aria-current')
     })
+    section.classList.toggle('is-begun', index > 0)
     lights?.show(lightsFor(rows[index]!))
     if (caption) {
       caption.textContent = rows[index]!.dataset.caption ?? ''
       if (!caption.hidden && !reduced()) retyper(caption).decode()
     }
   }
-  /** Where the page would be scrolled with tier i in the middle of the screen. */
+  /** The page's scroll with the window pinned, in px per tier; 0 when the stylesheet has not pinned it. */
+  const step = () => pinned.matches ? Math.max(0, (stage.offsetHeight - pin.offsetHeight) / (rows.length - 1 + TAIL)) : 0
+  /** Where the page would be scrolled to show tier i: the stage's top plus i steps when pinned, otherwise the tier
+   * in the middle of the screen. */
   const stop = (i: number) => {
+    if (step()) return stage.getBoundingClientRect().top + window.scrollY + i * step()
     const box = rows[i]!.getBoundingClientRect()
     return box.top + window.scrollY + box.height / 2 - window.innerHeight / 2
   }
-  /** How far through the tiers the scroll is: 0 with the first in the middle, 1 with the second, and so on. */
+  /** How far through the tiers the scroll is: 0 at the first, 1 at the second, and so on. */
   const progress = () => {
     const y = window.scrollY
+    if (step()) return (y - stop(0)) / step()
     const stops = rows.map((_, i) => stop(i))
     if (y <= stops[0]!) return (y - stops[0]!) / window.innerHeight
     for (let i = 1; i < stops.length; i++) if (y <= stops[i]!) return i - 1 + (y - stops[i - 1]!) / (stops[i]! - stops[i - 1]!)
@@ -234,33 +248,16 @@ function mountTierRail(): void {
   }
   let queued = 0
   const update = () => { queued = 0; select(Math.max(0, Math.min(rows.length - 1, Math.round(progress())))) }
+  const refresh = () => { if (!queued) queued = requestAnimationFrame(update) }
   update()
+  window.addEventListener('scroll', refresh, { passive: true })
+  window.addEventListener('resize', refresh)
+  pinned.addEventListener('change', refresh)
 
-  let settled = 0
-  let rest = 0
-  const settle = () => {
-    const f = progress()
-    // Approaching the first tier from above, or leaving past the last, the scroll is the visitor's.
-    if (f <= -0.45 || f >= rows.length - 1 + 0.2) { settled = Math.max(0, Math.min(rows.length - 1, Math.round(f))); return }
-    const move = f - settled
-    const target = f < 0 ? 0 : f > rows.length - 1 ? rows.length - 1 : move > 0.14 ? Math.ceil(f) : move < -0.14 ? Math.floor(f) : Math.round(f)
-    settled = Math.max(0, Math.min(rows.length - 1, target))
-    const top = stop(settled)
-    if (Math.abs(window.scrollY - top) < 2) return
-    window.scrollTo({ top, behavior: reduced() ? 'auto' : 'smooth' })
-  }
-  window.addEventListener('scroll', () => {
-    if (!queued) queued = requestAnimationFrame(update)
-    clearTimeout(rest)
-    rest = window.setTimeout(settle, 160)
-  }, { passive: true })
-  window.addEventListener('resize', () => { if (!queued) queued = requestAnimationFrame(update) })
-
+  const go = (i: number) => window.scrollTo({ top: stop(i), behavior: reduced() ? 'auto' : 'smooth' })
   rows.forEach((row, i) => {
-    row.querySelector('.tier-head')?.addEventListener('click', () => {
-      settled = i
-      window.scrollTo({ top: stop(i), behavior: reduced() ? 'auto' : 'smooth' })
-    })
+    row.querySelector('.tier-head')?.addEventListener('click', () => go(i))
+    row.addEventListener('focusin', () => { if (i !== active) go(i) })
   })
 
   const near = new IntersectionObserver(entries => {
