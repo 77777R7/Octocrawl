@@ -1,0 +1,7 @@
+{
+ "command": "npx -y octocrawl@0.3.2 map https://modelcontextprotocol.io --search transports --limit 3 --task-root <temp dir> > map.json 2> map.err",
+ "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
+ "network": "through local proxy 127.0.0.1:7890 (HTTPS_PROXY and HTTP_PROXY set; map.err says so)",
+ "dates": "UTC (started.txt, finished.txt); the folder is named by the local date (UTC+8)",
+ "note": "written 2026-10-10 from the session's command log; the run itself wrote only map.json, map.err and the two timestamps"
+}

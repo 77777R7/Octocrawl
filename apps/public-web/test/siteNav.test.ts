@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES, siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
 import { CAPABILITIES } from '../src/featureSections.js'
@@ -12,7 +13,7 @@ const headingIds = (file: string) => [...readFileSync(app(`content/${file}`), 'u
   .map(([, title]) => title!.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/\s+/g, '-'))
 
 describe('Top navigation', () => {
-  it('leads only to places that exist: docs pages and their sections, home page sections, the changelog', () => {
+  it('leads only to places that exist: docs pages and their sections, blog articles, home page sections, the changelog', () => {
     const home = pageMarkup()
     const hrefs = [...`${siteNavMarkup()}${siteActionsMarkup()}`.matchAll(/href="([^"]+)"/g)].map(([, href]) => href!)
     expect(hrefs.length).toBeGreaterThan(20)
@@ -22,6 +23,7 @@ describe('Top navigation', () => {
       if (path === '/') { expect([href, home.includes(`id="${hash}"`)]).toEqual([href, true]); continue }
       if (path === '/changelog/') { expect(existsSync(app('../../CHANGELOG.md'))).toBe(true); continue }
       if (path === '/llms.txt') continue
+      if (path.startsWith('/blog/')) { expect([href, path === '/blog/' || posts.some(post => blogPath(post) === path)]).toEqual([href, true]); continue }
       const page = pages.find(p => (p.slug ? `/docs/${p.slug}/` : '/docs/') === path)
       expect([href, page?.file]).toEqual([href, expect.any(String)])
       if (hash) expect([href, headingIds(page!.file).includes(hash)]).toEqual([href, true])
@@ -47,6 +49,7 @@ describe('Top navigation', () => {
   it('marks the page being read', () => {
     expect(siteNavMarkup('docs')).toMatch(/<summary aria-current="page">Docs/)
     expect(siteNavMarkup('changelog')).toContain('href="/changelog/" aria-current="page"')
+    expect(siteNavMarkup('blog')).toContain('href="/blog/" aria-current="page"')
     expect(siteNavMarkup()).not.toContain('aria-current')
   })
 })

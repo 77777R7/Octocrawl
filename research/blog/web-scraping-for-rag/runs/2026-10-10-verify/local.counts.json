@@ -1,0 +1,14 @@
+{
+ "status": "success",
+ "lane": "http",
+ "wallMs": 689,
+ "contentTokens": 8260,
+ "markdownChars": 33037,
+ "headings": 12,
+ "tables": 2,
+ "codeBlocks": 15,
+ "fetchedAt": "2026-10-09T20:09:07.622Z",
+ "outputSha256.markdown": "abec4b896a640b5115e809f43bd71b8decdf8842a7281f29d0499e10d588142d",
+ "sha256OfMarkdownAsReceived": "abec4b896a640b5115e809f43bd71b8decdf8842a7281f29d0499e10d588142d",
+ "extractor": "extract-tf/16"
+}

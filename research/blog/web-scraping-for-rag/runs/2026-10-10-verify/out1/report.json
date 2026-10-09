@@ -1,0 +1,23 @@
+{
+  "taskId": "f827227e-ebf9-414c-8950-c61db018a2da",
+  "attemptId": "bcda829a-689c-4752-a5f8-eec9870ee461",
+  "status": "completed",
+  "pagesFetched": 6,
+  "cachedPages": 0,
+  "budgetExceeded": null,
+  "loopDetected": false,
+  "wallMs": 1979,
+  "costUsd": 0,
+  "contentTokens": 29253,
+  "discovery": null,
+  "attribution": {
+    "origin": "cli@0.3.2"
+  },
+  "requested": 6,
+  "completed": 6,
+  "remaining": 0,
+  "succeeded": 6,
+  "failed": 0,
+  "maxConcurrency": 4,
+  "waitingForPerson": 0
+}

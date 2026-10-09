@@ -1,0 +1,3 @@
+command: curl -sS -o /dev/null -D - -A "w2l-research (anonymous header check)" https://github.com/notifications (no cookies); only the status lines and Location are kept
+network: through local proxy 127.0.0.1:7890 (the first status line is the proxy CONNECT)
+dates: UTC; the folder is named by the local date (UTC+8)

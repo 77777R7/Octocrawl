@@ -1,0 +1,19 @@
+{
+ "chunks": 47,
+ "per_url": {
+  "https://docs.python.org/3/tutorial/": 1,
+  "https://docs.python.org/3/tutorial/appetite.html": 1,
+  "https://docs.python.org/3/tutorial/interpreter.html": 6,
+  "https://docs.python.org/3/tutorial/introduction.html": 6,
+  "https://docs.python.org/3/tutorial/controlflow.html": 19,
+  "https://docs.python.org/3/tutorial/datastructures.html": 14
+ },
+ "largest_text_chars": 17212,
+ "example": {
+  "id": "7796ececec1d7b26-1",
+  "url": "https://docs.python.org/3/tutorial/interpreter.html",
+  "fetched_at": "2026-10-09T18:18:34.976Z",
+  "markdown_sha256": "7796ececec1d7b2694653908dbca0bf7bf476c5f0f2ea4b6d496bdf713d182f3",
+  "text": "## 2.1. Invoking the Interpreter[¶](#invoking-the-interpreter)\n\nThe Python interpreter is usually installed as `/usr/local/bin/python3.15` on those machines where it is available; putting `/usr/local/ …"
+ }
+}
