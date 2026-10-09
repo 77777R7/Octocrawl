@@ -5,7 +5,7 @@
 // (research/access/tasks.v1.json) and, with --record, writes the committed Markdown record.
 //
 // Usage: node research/access/my-browser-check.mjs [--tasks T001,T048,...] [--login .w2l/access/my-browser-login.json]
-//          [--scrape-one] [--record research/access/runs/<date>-my-browser-<commit>.md]
+//          [--scrape-one] [--via lane|access] [--record research/access/runs/<date>-my-browser-<commit>.md]
 //   Env: W2L_API_URL (default http://127.0.0.1:8787).
 //   --tasks      public tasks from tasks.v1.json (default PUBLIC below, the set of runs 1 to 4); `none` reads none.
 //   --login      a git-ignored JSON file, [{ "url": "...", "signedInText": "..." }, ...]: pages that need the person's
@@ -13,6 +13,8 @@
 //                text only that page shows to them (their name, a local listing). The record names only each page's
 //                host, never its URL, the text or the page.
 //   --scrape-one also reads the first public page as a single scrape (POST /v1/scrape), which asks the person again.
+//   --via        how the request asks for the lane: `lane` (default, `"lane": "my-browser"`) or `access` (the one
+//                plain choice of ROADMAP PA item 7, `"access": "my-browser"`).
 //
 // Method:
 //   verified       the API answered `success` or `partial` and every predicate passed; a status alone never does.
@@ -43,6 +45,10 @@ const publicTasks = ids.map((id) => {
   if (task === undefined) throw new Error(`no task ${id} in tasks.v1.json`)
   return { id, url: task.url, kind: task.kind, part: task.part, baseline: task.baseline?.windowA?.verified ?? null, predicates: task.predicates, login: false }
 })
+const via = flag('--via') ?? 'lane'
+if (!['lane', 'access'].includes(via)) throw new Error('--via must be lane or access')
+// The request's way of asking for the person's Chrome.
+const asked = via === 'access' ? { access: 'my-browser' } : { lane: 'my-browser' }
 const loginFile = flag('--login')
 const loginTasks = loginFile === undefined ? [] : JSON.parse(await readFile(loginFile, 'utf8')).map((entry, i) => ({
   id: `L${i + 1}`, url: entry.url, kind: 'login', part: 'login', baseline: null, login: true,
@@ -76,7 +82,7 @@ console.log(`octocrawl my-browser check: ${tasks.length} pages (${publicTasks.le
 console.log('In Chrome: click Allow on "Allow remote debugging?", then "Allow reading these sites" in the page Octocrawl opens. A page that shows a check waits for you.')
 
 const results = []
-const started = await call('POST', '/v1/batches', { urls: tasks.map((t) => t.url), lane: 'my-browser', formats: ['markdown'] })
+const started = await call('POST', '/v1/batches', { urls: tasks.map((t) => t.url), ...asked, formats: ['markdown'] })
 if (started.status !== 202) throw new Error(`the batch was refused: HTTP ${started.status} ${JSON.stringify(started.json)}`)
 const batchId = started.json.taskId ?? started.json.id
 let report
@@ -110,7 +116,7 @@ for (const task of tasks) {
 if (args.includes('--scrape-one')) {
   const task = publicTasks[0]
   console.log(`Single scrape of ${task.id}: Chrome asks again.`)
-  const answer = await call('POST', '/v1/scrape', { url: task.url, lane: 'my-browser', formats: ['markdown'], debug: true })
+  const answer = await call('POST', '/v1/scrape', { url: task.url, ...asked, formats: ['markdown'], debug: true })
   const md = typeof answer.json?.markdown === 'string' ? answer.json.markdown : ''
   await writeFile(join(outDir, `${task.id}-scrape.md`), md)
   const passed = task.predicates.map((p) => judge(p, md))
@@ -134,7 +140,7 @@ if (recordFile !== undefined) {
   const rows = results.map((r) => `| ${r.task.id} | ${r.route} | ${where(r)} | ${r.task.part} | ${r.task.baseline === null ? '—' : r.task.baseline ? 'verified' : 'not verified'} | ${r.status ?? '—'} | ${r.reason ?? ''} | ${r.lane ?? '—'} | ${r.completion ?? '—'} | ${r.verified ? 'yes' : 'no'} | ${r.wallMs ?? '—'} | ${r.note} |`)
   const text = `# my-browser lane: real-page acceptance, ${startedAt.slice(0, 10)}
 
-ROADMAP PA item 8. Pages read in the person's own Chrome through one batch on \`lane: "my-browser"\`.
+${via === 'access' ? 'ROADMAP PA item 7 (the one plain access choice) and item 8' : 'ROADMAP PA item 8'}. Pages read in the person's own Chrome through one batch on \`${via === 'access' ? 'access' : 'lane'}: "my-browser"\`.
 
 - Command: \`node research/access/my-browser-check.mjs ${args.join(' ')}\`
 - Source commit: \`${commit}\`${dirty ? ' (working tree had uncommitted changes)' : ''}
