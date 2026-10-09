@@ -1283,20 +1283,62 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .is-earth .can-intro h2 em { color: var(--orange-100); }
 .is-earth .can-lead { color: var(--on-navy); font-size: 16px; }
 .is-earth .tier-wrap { min-height: 860px; }
+.tier-pin { position: relative; }
 .tier-copy { max-width: 520px; }
-.tier-hint { display: inline-flex; gap: 8px; margin: 22px 0 0; color: var(--orange-100); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
-/* With a script: the planet stays in view while the tiers pass one by one, each with a screen's worth of room; the
-   one in the middle of the screen is lit, and featureMotion.ts settles the scroll with a tier in the middle. */
-.is-story .earth-art { position: sticky; inset: auto; top: 0; height: 100vh; height: 100svh; margin-bottom: -100vh; margin-bottom: -100svh; }
-.is-story .tier-wrap { min-height: 0; padding-bottom: 30vh; }
-.is-story .tier-rail { margin-top: 24vh; }
-.is-story .tier-row { display: flex; flex-direction: column; justify-content: center; min-height: 64vh; }
+.tier-hint { display: inline-flex; gap: 8px; margin: 22px 0 0; color: var(--orange-100); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; transition: opacity .4s ease; }
+.tier-foot-band { padding: 0 32px 80px; }
 .is-story .tier-row:not(.is-active) .tier-name, .is-story .tier-row:not(.is-active) .tier-amount b { color: var(--on-navy-2); }
 .is-story .tier-row.is-active .tier-head::before { background: var(--orange); }
 .is-story .tier-row.is-active .tier-n { color: var(--orange-100); }
-.is-story .tier-row .tier-panel { transition: opacity .5s ease, transform .5s cubic-bezier(.2, .8, .2, 1); }
-.is-story .tier-row:not(.is-active) .tier-panel { opacity: .55; transform: translateY(6px); }
-.is-story .earth-caption { right: max(32px, calc(50% - 568px)); bottom: 40px; }
+.is-story .tier-head { cursor: pointer; }
+/* With a script, where the window cannot be pinned (a narrow screen, or one too short to hold the heading, the list
+   and an open tier at once): the planet stays in view while the tiers pass over it one by one, each with most of a
+   screen's room, and the one nearest the middle of the screen is lit (featureMotion.ts). */
+@media (max-width: 860px), (max-height: 719px) {
+  .is-story .earth-art { position: sticky; inset: auto; top: 0; height: 100vh; height: 100svh; margin-bottom: -100vh; margin-bottom: -100svh; }
+  .is-story .tier-wrap { min-height: 0; padding-bottom: 16vh; }
+  .is-story .tier-rail { margin-top: 10vh; }
+  .is-story .tier-row { display: flex; flex-direction: column; justify-content: center; min-height: 64vh; min-height: 64svh; }
+  .is-story .tier-panel { transition: opacity .5s ease; }
+  .is-story .tier-row:not(.is-active) .tier-panel { opacity: .55; }
+}
+/* With a script on a screen wide and tall enough, the window is pinned: the planet and the list of four stay in view
+   while the page scrolls one step per tier, with half a step's hold on the last, and the tier the scroll has reached
+   opens in the list while the others fold to their names. The visitor always sees all four and which one is lit,
+   and the scroll is the browser's own. The stage's --tiers (featureSections.ts) counts the steps; featureMotion.ts
+   reads the step from the stage's and the window's heights, and pins under the same query, so the hold here and its
+   TAIL, and this query and its own, must agree. */
+@media (min-width: 861px) and (min-height: 720px) {
+  .is-story .tier-stage { height: calc(100vh + (var(--tiers) - .5) * 60vh); height: calc(100svh + (var(--tiers) - .5) * 60svh); }
+  .is-story .tier-pin { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; overflow: clip; }
+  .is-story .tier-wrap { min-height: 0; padding: 28px 32px 0; }
+  .is-story .tier-hint { margin-top: 14px; }
+  .is-story.is-begun .tier-hint { opacity: 0; }
+  .is-story .tier-rail { margin-top: 20px; }
+  .is-story .tier-head { padding: 12px 16px 10px 20px; }
+  .is-story .tier-head::before { top: 19px; }
+  /* A folded tier keeps its words in the page (a reader, or the Tab key, still reaches them, and focus inside one
+     unfolds it: featureMotion.ts); only its height goes. */
+  .is-story .tier-panel { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s cubic-bezier(.2, .8, .2, 1), opacity .25s ease; }
+  .is-story .tier-panel-in { min-height: 0; padding-bottom: 16px; overflow: hidden; overflow: clip; }
+  .is-story .tier-row.is-active .tier-panel { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .15s; }
+  .is-story .tier-unit { margin-bottom: 10px; }
+  .is-story .tier-facts { gap: 7px; }
+  .is-story .tier-link { min-height: 36px; margin-top: 2px; }
+  /* The caption keeps to the right of the words' column, however narrow the screen. */
+  .is-story .earth-caption { left: calc(var(--copy-end) + 40px); right: max(32px, calc(50% - 568px)); bottom: 40px; width: fit-content; max-width: none; margin-left: auto; }
+  .is-story .tier-foot-band { padding-top: 40px; }
+}
+/* On the shorter of those screens the pinned window gives up the hint and some size to keep an open tier whole. */
+@media (min-width: 861px) and (min-height: 720px) and (max-height: 880px) {
+  .is-story .tier-wrap { padding-top: 24px; }
+  .is-story .can-intro h2 { font-size: 32px; }
+  .is-story .can-lead { margin-top: 12px; }
+  .is-story .tier-hint { display: none; }
+  .is-story .tier-rail { margin-top: 16px; }
+  .is-story .tier-unit, .is-story .tier-facts dd { font-size: 14px; }
+  .is-story .tier-facts dd { line-height: 1.45; }
+}
 .is-earth .tier-rail { margin-top: 36px; }
 .tier-rail { padding: 0; }
 .tier-row { position: relative; border-top: 1px solid rgba(176, 200, 240, .16); }
@@ -1309,7 +1351,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .tier-leader::before { content: "· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·"; }
 .tier-amount { flex: none; color: var(--on-navy-2); font-size: 14px; white-space: nowrap; }
 .tier-amount b { margin-right: .25em; color: var(--on-navy); font-size: 20px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.tier-panel { padding: 0 16px 22px calc(20px + 2.6ch + 12px); }
+.tier-panel-in { padding: 0 16px 22px calc(20px + 2.6ch + 12px); }
 .tier-unit { margin: 0 0 14px; color: var(--on-navy); font-size: 15px; }
 .tier-facts { display: grid; gap: 9px; margin: 0; }
 .tier-facts div { display: grid; grid-template-columns: 6.5ch minmax(0, 1fr); gap: 12px; }
@@ -1319,21 +1361,21 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .tier-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 6px; color: var(--link-on-navy); font-size: 15px; font-weight: 650; text-underline-offset: 3px; }
 .tier-link:hover { color: var(--orange-100); }
 .earth-caption { position: absolute; right: 32px; bottom: 40px; max-width: calc(100% - 40px); margin: 0; padding: 7px 10px; border-radius: 4px; color: var(--on-navy); background: rgba(6, 22, 52, .78); font: 500 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-align: right; }
-.tier-foot { margin: 26px 0 0; color: var(--on-navy-2); font-size: 14px; line-height: 1.65; }
+.tier-foot { max-width: 520px; margin: 0; color: var(--on-navy-2); font-size: 14px; line-height: 1.65; }
 .tier-foot a { color: var(--link-on-navy); font-weight: 650; text-underline-offset: 3px; white-space: nowrap; }
 .tier-foot a:hover { color: var(--orange-100); }
 
-@media (max-width: 1049px) { .can-wrap, .tier-wrap { padding: 72px 32px 80px; } }
+@media (max-width: 1049px) { .can-wrap, .tier-wrap { padding: 72px 32px 80px; } .tier-foot-band { padding-bottom: 64px; } }
 @media (max-width: 860px) {
   /* Narrow screens: the words on navy first, the planet rising under them at the foot of the section. */
   .is-earth:not(.is-story) .tier-wrap { min-height: 0; padding-bottom: calc(60vw + 40px); }
+  /* With a script the tiers pass over the planet (the flow above) as cards, the planet rising under them. */
   .is-story .earth-art img { object-position: 76% 100%; }
   .is-story .earth-art::after { background: linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, .9) 34%, rgba(6, 22, 52, .2) 70%, rgba(6, 22, 52, .1) 100%); }
-  .is-story .tier-row { min-height: 72svh; justify-content: flex-start; border: 0; }
+  .is-story .tier-row { border: 0; }
   .is-story .tier-row > * { background: rgba(6, 22, 52, .88); }
   .is-story .tier-head { border-radius: 10px 10px 0 0; }
   .is-story .tier-panel { border-radius: 0 0 10px 10px; }
-  .is-story .tier-rail { margin-top: 12vh; }
   .is-story .earth-caption { display: none; }
   .tier-copy { max-width: none; }
   .is-earth:not(.is-story) .earth-art { top: auto; height: calc(60vw + 120px); }
@@ -1346,7 +1388,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .tier-leader { display: none; }
   .tier-name { flex: 1 1 auto; min-width: 0; }
   .tier-amount { margin-left: auto; }
-  .tier-panel { padding-left: calc(20px + 2.6ch + 10px); padding-right: 8px; }
+  .tier-panel-in { padding-left: calc(20px + 2.6ch + 10px); padding-right: 8px; }
 }
 @media (max-width: 999px) {
   .can-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1355,6 +1397,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 }
 @media (max-width: 600px) {
   .can-wrap, .tier-wrap { padding: 60px 16px 68px; }
+  .tier-foot-band { padding: 0 16px 56px; }
   .can-grid { grid-template-columns: minmax(0, 1fr); margin-top: 32px; }
   .can-cell { padding: 22px 20px 18px; }
   .can-art { min-height: 75px; font-size: 11px; line-height: 15px; }
@@ -1369,6 +1412,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   p.use-note { padding: 12px 18px 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .is-story .tier-row .tier-panel { transition: none; }
+  .is-story .tier-panel, .tier-hint { transition: none; }
   .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
 }
