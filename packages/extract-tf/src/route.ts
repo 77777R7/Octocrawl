@@ -94,6 +94,25 @@ function hasBuyBoxUnderH2(doc: Document, prices: readonly Element[]): boolean {
   return true
 }
 
+/**
+ * Whether the page's first h1 is followed by a price of its own: the first visible price after it sits in no element,
+ * short of one that also holds the h1, that names one of the listed products. A product page that declares its related
+ * products as an unnamed list shows its own price under its title; a category page's first price is a card's.
+ */
+function ownPriceAfterTitle(doc: Document, names: readonly string[]): boolean {
+  const h1 = qsa(doc, 'h1')[0]
+  if (h1 === undefined) return false
+  const prices = new Set(visiblePrices(doc))
+  const all = qsa(doc, '*')
+  const first = all.slice(all.indexOf(h1) + 1).find((el) => prices.has(el))
+  if (first === undefined) return false
+  for (let up = first.parentElement; up !== null && !up.contains(h1); up = up.parentElement) {
+    const text = textOf(up).replace(/\s+/g, ' ')
+    if (names.some((name) => text.includes(name))) return false
+  }
+  return true
+}
+
 function countAll(doc: Document): RouterCounts {
   const textLength = (el: Element | null): number => (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length
   const textChars = textLength(doc.body)
@@ -148,6 +167,13 @@ export interface PageSignals {
   listedProducts: number
   /** Normalized @type names of the JSON-LD's top-level nodes and @graph members: what the page declares itself. */
   pageTypes: string[]
+  /**
+   * The most Products one ItemList among those nodes lists as its own items, when the list is not named for
+   * recommendations ("You may also like"): a page that declares itself a list of products (H&M's category pages).
+   */
+  ownListedProducts: number
+  /** The names of that list's Products. */
+  ownListedNames: string[]
 }
 
 /** The fewest alike Product scopes that are a listing's cards rather than one product. */
@@ -187,9 +213,46 @@ function collectPageTypes(root: unknown, out: string[]): void {
 }
 
 /**
+ * The most Products that one ItemList among a parsed JSON-LD script's top-level nodes and @graph members lists as its
+ * items (a ListItem's item, or the element itself), skipping a list named for recommendations.
+ */
+function ownListedProducts(root: unknown): string[] {
+  let most: string[] = []
+  for (const node of Array.isArray(root) ? root : [root]) {
+    if (typeof node !== 'object' || node === null) continue
+    const record = node as Record<string, unknown>
+    if (Array.isArray(record['@graph'])) {
+      const listed = ownListedProducts(record['@graph'])
+      if (listed.length > most.length) most = listed
+    }
+    if (!typeNames(record).includes('itemlist')) continue
+    if (typeof record['name'] === 'string' && isRecommendationHeading(record['name'])) continue
+    const products: string[] = []
+    for (const element of Array.isArray(record['itemListElement']) ? record['itemListElement'] : []) {
+      if (typeof element !== 'object' || element === null) continue
+      const item = (element as Record<string, unknown>)['item']
+      const product = typeNames(element as Record<string, unknown>).includes('product')
+        ? element as Record<string, unknown>
+        : typeof item === 'object' && item !== null && typeNames(item as Record<string, unknown>).includes('product') ? item as Record<string, unknown> : null
+      if (product !== null) products.push(typeof product['name'] === 'string' ? product['name'].replace(/\s+/g, ' ').trim() : '')
+    }
+    if (products.length > most.length) most = products
+  }
+  return most
+}
+
+/** A JSON-LD node's normalized @type names. */
+function typeNames(node: Record<string, unknown>): string[] {
+  const t = node['@type']
+  return (typeof t === 'string' ? [t] : Array.isArray(t) ? t.filter((type): type is string => typeof type === 'string') : []).map(normalizeTypeName)
+}
+
+/**
  * Recursively walk parsed JSON-LD (objects, arrays, @graph) and collect
- * every normalized @type. A Product inside an ItemList is counted in
- * `listed.products` instead. Malformed JSON is caught by the caller.
+ * every normalized @type. A Product inside an ItemList, or inside a node
+ * that declares a collection (a CollectionPage or SearchResultsPage: eBay's
+ * category pages list their products as its `about.offers.itemOffered`), is
+ * counted in `listed.products` instead. Malformed JSON is caught by the caller.
  */
 function collectJsonLdTypes(node: unknown, out: string[], listed: { products: number }, inList = false): void {
   if (Array.isArray(node)) {
@@ -203,7 +266,7 @@ function collectJsonLdTypes(node: unknown, out: string[], listed: { products: nu
     if (inList && type === 'product') listed.products++
     else out.push(type)
   }
-  const list = inList || types.includes('itemlist')
+  const list = inList || types.includes('itemlist') || COLLECTION_PAGE_TYPES.some((type) => types.includes(type))
   for (const value of Object.values(node as Record<string, unknown>)) {
     if (typeof value === 'object' && value !== null) collectJsonLdTypes(value, out, listed, list)
   }
@@ -220,6 +283,7 @@ function collectPageSignals(doc: Document): PageSignals {
   const jsonLdTypes: string[] = []
   const listed = { products: 0 }
   const pageTypes: string[] = []
+  let ownListed: string[] = []
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
@@ -227,6 +291,8 @@ function collectPageSignals(doc: Document): PageSignals {
       const parsed: unknown = JSON.parse(text)
       collectJsonLdTypes(parsed, jsonLdTypes, listed)
       collectPageTypes(parsed, pageTypes)
+      const own = ownListedProducts(parsed)
+      if (own.length > ownListed.length) ownListed = own
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
@@ -251,6 +317,8 @@ function collectPageSignals(doc: Document): PageSignals {
     productCards: productCards(doc),
     listedProducts: listed.products,
     pageTypes,
+    ownListedProducts: ownListed.length,
+    ownListedNames: ownListed.filter((name) => name.length > 0),
   }
 }
 
@@ -482,11 +550,13 @@ function routeByCounts(c: RouterCounts, s: PageSignals, doc: Document): RouteDec
   // products (a category page), not one: the product strategy would cut them
   // as recommendations. So are products a page its publisher declares a
   // collection (a top-level CollectionPage or SearchResultsPage node; one the
-  // page is only part of does not count) lists as an ItemList's
-  // items, when no microdata scope declares one product. A product page that
-  // lists only its related products declares no such page.
+  // page is only part of does not count) lists as an ItemList's items, and so
+  // are the products of a top-level ItemList not named for recommendations
+  // (H&M's category pages, which declare no CollectionPage), when no microdata
+  // scope declares one product. A product page that lists only its related
+  // products declares no such page, or names its list for them.
   const listedOnly = s.listedProducts >= PRODUCT_CARDS &&
-    COLLECTION_PAGE_TYPES.some((type) => hasToken(s.pageTypes, type)) &&
+    (COLLECTION_PAGE_TYPES.some((type) => hasToken(s.pageTypes, type)) || (s.ownListedProducts >= PRODUCT_CARDS && !ownPriceAfterTitle(doc, s.ownListedNames))) &&
     (s.productCards || !hasToken(s.itemTypeTokens, 'product'))
   if ((s.productCards || listedOnly) && !c.buyBox && !hasToken(s.jsonLdTypes, 'product')) {
     return { type: 'collection', strategy: 'article' }

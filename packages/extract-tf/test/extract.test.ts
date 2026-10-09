@@ -85,6 +85,46 @@ describe('extractTf', () => {
     expect([hiddenTable.strategy, hiddenTable.escalate]).toEqual(['table', true])
   })
 
+  it('takes the region the page marks role="main" for its content, as it takes a <main> (ROADMAP PA item 4)', () => {
+    // eBay's category pages: a site header whose menus list every department, then <div role="main"> with the page's
+    // own heading, its category links and its listings (T021).
+    const department = (name: string) => `<div class="menu"><p>${name}</p><ul>${Array.from({ length: 4 }, (_, i) => `<li><a href="/d/${name}/${i}">${name} department ${i + 1}, everything in it</a></li>`).join('')}</ul><p>Shop the latest ${name.toLowerCase()} deals across every brand and condition we carry.</p></div>`
+    const header = `<div class="global-header"><header><a href="#mainContent">Skip to main content</a>${['Motors', 'Clothing'].map(department).join('')}</header></div>`
+    const listing = (i: number) => `<li class="card"><a href="/itm/${i}">Refurbished laptop model ${i + 1}, 16 GB memory, 512 GB SSD</a><span class="price">$${400 + i}.99</span><p>Tested and cleaned by a certified refurbisher, with a new battery and a 90-day warranty.</p></li>`
+    const content = `<div class="main-content" id="mainContent" role="main"><h1>Laptops &amp; Netbooks</h1><p>Shop by category: Apple laptops, PC laptops and netbooks from every brand, new and refurbished.</p><ul class="cards">${Array.from({ length: 12 }, (_, i) => listing(i)).join('')}</ul></div>`
+    const page = (main: string) => `<!doctype html><html><body><div class="page-container">${header}${main}</div></body></html>`
+    const out = extractTf.extract(page(content))
+    expect(out.mainHtml).toContain('Laptops &amp; Netbooks')
+    expect(out.mainHtml).toContain('$405.99')
+    expect(out.mainHtml).not.toContain('Shop the latest motors deals')
+    // A <main> or an <article> still comes first; a role="main" holding less than half of the page's text is not trusted.
+    expect(extractTf.extract(page(content.replace('<div class="main-content"', '<main class="main-content"').replace(/<\/div>$/, '</main>'))).mainHtml).not.toContain('Shop the latest motors deals')
+    const thin = extractTf.extract(page('<div role="main"><p>Laptops</p></div>' + content.replace(' role="main"', '')))
+    expect(thin.mainHtml).toContain('$405.99')
+    // An <article> inside a wider role="main" is the content, as before.
+    const story = `<article><h1>Refurbished laptops, tested</h1>${Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1}: every machine is tested and cleaned by a certified refurbisher, with a new battery and a warranty.</p>`).join('')}</article>`
+    const wide = extractTf.extract(`<!doctype html><html><body><div role="main"><section class="intro"><p>Also this week: the best budget gaming laptops of the year, chosen by our editors.</p></section>${story}</div></body></html>`)
+    expect(wide.mainHtml).toContain('Refurbished laptops, tested')
+    expect(wide.mainHtml).not.toContain('the best budget gaming laptops')
+    // So is a <main>.
+    const inner = extractTf.extract(`<!doctype html><html><body><div role="main"><section class="intro"><p>Also this week: the best budget gaming laptops of the year, chosen by our editors.</p></section>${story.replace('<article>', '<main>').replace('</article>', '</main>')}</div></body></html>`)
+    expect(inner.mainHtml).toContain('Refurbished laptops, tested')
+    expect(inner.mainHtml).not.toContain('the best budget gaming laptops')
+  })
+
+  it('keeps the page\'s h1 when it sits outside the region marked role="main"', () => {
+    // Stack Exchange: the question's h1 and its Asked/Viewed line sit above <div id="mainbar" role="main">, which holds
+    // the question and the answers (one of them with an h1 of its own).
+    const answer = `<div class="answer"><h1>Quick answer:</h1>${Array.from({ length: 3 }, (_, i) => `<p>Answer line ${i + 1}: use tar with the x, z and f flags to extract the archive into the current directory.</p>`).join('')}</div>`
+    const html = `<!doctype html><html><head><title>command line - What do I need to extract a .tar.gz file? - Ask Ubuntu</title></head><body><div id="content"><div class="inner-content">
+<div id="question-header"><h1>What command do I need to unzip/extract a .tar.gz file?</h1></div><div class="meta">Asked 13 years ago, viewed 4.2m times</div>
+<div id="mainbar" role="main"><p>I received a huge .tar.gz file from a client that contains about 800 MB of image files when uncompressed.</p><p>Our hosting company's FTP is very slow, so I want to extract it on the server.</p>${answer}</div>
+<div id="sidebar"><ul><li><a href="/q/1">Linked question one</a></li><li><a href="/q/2">Linked question two</a></li></ul></div></div></div></body></html>`
+    const out = extractTf.extract(html)
+    expect(out.title).toBe('What command do I need to unzip/extract a .tar.gz file?')
+    expect(out.mainHtml).toContain('What command do I need to unzip/extract a .tar.gz file?')
+  })
+
   it('reads a region a reader can still see or find as shown, whatever its markup says (ROADMAP PA item 4)', () => {
     const article = `<main><h1>Templates</h1><p>Jumpstart your next app with a template: a commerce storefront, a blog, a dashboard or an AI chatbot, each ready to deploy.</p><p>Every template comes with its source, a live demo and a guide to the parts worth changing first.</p></main>`
     const page = (wrap: (inner: string) => string) => extractTf.extract(`<!doctype html><html><body>${wrap(article)}</body></html>`)
@@ -604,6 +644,64 @@ ${options}
     expect(report?.textChars).toBeGreaterThan(1_500)
     // The same notice on a thin page is what a script-filled shell looks like.
     expect(extractTf.extract(page(3)).render).toMatchObject({ clientRendered: true, reason: 'js_fallback' })
+  })
+
+  it('reads a short page whose sections still say they are loading, beside its scripts, for a shell (ROADMAP PA item 4)', () => {
+    // WSJ's market data over HTTP: the table under each heading reads "Loading..." until the page's scripts fetch it (T066).
+    const intro = '<p>Market data for the major U.S. indexes, the day\'s market diary, the most active stocks and the new highs and lows, updated through the trading day. Quotes are delayed at least fifteen minutes; index levels come from their publishers, and volume figures cover every U.S. exchange and trading venue.</p>'
+    const sections = (loader: string) => ['Stock Indexes', 'Markets Diary', 'Stock Movers'].map((name) => `<section><h3>${name}</h3>${loader}</section>`).join('')
+    const page = (loader: string, scripts = 1_000, more = '', header = '') => `<!doctype html><html><body>${header}<main><h2>U.S. Stocks</h2>${intro}${sections(loader)}${more}</main><script>${'s'.repeat(scripts)}</script></body></html>`
+    for (const loader of ['<div class="loader">Loading...</div>', '<div>Loading\u2026</div>', '<div>Fetching the quotes...</div>', '<span>Please wait</span>', '<div>Quotes loading...</div>']) {
+      const render = extractTf.extract(page(loader)).render
+      expect(render?.textChars, loader).toBeGreaterThan(300)
+      expect(render, loader).toMatchObject({ clientRendered: true, reason: 'loading_text' })
+    }
+    // Up to the browser lane's bound of 4,000 characters of text.
+    const notes = Array.from({ length: 24 }, (_, i) => `<p>Note ${i + 1}: the index closed higher for a third day as banks and energy companies led the gains.</p>`).join('')
+    const longer = extractTf.extract(page('<div>Loading...</div>', 1_000, notes)).render
+    expect(longer?.textChars).toBeGreaterThan(2_000)
+    expect(longer?.textChars).toBeLessThanOrEqual(4_000)
+    expect(longer).toMatchObject({ clientRendered: true, reason: 'loading_text' })
+    // Not with less than 1,000 characters of script to fetch the data.
+    expect(extractTf.extract(page('<div>Loading...</div>', 999)).render).toMatchObject({ clientRendered: false, reason: null })
+    // Not a button's, a link's or an icon's text; not a sentence about loading, nor one longer than a loader ending in it;
+    // not a bare "Loading", which is as often a label for screen readers; not text no reader sees.
+    for (const loader of [
+      '<button>Loading...</button>', '<a href="/more">Loading...</a>', '<svg role="img"><title>Loading...</title></svg>',
+      '<p>Loading docks open at six every morning.</p>', '<p>The quarterly report on household consumption is still loading...</p>',
+      '<div>Loading</div>',
+      '<div hidden>Loading...</div>', '<div aria-hidden="true"><span>Loading...</span></div>',
+      '<span class="sr-only">Loading...</span>', '<span class="ScreenReaderOnly_srOnly__a1b2c">Loading...</span>', '<span class="visually-hidden">Loading...</span>',
+    ]) {
+      expect(extractTf.extract(page(loader)).render, loader).toMatchObject({ clientRendered: false, reason: null })
+    }
+    // Not a loader outside the page's content (a sign-in skeleton in the header).
+    expect(extractTf.extract(page('', 1_000, '', '<header><nav><a href="/">Home</a></nav><div class="login">Loading...</div></header>')).render).toMatchObject({ clientRendered: false, reason: null })
+    // Not on a page with more text than the browser lane reads for a loader: one left on it is not its data.
+    const long = Array.from({ length: 40 }, (_, i) => `<p>Paragraph ${i + 1}: the index closed higher for a third day as banks and energy companies led the gains.</p>`).join('')
+    const full = extractTf.extract(page('<div>Loading...</div>', 1_000, long)).render
+    expect(full?.textChars).toBeGreaterThan(4_000)
+    expect(full).toMatchObject({ clientRendered: false, reason: null })
+  })
+
+  it('reads a bare lower-case data or state object as hydration state, not a router\'s or a tag\'s own (ROADMAP PA item 4)', () => {
+    // The World Bank's indicator pages over HTTP: the figures are in window.__data, and the page shows only the headers
+    // of the list its scripts fill (T056).
+    const sources = '<p>Source: World Bank national accounts data, and OECD National Accounts data files. Country official statistics, national statistical organizations and central banks; staff estimates. License: CC BY-4.0. The figures are in current U.S. dollars, converted from domestic currencies using single-year official exchange rates.</p>'
+    const page = (state: string) => `<!doctype html><html><body><main><h1>GDP (current US$)</h1>${sources}<h2>All Countries and Economies</h2><div class="item title"><div class="th">Country</div><div class="th">Most Recent Year</div><div class="th">Most Recent Value</div></div></main><script>${state}${JSON.stringify({ rows: Array.from({ length: 80 }, (_, i) => ({ country: `Country ${i}`, year: 2025, value: 1_000 + i })) })}</script></body></html>`
+    for (const state of ['window.__data=', 'window.__state = ', 'window.__STATE__ = ', 'window._INITIAL_DATA=']) {
+      const render = extractTf.extract(page(state)).render
+      expect(render?.textChars, state).toBeGreaterThan(300)
+      expect(render, state).toMatchObject({ clientRendered: true, reason: 'hydration_shell', markers: ['hydration_state'] })
+    }
+    // A script that reads such a name, or sets a longer one a router or an analytics tag keeps, holds none.
+    for (const state of ['console.log(window.__data);var rows=', 'window.__dataLayer=', 'window.__staticRouterHydrationData = JSON.parse("{}");var rows=', 'window._sf_async_config=', 'window._analyticsConfig=']) {
+      expect(extractTf.extract(page(state)).render?.markers, state).not.toContain('hydration_state')
+    }
+    // A Substack post: the whole article, a noscript notice, and React Router's hydration data among its scripts.
+    const paragraphs = Array.from({ length: 12 }, (_, i) => `<p>Paragraph ${i + 1}: a heuristic that almost always works is worth less than it looks, because the rare case it misses is the one you were paid to catch.</p>`).join('')
+    const post = `<!doctype html><html><body><noscript><div id="nojs-banner">This site requires JavaScript to run correctly. Please turn on JavaScript or unblock scripts</div></noscript><main><article><h1>Heuristics that almost always work</h1>${paragraphs}</article></main><script>window.__staticRouterHydrationData = JSON.parse("{\\"loaderData\\":{}}");window._analyticsConfig = ${JSON.stringify({ properties: Array.from({ length: 200 }, (_, i) => `p${i}`) })};${'x'.repeat(4_000)}</script></body></html>`
+    expect(extractTf.extract(post).render).toMatchObject({ clientRendered: false, reason: null })
   })
 
   describe('a listing whose own data lists more records than its markup shows', () => {

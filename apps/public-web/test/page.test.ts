@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
 import { VISITOR_DAILY_PREVIEWS } from '../../../packages/public-preview/src/quota.js'
-import { CAPABILITIES, clientCopy, CLIENTS, tierAmount, tierCaption, TIERS } from '../src/featureSections.js'
+import { CAPABILITIES, clientCopy, CLIENTS, tierAmount, tierLit, TIERS, tierUnit } from '../src/featureSections.js'
 import { glyphBand } from '../src/glyphArt.js'
 import { FAQ, faqJsonLd, pageMarkup, sectionBar } from '../src/page.js'
 import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
@@ -143,21 +143,27 @@ describe('Page markup', () => {
     expect(TIERS.map(t => tierAmount(t.perDay))).toEqual(numbers)
   })
 
-  it('lights one painted mark per page a day, every mark for no daily limit, and says so beside the planet', () => {
+  it('lights one painted mark per page a day, every mark for no daily limit, and says so on the planet', () => {
     const page = pageMarkup()
-    const rows = [...page.matchAll(/<div class="tier-row" id="tier-\d\d" data-lights="([^"]+)" data-caption="([^"]+)">/g)]
+    const rows = [...page.matchAll(/<div class="tier-row" id="tier-\d\d" data-lights="([^"]+)" data-unit="([^"]+)" data-lit="([^"]+)">/g)]
     expect(rows.map(([, lights]) => lights)).toEqual(TIERS.map(t => String(t.perDay ?? 'all')))
-    expect(rows.map(([, , caption]) => caption)).toEqual(TIERS.map(tierCaption))
-    expect(tierCaption(TIERS[2]!)).toBe('1,000 lit marks · 1,000 pages a day')
-    // Hidden until the lights are drawn, so it never claims marks that are not lit.
-    expect(page).toContain(`<p class="earth-caption" id="earth-caption" aria-hidden="true" hidden>${tierCaption(TIERS[0]!)}</p>`)
+    expect(rows.map(([, , unit]) => unit)).toEqual(['previews a day', 'pages a day', 'pages a day', 'no daily limit'])
+    expect(rows.map(([, , , lit]) => lit)).toEqual(TIERS.map(tierLit))
+    expect(tierLit(TIERS[2]!)).toBe('1,000 lit marks on the planet')
+    expect(tierLit(TIERS[3]!)).toBe('Every mark on the planet lit')
+    expect(TIERS.map(tierUnit)).toEqual(rows.map(([, , unit]) => unit))
+    // The readout on the planet: which of the four, what it allows, how far along. Hidden until the lights are
+    // drawn, so it never claims marks that are not lit.
+    const readout = /<div class="earth-readout" id="earth-readout" aria-hidden="true" hidden>([\s\S]*?)<\/div>/.exec(page)?.[1] ?? ''
+    expect(readout).toContain('<b class="earth-step-n">01</b> / 04 · <span class="earth-step-name">Browser preview</span>')
+    expect(readout).toContain('<b class="earth-amount-n">5</b> <span class="earth-amount-unit">previews a day</span>')
+    expect(readout).toContain(`<p class="earth-lit">${tierLit(TIERS[0]!)}</p>`)
+    expect(readout.match(/<i( class="is-on")?><\/i>/g)).toHaveLength(TIERS.length)
     // The artwork is the page's own asset, sized, lazy and decorative.
     expect(page).toContain('<div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>')
     expect(readFileSync(new URL('../public/assets/scene-earth.webp', import.meta.url)).length).toBeGreaterThan(0)
-    // The pinned window scrolls one step per tier (styles.css .is-story .tier-stage); the script gives the stage the
-    // count, because the site's CSP drops style attributes in the markup.
-    expect(page).toContain('<div class="tier-stage" id="tier-stage">')
-    expect(page.match(/<div class="tier-pin" id="tier-pin">/g)).toHaveLength(1)
+    // Nothing is pinned but the planet: no stage or pinned window around the words.
+    expect(page).not.toMatch(/tier-stage|tier-pin/)
   })
 
   it('shows every tier with its details, so nothing needs a click', () => {
