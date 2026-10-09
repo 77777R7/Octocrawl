@@ -85,6 +85,24 @@ describe('extractTf', () => {
     expect([hiddenTable.strategy, hiddenTable.escalate]).toEqual(['table', true])
   })
 
+  it('takes the region the page marks role="main" for its content, as it takes a <main> (ROADMAP PA item 4)', () => {
+    // eBay's category pages: a site header whose menus list every department, then <div role="main"> with the page's
+    // own heading, its category links and its listings (T021).
+    const department = (name: string) => `<div class="menu"><p>${name}</p><ul>${Array.from({ length: 4 }, (_, i) => `<li><a href="/d/${name}/${i}">${name} department ${i + 1}, everything in it</a></li>`).join('')}</ul><p>Shop the latest ${name.toLowerCase()} deals across every brand and condition we carry.</p></div>`
+    const header = `<div class="global-header"><header><a href="#mainContent">Skip to main content</a>${['Motors', 'Clothing'].map(department).join('')}</header></div>`
+    const listing = (i: number) => `<li class="card"><a href="/itm/${i}">Refurbished laptop model ${i + 1}, 16 GB memory, 512 GB SSD</a><span class="price">$${400 + i}.99</span><p>Tested and cleaned by a certified refurbisher, with a new battery and a 90-day warranty.</p></li>`
+    const content = `<div class="main-content" id="mainContent" role="main"><h1>Laptops &amp; Netbooks</h1><p>Shop by category: Apple laptops, PC laptops and netbooks from every brand, new and refurbished.</p><ul class="cards">${Array.from({ length: 12 }, (_, i) => listing(i)).join('')}</ul></div>`
+    const page = (main: string) => `<!doctype html><html><body><div class="page-container">${header}${main}</div></body></html>`
+    const out = extractTf.extract(page(content))
+    expect(out.mainHtml).toContain('Laptops &amp; Netbooks')
+    expect(out.mainHtml).toContain('$405.99')
+    expect(out.mainHtml).not.toContain('Shop the latest motors deals')
+    // A <main> or an <article> still comes first; a role="main" holding less than half of the page's text is not trusted.
+    expect(extractTf.extract(page(content.replace('<div class="main-content"', '<main class="main-content"').replace(/<\/div>$/, '</main>'))).mainHtml).not.toContain('Shop the latest motors deals')
+    const thin = extractTf.extract(page('<div role="main"><p>Laptops</p></div>' + content.replace(' role="main"', '')))
+    expect(thin.mainHtml).toContain('$405.99')
+  })
+
   it('reads a region a reader can still see or find as shown, whatever its markup says (ROADMAP PA item 4)', () => {
     const article = `<main><h1>Templates</h1><p>Jumpstart your next app with a template: a commerce storefront, a blog, a dashboard or an AI chatbot, each ready to deploy.</p><p>Every template comes with its source, a live demo and a guide to the parts worth changing first.</p></main>`
     const page = (wrap: (inner: string) => string) => extractTf.extract(`<!doctype html><html><body>${wrap(article)}</body></html>`)

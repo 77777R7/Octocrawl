@@ -45,9 +45,10 @@ function layoutParent(el: Element): Element | null {
 export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
   if (blocks.length === 0) return null
 
-  // Explicit semantic container: if article/main holds a reasonable share of
-  // the blocks, trust it outright.
-  for (const sel of ['article', 'main']) {
+  // Explicit semantic container: if article/main, or the element the page
+  // marks role="main" (eBay's <div id="mainContent" role="main">), holds a
+  // reasonable share of the blocks, trust it outright.
+  for (const sel of ['article', 'main', '[role="main"]']) {
     const el = doc.querySelector(sel)
     if (!el) continue
     const inside = blocks.filter((b) => el.contains(b.el))
