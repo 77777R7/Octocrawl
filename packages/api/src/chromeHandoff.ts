@@ -600,13 +600,16 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         browser,
       }, tab: { targetId, sessionId, stops } }
     }
+    // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response
+    // alone may not name (a document answered 403 is `http_403` until the page shows whose check it is).
+    const holding = last === null ? null : stillGated(last, options)
     const where = last === null ? 'it never loaded'
       : allowed !== null && !allowed.has(hostAndPort(last.state.href)) ? `it was on ${hostAndPort(last.state.href)}, which you did not allow (only ${[...allowed].join(', ')})`
       : !sameSite(last.state.href, host) ? `it was on ${safeHost(last.state.href)}, not ${host}`
-        : stillGated(last, options) !== null ? `it still showed a check (${stillGated(last, options)!.reason}: ${stillGated(last, options)!.signals.join(', ')})`
+        : holding !== null ? `it still showed a check (${holding.reason}: ${holding.signals.join(', ')})`
           : clear >= CLEAR_READS && heard.act === null ? 'the page showed no check, and you did not click on it to have it read (Octocrawl reads a page in your Chrome only once you act in its tab; a site you are signed into is read with your login through octocrawl login import and mode authed)'
             : 'it was not yet the page: still loading, at a sign-in step, or not answering 2xx'
-    throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, sawGate)
+    throw new HandoffNotThrough(`${url} was not through within ${Math.round(waitMs / 1000)} s: ${where}`, holding?.reason ?? sawGate)
   } catch (error) {
     throw ended(error)
   } finally {

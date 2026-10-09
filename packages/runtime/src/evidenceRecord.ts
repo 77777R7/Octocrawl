@@ -158,8 +158,9 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r) })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
   if (!laneRan) return route(null, null)
-  // A page read in the person's Chrome: theirs alone when it showed no check, handed to them when it did.
-  const userBrowser = (detail: Record<string, unknown>) => route('user_browser', text(detail.browser), null, null, detail.sawGate === null || detail.sawGate === undefined ? 'user_browser' : 'handed_to_person')
+  // A page read in the person's Chrome: handed to them when it showed a check and they acted in its tab; theirs alone
+  // otherwise, a check that cleared without a step of theirs included.
+  const userBrowser = (detail: Record<string, unknown>) => route('user_browser', text(detail.browser), null, null, detail.sawGate != null && detail.act != null ? 'handed_to_person' : 'user_browser')
   switch (result.lane) {
     case 'http': {
       const transport = event('transport')
