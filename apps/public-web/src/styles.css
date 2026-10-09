@@ -7,6 +7,21 @@
   --label: #5c6d8a;
   --page: #f7f8fb;
   --line: #e6edf5;
+  /* Colour roles. Text on light: --text, --ink-soft for long copy, --muted for captions, --orange-ink for orange
+     text, --link (always underlined). Dark windows: --navy-deep, with --on-navy, --on-navy-2, --on-navy-3 (the floor)
+     and --link-on-navy; --orange-100 for accent text on navy and a city light's core, --orange-200 the glyph
+     highlight. The brand
+     orange fills actions and marks, never text or thin lines on light. */
+  --navy-deep: #061634;
+  --ink-soft: #3d5075;
+  --orange-ink: #b8461d;
+  --orange-100: #ffc2a4;
+  --orange-200: #ffae86;
+  --link: #1d64ac;
+  --link-on-navy: #8db9e8;
+  --on-navy: #e6eefc;
+  --on-navy-2: #b7c8e6;
+  --on-navy-3: #9db2d6;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   color: var(--text);
   background: var(--page);
@@ -26,7 +41,7 @@ a { color: inherit; }
 ::selection { background: #fd966c; color: #071b4f; }
 :focus-visible { outline: 3px solid #fa935f; outline-offset: 3px; }
 /* The light sections need a darker ring: #fa935f is 2.1:1 on #f7f8fb, #b8461d is 5:1. */
-.runs-section :focus-visible, .how-section :focus-visible, .examples-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible, .status-section :focus-visible, .faq-section :focus-visible { outline-color: #b8461d; }
+.runs-section :focus-visible, .how-section :focus-visible, .can-section :focus-visible, .start-section :focus-visible, .tier-section :focus-visible, .examples-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible, .status-section :focus-visible, .faq-section :focus-visible { outline-color: #b8461d; }
 
 .page-shell { overflow: clip; }
 
@@ -571,8 +586,11 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .section-bar-label { color: #2f6ba8; }
 
 /* Glyph band: the hero's ink breaking up into the page, instead of a hard cut from navy to white. */
-.glyph-band { position: relative; height: 52px; overflow: hidden; background: #fff; }
+.glyph-band { position: relative; height: 52px; overflow: hidden; background: var(--page); }
 .glyph-band pre { position: absolute; top: 4px; left: 50%; margin: 0; transform: translateX(-50%); color: rgba(7, 27, 79, .55); font: 12px/11px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 2px; white-space: pre; }
+.glyph-band-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+/* While the waves run, the canvas draws the band and the written marks step aside. */
+.glyph-band.is-live pre { visibility: hidden; }
 
 /* Recorded runs: the results this page shows, scrolling past while the ticker is on screen. */
 .ticker { display: flex; align-items: stretch; overflow: hidden; border-top: 1px solid var(--line); background: #fff; }
@@ -1137,3 +1155,220 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .waitlist-note a { color: #d8e5f6; }
 .waitlist-done { margin: 0; padding: 18px 20px; border: 1px solid rgba(251, 123, 76, .5); border-radius: 12px; color: #fff; font-size: 16px; font-weight: 650; }
 @media (max-width: 860px) { .waitlist { grid-template-columns: 1fr; padding: 48px 0; } }
+
+/* ---------- 02 What it does and 03 Free tiers (featureSections.ts; motion in featureMotion.ts). Hairline cells, glyph
+   art that decodes in place, and the page's navy code window. ---------- */
+.can-wrap, .tier-wrap { padding: 96px 32px 104px; }
+.tier-wrap { padding-top: 88px; }
+.can-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 28px 48px; }
+.can-intro { max-width: 560px; }
+.can-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
+.can-intro h2 em { color: #b8461d; font-style: normal; }
+.can-lead { max-width: 58ch; margin: 18px 0 0; color: var(--ink-soft); font-size: 15px; line-height: 1.65; text-wrap: pretty; }
+
+.can-filter { display: inline-flex; flex-wrap: wrap; gap: 2px; margin: 0; padding: 3px; border: 1px solid #e0e8f2; border-radius: 4px; background: #fff; font: 500 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
+.can-filter label { position: relative; display: inline-flex; align-items: center; gap: .5ch; min-height: 38px; padding: 0 10px; border-radius: 3px; color: #566b8c; cursor: pointer; transition: color .2s ease, background-color .2s ease; }
+.can-filter label:hover { color: #142a57; }
+.can-filter input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.can-filter label:has(input:checked) { color: #142a57; background: rgba(251, 123, 76, .12); }
+.can-filter label:has(input:focus-visible) { outline: 3px solid #b8461d; outline-offset: 2px; }
+.can-bracket { color: transparent; transition: color .2s ease; }
+.can-filter label:has(input:checked) .can-bracket { color: #b8461d; }
+.can-count { color: #5c6d8a; }
+
+.can-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 44px 0 0; padding: 0; border-top: 1px solid #e0e8f2; border-left: 1px solid #e0e8f2; list-style: none; }
+.can-cell { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 26px 28px 22px; border-right: 1px solid #e0e8f2; border-bottom: 1px solid #e0e8f2; background: #fbfcfe; transition: background-color .3s ease; }
+.can-cell h3 { transition: color .3s ease; }
+.can-cell::before { content: ""; position: absolute; z-index: 2; top: -1px; left: -1px; width: 7px; height: 7px; background: transparent; transition: background-color .25s ease; }
+/* Pointed at, a cell fills with the brand orange from the left (and lets it go to the right), and its words turn white,
+   which reads better on this orange than dark text does (APCA Lc 62 against 46 for the deep navy); the art's accents
+   turn the deep navy. */
+.can-cell::after { content: ""; position: absolute; z-index: 0; inset: 0; background: var(--orange); transform: scaleX(0); transform-origin: right center; transition: transform .38s cubic-bezier(.65, 0, .35, 1); pointer-events: none; }
+.can-cell > * { position: relative; z-index: 1; }
+.can-cell:hover, .can-cell:focus-within { background: #fff; }
+.can-cell:hover::before, .can-cell:focus-within::before { background: #fb7b4c; }
+.can-cell.is-out { background: #f2f5f9; }
+.can-cell.is-out::before { background: transparent; }
+.can-cell.is-out h3 { color: #566b8c; }
+.can-art { min-height: 75px; margin: 0 0 10px; overflow: hidden; color: rgba(20, 37, 74, .46); font: 11px/15px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; transition: color .3s ease; }
+.can-art b { color: #e0592d; font-weight: inherit; transition: color .2s ease; }
+.can-cell:hover .can-art, .can-cell:focus-within .can-art { color: rgba(20, 37, 74, .72); }
+.can-cell.is-out .can-art { color: rgba(20, 37, 74, .3); }
+.can-cell.is-out .can-art b { color: inherit; }
+.can-cell h3 { margin: 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
+.can-cell p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.can-points { display: grid; gap: 7px; margin: 2px 0 0; padding: 0; list-style: none; }
+.can-points li { display: grid; grid-template-columns: 1.3em minmax(0, 1fr); color: var(--ink-soft); font-size: 14.5px; line-height: 1.45; text-wrap: pretty; transition: color .3s ease; }
+.can-points li::before { content: "·"; content: "·" / ""; color: #5c6d8a; font-weight: 700; transition: color .3s ease; }
+.can-cell .can-where { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: auto; padding-top: 10px; font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
+.can-where > span::before { content: "●"; margin-right: .8ch; }
+.can-where .is-yes { color: #1d64ac; }
+.can-where .is-no { color: #5c6d8a; text-decoration: line-through; text-decoration-color: rgba(92, 109, 138, .55); }
+.can-where .is-no::before { content: "○"; display: inline-block; text-decoration: none; }
+.can-where > span { transition: color .3s ease; }
+@media (hover: hover) {
+  .can-cell:not(.is-out):hover::after { transform: scaleX(1); transform-origin: left center; }
+  .can-cell:not(.is-out):hover h3, .can-cell:not(.is-out):hover .can-points li, .can-cell:not(.is-out):hover .can-points li::before, .can-cell:not(.is-out):hover .can-where > span { color: #fff; }
+  .can-cell:not(.is-out):hover .can-where .is-no { text-decoration-color: rgba(255, 255, 255, .7); }
+  .can-cell:not(.is-out):hover .can-art { color: rgba(255, 255, 255, .92); }
+  .can-cell:not(.is-out):hover .can-art b { color: var(--navy-deep); }
+  /* White once the orange is (nearly) across, so no word goes white on white; back at once when it leaves. */
+  .can-cell:not(.is-out):hover h3, .can-cell:not(.is-out):hover .can-points li, .can-cell:not(.is-out):hover .can-points li::before, .can-cell:not(.is-out):hover .can-where > span, .can-cell:not(.is-out):hover .can-art, .can-cell:not(.is-out):hover .can-art b { transition: color .14s ease .22s; }
+}
+
+/* 03 Get started: a centred head over a breathing glyph cloud, the ways in as a row of tabs, and one navy terminal
+   window that shows a few real steps for each. */
+.start-wrap { padding: 104px 32px 112px; }
+.start-head { position: relative; padding-top: 170px; text-align: center; }
+/* The little octopus and its bubbles swim over the glyph sea and under the words. */
+.start-octopus { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.start-head > :not(.glyph-cloud):not(.start-octopus) { position: relative; z-index: 2; }
+.start-head .glyph-cloud { top: -24px; }
+/* A faint texture behind the head, so the words stay the clearest thing in it. */
+.start-head .glyph-cloud:not(.is-handed-off), .start-head .glyph-ripple.is-live { opacity: .38; }
+.start-head .section-kicker { justify-content: center; }
+.start-head h2 { margin: 18px 0 0; color: #142a57; font-size: clamp(38px, 4.6vw, 64px); line-height: 1.04; letter-spacing: -.055em; }
+.start-head h2 em { color: var(--orange-ink); font-style: normal; }
+.start-lead { max-width: 52ch; margin: 20px auto 0; color: var(--ink-soft); font-size: 17px; line-height: 1.6; text-wrap: pretty; }
+.use-tabs { display: flex; flex-wrap: wrap; justify-content: center; width: fit-content; max-width: 100%; gap: 2px; margin: 44px auto 0; padding: 4px; border: 1px solid #dfe6f0; border-radius: 6px; background: #fff; }
+.use-tabs[hidden] { display: none; }
+.use-tab { display: inline-flex; align-items: center; gap: 1ch; min-height: 40px; padding: 0 18px; border: 0; border-radius: 4px; color: var(--ink-soft); background: transparent; font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; transition: color .2s ease, background-color .2s ease; }
+.use-tab:hover { color: #142a57; background: #f1f4f9; }
+.use-tab .row-mark { background: radial-gradient(circle, #8ea5cc 1.1px, transparent 1.6px); }
+.use-tab[aria-selected="true"] { color: #fff; background: var(--navy-deep); }
+.use-tab[aria-selected="true"] .row-mark { background: var(--orange); transform: scale(.875); }
+.use-tabs :focus-visible { outline-color: var(--orange-ink); }
+.use-window { --use-text: var(--on-navy); --use-muted: var(--on-navy-2); --use-dots: radial-gradient(circle, rgba(176, 200, 240, .42) 1px, transparent 1.45px); position: relative; max-width: 980px; margin: 22px auto 0; overflow: hidden; border-radius: 16px; color: var(--use-text); background: var(--navy-deep); box-shadow: 0 50px 90px -56px rgba(13, 26, 61, .6), inset 0 0 0 1px rgba(176, 200, 240, .1); }
+.use-tabs[hidden] + .use-window { margin-top: 44px; }
+.use-bar { display: flex; align-items: center; gap: 14px; margin: 0 22px; padding: 16px 0 14px; background: var(--use-dots) 0 100% / 8px 3px repeat-x; }
+.use-marks { color: var(--orange-200); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .3em; }
+.use-label { color: var(--use-muted); font: 500 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.use-copy { min-height: 36px; margin-left: auto; padding: 0 16px; border: 1px solid rgba(176, 200, 240, .26); border-radius: 4px; color: var(--use-text); background: transparent; font: 500 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.use-copy:hover { border-color: var(--orange); color: var(--orange-100); }
+.use-window :focus-visible { outline-color: #fa935f; }
+.use-panel-label { display: none; margin: 0; padding: 18px 28px 0; color: var(--use-muted); font: 500 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+.use-window:not(.is-tabbed) .use-panel-label { display: block; }
+.use-window:not(.is-tabbed) .use-panel + .use-panel { margin: 0 22px; padding: 0; background: var(--use-dots) 0 0 / 8px 3px repeat-x; }
+.use-window:not(.is-tabbed) .use-panel + .use-panel > * { padding-inline: 6px; }
+.use-code { min-height: 13em; margin: 0; padding: 26px 28px 14px; overflow-x: auto; color: var(--use-text); font: 14px/1.9 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+.use-prompt { margin-right: 1ch; color: var(--orange); font-weight: 700; }
+.ln-note { color: var(--on-navy-3); }
+.ln-out { color: var(--on-navy-2); }
+.ln-out::before { content: "  "; }
+.ln-ask { margin-right: 1ch; color: var(--orange-100); font-weight: 700; }
+.ln-asked { color: var(--orange-100); }
+.use-note { margin: 0; color: var(--use-muted); padding: 14px 28px 22px; border-top: 1px solid rgba(176, 200, 240, .1); font-size: 14px; line-height: 1.6; }
+.use-note code { color: #fff; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.use-note a { color: var(--link-on-navy); font-weight: 650; text-underline-offset: 3px; }
+.use-note a:hover { color: var(--orange-100); }
+
+/* Free tiers: the light section's heading, then one contained dark window: the tiers on the left over calm navy, the
+   Earth artwork on the right, dimmed so it stays quieter than the hero. Colours are the palette's roles (:root). */
+/* The whole section is the Earth artwork, dimmed and veiled so the page keeps one sun (the hero's): calm navy behind
+   the words on the left (stops follow the content column, not the screen), the planet opening up to the right, and
+   navy fading in at the top and bottom so the light sections above and below meet it gently. */
+.tier-section.is-earth { position: relative; isolation: isolate; overflow: clip; color: var(--on-navy); background: var(--navy-deep); --copy-end: calc(max(16px, 50% - 600px) + 560px); }
+.is-earth .earth-art { position: absolute; inset: 0; z-index: -1; }
+.is-earth .earth-art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 70% 42%; filter: brightness(.8) saturate(.8); }
+.earth-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+.is-earth .earth-art::after { content: ""; position: absolute; inset: 0; pointer-events: none; background:
+  linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, 0) 150px, rgba(6, 22, 52, 0) calc(100% - 150px), var(--navy-deep) 100%),
+  radial-gradient(ellipse 26% 30% at 75% 33%, rgba(6, 22, 52, .46), rgba(6, 22, 52, 0) 72%),
+  linear-gradient(90deg, var(--navy-deep) 0, rgba(6, 22, 52, .94) var(--copy-end), rgba(6, 22, 52, .6) calc(var(--copy-end) + 100px), rgba(6, 22, 52, 0) calc(var(--copy-end) + 280px)); }
+.is-earth :focus-visible { outline-color: #fa935f; }
+.is-earth .section-bar { border-bottom-color: rgba(176, 200, 240, .14); color: var(--on-navy-3); }
+.is-earth .section-bar b { color: var(--orange-200); }
+.is-earth .section-bar-label, .is-earth .section-kicker { color: var(--link-on-navy); }
+.is-earth .can-intro h2 { color: #fff; }
+.is-earth .can-intro h2 em { color: var(--orange-100); }
+.is-earth .can-lead { color: var(--on-navy); font-size: 16px; }
+.is-earth .tier-wrap { min-height: 860px; }
+.tier-copy { max-width: 520px; }
+.tier-hint { display: inline-flex; gap: 8px; margin: 22px 0 0; color: var(--orange-100); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+/* With a script: the planet stays in view while the tiers pass one by one, each with a screen's worth of room; the
+   one in the middle of the screen is lit, and featureMotion.ts settles the scroll with a tier in the middle. */
+.is-story .earth-art { position: sticky; inset: auto; top: 0; height: 100vh; height: 100svh; margin-bottom: -100vh; margin-bottom: -100svh; }
+.is-story .tier-wrap { min-height: 0; padding-bottom: 30vh; }
+.is-story .tier-rail { margin-top: 24vh; }
+.is-story .tier-row { display: flex; flex-direction: column; justify-content: center; min-height: 64vh; }
+.is-story .tier-row:not(.is-active) .tier-name, .is-story .tier-row:not(.is-active) .tier-amount b { color: var(--on-navy-2); }
+.is-story .tier-row.is-active .tier-head::before { background: var(--orange); }
+.is-story .tier-row.is-active .tier-n { color: var(--orange-100); }
+.is-story .tier-row .tier-panel { transition: opacity .5s ease, transform .5s cubic-bezier(.2, .8, .2, 1); }
+.is-story .tier-row:not(.is-active) .tier-panel { opacity: .55; transform: translateY(6px); }
+.is-story .earth-caption { right: max(32px, calc(50% - 568px)); bottom: 40px; }
+.is-earth .tier-rail { margin-top: 36px; }
+.tier-rail { padding: 0; }
+.tier-row { position: relative; border-top: 1px solid rgba(176, 200, 240, .16); }
+.tier-row:last-child { border-bottom: 1px solid rgba(176, 200, 240, .16); }
+.tier-head { position: relative; display: flex; align-items: baseline; gap: 12px; margin: 0; padding: 18px 16px 12px 20px; font-size: inherit; font-weight: inherit; }
+.tier-head::before { content: ""; position: absolute; top: 25px; left: 0; width: 7px; height: 7px; background: transparent; transition: background-color .3s ease; }
+.tier-n { flex: none; width: 2.6ch; color: var(--on-navy-2); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; transition: color .3s ease; }
+.tier-name { flex: none; color: var(--on-navy); font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.tier-leader { flex: 1 1 auto; min-width: 16px; overflow: hidden; color: rgba(183, 200, 230, .5); font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.tier-leader::before { content: "· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·"; }
+.tier-amount { flex: none; color: var(--on-navy-2); font-size: 14px; white-space: nowrap; }
+.tier-amount b { margin-right: .25em; color: var(--on-navy); font-size: 20px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.tier-panel { padding: 0 16px 22px calc(20px + 2.6ch + 12px); }
+.tier-unit { margin: 0 0 14px; color: var(--on-navy); font-size: 15px; }
+.tier-facts { display: grid; gap: 9px; margin: 0; }
+.tier-facts div { display: grid; grid-template-columns: 6.5ch minmax(0, 1fr); gap: 12px; }
+.tier-facts dt { color: var(--on-navy-2); font: 500 12px/1.8 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
+.tier-facts dd { margin: 0; color: var(--on-navy); font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.tier-facts code { color: #fff; font: 13.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tier-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 6px; color: var(--link-on-navy); font-size: 15px; font-weight: 650; text-underline-offset: 3px; }
+.tier-link:hover { color: var(--orange-100); }
+.earth-caption { position: absolute; right: 32px; bottom: 40px; max-width: calc(100% - 40px); margin: 0; padding: 7px 10px; border-radius: 4px; color: var(--on-navy); background: rgba(6, 22, 52, .78); font: 500 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-align: right; }
+.tier-foot { margin: 26px 0 0; color: var(--on-navy-2); font-size: 14px; line-height: 1.65; }
+.tier-foot a { color: var(--link-on-navy); font-weight: 650; text-underline-offset: 3px; white-space: nowrap; }
+.tier-foot a:hover { color: var(--orange-100); }
+
+@media (max-width: 1049px) { .can-wrap, .tier-wrap { padding: 72px 32px 80px; } }
+@media (max-width: 860px) {
+  /* Narrow screens: the words on navy first, the planet rising under them at the foot of the section. */
+  .is-earth:not(.is-story) .tier-wrap { min-height: 0; padding-bottom: calc(60vw + 40px); }
+  .is-story .earth-art img { object-position: 76% 100%; }
+  .is-story .earth-art::after { background: linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, .9) 34%, rgba(6, 22, 52, .2) 70%, rgba(6, 22, 52, .1) 100%); }
+  .is-story .tier-row { min-height: 72svh; justify-content: flex-start; border: 0; }
+  .is-story .tier-row > * { background: rgba(6, 22, 52, .88); }
+  .is-story .tier-head { border-radius: 10px 10px 0 0; }
+  .is-story .tier-panel { border-radius: 0 0 10px 10px; }
+  .is-story .tier-rail { margin-top: 12vh; }
+  .is-story .earth-caption { display: none; }
+  .tier-copy { max-width: none; }
+  .is-earth:not(.is-story) .earth-art { top: auto; height: calc(60vw + 120px); }
+  .is-earth .earth-art::after { background: linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, 0) 140px), radial-gradient(ellipse 30% 34% at 75% 40%, rgba(6, 22, 52, .46), rgba(6, 22, 52, 0) 72%); }
+  .earth-caption { right: 16px; bottom: 16px; max-width: calc(100% - 32px); }
+}
+/* Phones: the dotted leader gives way, and a long tier name wraps before its number does. */
+@media (max-width: 480px) {
+  .tier-head { gap: 10px; padding-right: 8px; }
+  .tier-leader { display: none; }
+  .tier-name { flex: 1 1 auto; min-width: 0; }
+  .tier-amount { margin-left: auto; }
+  .tier-panel { padding-left: calc(20px + 2.6ch + 10px); padding-right: 8px; }
+}
+@media (max-width: 999px) {
+  .can-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .can-cell { padding: 22px 20px 18px; }
+  .can-art { min-height: 70px; font-size: 10px; line-height: 14px; }
+}
+@media (max-width: 600px) {
+  .can-wrap, .tier-wrap { padding: 60px 16px 68px; }
+  .can-grid { grid-template-columns: minmax(0, 1fr); margin-top: 32px; }
+  .can-cell { padding: 22px 20px 18px; }
+  .can-art { min-height: 75px; font-size: 11px; line-height: 15px; }
+  .can-filter { display: grid; grid-template-columns: auto auto minmax(0, 1fr); width: 100%; font-size: 11px; letter-spacing: 0; }
+  .can-filter label { justify-content: center; padding: 0 8px; }
+  .fit-chip { flex: 1 1 auto; }
+  .start-wrap { padding: 72px 16px 80px; }
+  .start-head { padding-top: 180px; }
+  .use-tab { padding: 0 12px; }
+  .use-bar { margin: 0 16px; }
+  .use-code { padding: 20px 18px 10px; font-size: 12.5px; }
+  p.use-note { padding: 12px 18px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-story .tier-row .tier-panel { transition: none; }
+  .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
+}
