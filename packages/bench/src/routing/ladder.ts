@@ -172,6 +172,24 @@ export function summarize(channelsTried: readonly string[], attempts: readonly {
  * client-rendered shell. The ladder honours the subject's own ask rather
  * than re-deriving it.
  */
+/**
+ * A failure with no routing class that a stronger rung may still answer (ROADMAP PA item 4): a 403 or 405 answered
+ * without a gate Octocrawl recognises (a site's bot defence often answers so), a page a browser rendered with no main
+ * content it could verify, and on an http rung a refused connection (a defence that drops a client by its TLS does so;
+ * the browser is another client, and a paid provider is not asked for a network failure). Not a timeout, which on a
+ * slow or dead site would hold the scrape for the browser's wait too; not a rate limit, which asks for fewer requests
+ * rather than another client; nor an error status that is the page's own answer (404, 410, 5xx). Null when the failure
+ * stands; else what the ladder steps up for.
+ */
+function strongerRungMayAnswer(result: FetchResult, channelId: string): string | null {
+  if (result.status !== 'failed') return null
+  const status = result.evidence.httpStatus
+  if (result.failureReason === 'http_error' && (status === 403 || status === 405)) return `http_${status}`
+  if (result.failureReason === 'empty_unverified' && !HTTP_CHANNELS.has(channelId)) return 'empty_unverified'
+  if (result.failureReason === 'connection_error' && HTTP_CHANNELS.has(channelId)) return 'connection_error'
+  return null
+}
+
 function resultRequestsEscalation(result: FetchResult): boolean {
   return result.escalations.some((e) => e.improved === null) || qualityEscalationEvent(result) !== null
 }
@@ -661,6 +679,8 @@ export class LadderRunner {
 
       const cls = classifyFetchFailure(result)
       const subjectAsked = resultRequestsEscalation(result)
+      // Content an earlier rung found stays the answer: a later rung's failure is not stepped past.
+      const stronger = cls === null && !subjectAsked && best === null ? strongerRungMayAnswer(result, channel.id) : null
 
       ladderTrace.push({
         at: result.usage.wallMs,
@@ -670,11 +690,11 @@ export class LadderRunner {
           vendorId: channel.vendorId ?? null,
           status: result.status,
           failureClass: cls,
-          escalate: subjectAsked ? 'subject_escalations' : null,
+          escalate: subjectAsked ? 'subject_escalations' : stronger,
         },
       })
 
-      if (cls === null && !subjectAsked) {
+      if (cls === null && !subjectAsked && stronger === null) {
         // Infrastructure failure or a terminal refusal, and the subject did
         // not ask for anything higher. If an earlier channel produced real
         // content, that content is still the answer — the failure does not
