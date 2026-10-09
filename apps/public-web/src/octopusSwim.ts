@@ -1,5 +1,6 @@
 import { whenVisible } from './motion'
 import { PET, petMood, rollAngle, startles } from './octopusPet'
+import { crabAlarmed, linkCells, readState, SHOAL, shoalSlots } from './seaLife'
 
 /* A small sea around the Get started heading, drawn in glyphs on the character grid, with an octopus living in it.
  *
@@ -15,10 +16,16 @@ import { PET, petMood, rollAngle, startles } from './octopusPet'
  * octopus watches it: it may give chase until the fish darts off, the fish may come over to touch the arm it holds out
  * (<3, waking it if it sleeps), or swim once round it, or just pass and be waved at. Come at it fast with the pointer
  * and it squirts ink and flees; come slowly and it only watches. Touch it (a click or a tap on its body) and it is
- * glad: ^ ^, a heart, and it puffs up for a moment; the third touch in a row turns it a somersault, and seven in ten
+ * glad: ^ ^, a heart, and it puffs up for a moment (busy with a page or fish, it carries on); the third touch in a row turns it a somersault, and seven in ten
  * seconds are too many: a flat look, and it fades into the water for a while. Keep a finger on it and it is tickled
  * (x x), bubbles streaming up. Click the water and it comes to look. It never swims over the words: to cross, it
  * rises above them.
+ *
+ * Two more live in the sea when there is water beside the words (seaLife.ts). A crab (\/) walks the floor; come low
+ * near it and it raises its claws, \(\/)/, and the octopus gives it a wide berth: it is the site's robots.txt. Now
+ * and then a shoal of fish swims through in a chevron, and the octopus, if it is free, maps it: it keeps still and
+ * reaches out, dotted lines run from its arm to each fish, and it reads them one by one (each flashes #), which is
+ * what a crawl does; then the shoal swims on.
  *
  * Everything sits on a grid, so everything moves a cell at a time. It runs only while on screen and the visitor
  * allows motion; otherwise one still frame shows it resting. */
@@ -56,7 +63,10 @@ type FishMode = 'pass' | 'flee' | 'visit' | 'circle' | 'meet' | 'orbit'
 // A fish by its nose; `dir` is the way it is going, `face` the way it faces, `side` the octopus's side it visits,
 // `at` when it set off or arrived.
 type Fish = { x: number, y: number, dir: number, face: number, side: number, speed: number, seed: number, big: boolean, mode: FishMode, at: number, angle: number, swept: number, waved: boolean }
-type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet'
+type Kind = 'wander' | 'rest' | 'sleep' | 'camo' | 'wave' | 'read' | 'peek' | 'bubbles' | 'chase' | 'meet' | 'map'
+// A shoal by its leader's nose: the way it goes, how many, whether it is passing, being mapped or done with (read, or
+// left off: either way not mapped again), and, once mapped, when that began and the octopus's side it is on.
+type Shoal = { x: number, y: number, dir: number, speed: number, n: number, seed: number, mode: 'pass' | 'mapped' | 'done', at: number, side: number }
 type Page = { x: number, y: number, stop: number, held: boolean, readAt: number }
 // `puff` is how swollen with pleasure it is (0 to 1), `roll` how far round a somersault it has turned.
 type Pose = { t: number, moving: number, trail: number, stretch: number, heading: number, curl: number, droop: number, wave: boolean, hold: boolean, reach: number, puff: number, roll: number }
@@ -133,6 +143,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
   let page: Page | null = null
   let fish: Fish | null = null
   let nextFish = 0
+  let shoal: Shoal | null = null
+  let nextShoal = 0
+  // The crab: where it is on the floor, the stretch it walks (none when lo >= hi), the way it goes, when it next
+  // steps, since when its claws are up (0 for down), and when it last sent the octopus off.
+  const crab = { x: 0, lo: 0, hi: 0, side: 0, dir: 1, next: 0, alarm: 0, warned: 0 }
   const bubbles: Particle[] = []
   const ink: Particle[] = []
   const plankton: Array<{ x: number, y: number, ox: number, oy: number, seed: number }> = []
@@ -175,6 +190,11 @@ export function mountOctopusSwim(head: HTMLElement): void {
     return [clamp(x, e.l * 0.85, width - e.r * 0.85), clamp(y, e.t + 2, height - e.b)]
   }
 
+  /** The floor's row, where the crab walks and the kelp stands. */
+  const floor = () => height - LINE
+  /** Whether the octopus's arms, at this spot, would come low near the crab. */
+  const nearCrab = (x: number, y: number) => crab.hi > crab.lo && crabAlarmed(crab.x, floor(), x, y + reach().b, R)
+
   /** Where it starts: beside the words, or above them when there is no water beside them. */
   const home = (): [number, number] => sides ? [text.l / 2, Math.max(reach().t + 2, (text.t + text.b) / 2 - R)] : [reach().l + 4, reach().t + 2]
 
@@ -184,7 +204,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     for (let i = 0; i < 60; i++) {
       const x = e.l + Math.random() * Math.max(1, width - e.l - e.r)
       const y = e.t + 2 + Math.random() * Math.max(1, (sides ? height : text.t) - e.t - e.b - 4)
-      if (overText(x, y)) continue
+      if (overText(x, y) || nearCrab(x, y)) continue
       if (sides && !canCross() && side(x) !== side(octo.x)) continue
       return [x, y]
     }
@@ -224,6 +244,17 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     plankton.length = 0
     for (let i = 0; i < Math.round(width * height / 26000); i++) plankton.push({ x: Math.random() * width, y: Math.random() * height, ox: 0, oy: 0, seed: Math.random() * 10 })
+    // The crab's walk: the floor on one side of the words, between the kelp, if there is room for one there.
+    crab.lo = crab.hi = 0
+    if (sides) {
+      if (!crab.side) crab.side = Math.random() < 0.5 ? -1 : 1
+      const [lo, hi] = crab.side < 0 ? [0.2 * width, text.l - 24 - 3 * cw] : [text.r + 24 + 3 * cw, 0.8 * width]
+      if (hi - lo >= 6 * cw) {
+        crab.lo = lo
+        crab.hi = hi
+        if (crab.x < lo || crab.x > hi) crab.x = (lo + hi) / 2
+      }
+    }
   }
 
   const put = (x: number, y: number, glyph: string, color: Rgb, alpha: number, z: number) => {
@@ -288,12 +319,13 @@ export function mountOctopusSwim(head: HTMLElement): void {
       act.until = now + 22000
     }
     if (kind === 'chase') act.until = now + 9000
-    // A fish's visit: it stays where it is and the fish ends the visit.
+    // A fish's visit, or mapping a shoal: it stays where it is and the fish end it.
     if (kind === 'meet') { stay(); act.until = now + 12000 }
+    if (kind === 'map') { stay(); act.until = now + 9000 }
   }
-  // Free to give chase; and, short of reading a page or chasing, free to stop for a visiting fish.
+  // Free to give chase; and, short of reading a page or seeing to fish, free to stop for a visiting fish or a shoal.
   const free = () => act.kind === 'wander' || act.kind === 'rest' || act.kind === 'bubbles'
-  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet'
+  const busy = () => act.kind === 'read' || act.kind === 'chase' || act.kind === 'meet' || act.kind === 'map'
   // Near enough the words to pass behind them (and not seem stuck to their ends).
   const behindWords = (x: number, y: number) => x > text.l - 20 && x < text.r + 20 && y > text.t - 8 && y < text.b + 8
 
@@ -314,7 +346,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     }
     if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
     if (act.kind === 'rest' || act.kind === 'bubbles') act.until = Math.max(act.until, now + 2600)
-    else if (act.kind !== 'read' && act.kind !== 'meet') begin('rest', now)
+    else if (act.kind !== 'read' && act.kind !== 'meet' && act.kind !== 'map') begin('rest', now)
     pet.puff = 1
     feel('^', now, 1600)
     say(octo.x + 1.4 * R, octo.y - 1.9 * R, '<3', now, 1.8)
@@ -349,7 +381,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
     // It watches the pointer, the words it came to peek at, a page drifting down to it, or a fish; otherwise where
     // it goes.
     const falling = page && !page.held && act.at ? page : null
-    const lookX = watching ? pointer.x - octo.x : act.kind === 'peek' && act.at ? (text.l + text.r) / 2 - octo.x : falling ? falling.x - octo.x : fish ? fish.x - octo.x : octo.vx
+    const lookX = watching ? pointer.x - octo.x : act.kind === 'peek' && act.at ? (text.l + text.r) / 2 - octo.x : falling ? falling.x - octo.x : act.kind === 'map' && shoal ? shoal.x - octo.x : fish ? fish.x - octo.x : octo.vx
     octo.gaze += (clamp(lookX / 40, -1, 1) - octo.gaze) * Math.min(1, dt * 6)
     const lookY = page?.held ? 1 : falling ? -1 : fish && !watching ? clamp((fish.y - octo.y) / (2 * R), -1, 1) : 0
     octo.look += (lookY - octo.look) * Math.min(1, dt * 4)
@@ -444,6 +476,66 @@ export function mountOctopusSwim(head: HTMLElement): void {
           nextFish = now + 8000 + Math.random() * 9000
           if (act.kind === 'chase') begin('rest', now)
         }
+      }
+    }
+
+    // A shoal now and then, through the open water. Short of reading a page or seeing to a fish, the octopus maps one
+    // that passes near (woken, if asleep): it keeps still and reaches out, lines run to each fish, and it reads them
+    // one by one; startled away, it leaves off.
+    if (!shoal && now > nextShoal && (sides || text.t > 5 * LINE)) {
+      const dir = Math.random() < 0.5 ? 1 : -1
+      const n = SHOAL.min + Math.floor(Math.random() * (SHOAL.max - SHOAL.min + 1))
+      const y = 2 * LINE + Math.random() * Math.max(LINE, (sides ? height - 3 * LINE : text.t - 2 * LINE) - 2 * LINE)
+      shoal = { x: dir > 0 ? -10 : width + 10, y, dir, speed: 38 + Math.random() * 16, n, seed: Math.random() * 6, mode: 'pass', at: now, side: 0 }
+    }
+    if (shoal) {
+      const s = shoal
+      s.x += s.dir * s.speed * (s.mode === 'mapped' ? 0.3 : 1) * dt
+      if (s.mode === 'pass' && !busy() && octo.flee <= 0 && Math.abs(s.x - octo.x) < 4.5 * R && Math.abs(s.y - octo.y) < 3.5 * R) {
+        if (act.kind === 'sleep' || act.kind === 'camo') say(octo.x + 1.4 * R, octo.y - 1.8 * R, '!', now, 1.2)
+        s.mode = 'mapped'
+        s.at = now
+        s.side = s.x >= octo.x ? 1 : -1
+        begin('map', now)
+      }
+      if (s.mode === 'mapped') {
+        if (act.kind !== 'map') s.mode = 'done'
+        else if (readState(now - s.at, s.n).done) {
+          // Read: a little Markdown drifts off the last fish, and the shoal swims on.
+          const [lc, lr] = shoalSlots(s.n)[s.n - 1]!
+          for (let i = 0; i < 5; i++) bubbles.push({ x: s.x - s.dir * lc * cw + (i - 2) * cw, y: s.y + lr * LINE - LINE, vx: (Math.random() - 0.5) * 20, vy: -22 - Math.random() * 20, born: now + i * 60, life: 2.2, glyph: MARKDOWN[i]!, alpha: 0.7, front: true })
+          s.mode = 'done'
+          feel('^', now, 1400)
+          act.until = now + 900
+        }
+      }
+      const tail = s.x - s.dir * (s.n - 1) * SHOAL.gap * cw
+      if ((s.dir > 0 && tail > width + 80) || (s.dir < 0 && tail < -80)) {
+        shoal = null
+        nextShoal = now + 25000 + Math.random() * 20000
+        if (act.kind === 'map') begin('rest', now)
+      }
+    }
+
+    // The crab walks its stretch of floor a cell at a time, pausing and turning now and then. An octopus coming low
+    // near it gets the claws, and, unless it is busy, takes itself off up and away.
+    if (crab.hi > crab.lo) {
+      const alarmed = crabAlarmed(crab.x, floor(), octo.x, octo.y + reach().b, R)
+      if (alarmed && !crab.alarm) crab.alarm = now
+      if (!alarmed && crab.alarm && now - crab.alarm > 1500) crab.alarm = 0
+      if (!alarmed && now > crab.next) {
+        crab.x += crab.dir * cw
+        if (crab.x < crab.lo || crab.x > crab.hi) { crab.dir *= -1; crab.x = clamp(crab.x, crab.lo, crab.hi) }
+        else if (Math.random() < 0.06) crab.dir *= -1
+        crab.next = now + (Math.random() < 0.15 ? 1800 + Math.random() * 2500 : 420 + Math.random() * 380)
+      }
+      if (alarmed && now - crab.warned > 6000 && !busy() && octo.flee <= 0) {
+        crab.warned = now
+        feel('O', now, 900)
+        say(octo.x + 1.6 * R, octo.y - 1.8 * R, '!', now, 1.2)
+        begin('wander', now)
+        ;[octo.tx, octo.ty] = fit(octo.x + (Math.sign(octo.x - crab.x) || 1) * 2.5 * R, octo.y - 2.5 * R)
+        if (overText(octo.tx, octo.ty) || nearCrab(octo.tx, octo.ty)) [octo.tx, octo.ty] = pick()
       }
     }
 
@@ -632,7 +724,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
       droop: sleeping ? 0.45 : 0,
       wave: !still && act.kind === 'wave',
       hold: !still && !!page?.held,
-      reach: !still && fish?.mode === 'meet' ? fish.side : 0,
+      reach: !still && fish?.mode === 'meet' ? fish.side : !still && act.kind === 'map' && shoal ? shoal.side : 0,
       puff: still ? 0 : pet.puff,
       roll: !still && pet.rolledAt ? rollAngle(now - pet.rolledAt) : 0,
     }
@@ -669,6 +761,29 @@ export function mountOctopusSwim(head: HTMLElement): void {
         const look = fish.big ? (fish.face > 0 ? '><(((°>' : '<°)))><') : (fish.face > 0 ? '><>' : '<><')
         const tail = fish.face > 0 ? fish.x - (look.length - 1) * cw : fish.x
         ;[...look].forEach((g, i) => { const x = tail + i * cw; if (!behindWords(x, fish!.y)) put(x, fish!.y, g, NAVY, 0.6, 20) })
+      }
+      // The crab on the floor, claws up when alarmed.
+      if (crab.hi > crab.lo) {
+        const look = crab.alarm ? '\\(\\/)/' : '(\\/)'
+        const x0 = crab.x - (look.length - 1) / 2 * cw
+        ;[...look].forEach((g, i) => put(x0 + i * cw, floor(), g, NAVY, 0.55, 3))
+      }
+      // The shoal, drawn back from each nose, passes behind the words; mapped, lines run to each fish from the arm
+      // the octopus holds out, and the fish being read flashes.
+      if (shoal) {
+        const s = shoal
+        const read = s.mode === 'mapped' ? readState(now - s.at, s.n) : null
+        const armC = Math.round((octo.x + s.side * 2.4 * R) / cw)
+        const armR = Math.round((octo.y + 1.05 * R) / LINE)
+        shoalSlots(s.n).forEach(([dc, dr], i) => {
+          const fx = s.x - s.dir * dc * cw
+          const fy = s.y + dr * LINE + Math.sin(t * 2.2 + s.seed + i) * 3
+          const look = s.dir > 0 ? '><>' : '<><'
+          const tail = s.dir > 0 ? fx - 2 * cw : fx
+          const flashing = read?.reading === i
+          ;[...look].forEach((g, k) => { const x = tail + k * cw; if (!behindWords(x, fy)) put(x, fy, flashing && k === 1 ? '#' : g, NAVY, flashing ? 0.9 : 0.55, 20) })
+          if (read?.linking) for (const [c, r] of linkCells(armC, armR, Math.round(fx / cw), Math.round(fy / LINE))) if (!behindWords(c * cw, r * LINE)) put(c * cw, r * LINE, '·', NAVY, 0.5, 15)
+        })
       }
       // The page in front, whole, whether it floats or is held.
       if (page) ['.-,', '|=|', '\'-\''].forEach((line, r) => [...line].forEach((g, c) => put(page!.x + (c - 1) * cw, page!.y + (r - 1) * LINE, g, NAVY, 0.72, 55)))
@@ -786,6 +901,7 @@ export function mountOctopusSwim(head: HTMLElement): void {
   layout()
   start = performance.now()
   nextFish = start + 9000
+  nextShoal = start + 14000
   begin('rest', start)
   act.until = start + 1800
   still()
