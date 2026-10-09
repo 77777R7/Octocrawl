@@ -9,13 +9,16 @@
 
 import {
   EVIDENCE_SCHEMA_VERSION,
+  RESULT_STATUS,
   declaredContact,
   type ActionsResult,
   type CrawlMode,
   type AccessCompletion,
   type EvidenceAccess,
   type EvidenceAccessEgress,
+  type EvidenceAccessGrant,
   type EvidenceAccessSession,
+  type EvidencePaidCall,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
   type EvidencePageActions,
@@ -154,8 +157,9 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     const id = own(r) ? text(laneEvent('session_cookies')?.session) : null
     return id === null ? null : { id }
   }
+  const paid = paidCalls(result.trace)
   const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
-    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r) })
+    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r), paidCalls: paid.calls, grant: paid.grant })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
   if (!laneRan) return route(null, null)
   // A page read in the person's Chrome: handed to them when it showed a check and they acted in its tab; theirs alone
@@ -184,6 +188,32 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     case 'provider':
       return route('vendor', text(event('provider_selected')?.provider))
   }
+}
+
+/**
+ * The paid provider calls the page was read with (ROADMAP PA item 4), from the `paid_calls` events the ladder puts on its
+ * answer, a read given up for another egress first; for a cache hit, those of the fetch it reuses. A call recorded in
+ * any other shape is left out, never guessed at. Null, and no grant, when there are none.
+ */
+function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | null; grant: EvidenceAccessGrant | null } {
+  const usd = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+  const text = (value: unknown): value is string => typeof value === 'string' && value !== ''
+  const calls: EvidencePaidCall[] = []
+  let grant: EvidenceAccessGrant | null = null
+  for (const event of trace) {
+    if (event.event !== 'paid_calls') continue
+    for (const call of Array.isArray(event.detail?.calls) ? (event.detail.calls as Record<string, unknown>[]) : []) {
+      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, outcome, reason, answer } = call
+      if (!text(provider) || !text(rung) || !Array.isArray(capabilities) || !capabilities.every(text) || !usd(ceilingUsd) || !usd(chargedUsd)) continue
+      if (!(reportedCostUsd === null || usd(reportedCostUsd)) || !(outcome === null || (RESULT_STATUS as readonly unknown[]).includes(outcome)) || !(reason === null || text(reason)) || typeof answer !== 'boolean') continue
+      calls.push({ provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, outcome: outcome as EvidencePaidCall['outcome'], reason: reason as EvidencePaidCall['reason'], answer })
+    }
+    const named = event.detail?.grant as Record<string, unknown> | null | undefined
+    if (named != null && text(named.tier) && (named.sha256 === null || (typeof named.sha256 === 'string' && /^[0-9a-f]{64}$/.test(named.sha256))) && (named.attestedAt === null || text(named.attestedAt))) {
+      grant = { sha256: named.sha256 as string | null, tier: named.tier, attestedAt: named.attestedAt as string | null }
+    }
+  }
+  return calls.length === 0 ? { calls: null, grant: null } : { calls, grant }
 }
 
 /** The steps that ran on the page, from the lane's own `action` trace events; null when the request had none. */

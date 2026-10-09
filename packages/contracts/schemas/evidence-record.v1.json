@@ -382,6 +382,20 @@
             { "$ref": "#/$defs/accessSession" },
             { "type": "null" }
           ]
+        },
+        "paidCalls": {
+          "description": "Every paid provider call the page was read with (ROADMAP PA item 4), in order: the provider, what the spend ledger reserved and charged, the price the provider stated, and what Octocrawl made of what came back. Null when no provider was called. Added with the spend ledger: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/accessPaidCall" }, "minItems": 1 },
+            { "type": "null" }
+          ]
+        },
+        "grant": {
+          "description": "The access grant the paid calls were made under: its digest, tier and attestation time, not a copy. Null when no provider was called. Added with paidCalls: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessGrant" },
+            { "type": "null" }
+          ]
         }
       }
     },
@@ -442,6 +456,77 @@
           "description": "The session's id, as the session_cookies trace event names it.",
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "accessPaidCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "rung", "capabilities", "ceilingUsd", "chargedUsd", "reportedCostUsd", "outcome", "reason", "answer"],
+      "properties": {
+        "provider": {
+          "description": "The provider's id, as the access grant's tariffs name it (browserbase, steel).",
+          "type": "string",
+          "minLength": 1
+        },
+        "rung": {
+          "description": "The rung that made the call; a retry after the person's handoff is provider(retry).",
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilities": {
+          "description": "The ADR 0005 capabilities the provider's session was created with: vendor_remote_browser, and solving or stealth when the grant named them.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "ceilingUsd": {
+          "description": "What the ledger reserved before the call: its price ceiling in USD, from the grant's tariff.",
+          "type": "number",
+          "minimum": 0
+        },
+        "chargedUsd": {
+          "description": "What the ledger charged in USD: the price the provider stated, else the ceiling (a call that threw or was cut included).",
+          "type": "number",
+          "minimum": 0
+        },
+        "reportedCostUsd": {
+          "description": "The price the provider stated for the call, in USD; null when it stated none (Browserbase and Steel state none per call).",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "outcome": {
+          "description": "What Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an identity it did not send): never the provider's word that it succeeded. Null when the call returned no page (it threw, or the deadline cut it).",
+          "enum": ["success", "partial", "empty_verified", "blocked", "failed", "cancelled", "budget_exceeded", "duplicate", null]
+        },
+        "reason": {
+          "description": "Why the outcome is not a read page, as the record's own reason; null otherwise.",
+          "enum": ["empty_unverified", "timeout", "dns_error", "connection_error", "tls_error", "http_error", "redirect_limit", "redirect_loop", "body_too_large", "decompressed_too_large", "unsupported_content_type", "unsupported_content_encoding", "parse_error", "loop_detected", "policy_denied", "provider_error", "identity_compromised", "internal_error", "cache_miss", "action_failed", "cloudflare_challenge", "captcha", "rate_limit", "login_wall", "geo_restricted", "bot_detected_generic", "tokens", "tokens_unknown", "time", "cost", "cost_unknown", "pages", "retries", null]
+        },
+        "answer": {
+          "description": "The record's own page is this call's.",
+          "type": "boolean"
+        }
+      }
+    },
+    "accessGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "tier", "attestedAt"],
+      "properties": {
+        "sha256": {
+          "description": "SHA-256 of the grant's text as Octocrawl read it (shasum -a 256 grant.json); null for a grant not read from text.",
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "tier": {
+          "description": "The grant's tier.",
+          "enum": ["standard", "enhanced", "my_browser"]
+        },
+        "attestedAt": {
+          "description": "When the grant's attestation says the operator accepted the providers' terms and costs; null when it has none.",
+          "type": ["string", "null"]
         }
       }
     }

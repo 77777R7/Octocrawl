@@ -31,6 +31,14 @@ describe('a page read in the person\'s browser', () => {
     expect(record).toMatchObject({ lane: 'browser_local_authed', status: 'success', httpStatus: 200, identity: { mode: 'authed', userAgent: null }, robotsDecision: { decision: 'allowed', robotsUrl: 'https://site.test/robots.txt' } })
   })
 
+  it('keeps the stopped run\'s paid provider calls on the record, none of them the page the person read (ROADMAP PA item 4)', () => {
+    const call = { provider: 'steel', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.25, chargedUsd: 0.25, reportedCostUsd: null, outcome: 'blocked', reason: 'captcha', answer: true }
+    const grant = { sha256: 'e'.repeat(64), tier: 'enhanced', attestedAt: '2026-10-09T00:00:00Z' }
+    const stopped = { ...STOPPED, lane: 'provider', trace: [{ at: 0, lane: 'provider', event: 'paid_calls', detail: { calls: [call], grant } }] } as FetchResult
+    const result = pageFromUserBrowser(read(PAGE), stopped, {})
+    expect(toEvidenceRecord(result, { mode: 'standard' }, { markdown: result.markdown }).access).toMatchObject({ route: 'user_browser', completion: 'handed_to_person', paidCalls: [{ ...call, answer: false }], grant })
+  })
+
   it('a page that still shows its check is blocked again, and a status the browser did not report is unknown', () => {
     expect(pageFromUserBrowser(read('<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'), STOPPED, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
     expect(pageFromUserBrowser(read(PAGE, { status: null, contentType: null }), STOPPED, {}).evidence).toMatchObject({ httpStatus: null, contentType: null })

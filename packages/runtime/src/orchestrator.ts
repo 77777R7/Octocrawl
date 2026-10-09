@@ -31,6 +31,7 @@ import {
   CONTENTFUL_STATUS,
   DEFAULT_CRAWL_SPEC,
   EMPTY_CRAWL_DISCOVERY,
+  paidCallsOfError,
   stepStatusFromResult,
   type Attempt,
   type BudgetKind,
@@ -371,6 +372,9 @@ export class CrawlOrchestrator {
                 // failed item, and one page never fails a whole batch or crawl.
                 if (stopped()) throw error
                 outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt, this.scrapeErrorCostUsd), links: [] }
+                // The paid calls the run made before it threw stay on the page's record (ROADMAP PA item 4).
+                const paid = paidCallsOfError(error)
+                if (paid !== null) outcome = { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, paid] } }
                 // Every paid call of this page reserved through its ledger before it was made: what that ledger settled is the
                 // page's whole paid spend, though the scrape threw before reporting a cost.
                 if (pageLedger !== undefined) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostChargedUsd: pageLedger.settledUsd } } }

@@ -11,6 +11,10 @@ import {
   FAILURE_REASON,
   FIELD_EVIDENCE_SOURCES,
   LANE,
+  carryPaidCalls,
+  givenUpPaidCalls,
+  paidCallsOfError,
+  type TraceEvent,
   MODE_IDENTITIES,
   RESULT_STATUS,
   declaredContact,
@@ -46,7 +50,7 @@ describe('Evidence Record v1 schema file', () => {
   it('has exactly the type\'s nested objects; a key added to v1 later is optional, every other one required', () => {
     const { record: _record, ...nested } = EVIDENCE_RECORD_KEYS
     expect(Object.keys(schema.$defs).filter(name => name !== 'sha256').sort()).toEqual(Object.keys(nested).sort())
-    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], access: ['completion', 'egress', 'session'], accessEgress: ['exit'] })
+    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], access: ['completion', 'egress', 'session', 'paidCalls', 'grant'], accessEgress: ['exit'] })
     for (const [name, keys] of Object.entries(nested)) {
       const def = schema.$defs[name]!
       const added: readonly string[] = EVIDENCE_RECORD_ADDED_KEYS[name as keyof typeof EVIDENCE_RECORD_KEYS] ?? []
@@ -70,6 +74,30 @@ describe('Evidence Record v1 schema file', () => {
     expect(d.robotsDecision!.properties.unreachable!.enum).toEqual(['server_error', 'network_error', 'timeout', null])
     expect(d.access!.properties.route!.enum).toEqual([...ACCESS_ROUTES, null])
     expect(d.access!.properties.completion!.enum).toEqual([...ACCESS_COMPLETIONS, null])
+    // A paid call's outcome and reason are the record's own verdict and reason, for the page that call returned.
+    expect(d.accessPaidCall!.properties.outcome!.enum).toEqual([...RESULT_STATUS, null])
+    expect(d.accessPaidCall!.properties.reason!.enum).toEqual(p.reason!.enum)
+  })
+})
+
+describe('paid provider calls kept off the answer (ROADMAP PA item 4)', () => {
+  const call = { provider: 'steel', rung: 'provider', chargedUsd: 0.3, outcome: null, answer: true }
+  const paid: TraceEvent = { at: 1, lane: 'provider', event: 'paid_calls', detail: { grant: null, calls: [call] } }
+
+  it('keeps a given-up result\'s calls, none of them the answer', () => {
+    const failed: TraceEvent = { at: 0, lane: 'provider', event: 'provider_failed', detail: {} }
+    expect(givenUpPaidCalls([failed, paid])).toEqual([{ ...paid, detail: { grant: null, calls: [{ ...call, answer: false }] } }])
+    expect(givenUpPaidCalls([failed])).toEqual([])
+  })
+
+  it('carries a thrown run\'s calls on its error, unseen when the error is printed', () => {
+    const error = new Error('vendor API answered 502')
+    expect(carryPaidCalls(error, paid)).toBe(error)
+    expect(paidCallsOfError(error)).toEqual(paid)
+    expect(JSON.stringify(error)).not.toContain('paid_calls')
+    expect(paidCallsOfError(new Error('no calls'))).toBeNull()
+    expect(paidCallsOfError('a string thrown')).toBeNull()
+    expect(paidCallsOfError(carryPaidCalls(Object.freeze(new Error('frozen')), paid))).toBeNull()
   })
 })
 
