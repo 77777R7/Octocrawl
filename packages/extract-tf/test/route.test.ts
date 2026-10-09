@@ -354,6 +354,48 @@ describe('routePage', () => {
       for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
     })
 
+    // H&M: the products are declared in JSON-LD only, as the page's own top-level ItemList, with no CollectionPage.
+    const ownList = (names: readonly string[], name?: string) => `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', ...(name === undefined ? {} : { name }), ...itemList(names) })}</script>`
+    const grid = (n: number) => `<div class="plp-grid">${Array.from({ length: n }, (_, i) => tile(i)).join('')}</div>`
+
+    it('routes a page whose own top-level ItemList lists its products to collection and keeps every card (ROADMAP PA item 4)', () => {
+      const category = (list: string, n = 8) => wrap(`<main><h1>Men's shirts</h1><p>Showing ${n} of 282 products</p>${grid(n)}</main>`, list)
+      const route = (html: string) => { const doc = parse(html); const decision = routePage(doc.document); doc.close(); return decision }
+      expect(route(category(ownList(names)))).toEqual({ type: 'collection', strategy: 'article' })
+      const out = extractTf.extract(category(ownList(names)))
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+      // In the page's @graph too.
+      expect(route(category(`<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': [{ '@type': 'BreadcrumbList', itemListElement: [] }, itemList(names)] })}</script>`))).toEqual({ type: 'collection', strategy: 'article' })
+      // Products listed as the list's elements themselves, not as ListItems' items.
+      const bare = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: names.map((n) => ({ '@type': 'Product', name: n })) })}</script>`
+      expect(route(category(bare))).toEqual({ type: 'collection', strategy: 'article' })
+      // A list named for recommendations is a product page's related products; fewer than three products of its own is
+      // no listing, beside however many a list of recommendations holds.
+      expect(route(category(ownList(names, 'You may also like'))).type).toBe('product')
+      expect(route(category(ownList(names.slice(0, 2)), 2)).type).toBe('product')
+      expect(route(category(ownList(names.slice(0, 2)) + ownList(names.slice(2, 6), 'Customers also bought'), 6)).type).toBe('product')
+      // A page titled by an h2, with no h1 to have a price of its own under.
+      expect(route(wrap(`<main><h2>Men's shirts</h2><p>Showing 8 of 282 products</p>${grid(8)}</main>`, ownList(names)))).toEqual({ type: 'collection', strategy: 'article' })
+    })
+
+    it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
+      for (const top of [
+        '<h1>Cobalt teapot</h1><span class="price">$84.00</span>',
+        '<div class="buy"><h1>Cobalt teapot</h1><span class="price">$84.00</span></div>',
+        // A second h1 below the first (a site that marks each section's title so) does not hide the price.
+        '<h1>Cobalt teapot</h1><span class="price">$84.00</span><h1>Details</h1>',
+      ]) {
+        const doc = parse(wrap(`<main>${top}<p>Hand-thrown stoneware.</p>${grid(4)}</main>`, ownList(names.slice(0, 4))))
+        expect(routePage(doc.document).type, top).toBe('product')
+        doc.close()
+      }
+      // A listed product without a name names no card the price could be in.
+      const unnamed = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', position: 1, item: { '@type': 'Product' } }, ...itemList(names.slice(0, 3)).itemListElement] })}</script>`
+      const doc = parse(wrap(`<main><h1>Cobalt teapot</h1><div class="buy"><span class="price">$84.00</span></div><p>Hand-thrown stoneware.</p>${grid(3)}</main>`, unnamed))
+      expect(routePage(doc.document).type).toBe('product')
+      doc.close()
+    })
+
     it('keeps product pages beside cards that share a class with them, or that show their price first, product pages', () => {
       const card = (i: number, cls: string) => `<div class="${cls}" itemscope itemtype="https://schema.org/Product"><a href="/p/${i}">Teapot ${i}</a><span class="price">$1${i}.00</span></div>`
       const cards = (cls: string) => `<div class="grid">${Array.from({ length: 4 }, (_, i) => card(i + 1, cls)).join('')}</div>`
