@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeAccessGrant } from '../src/accessGrant.js'
+import { normalizeAccessGrant, tariffCeilingUsd } from '../src/accessGrant.js'
 
 const ATTESTATION = { principal: 'tester', at: '2026-10-05T00:00:00Z', statement: 'I accept these routes.' }
 
@@ -7,8 +7,33 @@ describe('normalizeAccessGrant', () => {
   it('defaults to a standard grant that names nothing', () => {
     expect(normalizeAccessGrant({})).toEqual({
       ok: true,
-      grant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: null }, scope: { hosts: null }, attestation: null },
+      grant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: null }, scope: { hosts: null }, attestation: null, tariffs: {} },
     })
+  })
+
+  it('takes a provider tariff and computes the most one call can cost (ROADMAP PA item 4)', () => {
+    const result = normalizeAccessGrant({ tariffs: { browserbase: { perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000 }, flat: { perCallUsd: 0.01 } } })
+    expect(result.ok).toBe(true)
+    const grant = (result as { grant: import('../src/accessGrant.js').AccessGrant }).grant
+    expect(grant.tariffs.browserbase).toEqual({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 1 })
+    // Two minutes at $0.12 an hour.
+    expect(tariffCeilingUsd(grant.tariffs.browserbase!)).toBeCloseTo(0.004)
+    expect(tariffCeilingUsd(grant.tariffs.flat!)).toBeCloseTo(0.01)
+    // A session billed for at least a minute: the floor counts when it is above the longest session.
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 10_000, minBilledMs: 60_000, billingIncrementMs: 1 })).toBeCloseTo(0.002)
+    // Billed by the minute, rounded up: 90 s bills two minutes.
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 90_000, minBilledMs: 0, billingIncrementMs: 60_000 })).toBeCloseTo(0.004)
+    // A provider that cannot be told to end a session before 60 s bills up to then when a release fails.
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 20_000, minBilledMs: 0, billingIncrementMs: 1 }, 60_000)).toBeCloseTo(0.002)
+  })
+
+  it('refuses a tariff whose cost has no ceiling, or that names no price', () => {
+    const result = normalizeAccessGrant({ tariffs: { a: { perHourUsd: 0.1 }, b: { perCallUsd: 0.01, perGbUsd: 5, maxBytes: 1000 }, c: { maxSessionMs: 1000 }, d: { perCallUsd: -1 }, e: { perCallUsd: 1, surge: 2 }, f: 'cheap' } })
+    expect(result.ok).toBe(false)
+    const problems = (result as { problems: readonly { field: string; reason: string }[] }).problems
+    expect(problems.map((p) => p.field)).toEqual(expect.arrayContaining(['tariffs.a.maxSessionMs', 'tariffs.b.perGbUsd', 'tariffs.c', 'tariffs.d.perCallUsd', 'tariffs.e.surge', 'tariffs.f']))
+    // Bandwidth pricing is refused by name, with what to do instead.
+    expect(problems.find((p) => p.field === 'tariffs.b.perGbUsd')?.reason).toMatch(/proxies off/)
   })
 
   it('lets standard name the routes with no third-party cost, without a budget', () => {

@@ -123,7 +123,13 @@ export interface ListRun {
   rounds: number
   /** Elements matching `itemSelector` at the end (on the last page for paginate; summed over its pages in `itemsRead`); null without one. */
   items: number | null
-  /** paginate: elements matching `itemSelector` over every page read; null without one. */
+  /**
+   * paginate: elements matching `itemSelector` over every page read; null without one. After a continuation in the person's
+   * Chrome (`continued`), the kept pages' count plus each page they showed, as their tab counted it, only when the addresses show
+   * no page can be counted twice (the kept pages each at its own, the check's page and the pages shown at none of them, the check
+   * not at the list's own address), no page shows again what another shows (its items' whole text, as the list merge tells it:
+   * a result set tied to the session that made it comes back at new addresses), and every count is known; null (unknown) otherwise.
+   */
   itemsRead?: number | null
   /** paginate: pages taken from the task's checkpoint after a run cut at page N (ExecutionContext.listResume), counted in `rounds`; absent when none. */
   resumed?: number

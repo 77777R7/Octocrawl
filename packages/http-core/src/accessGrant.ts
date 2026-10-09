@@ -19,7 +19,9 @@
  * Pure, zero dependencies, like the rest of http-core.
  */
 
+import type { EvidenceAccessGrant } from '@w2l/contracts'
 import type { AccessAttestationInput } from './access.js'
+import { sha256Utf8 } from './hash.js'
 import { AUTHORIZABLE, evaluateAccessCapability, type AuthorizableCapability } from './vendor.js'
 
 export const ACCESS_TIERS = ['standard', 'enhanced', 'my_browser'] as const
@@ -33,6 +35,78 @@ export interface AccessGrant {
   /** Hosts the grant covers; null covers every host the run may fetch. */
   scope: { hosts: readonly string[] | null }
   attestation: AccessAttestationInput | null
+  /**
+   * The prices the operator accepted for each provider (by vendor id), from which a call's price ceiling is computed
+   * (ROADMAP PA item 4): a provider without one is not called. Empty: none.
+   */
+  tariffs: Readonly<Record<string, VendorTariff>>
+  /**
+   * SHA-256 of the grant's text as it was read (accessGrantFromText), so a record names the grant its paid calls were
+   * made under without copying it: `shasum -a 256 grant.json` gives the same digest. Absent on a grant built in code.
+   */
+  sha256?: string
+}
+
+/** What a record says of the grant a paid call was made under (ROADMAP PA item 4): its digest, tier and attestation time. */
+export function accessGrantRef(grant: AccessGrant): EvidenceAccessGrant {
+  return { sha256: grant.sha256 ?? null, tier: grant.tier, attestedAt: grant.attestation?.at ?? null }
+}
+
+/**
+ * A provider's prices, as its pricing page states them, and the limit that makes a call's cost bounded: a per-hour price
+ * needs the longest session a call may hold (the vendor lane ends the call and its session there, and asks the provider
+ * to end the session then too). `minBilledMs` is the shortest time the provider bills a session for. A per-GB price
+ * (a provider's proxy bandwidth) is not taken: the bytes a provider's browser receives across every target it opens
+ * cannot be counted from here, so such a cost has no ceiling.
+ */
+export interface VendorTariff {
+  perCallUsd: number
+  perHourUsd: number
+  maxSessionMs: number | null
+  minBilledMs: number
+  /** The step the provider bills time in (a minute, rounded up); 1: exact. */
+  billingIncrementMs: number
+}
+
+/**
+ * The most one call can cost under this tariff, in US dollars: its per-call price, and its longest session (at least the
+ * billed minimum and `floorMs`, the shortest session the provider can be told to end at) rounded up to the billing step.
+ */
+export function tariffCeilingUsd(tariff: VendorTariff, floorMs = 0): number {
+  const sessionMs = Math.max(tariff.maxSessionMs ?? 0, tariff.minBilledMs, tariff.maxSessionMs === null ? 0 : floorMs)
+  const step = tariff.billingIncrementMs > 0 ? tariff.billingIncrementMs : 1
+  const billedMs = Math.ceil(sessionMs / step) * step
+  return tariff.perCallUsd + (tariff.perHourUsd * billedMs) / 3_600_000
+}
+
+const TARIFF_PRICES = ['perCallUsd', 'perHourUsd'] as const
+const TARIFF_LIMITS = ['maxSessionMs', 'minBilledMs', 'billingIncrementMs'] as const
+
+/** One provider's tariff from its JSON, or the problems with it. */
+function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem[]): VendorTariff | null {
+  const field = `tariffs.${vendor}`
+  if (!isRecord(input)) { problems.push({ field, kind: 'invalid', reason: 'a tariff is an object of prices and limits' }); return null }
+  const known = new Set<string>([...TARIFF_PRICES, ...TARIFF_LIMITS])
+  if (input.perGbUsd !== undefined || input.maxBytes !== undefined) {
+    problems.push({ field: `${field}.perGbUsd`, kind: 'invalid', reason: 'a per-GB price (a provider\'s proxy bandwidth) has no ceiling: the bytes its browser receives across every target cannot be counted from here; turn the provider\'s proxies off and leave perGbUsd and maxBytes out' })
+  }
+  for (const key of Object.keys(input)) if (!known.has(key) && key !== 'perGbUsd' && key !== 'maxBytes') problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: `unknown tariff field; one of ${[...known].join(', ')}` })
+  const price = (key: (typeof TARIFF_PRICES)[number]): number => {
+    const v = input[key]
+    if (v === undefined || v === null) return 0
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) { problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: 'a non-negative number of US dollars' }); return 0 }
+    return v
+  }
+  const limit = (key: (typeof TARIFF_LIMITS)[number]): number | null => {
+    const v = input[key]
+    if (v === undefined || v === null) return null
+    if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) { problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: 'a positive whole number' }); return null }
+    return v
+  }
+  const tariff: VendorTariff = { perCallUsd: price('perCallUsd'), perHourUsd: price('perHourUsd'), maxSessionMs: limit('maxSessionMs'), minBilledMs: limit('minBilledMs') ?? 0, billingIncrementMs: limit('billingIncrementMs') ?? 1 }
+  if (TARIFF_PRICES.every((key) => input[key] === undefined || input[key] === null)) problems.push({ field, kind: 'invalid', reason: 'a tariff names at least one price: perCallUsd or perHourUsd' })
+  if (tariff.perHourUsd > 0 && tariff.maxSessionMs === null) problems.push({ field: `${field}.maxSessionMs`, kind: 'invalid', reason: 'a per-hour price needs the longest session a call may hold, or its cost has no ceiling' })
+  return tariff
 }
 
 export type AccessGrantProblemKind =
@@ -152,8 +226,19 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
     })
   }
 
+  const tariffsIn = input.tariffs ?? {}
+  const tariffs: Record<string, VendorTariff> = {}
+  if (!isRecord(tariffsIn)) {
+    problems.push({ field: 'tariffs', kind: 'invalid', reason: 'tariffs is an object of provider ids to their prices' })
+  } else {
+    for (const [vendor, value] of Object.entries(tariffsIn)) {
+      const tariff = readTariff(vendor, value, problems)
+      if (tariff !== null) tariffs[vendor] = tariff
+    }
+  }
+
   if (problems.length > 0) return { ok: false, problems }
-  return { ok: true, grant: { tier: tier as AccessTier, capabilities, budget: { perRequestUsd, perRunUsd }, scope: { hosts }, attestation } }
+  return { ok: true, grant: { tier: tier as AccessTier, capabilities, budget: { perRequestUsd, perRunUsd }, scope: { hosts }, attestation, tariffs } }
 }
 
 /**
@@ -176,5 +261,5 @@ export function accessGrantFromText(text: string): AccessGrant {
   if (result.grant.scope.hosts !== null) {
     throw new Error('access grant refused: scope.hosts is not enforced yet, so a grant that names hosts would reach every host; leave scope out')
   }
-  return result.grant
+  return { ...result.grant, sha256: sha256Utf8(text) }
 }

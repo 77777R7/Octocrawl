@@ -178,7 +178,7 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
   it('access enhanced reaches the provider the grant allows in mode standard, from a scrape, /fc proxy stealth and a batch', async () => {
     const reached: string[] = []
     const provider: Channel = {
-      id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'),
+      id: 'provider', vendorId: 'fake', priceCeilingUsd: 0.05, identity: identityForRoute('standard'),
       fetch: async (url: string): Promise<FetchResult> => {
         reached.push(url)
         return {
@@ -205,15 +205,41 @@ describe('headers, mobile, skipTlsVerification, fastMode and blockAds through th
     expect(reached).toHaveLength(3)
   })
 
-  it('a batch that chose enhanced counts a page whose provider call threw as of unknown cost, so the run budget stops it', async () => {
+  it('a batch that chose enhanced charges a provider call that threw at its price ceiling, and stops at the run budget (ROADMAP PA item 4)', async () => {
     let calls = 0
-    const throwing: Channel = { id: 'provider', vendorId: 'fake', identity: identityForRoute('standard'), fetch: async () => { calls++; throw new Error('the vendor session dropped after it was billed') } }
+    const throwing: Channel = { id: 'provider', vendorId: 'fake', priceCeilingUsd: 2.5, identity: identityForRoute('standard'), fetch: async () => { calls++; throw new Error('the vendor session dropped after it was billed') } }
     const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
     const { origin, post, engine } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => enhanced === true ? [throwing] : buildChannels(mode, {}) })
     const batch = (await post('/v1/batches', { urls: ['a', 'b', 'c'].map((page) => `${origin}/chrome?${page}`), access: 'enhanced', maxConcurrency: 1 })).body
     const report = await finished(() => engine.getBatch(batch.taskId ?? batch.id))
-    expect(report).toMatchObject({ budgetExceeded: 'cost_unknown' })
-    expect(calls).toBe(1)
+    // Two calls at their $2.50 ceiling fill the $5 run budget: the third page is not fetched.
+    expect(report).toMatchObject({ budgetExceeded: 'cost' })
+    expect(calls).toBe(2)
+    // Each page whose call threw keeps that call on its record: charged at its ceiling, no page from it.
+    const items = (await engine.getBatchItems(batch.taskId ?? batch.id, { limit: 10 }))!.items.filter((item) => item.evidenceRecord?.access?.paidCalls != null)
+    expect(items.map((item) => item.evidenceRecord!.access!.paidCalls)).toEqual([0, 1].map(() => [expect.objectContaining({ provider: 'fake', chargedUsd: 2.5, ceilingUsd: 2.5, outcome: null, reason: null, answer: false })]))
+    // An append runs the batch again: its ledger opens with what the earlier run was charged, so no call fits.
+    const id = batch.taskId ?? batch.id
+    expect((await post('/v1/batches', { appendToId: id, urls: [`${origin}/chrome?d`] })).status).toBeLessThan(300)
+    expect(await finished(() => engine.getBatch(id))).toMatchObject({ budgetExceeded: 'cost' })
+    expect(calls).toBe(2)
+  })
+
+  it('never calls a provider with no price ceiling, and a page\'s own cap holds its calls below the run\'s (ROADMAP PA item 4)', async () => {
+    let unpricedCalls = 0
+    const unpriced: Channel = { id: 'provider', vendorId: 'unpriced', identity: identityForRoute('standard'), fetch: async () => { unpricedCalls++; throw new Error('called without a ceiling') } }
+    const grant = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 5, perRequestUsd: 0.1 }, attestation: { principal: 'operator@example.test', at: '2026-10-06T00:00:00Z', statement: 'I accept the terms.' } }))
+    const { origin, post } = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => enhanced === true ? [unpriced] : buildChannels(mode, {}) })
+    const scraped = (await post('/v1/scrape', { url: `${origin}/chrome`, access: 'enhanced' })).body
+    expect(unpricedCalls).toBe(0)
+    expect(scraped.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'unpriced', reason: expect.stringContaining('no price ceiling') }) }))
+    // A ceiling above the request's $0.10 is not reserved: the provider is not called, and the trace says why.
+    let dearCalls = 0
+    const dear: Channel = { ...unpriced, vendorId: 'dear', priceCeilingUsd: 0.5, fetch: async () => { dearCalls++; throw new Error('called above the request cap') } }
+    const second = await setup({ accessGrant: grant, channelsFor: (mode, _egress, enhanced) => enhanced === true ? [dear] : buildChannels(mode, {}) })
+    const capped = (await second.post('/v1/scrape', { url: `${second.origin}/chrome`, access: 'enhanced' })).body
+    expect(dearCalls).toBe(0)
+    expect(capped.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', detail: expect.objectContaining({ vendorId: 'dear', reason: expect.stringContaining('budget'), ceilingUsd: 0.5, capUsd: 0.1 }) }))
   })
 
   it('fastMode keeps the http rung alone, reports its verdict, and says what it declined', async () => {

@@ -8,7 +8,7 @@ import { egressProxies, localNetworkPolicy, type FetchResult, type ProxyServer }
 import { accessGrantFromText } from '@w2l/http-core'
 import { buildChannels } from '@w2l/bench'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
-import { EGRESS_COOLDOWN_MS, EgressPool, egressInDoubt, probeEgress } from '../src/egressPool.js'
+import { EGRESS_COOLDOWN_MS, EgressPool, egressInDoubt, parseEchoExit, probeEgress } from '../src/egressPool.js'
 
 /**
  * Egress proxies (W2L_EGRESS_PROXIES, ADR 0005 egress_sessions): a task keeps one egress, switches only
@@ -27,6 +27,7 @@ let holdPage = false
 let holdStarted: (() => void) | null = null
 const holdCookies: string[] = []
 let engine: ApiEngine | null = null
+let echoIp = '203.0.113.7'
 
 /** A forward proxy that sends every request, tunnel or plain, to an origin server (the shared one by default), and counts them. */
 async function liveProxy(target = () => originPort): Promise<ProxyServer & { stop(): Promise<void> }> {
@@ -79,6 +80,10 @@ beforeAll(async () => {
       return
     }
     if (req.url === '/blocked') return void res.writeHead(403, { 'content-type': 'text/html' }).end('<h1>Access Denied</h1>')
+    // An echo service: the address and country it says the request came from (a fake proxy forwards every host here).
+    if (req.url === '/echo') return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ip: echoIp, country: 'jp' }))
+    // An echo that never answers.
+    if (req.url === '/echo-hold') return
     if (req.url === '/busy') return void res.writeHead(429, { 'content-type': 'text/html', 'retry-after': '1' }).end('<h1>Too many requests</h1>')
     res.writeHead(404).end()
   })
@@ -100,12 +105,12 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-type Item = { url: string; status: string; failureReason?: string | null; evidenceRecord?: { proxy: string | null; access?: { egress?: unknown; session?: unknown } } | null; trace?: { event: string; detail?: Record<string, unknown> }[] }
+type Item = { url: string; status: string; failureReason?: string | null; evidenceRecord?: { proxy: string | null; access?: { egress?: { exit?: unknown } | null; session?: unknown } } | null; trace?: { event: string; detail?: Record<string, unknown> }[] }
 
 type Channels = NonNullable<Parameters<typeof createApiEngine>[0]['channelsFor']>
 const httpOnly = (policy: ReturnType<typeof localNetworkPolicy>): Channels => (mode, egress) => buildChannels(mode, { networkPolicy: egress?.policy ?? policy }).filter((channel) => channel.id === 'http')
 
-async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown> } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
+async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown>; echoUrl?: string } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
   root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
   const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
   engine = createApiEngine({
@@ -113,6 +118,7 @@ async function batch(pool: ProxyServer[], paths: string[], options: { channels?:
     networkPolicy: policy,
     accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })),
     egressProxies: pool,
+    egressEchoUrl: options.echoUrl ?? null,
     channelsFor: options.channels ?? httpOnly(policy),
   })
   // A name only the proxies resolve: a request that skipped its egress could not reach the site.
@@ -242,6 +248,60 @@ describe('a task on egress proxies', () => {
   })
 })
 
+describe('where a pool egress leaves from', () => {
+  it('records the exit its echo saw on each page read through it, the egress a switch moved to included', async () => {
+    const dead = await deadProxy()
+    const live = await liveProxy()
+    const { items } = await batch([dead, live], ['/start', '/needs'], { echoUrl: `http://echo.test:${originPort}/echo` })
+    for (const path of ['/start', '/needs']) {
+      expect(items[path]).toMatchObject({ status: 'success' })
+      expect(items[path]!.evidenceRecord?.access?.egress).toMatchObject({ proxy: live.endpoint, source: 'pool', exit: { ip: '203.0.113.7', country: 'JP', observedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) } })
+    }
+  })
+
+  it('keeps the exit a cached page was read through, not the echo\'s answer when the cache gives it back', async () => {
+    const live = await liveProxy()
+    root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const make = () => createApiEngine({ taskRoot: join(root, 'tasks'), networkPolicy: policy, accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })), egressProxies: [live], egressEchoUrl: `http://echo.test:${originPort}/echo`, channelsFor: httpOnly(policy) })
+    const url = `http://site.test:${originPort}/start`
+    echoIp = '203.0.113.7'
+    engine = make()
+    const read = await engine.scrape({ url, formats: ['markdown'], storeInCache: true, debug: true } as Parameters<ApiEngine['scrape']>[0]) as unknown as Item
+    expect(read.evidenceRecord?.access?.egress?.exit).toMatchObject({ ip: '203.0.113.7' })
+    await engine.close()
+    // The proxy now leaves from elsewhere; a new server asks again, and the batch is answered from the cache alone.
+    echoIp = '198.51.100.9'
+    engine = make()
+    const { taskId } = await engine.startBatch({ urls: [url], maxConcurrency: 1, lockdown: true } as Parameters<ApiEngine['startBatch']>[0])
+    let report = await engine.getBatch(taskId)
+    for (let i = 0; i < 500 && (report === null || ['pending', 'running'].includes(report.status)); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); report = await engine.getBatch(taskId) }
+    const hit = ((await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items as unknown as Item[])[0]!
+    expect(hit.trace?.some((event) => event.event === 'cache_hit')).toBe(true)
+    expect(hit.evidenceRecord?.access?.egress?.exit).toMatchObject({ ip: '203.0.113.7' })
+    echoIp = '203.0.113.7'
+  })
+
+  it('never waits for the echo past a scrape\'s timeout: the exit is then unknown', async () => {
+    const live = await liveProxy()
+    root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), networkPolicy: policy, accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })), egressProxies: [live], egressEchoUrl: `http://echo.test:${originPort}/echo-hold`, channelsFor: httpOnly(policy) })
+    const started = Date.now()
+    const read = await engine.scrape({ url: `http://site.test:${originPort}/start`, formats: ['markdown'], timeout: 1_500, debug: true } as Parameters<ApiEngine['scrape']>[0]) as unknown as Item
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(read.status).toBe('success')
+    expect(read.evidenceRecord?.access?.egress).toMatchObject({ proxy: live.endpoint, exit: null })
+  })
+
+  it('leaves the exit null without an echo URL: unknown is not guessed', async () => {
+    const live = await liveProxy()
+    const { items } = await batch([live], ['/start'])
+    expect(items['/start']!.evidenceRecord?.access?.egress).toMatchObject({ proxy: live.endpoint, source: 'pool', exit: null })
+    expect(items['/start']!.trace?.some((event) => event.event === 'egress_exit')).toBe(false)
+  })
+})
+
 describe('EgressPool', () => {
   it('hands out egresses in turn, skips one cooling down, and falls back to the one whose cooldown ends first', () => {
     let now = 1_000
@@ -282,6 +342,41 @@ describe('EgressPool', () => {
     await new Promise<void>((resolve) => needsAuth.listen(0, '127.0.0.1', resolve))
     proxies.push(needsAuth)
     expect(await probeEgress(egressProxies(`http://u:p@127.0.0.1:${(needsAuth.address() as AddressInfo).port}`)[0]!)).toBe('credentials_refused')
+  })
+
+  it('asks each egress where it leaves from once, again after it failed or ten minutes on, and never without an echo URL', async () => {
+    let now = 1_000
+    const asked: string[] = []
+    const [a, b] = egressProxies('http://a.test:1,http://b.test:2')
+    const pool = new EgressPool([a!, b!], localNetworkPolicy(), () => now, 'https://echo.test/', async (server) => {
+      asked.push(server.endpoint)
+      return server.endpoint === 'a.test:1' ? { status: 200, body: '{"ip":"198.51.100.1","country_code":"de"}' } : { status: 503, body: '' }
+    })
+    expect(await pool.exitOf('a.test:1')).toEqual({ ip: '198.51.100.1', country: 'DE', observedAt: new Date(1_000).toISOString() })
+    await pool.exitOf('a.test:1')
+    expect(asked).toEqual(['a.test:1'])
+    // An echo that did not answer names no exit.
+    expect(await pool.exitOf('b.test:2')).toBeNull()
+    pool.fail('a.test:1')
+    await pool.exitOf('a.test:1')
+    now += EGRESS_COOLDOWN_MS
+    await pool.exitOf('a.test:1')
+    expect(asked).toEqual(['a.test:1', 'b.test:2', 'a.test:1', 'a.test:1'])
+    expect(await pool.exitOf('c.test:3')).toBeNull()
+    const silent = new EgressPool([a!], localNetworkPolicy(), () => now, null, async () => { throw new Error('asked without an echo URL') })
+    expect(await silent.exitOf('a.test:1')).toBeNull()
+  })
+
+  it('reads an echo answer in the shapes echo services give, and names no exit it cannot read', () => {
+    const at = '2026-10-08T00:00:00.000Z'
+    expect(parseEchoExit('{"ip":"203.0.113.9","country":"US","city":"x"}', at)).toEqual({ ip: '203.0.113.9', country: 'US', observedAt: at })
+    expect(parseEchoExit('{"query":"203.0.113.9","countryCode":"nl"}', at)).toEqual({ ip: '203.0.113.9', country: 'NL', observedAt: at })
+    // httpbin lists every address the request passed through; the last reached it.
+    expect(parseEchoExit('{"origin":"192.0.2.1, 203.0.113.9"}', at)).toEqual({ ip: '203.0.113.9', country: null, observedAt: at })
+    expect(parseEchoExit('2001:db8::1\n', at)).toEqual({ ip: '2001:db8::1', country: null, observedAt: at })
+    expect(parseEchoExit('{"ip":"203.0.113.9","country":"United States"}', at)).toEqual({ ip: '203.0.113.9', country: null, observedAt: at })
+    expect(parseEchoExit('<html>blocked</html>', at)).toBeNull()
+    expect(parseEchoExit('{"ip":"not an address"}', at)).toBeNull()
   })
 })
 

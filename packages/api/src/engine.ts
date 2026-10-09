@@ -69,6 +69,7 @@ import {
   BATCH_ERRORS_MAX_LIMIT,
   RequestError,
   type FetchResult,
+  type ListFormatRequest,
   type NetworkPolicy,
   type ScrapeRequest,
   type StepRecord,
@@ -109,9 +110,10 @@ import {
   type MapSources,
   cacheLookupRequested,
   cacheStateOf,
+  givenUpPaidCalls,
   type ScrapeOutcome,
 } from '@w2l/contracts'
-import { createExecutionScope, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
+import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
@@ -380,6 +382,11 @@ export interface ApiEngineOptions {
    */
   egressProxies?: readonly ProxyServer[]
   /**
+   * A URL that answers with the caller's address (`W2L_EGRESS_ECHO_URL`): each pool egress is asked it through its
+   * own proxy, and a page read through that egress records where it left from (`access.egress.exit`). Absent: not asked.
+   */
+  egressEchoUrl?: string | null
+  /**
    * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
    * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
    * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
@@ -466,6 +473,59 @@ function writeTaskEgress(file: string, id: string): void {
 const DEFAULT_WORKER_COUNT = 4
 
 /**
+ * Whether a page of a list shows again what an earlier one shows, as the list merge tells it (its items' whole text), or that
+ * cannot be told (a selector the extractor does not take, no list read from the first page, or the merge cut short): a page shown again at an address of its own, as a
+ * result set tied to the session that made it comes back in another session, would be counted twice by a sum. A page with no
+ * item adds none to a sum, so it is not one.
+ */
+export function listPagesRepeat(pages: readonly { url: string; html: string }[], itemSelector: string): boolean {
+  // A selector the extractor does not take (`:has()`, `:nth-child()`, `+`, `~`) finds no item here though the browser counted some: it cannot be told.
+  if (invalidSelector(itemSelector) !== null) return true
+  const merged = mergeListPages(pages.map(({ url, html }) => ({ url, html })), { type: 'list', itemSelector } as ListFormatRequest)
+  return merged === null || merged.spec === null || merged.list.pages !== pages.length || merged.list.truncated
+}
+
+/**
+ * A continued list's `itemsRead`: the kept pages' count plus each page the person showed, only when no page can be counted
+ * twice, else null (unknown). That needs pages with addresses of their own, told by the addresses themselves: the kept pages
+ * each at their own, the check's page at none of them, no page the person showed at a kept one, and the check's page not the
+ * list's own (a pager reopened there shows the kept pages again); and every count known.
+ */
+export function continuedItemsRead(pages: { stepUrl: string; checkUrl: string; kept: readonly string[]; keptItems: number | null | undefined; shown: readonly { url: string; items?: number | null }[] }): number | null {
+  const at = (href: string): string => {
+    try {
+      const parsed = new URL(href)
+      return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '') || '/'}${parsed.search}`
+    } catch {
+      return href
+    }
+  }
+  const kept = pages.kept.map(at)
+  const addressed = new Set(kept).size === kept.length && !kept.includes(at(pages.checkUrl)) && at(pages.checkUrl) !== at(pages.stepUrl)
+    && pages.shown.every((page) => !kept.includes(at(page.url)))
+  if (!addressed || typeof pages.keptItems !== 'number') return null
+  let sum = pages.keptItems
+  for (const page of pages.shown) {
+    if (typeof page.items !== 'number') return null
+    sum += page.items
+  }
+  return sum
+}
+
+/** `promise`'s value, or null once the context's signal aborts or its deadline passes first. */
+function settledBy<T>(promise: Promise<T | null>, context: ExecutionContext): Promise<T | null> {
+  if (context.signal?.aborted || (context.deadlineAt !== undefined && context.deadlineAt <= Date.now())) return Promise.resolve(null)
+  if (context.signal === undefined && context.deadlineAt === undefined) return promise
+  return new Promise((resolve) => {
+    const done = (value: T | null) => { clearTimeout(timer); context.signal?.removeEventListener('abort', aborted); resolve(value) }
+    const aborted = () => done(null)
+    const timer = context.deadlineAt === undefined ? undefined : setTimeout(aborted, context.deadlineAt - Date.now())
+    context.signal?.addEventListener('abort', aborted, { once: true })
+    promise.then(done, () => done(null))
+  })
+}
+
+/**
  * How the cache takes part in one page's fetch: the key of the page under
  * the options that shape its result, the age bounds of a lookup (null: none
  * is made), whether a miss ends the page (`lockdown`) and whether a
@@ -532,8 +592,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const grantedBudget = (budget: Task['budget']): Task['budget'] => {
     const cap = accessGrant?.budget.perRunUsd ?? null
-    if (cap === null) return budget
-    return { ...budget, maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }
+    const perPage = accessGrant?.budget.perRequestUsd ?? null
+    return {
+      ...budget,
+      ...(cap === null ? {} : { maxCostUsd: budget.maxCostUsd === null ? cap : Math.min(budget.maxCostUsd, cap) }),
+      // One page's own cap within the run's (ROADMAP PA item 4).
+      ...(perPage === null ? {} : { maxCostPerPageUsd: perPage }),
+    }
   }
   const basePolicy = options.networkPolicy ?? localNetworkPolicy()
   const networkPolicy: NetworkPolicy = {
@@ -544,7 +609,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     maxFileBytes: basePolicy.maxFileBytes ?? maxFileBytesFromEnv(process.env),
   }
   /** The operator's egress proxies, when any: every fetch leaves through one of them. */
-  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy)
+  const egressPool = egressProxyList.length === 0 ? null : new EgressPool(egressProxyList, networkPolicy, Date.now, options.egressEchoUrl ?? null)
+  /**
+   * The page's trace with where its pool egress leaves from, when the pool's echo said (egress_exit); unchanged otherwise.
+   * A cache hit keeps the exit its original read recorded: the echo's answer now is not where that read left from. The
+   * wait for the echo ends with the page's signal or deadline, the exit then unknown, so it never outlasts a `timeout`.
+   */
+  const withEgressExit = async (result: FetchResult, egress: Egress | undefined, context: ExecutionContext = {}): Promise<FetchResult> => {
+    if (egress === undefined || egressPool === null || result.trace.some((event) => event.event === 'cache_hit')) return result
+    const exit = await settledBy(egressPool.exitOf(egress.id), context)
+    return exit === null ? result : { ...result, trace: [...result.trace, { at: 0, lane: result.lane, event: 'egress_exit', detail: { proxy: egress.id, ...exit } }] }
+  }
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
   const fileStore = new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
@@ -772,7 +847,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1058,9 +1133,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const merged = list === undefined ? null : mergeListPages(pages, list)
       const rounds = pages.length
       const continued = { from, pages: read.pages.length, by: 'user_browser' as const }
-      const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: null, itemsRead: null, continued } : item)
+      // The items on the last page, as the person's tab counted them, and over every page only when a sum cannot count a page twice:
+      // by the pages' addresses, and by their items, since a result set tied to the session that made it comes back at new ones.
+      const itemsRead = action.itemSelector === undefined || listPagesRepeat(pages, action.itemSelector) ? null
+        : continuedItemsRead({ stepUrl: step.url, checkUrl: url, kept: kept.map((page) => page.url), keptItems: run.itemsRead, shown: read.pages })
+      const lists = (prior.actions?.lists ?? []).map((item) => item.index === run.index ? { ...item, stoppedBy: read.stoppedBy, rounds, items: last.items ?? null, itemsRead, continued } : item)
       // Each page says who read it: W2L's own browser before the check (the kept pages), the person's after it.
-      const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map((page) => ({ ...page, step: run.index, by: 'user_browser' as const }))], lists }
+      const actions = { ...prior.actions!, scrapes: [...(prior.actions?.scrapes ?? []).filter((scrape) => scrape.step !== run.index), ...kept.map((page) => ({ ...page, step: run.index })), ...read.pages.map(({ url: pageUrl, html }) => ({ url: pageUrl, html, step: run.index, by: 'user_browser' as const }))], lists }
       const valued = merged !== null && merged.valued
       const short = read.stoppedBy !== 'end'
       const at = base.usage.wallMs
@@ -1153,7 +1232,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /**
    * One page read in the person's Chrome on a site they allowed (`allowed`), without a click of theirs; a check it
    * shows waits for them. The page, or why it was not read: revoked, its tab closed or the caller gone (`cancelled`),
-   * the check it still showed (`blocked`), or the wait over (`timeout`).
+   * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), or the wait over (`timeout`).
    */
   async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
     try {
@@ -1174,6 +1253,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const wallMs = Date.now() - started
       if (allowed.signal.aborted) return unreadInUserBrowser(url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${url} was read`, wallMs)
       if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(url, { status: 'cancelled' }, error.message, wallMs)
+      // Chrome refused a command (a tab it would not open, a page it would not answer for): not a wait that ran out.
+      if (error.kind === 'chrome') return unreadInUserBrowser(url, { status: 'failed', failureReason: 'connection_error' }, error.message, wallMs)
       const check = (BLOCK_REASON as readonly string[]).includes(error.check ?? '') ? error.check as BlockReason : null
       return unreadInUserBrowser(url, check === null ? { status: 'failed', failureReason: 'timeout' } : { status: 'blocked', blockReason: check }, error.message, wallMs)
     }
@@ -1471,6 +1552,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         let used = current
         let outcome = await pageAtom.scrape(url, context)
         const events: TraceEvent[] = []
+        const carried: TraceEvent[] = []
         while (egressInDoubt(outcome)) {
           let reason: string
           if (current === used) {
@@ -1492,10 +1574,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             reason = 'moved_with_task'
           }
           events.push({ at: 0, lane: outcome.result.lane, event: 'egress_switched', detail: { from: used.egress!.id, to: current.egress!.id, reason, switches } })
+          // The read given up still paid for its provider calls: they stay on the page's record, none of them its answer.
+          carried.push(...givenUpPaidCalls(outcome.result.trace))
           used = current
           outcome = await pageAtom.scrape(url, context)
         }
-        return events.length === 0 ? outcome : { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, ...events] } }
+        const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...carried, ...outcome.result.trace, ...events] }, used.egress, context)
+        return result === outcome.result ? outcome : { ...outcome, result }
       },
       close: () => pageAtom.close(),
     }
@@ -1626,7 +1711,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const scope = createExecutionScope({...context, signal: context.signal ? AbortSignal.any([context.signal, shutdownController.signal]) : shutdownController.signal, deadlineAt})
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, mode === 'authed' ? undefined : egressPool?.pick())
+    const scrapeEgress = mode === 'authed' ? undefined : egressPool?.pick()
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, scrapeEgress)
     const policy: CrawlPolicy = {
       mode,
       // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
@@ -1665,10 +1751,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // Its JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline: the person's time is theirs.
         return deliver(full, createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }), true)
       }
+      // A scrape's paid calls are held to the grant's per-request cap, else its run cap (ROADMAP PA item 4).
+      const scrapeCap = accessGrant?.budget.perRequestUsd ?? accessGrant?.budget.perRunUsd ?? null
+      const scrapeSpend = scrapeCap === null ? undefined : createSpendLedger(scrapeCap)
       const answer = consultCache(plan, req.url, policy)
       const run = answer.kind === 'fetch'
-        ? await runner.run(req.url, undefined, scope, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
-          .then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
+        ? await runner.run(req.url, undefined, scrapeSpend === undefined ? scope : { ...scope, spend: scrapeSpend }, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
+          .then(async (fetched) => ({ ...fetched, result: afterFetch(plan, answer, await withEgressExit(fetched.result, scrapeEgress, scope)) }))
         : { result: answer.result, ...untriedAudit(Math.round(performance.now() - overallStart)) }
       // A page a check stopped: handed to the person when the request asks, else told how it could be.
       const handed = req.handoff !== undefined && answer.kind === 'fetch' && handoffResult(run.result) ? await handOffScrape(req, run.result, context, hooks) : null
@@ -1685,7 +1774,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const full: ScrapeRun = {
         ...result,
         // The answer's third-party spend is the whole call's: a page read in the person's Chrome after a provider tried it still cost what the provider charged.
-        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd },
+        usage: { ...result.usage, externalCostUsd: summary.externalCostUsd, ...(run.result.usage.externalCostChargedUsd === undefined ? {} : { externalCostChargedUsd: run.result.usage.externalCostChargedUsd }) },
         channelsTried: run.channelsTried,
         ladderTrace: run.ladderTrace,
         summary,

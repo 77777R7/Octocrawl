@@ -31,6 +31,7 @@ import {
   CONTENTFUL_STATUS,
   DEFAULT_CRAWL_SPEC,
   EMPTY_CRAWL_DISCOVERY,
+  paidCallsOfError,
   stepStatusFromResult,
   type Attempt,
   type BudgetKind,
@@ -39,6 +40,7 @@ import {
   type CrawlReport,
   type CrawlSpec,
   type ExecutionContext,
+  type SpendLedger,
   type FetchResult,
   type ScrapeAtom,
   type ScrapeOutcome,
@@ -50,7 +52,7 @@ import {
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
-import { abortableSleep, createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl } from './canonicalize.js'
@@ -177,6 +179,15 @@ export class CrawlOrchestrator {
     let cachedPages = 0
     let costUsd = 0
     let costUnknown = false
+    // The run's spend ledger (ROADMAP PA item 4): every page's paid calls reserve their price ceiling here before they are
+    // made, so concurrent pages cannot pass the run's cap; each page has a child capped at its own share, when one is set.
+    // Opened once the task is known, with what its earlier attempts were charged: the cap is the task's, not each run's.
+    let spend: SpendLedger | undefined
+    let priorChargedUsd = 0
+    // What the run's attempts were charged: each at its ledger charge (a reported price, or its ceiling), else its reported
+    // cost; and whether one cost is unknown with no ceiling either, which no cap can bound.
+    let chargedUsd = 0
+    let unboundedCost = false
     let contentTokens = 0
     let contentTokensUnknown = false
     let budgetExceeded: BudgetKind | null = null
@@ -190,6 +201,10 @@ export class CrawlOrchestrator {
       wallMs: this.clock.now() - startedAtMs,
       costUsd: costUnknown ? null : costUsd,
       costUnknown,
+      // What the ledger settled and holds reserved in this run, calls of pages never written (interrupted, cut) and
+      // reservations in flight included, so a crash between steps leaves the next run no room it did not have; at least
+      // what the written pages were charged, costs reported outside the ledger included.
+      ...(spend === undefined ? {} : { chargedUsd: Math.max(chargedUsd, spend.settledUsd + spend.reservedUsd - priorChargedUsd) }),
       contentTokens,
       contentTokensUnknown,
       budgetExceeded,
@@ -210,6 +225,11 @@ export class CrawlOrchestrator {
       const opened = await this.openRun(spec, startedAt)
       task = opened.task
       attempt = opened.attempt
+      if (spec.budget.maxCostUsd !== null || (spec.budget.maxCostPerPageUsd ?? null) !== null) {
+        const openedId = attempt.id
+        priorChargedUsd = (await this.store.listAttempts(task.id)).filter((earlier) => earlier.id !== openedId).reduce((sum, earlier) => sum + (earlier.chargedUsd ?? 0), 0)
+        spend = createSpendLedger(spec.budget.maxCostUsd, priorChargedUsd)
+      }
       // A crawl runs with the options it stored; a batch, and a crawl stored
       // before its depth and hosts were kept, with the caller's.
       const stored = task.batch === undefined ? task.crawl : undefined
@@ -298,8 +318,8 @@ export class CrawlOrchestrator {
             stopController.abort(new DOMException('Crawl cancelled', 'AbortError'))
           } else seedAppended(persistedTask)
           if (stopped()) { stopping = true; break }
-          const spent: CrawlBudgetSpent = { wallMs: now - startedAtMs, costUsd, costUnknown, tokens: contentTokens, tokensUnknown: contentTokensUnknown }
-          const hit = budgetHit(spec.budget, spent)
+          const spent: CrawlBudgetSpent = { wallMs: now - startedAtMs, costUsd, costUnknown, chargedUsd: priorChargedUsd + chargedUsd, unboundedCost, tokens: contentTokens, tokensUnknown: contentTokensUnknown }
+          const hit = budgetHit(spec.budget, spent, spend)
           if (hit !== null) { budgetExceeded = hit; if (hit === 'time') markTimeBudget(); break }
           const next = frontier.dequeue(now, admit)
           if (next.refused > 0) budgetExceeded = 'pages'
@@ -328,6 +348,7 @@ export class CrawlOrchestrator {
             let links: readonly string[]
             let audit: import('@w2l/contracts').LadderRunAudit | undefined
             let cachedPage = false
+            let pageLedger: SpendLedger | undefined
             if (reusable && cached.result !== null) {
               result = cached.result; links = linksOf(cached.result); audit = cached.audit; cachedPage = true
             } else {
@@ -336,8 +357,11 @@ export class CrawlOrchestrator {
               // A batch with a paginate step keeps each page the step reads in the checkpoint (ROADMAP PA item 3): a run cut
               // at page N resumes from them. The whole URL is still the step; the pages are its progress until it is stored.
               const pagesRead = listsPages(runningTask) ? await this.store.listPagesRead(runningTask.id, item.canonicalUrl) : []
-              const pageScope = !listsPages(runningTask) ? scope : {
+              pageLedger = spend?.child(spec.budget.maxCostPerPageUsd ?? null)
+              const pageSpend = pageLedger === undefined ? {} : { spend: pageLedger }
+              const pageScope = !listsPages(runningTask) ? { ...scope, ...pageSpend } : {
                 ...scope,
+                ...pageSpend,
                 onListPage: (page: ListPageRead) => { void this.store.putPageRead(runningTask.id, item.canonicalUrl, page).catch(() => {}) },
                 ...(pagesRead.length === 0 ? {} : { listResume: { pages: pagesRead } }),
               }
@@ -348,6 +372,12 @@ export class CrawlOrchestrator {
                 // failed item, and one page never fails a whole batch or crawl.
                 if (stopped()) throw error
                 outcome = { result: scrapeErrorResult(item.url, error, Date.now() - scrapeStartedAt, this.scrapeErrorCostUsd), links: [] }
+                // The paid calls the run made before it threw stay on the page's record (ROADMAP PA item 4).
+                const paid = paidCallsOfError(error)
+                if (paid !== null) outcome = { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, paid] } }
+                // Every paid call of this page reserved through its ledger before it was made: what that ledger settled is the
+                // page's whole paid spend, though the scrape threw before reporting a cost.
+                if (pageLedger !== undefined) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostChargedUsd: pageLedger.settledUsd } } }
               }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
               if (outcome.cached === true) {
@@ -402,6 +432,13 @@ export class CrawlOrchestrator {
             if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
             if (!cachedPage) {
+              // The page's charge: what its answer or attempts report, and no less than what its ledger settled, which holds
+              // every paid call the page made (a re-read's, a call that threw or was cut). An unknown cost no ceiling bounds
+              // stops a capped run.
+              const tried = audit?.summary.attempts ?? [{ result }]
+              const reported = result.usage.externalCostChargedUsd ?? tried.reduce((sum, { result: attempt }) => sum + (attempt.usage.externalCostUsd ?? 0), 0)
+              chargedUsd += Math.max(reported, pageLedger?.settledUsd ?? 0)
+              unboundedCost ||= tried.some(({ result: attempt }) => attempt.usage.externalCostUsd === null && attempt.usage.externalCostChargedUsd === undefined)
               const meter = audit?.summary
               if (meter !== undefined) {
                 costUsd += meter.externalCost.knownSubtotal
@@ -703,14 +740,26 @@ interface CrawlBudgetSpent {
   wallMs: number
   costUsd: number
   costUnknown: boolean
+  /** What the spend ledger charged the attempts (a reported price, or a ceiling), else what they reported. */
+  chargedUsd: number
+  /** An attempt's cost is unknown and no ledger charged it a ceiling. */
+  unboundedCost: boolean
   tokens: number
   tokensUnknown: boolean
 }
 
-function budgetHit(budget: CrawlBudget, spent: CrawlBudgetSpent): BudgetKind | null {
+function budgetHit(budget: CrawlBudget, spent: CrawlBudgetSpent, spend?: SpendLedger): BudgetKind | null {
   if (budget.maxWallMs !== null && spent.wallMs >= budget.maxWallMs) return 'time'
-  if (budget.maxCostUsd !== null && spent.costUnknown) return 'cost_unknown'
-  if (budget.maxCostUsd !== null && spent.costUsd >= budget.maxCostUsd) return 'cost'
+  // With a spend ledger every paid call was reserved at its price ceiling before it was made and settled at its reported
+  // price or that ceiling: the run's spend is bounded though a provider stated no price, so it stops at its cap, not on an unknown.
+  if (budget.maxCostUsd !== null && spend !== undefined) {
+    if (spent.unboundedCost) return 'cost_unknown'
+    // Calls in flight count at their reserved ceilings; a call settled before its page finished counts once.
+    if (Math.max(spent.chargedUsd, spend.settledUsd) + spend.reservedUsd >= budget.maxCostUsd) return 'cost'
+  } else {
+    if (budget.maxCostUsd !== null && spent.costUnknown) return 'cost_unknown'
+    if (budget.maxCostUsd !== null && spent.costUsd >= budget.maxCostUsd) return 'cost'
+  }
   if (budget.maxTokens !== null && spent.tokensUnknown) return 'tokens_unknown'
   if (budget.maxTokens !== null && spent.tokens >= budget.maxTokens) return 'tokens'
   return null
@@ -808,6 +857,7 @@ function duplicateResult(url: string, { html: _html, rawHtml: _rawHtml, images: 
       attemptCount: prior.usage.attemptCount,
       browserMs: prior.usage.browserMs,
       externalCostUsd: prior.usage.externalCostUsd,
+      ...(prior.usage.externalCostChargedUsd === undefined ? {} : { externalCostChargedUsd: prior.usage.externalCostChargedUsd }),
     },
     trace: [
       ...prior.trace,

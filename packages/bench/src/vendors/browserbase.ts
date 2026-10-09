@@ -40,7 +40,16 @@ export interface BrowserbaseConfig {
   /** Optional; Browserbase infers the project from the key when omitted. */
   projectId?: string
   baseUrl?: string
+  /**
+   * Under a tariff (ROADMAP PA item 4): the longest a session may live. The session is created with Browserbase's own
+   * `timeout` (seconds, at least BROWSERBASE_MIN_SESSION_MS) and its proxies off, so it ends on Browserbase's side when a
+   * release fails, and bills no bandwidth. Absent: Browserbase's project defaults, as before.
+   */
+  sessionTimeoutMs?: number
 }
+
+/** The shortest session `timeout` Browserbase accepts (60 s, its create-a-session reference). */
+export const BROWSERBASE_MIN_SESSION_MS = 60_000
 
 /**
  * What Browserbase can do — the capability layer's manifest. Declarative:
@@ -66,6 +75,7 @@ export function browserbaseSessionBody(
   decision: PolicyDecision,
   projectId?: string,
   resume?: VendorResumeContext | null,
+  sessionTimeoutMs?: number,
 ): unknown {
   const persistEnabled = decision.enabled.some((c) => c.capability === 'session_persistence')
   const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
@@ -73,6 +83,7 @@ export function browserbaseSessionBody(
 
   return {
     ...(projectId === undefined ? {} : { projectId }),
+    ...(sessionTimeoutMs === undefined ? {} : { timeout: Math.ceil(Math.max(sessionTimeoutMs, BROWSERBASE_MIN_SESSION_MS) / 1000), proxies: false, keepAlive: false }),
     browserSettings: {
       // Browserbase defaults solveCaptchas to true, so the off state is an
       // explicit false, never an omission.
@@ -144,7 +155,7 @@ export function browserbaseOps(
     },
 
     async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession> {
-      const body = browserbaseSessionBody(decision, config.projectId, resume ?? null)
+      const body = browserbaseSessionBody(decision, config.projectId, resume ?? null, config.sessionTimeoutMs)
       const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions`,

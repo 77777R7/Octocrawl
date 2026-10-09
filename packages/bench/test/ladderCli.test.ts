@@ -255,6 +255,7 @@ function fakeVendorOps(
   opts: {
     persist?: boolean
     onEnsure?: () => void
+    onRelease?: () => void
     savedResume?: { browserbaseContextId: string } | { steelProfileId: string }
   } = {},
 ): VendorOps {
@@ -287,7 +288,7 @@ function fakeVendorOps(
               : null,
       }
     },
-    async releaseSession() {},
+    async releaseSession() { opts.onRelease?.() },
   }
 }
 
@@ -522,6 +523,7 @@ describe('buildChannels + LadderRunner session composition', () => {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
+      vendorTariffs: { steel: { perCallUsd: 0, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1 } },
       ...vendorEnv(),
     })
     const runner = new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore())
@@ -536,7 +538,40 @@ describe('buildChannels + LadderRunner session composition', () => {
     await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
   })
 
-  it('a saved Browserbase context is injected into the FIRST session; ensurePersistence is skipped', async () => {
+  it('under a tariff a provider call holds a session of its own, released when the call ends, at the tariff\'s ceiling (ROADMAP PA item 4)', async () => {
+    let created = 0
+    let released = 0
+    const build = (tariffs?: Record<string, import('@w2l/http-core').VendorTariff>) => buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: fakeVendorOps('steel', () => { created++ }, { onRelease: () => { released++ } }) },
+      ...(tariffs === undefined ? {} : { vendorTariffs: tariffs }),
+      ...vendorEnv(),
+    })
+    const channels = build({ steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } })
+    const provider = channels.find((c) => c.vendorId === 'steel')!
+    expect(provider.priceCeilingUsd).toBeCloseTo(0.01 + 0.002)
+    const runner = new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore())
+    expect((await runner.run('https://example.com/p')).result.lane).toBe('provider')
+    expect((await runner.run('https://example.com/q')).result.lane).toBe('provider')
+    // Each call opened its own session and released it: no session idles, billing, between calls.
+    expect(created).toBe(2)
+    expect(released).toBe(2)
+    // Concurrent calls each open and release a session of their own: none closes another's, none is left open.
+    const both = await Promise.all([provider.fetch('https://example.com/a'), provider.fetch('https://example.com/b')])
+    expect(both.map((r) => r.status)).toEqual(['success', 'success'])
+    expect(created).toBe(4)
+    expect(released).toBe(4)
+    await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+    // Without a tariff the rung has no ceiling, and the ladder does not call it.
+    const unpriced = build()
+    expect(unpriced.find((c) => c.vendorId === 'steel')!.priceCeilingUsd).toBeNull()
+    const run = await new LadderRunner(unpriced, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+    expect(run.result.lane).not.toBe('provider')
+    await Promise.all(unpriced.map((c) => c.close?.().catch(() => {})))
+  })
+
+    it('a saved Browserbase context is injected into the FIRST session; ensurePersistence is skipped', async () => {
     const resumes: unknown[] = []
     let ensureCalls = 0
     const channels = buildChannels('research', {
