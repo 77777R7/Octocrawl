@@ -203,9 +203,12 @@ export const tierAmount = (perDay: number | null) => perDay === null ? '∞' : p
 
 /** What the planet shows for a tier: one lit mark for each page a day, or every mark on the planet for no daily
  * limit. It shows only once the lights are drawn (featureMotion.ts), so it never claims marks that are not lit. */
-export const tierCaption = (t: Tier) => t.perDay === null
-  ? 'Every mark on the planet lit · no daily limit'
-  : `${tierAmount(t.perDay)} lit marks · ${tierAmount(t.perDay)} ${t.unit.split(',')[0]}`
+export const tierLit = (t: Tier) => t.perDay === null
+  ? 'Every mark on the planet lit'
+  : `${tierAmount(t.perDay)} lit mark${t.perDay === 1 ? '' : 's'} on the planet`
+
+/** A tier's unit without its qualifier ("previews a day, per visitor" is "previews a day"), for the planet's readout. */
+export const tierUnit = (t: Tier) => t.unit.split(',')[0]!
 
 function capabilityCell(item: Capability): string {
   const hosted = item.hosted ? 'is-yes' : 'is-no'
@@ -291,24 +294,23 @@ export function capabilitiesMarkup(bar: string): string {
     </section>`
 }
 
-/** Section 04: the four free ways to use Octocrawl, every one written out, over the Earth artwork that fills the
- * whole section. With a script on a wide screen the window (.tier-pin) is pinned while the page scrolls one step per
- * tier: the list of four stays in view, the tier the scroll has reached opens and lights as many of the planet's
- * painted marks, and the others fold to their names (featureMotion.ts, earthLights.ts; the script gives the stage
- * the number of steps as --tiers, since the site's CSP refuses style attributes in the markup). On a narrow screen the tiers pass one by one over the planet. Without a
- * script the tiers simply follow one another over the artwork as painted. */
+/** Section 04: the four free ways to use Octocrawl, every one written out in full, over the Earth artwork. With a
+ * script the planet stays in view behind the section while the words scroll past it as usual: the tier crossing the
+ * middle of the screen is the one lit, it lights as many of the planet's painted marks (featureMotion.ts,
+ * earthLights.ts), and a readout on the planet says which of the four it is and what it allows. Nothing folds and
+ * nothing is pinned but the planet. Without a script the tiers simply follow one another over the artwork as
+ * painted. */
 export function tiersMarkup(bar: string): string {
-  const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-caption="${esc(tierCaption(t))}">
+  const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-unit="${esc(tierUnit(t))}" data-lit="${esc(tierLit(t))}">
               <h3 class="tier-head"><span class="tier-n" aria-hidden="true">${t.n}</span><span class="tier-name">${t.name}</span><span class="tier-leader" aria-hidden="true"></span><span class="tier-amount"><b>${tierAmount(t.perDay)}</b>${t.perDay === null ? '<span class="visually-hidden"> no daily limit</span>' : ' a day'}</span></h3>
-              <div class="tier-panel"><div class="tier-panel-in">
+              <div class="tier-panel">
                 <p class="tier-unit">${t.unit}</p>
                 <dl class="tier-facts">${t.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
                 <a class="tier-link" href="${t.link[0]}">${t.link[1]} <span aria-hidden="true">${t.link[2]}</span></a>
-              </div></div>
+              </div>
             </div>`).join('\n            ')
+  const first = TIERS[0]!
   return `<section class="tier-section is-earth" id="free-tiers" aria-labelledby="tier-title">
-      <div class="tier-stage" id="tier-stage">
-      <div class="tier-pin" id="tier-pin">
       <div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>
       ${bar}
       <div class="band">
@@ -324,10 +326,13 @@ export function tiersMarkup(bar: string): string {
             ${rows}
             </div>
           </div>
-          <p class="earth-caption" id="earth-caption" aria-hidden="true" hidden>${esc(tierCaption(TIERS[0]!))}</p>
+          <div class="earth-readout" id="earth-readout" aria-hidden="true" hidden>
+            <p class="earth-step"><b class="earth-step-n">${first.n}</b> / ${String(TIERS.length).padStart(2, '0')} · <span class="earth-step-name">${first.name}</span></p>
+            <p class="earth-amount"><b class="earth-amount-n">${tierAmount(first.perDay)}</b> <span class="earth-amount-unit">${esc(tierUnit(first))}</span></p>
+            <p class="earth-lit">${esc(tierLit(first))}</p>
+            <p class="earth-ticks">${TIERS.map((_, i) => `<i${i === 0 ? ' class="is-on"' : ''}></i>`).join('')}</p>
+          </div>
         </div>
-      </div>
-      </div>
       </div>
       <div class="band"><div class="frame tier-foot-band">
         <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
