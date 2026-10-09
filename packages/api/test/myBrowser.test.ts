@@ -18,10 +18,15 @@ import { createApiEngine, type ApiEngine } from '../src/engine.js'
 const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'
 const PAGE = `<html><head><title>Ledger</title></head><body><article><h1>Tide ledger</h1>${'<p>The harbour office records the tide for every hour of the day. </p>'.repeat(4)}</article></body></html>`
 
+/** A Cloudflare block page, as crunchbase.com answered the person's Chrome on 2026-10-06 (HTTP 403). */
+const CF_BLOCK = '<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head><body><h1>Sorry, you have been blocked</h1><p>You are unable to access site.test</p><div id="cf-error-details">Cloudflare Ray ID: 0123456789abcdef</div></body></html>'
+
 /** The scope page's answer on each poll: what its buttons set, and whether the person clicked on it (their activation, which only Chrome sets); 'closed': they closed it. */
 type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
 
-function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
+/** `documentStatus`: the page's document answers with this status (heard as Chrome's response event); `refuseTabs`: Chrome refuses to open the page's tab. */
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean }) {
+  const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
   // Page tabs open at once, at most.
@@ -43,11 +48,17 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
       const p = (params ?? {}) as Record<string, unknown>
       if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
+      if (method === 'Target.createTarget' && page.refuseTabs === true && targets >= 1) throw new ChromeLoginError('Chrome refused the request: Failed to open a new tab')
       if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, targets === 1 ? 'scope' : 'page'); created.push(id); live.add(id); if (targets > 1) mostOpen = Math.max(mostOpen, ++open); return { targetId: id } }
       if (method === 'Target.attachToTarget') return { sessionId: `s:${String(p.targetId)}` }
-      if (method === 'Page.navigate') { navigated.set(String(sessionId).replace(/^s:/, ''), String(p.url)); return {} }
+      if (method === 'Page.navigate') {
+        const target = String(sessionId).replace(/^s:/, '')
+        navigated.set(target, String(p.url))
+        if (page.documentStatus !== undefined) listeners.get(`Network.responseReceived@${String(sessionId)}`)?.({ type: 'Document', frameId: target, response: { url: hrefOf(target), status: page.documentStatus, headers: {} } })
+        return {}
+      }
       if (method === 'Target.closeTarget') { if (kinds.get(String(p.targetId)) === 'page' && live.has(String(p.targetId))) open--; live.delete(String(p.targetId)); return {} }
-      if (method === 'Target.activateTarget' || method === 'Network.enable') return {}
+      if (method === 'Target.activateTarget' || method === 'Network.enable' || method === 'Page.enable') return {}
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
       const kind = kinds.get(String(sessionId ?? p.targetId).replace(/^s:/, ''))
       if (method === 'Target.getTargetInfo') {
@@ -71,6 +82,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string }) {
       }
       throw new Error(`unexpected ${method}`)
     },
+    ...(page.documentStatus === undefined ? {} : { on: (method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void) => { listeners.set(`${method}@${String(sessionId)}`, listener); return () => { listeners.delete(`${method}@${String(sessionId)}`) } } }),
     close() { connectionClosed = true },
   })
   return { connect, written, created, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed }
@@ -150,6 +162,20 @@ describe('the my-browser lane', () => {
     expect(body.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'my_browser_not_read', message: expect.stringContaining('revoked') })]))
     expect(valid(body.evidenceRecord).access).toMatchObject({ route: null, completion: null })
   }, 20_000)
+
+  it('says what kept a page from being read: the check it still showed is blocked, a Chrome that refused the tab is a connection error', async () => {
+    // A Cloudflare block page whose document answered 403: the response alone names no check (http_403), the page does.
+    const blocking = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: CF_BLOCK, documentStatus: 403 })
+    let app = await setup(blocking)
+    const blocked = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', handoff: { waitMs: 10_000 }, debug: true })
+    expect(blocked.body).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'my_browser' })
+    await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
+    // Chrome refuses to open the page's tab: not a wait that ran out.
+    const refusing = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE, refuseTabs: true })
+    app = await setup(refusing)
+    const refused = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', debug: true })
+    expect(refused.body).toMatchObject({ status: 'failed', failureReason: 'connection_error', lane: 'my_browser' })
+  }, 30_000)
 
   it('is refused by name where it is not offered, and for what a page in the person\'s Chrome cannot give', async () => {
     const hosted = await setup(null, { hosted: true })

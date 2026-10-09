@@ -87,6 +87,9 @@ describe('toEvidenceRecord', () => {
       .toEqual({ route: 'user_browser', executor: 'Google Chrome', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'user_browser', egress: null, session: null })
     expect(access({ ...zero, lane: 'my_browser' }, [{ at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: 'captcha', act: 'user_activation' } }]))
       .toMatchObject({ route: 'user_browser', completion: 'handed_to_person' })
+    // A check that cleared without a step of the person's (no act): the page was still read in their Chrome alone.
+    expect(access({ ...zero, lane: 'my_browser' }, [{ at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: 'cloudflare_challenge', act: null } }]))
+      .toMatchObject({ route: 'user_browser', completion: 'user_browser' })
     // A page not read counts no completion, whichever lane tried it.
     expect(access({ ...zero, status: 'blocked', blockReason: 'captcha' })).toMatchObject({ route: 'http', completion: null })
     // A provider states its vendor; a run whose provider stated no price has an unknown cost.
