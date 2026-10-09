@@ -333,7 +333,10 @@ async function attempt(task, temperature) {
     taskId: task.id, url: task.url, part: task.part, temperature,
     observed: {
       apiStatus, httpStatus: doc?.evidence?.httpStatus ?? null, status: doc?.status ?? null,
-      reason: doc?.failureReason ?? doc?.blockReason ?? doc?.budgetExceeded ?? doc?.error?.code ?? error,
+      reason: doc?.failureReason ?? doc?.blockReason ?? doc?.budgetExceeded ?? doc?.error?.code ?? (typeof doc?.code === 'string' ? doc.code : null) ?? error,
+      // An error answer's message, in the git-ignored attempts file only: a local server's 500 says what threw, and its
+      // log may be gone by the time anyone reads the run (the PA 4 Steel runs' 500s at about 32 s).
+      ...(apiStatus !== null && apiStatus >= 400 && typeof doc?.error === 'string' ? { apiError: doc.error.slice(0, 500) } : {}),
       lane: doc?.lane ?? null, channelsTried: doc?.channelsTried ?? doc?.summary?.channelsTried ?? null,
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,

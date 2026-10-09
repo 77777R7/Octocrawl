@@ -571,6 +571,83 @@ describe('buildChannels + LadderRunner session composition', () => {
     await Promise.all(unpriced.map((c) => c.close?.().catch(() => {})))
   })
 
+  it('answers a vendor that cannot open a session as the provider\'s failure, not a thrown error, and keeps its paid call (ROADMAP PA item 4)', async () => {
+    // The PA 4 Steel runs: Steel's session create hung past the vendor API's 30 s cap, the error escaped the rung,
+    // and the API answered 500 at about 32 s with no record of the page or the call.
+    const hung = (): VendorOps => ({
+      ...fakeVendorOps('steel', () => {}),
+      secrets: ['steel-key-123'],
+      async createSession() { throw new Error('steel: session create at wss://connect.steel.dev?apiKey=steel-key-123: This operation was aborted') },
+    })
+    const channels = buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: hung() },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      ...vendorEnv(),
+    })
+    const provider = channels.find((c) => c.vendorId === 'steel')!
+    const direct = await provider.fetch('https://example.com/p')
+    expect(direct).toMatchObject({ status: 'failed', failureReason: 'provider_error', lane: 'provider', markdown: null })
+    // The vendor's key, which its connect URL carries, never reaches the record.
+    expect(direct.trace.find((e) => e.event === 'provider_failed')?.detail).toEqual({ error: 'steel: session create at wss://connect.steel.dev?apiKey=<redacted>: This operation was aborted' })
+    const run = await new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+    expect(run.channelsTried).toContain('provider')
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'provider_error', lane: 'provider' })
+    // The call is on the record, charged at its ceiling: the session create may have reached the vendor and opened a
+    // session that bills, though no id came back.
+    expect(run.result.trace.find((e) => e.event === 'paid_calls')?.detail).toMatchObject({ calls: [{ provider: 'steel', outcome: 'failed', reason: 'provider_error', chargedUsd: 0.012, ceilingUsd: 0.012 }] })
+    // So is a vendor whose profile setup fails before any session, its key kept out as well.
+    const unready = buildChannels('authed', {
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: { ...hung(), async ensurePersistence() { throw new Error('steel: profile setup with key steel-key-123 returned 503') } } },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      ...vendorEnv(),
+    })
+    const setup = await unready.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p')
+    expect(setup).toMatchObject({ status: 'failed', failureReason: 'provider_error' })
+    expect(setup.trace.find((e) => e.event === 'provider_failed')?.detail).toEqual({ error: 'steel: profile setup with key <redacted> returned 503' })
+    await Promise.all(unready.map((c) => c.close?.().catch(() => {})))
+    // A CDP connect, or a robots.txt fetch, that runs out the session's time before the request's own is the
+    // provider's timeout, not an error: the session's time is the tariff's, not the request's.
+    const capped = (connector: typeof vendorEnv extends () => infer E ? E extends { vendorConnector: infer C } ? C : never : never, robotsFetcher?: () => Promise<never>, maxSessionMs = 300) => buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: fakeVendorOps('steel', () => {}) },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs, minBilledMs: 0, billingIncrementMs: 1 } },
+      ...vendorEnv(),
+      vendorConnector: connector,
+      ...(robotsFetcher === undefined ? {} : { robotsFetcher }),
+    })
+    // As Playwright's connectOverCDP does: it gives up at the deadline it was handed.
+    const hangingConnect = async (_url: string, deadlineMs?: number) => await new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('browserType.connectOverCDP: Timeout exceeded')), Math.max(1, (deadlineMs ?? Date.now()) - Date.now())))
+    for (const [label, channelsFor] of [
+      ['connect', () => capped(hangingConnect)],
+      ['robots.txt', () => capped(async () => fakeBrowser(), () => new Promise<never>(() => {}))],
+    ] as const) {
+      const set = channelsFor()
+      const result = await set.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 10_000 })
+      expect(result, label).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'provider' })
+      expect(result.trace.some((e) => e.event === 'provider_failed'), label).toBe(true)
+      await Promise.all(set.map((c) => c.close?.().catch(() => {})))
+    }
+    // Any other error during the fetch is not the rung's to hide: it still throws.
+    const broken = capped(async () => fakeBrowser(), () => Promise.reject(new Error('robots fetcher bug')), 60_000)
+    await expect(broken.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 10_000 })).rejects.toThrow('robots fetcher bug')
+    await Promise.all(broken.map((c) => c.close?.().catch(() => {})))
+    // The request's own deadline ending first is the ladder's: the rung throws, and the run answers its deadline outcome.
+    const late = capped(hangingConnect, undefined, 60_000)
+    await expect(late.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p', null, { deadlineAt: Date.now() + 200 })).rejects.toThrow()
+    const ended = await new LadderRunner(late, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p', null, { deadlineAt: Date.now() + 300 })
+    expect(ended.result).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+    await Promise.all(late.map((c) => c.close?.().catch(() => {})))
+    // A cancelled call is still the ladder's to report as such.
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(provider.fetch('https://example.com/p', null, { signal: cancelled.signal })).rejects.toThrow()
+    await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+  })
+
     it('a saved Browserbase context is injected into the FIRST session; ensurePersistence is skipped', async () => {
     const resumes: unknown[] = []
     let ensureCalls = 0

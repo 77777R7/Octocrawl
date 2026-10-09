@@ -161,6 +161,46 @@ function isPlainText(contentType: string | null): boolean {
   return contentType.toLowerCase().trimStart().startsWith('text/plain')
 }
 
+/**
+ * The result of a provider call that broke before the vendor answered for the page: its session could not be opened,
+ * or its browser failed. The provider broke, not the target: reporting this as http_error would blame the publisher
+ * for our vendor's outage. A target name the vendor's browser could not resolve is a DNS fact, not a fault.
+ */
+export function providerFailure(url: string, wallMs: number, trace: TraceEvent[], err: unknown, aborted: boolean): FetchResult {
+  return {
+    requestedUrl: url,
+    status: 'failed',
+    failureReason: aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
+    blockReason: null,
+    budgetExceeded: null,
+    lane: 'provider',
+    escalations: [],
+    markdown: null,
+    truncated: false,
+    truncatedAt: null,
+    compliance: null,
+    evidence: {
+      finalUrl: url,
+      httpStatus: null,
+      redirectChain: [],
+      contentType: null,
+      rawBodySha256: null,
+      artifacts: [],
+    },
+    usage: {
+      wallMs,
+      bytesWire: 0,
+      bytesDecompressed: 0,
+      requestCount: 1,
+      attemptCount: 1,
+      contentTokens: null,
+      browserMs: 0,
+      externalCostUsd: null,
+    },
+    trace,
+  }
+}
+
 export class ProviderSubject implements SubjectAdapter {
   readonly meta: SubjectAdapter['meta']
 
@@ -298,41 +338,7 @@ export class ProviderSubject implements SubjectAdapter {
         event: 'provider_failed',
         detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
       })
-      return {
-        requestedUrl: url,
-        status: 'failed',
-        // The provider broke, not the target. Reporting this as http_error
-        // would blame the publisher for our vendor's outage. A target name
-        // the vendor's browser could not resolve is a DNS fact, not a fault.
-        failureReason: execution.signal?.aborted ? 'timeout' : err instanceof Error && err.message.includes('net::ERR_NAME_NOT_RESOLVED') ? 'dns_error' : 'provider_error',
-        blockReason: null,
-        budgetExceeded: null,
-        lane: 'provider',
-        escalations: [],
-        markdown: null,
-        truncated: false,
-        truncatedAt: null,
-        compliance: null,
-        evidence: {
-          finalUrl: url,
-          httpStatus: null,
-          redirectChain: [],
-          contentType: null,
-          rawBodySha256: null,
-          artifacts: [],
-        },
-        usage: {
-          wallMs,
-          bytesWire: 0,
-          bytesDecompressed: 0,
-          requestCount: 1,
-          attemptCount: 1,
-          contentTokens: null,
-          browserMs: 0,
-          externalCostUsd: null,
-        },
-        trace,
-      }
+      return providerFailure(url, wallMs, trace, err, execution.signal?.aborted === true)
     }
 
     const wallMs = Date.now() - start
